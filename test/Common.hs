@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
 
@@ -322,30 +323,3 @@ instance Arbitrary Term2 where
     TITE i t e -> i : t : e : [TITE ni nt ne | (ni, nt, ne) <- shrink (i,t,e)]
     TPair a b -> a : b : [TPair na nb | (na, nb) <- shrink (a,b)]
     TApp f i -> f : i : [TApp nf ni | (nf, ni) <- shrink (f,i)]
-
-newtype ArbitraryUPTPairs = MkArbitraryUPTPairs UnprocessedParsedTerm
-  deriving (Show)
-
-instance Arbitrary ArbitraryUPTPairs where
-  arbitrary = sized genTree where
-    genTree :: Int -> Gen ArbitraryUPTPairs
-    -- genTree = undefined
-    genTree i = let half = div i 2
-                in case i of
-                     0 -> leaves
-                     x -> oneof [ do
-                                    (MkArbitraryUPTPairs upt1) <- genTree half
-                                    (MkArbitraryUPTPairs upt2) <- genTree half
-                                    pure . MkArbitraryUPTPairs $ PairUP upt1 upt2
-                                , leaves
-                                ]
-
-    leaves :: Gen ArbitraryUPTPairs
-    leaves =
-      oneof $ (fmap . fmap) MkArbitraryUPTPairs
-        [ StringUP <$> elements (map (("s" <>) . show) [1..9]) -- chooseAny
-        , IntUP <$> elements [0..9]
-        , ChurchUP <$> elements [0..9]
-        , pure UnsizedRecursionUP
-        ]
-  --shrink = undefined

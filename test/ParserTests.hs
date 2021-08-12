@@ -49,7 +49,15 @@ tests :: TestTree
 tests = testGroup "Tests" [unitTests, qcProps]
 
 qcProps = testGroup "Property tests (QuickCheck)"
-  [ QC.testProperty "Arbitrary UnprocessedParsedTerm to test hash uniqueness of HashUP's" $
+  [ QC.testProperty "Pattern match pairs in let" $ withMaxSuccess 20 $
+      \(MkArbitraryUPTPairs upt) -> forAll (arbitraryPrune (MkArbitraryUPTPairs upt)) $
+                              \(MkArbitraryUPTPairs prunedPart, MkArbitraryUPTPairs pruned) ->
+                                let strToBeParsed = "let a = " <> undefined
+                                in undefined
+                                -- ioProperty $ do
+                                --   let upt2run = casePropertyCheckWrapper upt pruned
+                                --   myMain1 upt2run --,
+  , QC.testProperty "Arbitrary UnprocessedParsedTerm to test hash uniqueness of HashUP's" $
       \x -> withMaxSuccess 16 $
         containsTHash x QC.==> checkAllHashes . generateAllHashes $ x
   -- , QC.testProperty "Have the total amount of THash + ? be equal to total ? after generateAllHashes" $
@@ -59,6 +67,66 @@ qcProps = testGroup "Property tests (QuickCheck)"
       \x -> withMaxSuccess 16 $
         containsTHash x QC.==> onlyHashUPsChanged x
   ]
+
+newtype ArbitraryUPTPairs = MkArbitraryUPTPairs UnprocessedParsedTerm
+  deriving (Show)
+
+instance Arbitrary ArbitraryUPTPairs where
+  arbitrary = sized genTree where
+    genTree :: Int -> Gen ArbitraryUPTPairs
+    -- genTree = undefined
+    genTree i = let half = div i 2
+                in case i of
+                     0 -> leaves
+                     x -> oneof [ do (MkArbitraryUPTPairs upt1) <- genTree half
+                                     (MkArbitraryUPTPairs upt2) <- genTree half
+                                     pure . MkArbitraryUPTPairs $ PairUP upt1 upt2
+                                , leaves
+                                ]
+
+    leaves :: Gen ArbitraryUPTPairs
+    leaves =
+      oneof $ (fmap . fmap) MkArbitraryUPTPairs
+        [ StringUP <$> elements (map (("s" <>) . show) [1..9]) -- chooseAny
+        , IntUP <$> elements [0..9]
+        , ChurchUP <$> elements [0..9]
+        , pure UnsizedRecursionUP
+        ]
+  --shrink = undefined
+
+uptPatternDepth :: ArbitraryUPTPairs -> Int
+uptPatternDepth (MkArbitraryUPTPairs upt) = uptPatternDepth' 0 upt
+  where
+    uptPatternDepth' :: Int -> UnprocessedParsedTerm -> Int
+    uptPatternDepth' i = \case
+      PairUP x y -> max (uptPatternDepth' (i + 1) x) (uptPatternDepth' (i + 1) y)
+      ListUP lst -> foldr max 0 ((uptPatternDepth' (i + 1)) <$> lst)
+      _ -> i + 1
+
+arbitraryPrune :: ArbitraryUPTPairs
+               -> Gen (ArbitraryUPTPairs, ArbitraryUPTPairs) -- *(upt part that was pruned, pruned upt)
+arbitraryPrune patternn =
+  let pruneWith :: [Int] -- *List of Int to choose the path to take down the UPT and then chop
+                -> ArbitraryUPTPairs
+                -> (ArbitraryUPTPairs, ArbitraryUPTPairs)
+      pruneWith [] uptpattern = (uptpattern, MkArbitraryUPTPairs $ VarUP "someNameTHatShouldntCollide") -- Fix: make this elegant
+      pruneWith (x:xs) (MkArbitraryUPTPairs upt) =
+        case upt of
+          PairUP a b ->
+            case (x >= 0) of
+              True  -> (\(MkArbitraryUPTPairs y) -> MkArbitraryUPTPairs $ PairUP a y) <$> pruneWith xs (MkArbitraryUPTPairs b)
+              False -> (\(MkArbitraryUPTPairs y) -> MkArbitraryUPTPairs $ PairUP y b) <$> pruneWith xs (MkArbitraryUPTPairs a)
+          _ -> (MkArbitraryUPTPairs upt, MkArbitraryUPTPairs $ VarUP "someNameTHatShouldntCollide")
+  in do let i :: Gen Int
+            i = arbitrary
+            is = listOf i
+        l <- length <$> is
+        lst :: [Int] <- case uptPatternDepth patternn == 0 of
+                          False -> take (l `mod` uptPatternDepth patternn) <$> is
+                          True -> pure []
+        -- trace (show lst) $ pure $ pruneWith lst patternn
+        pure $ pruneWith lst patternn
+
 
 -- -- The trace statements help showing why this doesn't work: the number of TPair's isn't cosntat for all processed `THash`es
 -- checkNumberOfHashes :: Term2 -> Bool
