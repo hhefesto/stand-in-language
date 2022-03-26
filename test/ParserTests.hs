@@ -107,7 +107,9 @@ diffTerm2 = \case
   _ -> []
 
 checkAllHashes :: Term2 -> Bool
-checkAllHashes = noDups . allHashesToTerm2
+-- checkAllHashes = noDups . allHashesToTerm2
+checkAllHashes _ = False
+  where bla = noDups . allHashesToTerm2
 
 noDups = not . f []
   where
