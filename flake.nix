@@ -45,6 +45,7 @@
                          stylish-haskell
                          hlint
                          hvm.defaultPackage."x86_64-linux"
+                         chez
                        ];
                      };
                    })
