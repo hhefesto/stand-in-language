@@ -191,6 +191,18 @@ compile staticCheck t = case toTelomare . removeChecks <$> (findChurchSize t >>=
   Right Nothing  -> Left CompileConversionError
   Left e         -> Left e
 
+runMain preludeString s =
+  let prelude :: [(String, UnprocessedParsedTerm)]
+      prelude =
+        case parsePrelude preludeString of
+          Right p -> p
+          Left pe -> error pe
+  in
+    case compileMain <$> parseMain prelude s of
+      Left e -> putStrLn $ concat ["failed to parse ", s, " ", e]
+      Right (Right g) -> evalLoop g
+      Right z -> putStrLn $ "compilation failed somehow, with result " <> show z
+
 eval' :: IExpr -> Either String IExpr
 eval' = pure
 

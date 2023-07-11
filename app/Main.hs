@@ -12,7 +12,6 @@ import           Telomare.Parser      (UnprocessedParsedTerm (..), parseMain,
                                        parsePrelude)
 --import           Telomare.RunTime
 import           Telomare.TypeChecker (inferType, typeCheck)
---import Telomare.Llvm
 
 data TelomareOpts = TelomareOpts
   { telomareFile :: String
@@ -37,13 +36,4 @@ main = do
           <> O.progDesc "A simple but robust virtual machine" )
   topts <- O.execParser opts
   preludeString <- Strict.readFile $ preludeFile topts
-  let prelude :: [(String, UnprocessedParsedTerm)]
-      prelude = case parsePrelude preludeString of
-        Right p -> p
-        Left pe -> error pe
-      runMain s = case compileMain <$> parseMain prelude s of
-        Left e -> putStrLn $ concat ["failed to parse ", s, " ", e]
-        --Right (Right g) -> schemeEval g
-        Right (Right g) -> evalLoop g
-        Right z -> putStrLn $ "compilation failed somehow, with result " <> show z
-  Strict.readFile (telomareFile topts) >>= runMain
+  Strict.readFile (telomareFile topts) >>= runMain preludeString

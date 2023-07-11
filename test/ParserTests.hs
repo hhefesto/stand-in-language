@@ -312,8 +312,18 @@ unitTests = testGroup "Unit tests"
       (fromRight TZero $ validateVariables [] res) `compare` expr3 @?= EQ
   , testCase "test automatic open close lambda 7" $ do
       res <- runTelomareParser (parseLambda <* scn <* eof) "\\a -> (a, (\\a -> (a,0)))"
-      (fromRight TZero $ validateVariables [] res) `compare` expr2 @?= EQ
+      fromRight TZero (validateVariables [] res) `compare` expr2 @?= EQ
+  , testCase "test if tictactoe.tel compiles" $ do
+      res :: Either SomeException () <- try tictactoe
+      case res of
+        Left err -> assertFailure . show $ err
+        Right _  -> pure ()
   ]
+
+tictactoe :: IO ()
+tictactoe = do
+  preludeString <- Strict.readFile "Prelude.tel"
+  Strict.readFile "tictactoe.tel" >>= runMain preludeString
 
 hashtest0 = unlines ["let wrapper = 2",
                 "  in (# wrapper)"]
