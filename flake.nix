@@ -41,17 +41,19 @@
         packages.telomare = project "telomare" [ ]; # [3]
         packages.default = self.packages.${system}.telomare;
 
-        defaultApp = self.packages.${system}.telomare;
+        # defaultApp = self.packages.${system}.telomare;
+        app.default = {
+          type = "app";
+          program = self.packages.${system}.telomare + "/bin/telomare";
+        };
 
         devShells.default = project "telomare" (with compiler; [ # [4]
           cabal-install
           haskell-language-server
           hlint
-	  ghcid
-	  stylish-haskell
-	  hvm.defaultPackage. "x86_64-linux"
-	  
-
+	        ghcid
+	        stylish-haskell
+	        hvm.defaultPackage. "x86_64-linux"
         ]);
 	
         checks = {

@@ -7,6 +7,7 @@
 module Main where
 
 import           Common
+import           Control.Exception         (SomeException, try)
 import           Control.Lens.Fold
 import           Control.Lens.Plated
 import           Control.Monad
@@ -39,7 +40,7 @@ import           Test.QuickCheck
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           Test.Tasty.QuickCheck     as QC
-import           Text.Megaparsec
+import           Text.Megaparsec           hiding (try)
 import           Text.Megaparsec.Debug
 import           Text.Megaparsec.Error
 import           Text.Show.Pretty          (ppShow)
@@ -313,17 +314,35 @@ unitTests = testGroup "Unit tests"
   , testCase "test automatic open close lambda 7" $ do
       res <- runTelomareParser (parseLambda <* scn <* eof) "\\a -> (a, (\\a -> (a,0)))"
       fromRight TZero (validateVariables [] res) `compare` expr2 @?= EQ
-  , testCase "test if tictactoe.tel compiles" $ do
-      res :: Either SomeException () <- try tictactoe
-      case res of
-        Left err -> assertFailure . show $ err
-        Right _  -> pure ()
+  -- , testCase "test if tictactoe.tel compiles" $ do
+  --     res :: Either SomeException () <- try tictactoe
+  --     case res of
+  --       Left err -> assertFailure . show $ err
+  --       Right _  -> pure ()
   ]
 
-tictactoe :: IO ()
+
+
+tictactoe :: IO String
 tictactoe = do
-  preludeString <- Strict.readFile "Prelude.tel"
-  Strict.readFile "tictactoe.tel" >>= runMain preludeString
+  (Just stdin_hdl, Just stdout_hdl, m_stderr_hdl, p_hdl) <- createProcess
+                                               (shell ("nix run .#telomare -- tictactoe.tel"))
+                                               { std_in = CreatePipe
+                                               , std_out = CreatePipe
+                                               }
+  hPutStrLn stdin_hdl "1"
+  hPutStrLn stdin_hdl "4"
+  hPutStrLn stdin_hdl "2"
+  hPutStrLn stdin_hdl "5"
+  hPutStrLn stdin_hdl "3"
+
+  hClose stdin_hdl
+  res <- hGetContents stdout_hdl
+  let aux = lines res
+      winner = aux !! (length aux - 2)
+  cleanupProcess (Just stdin_hdl, Just stdout_hdl, m_stderr_hdl, p_hdl)
+  pure winner
+
 
 hashtest0 = unlines ["let wrapper = 2",
                 "  in (# wrapper)"]

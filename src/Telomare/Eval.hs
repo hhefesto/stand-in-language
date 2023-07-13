@@ -33,6 +33,8 @@ import           Telomare                  (BreakExtras (..), BreakState',
                                             pattern AbortRecursion,
                                             pattern AbortUser, rootFrag, s2g)
 import           Telomare.Optimizer        (optimize)
+import           Telomare.Parser           (UnprocessedParsedTerm (..),
+                                            parseMain, parsePrelude)
 import           Telomare.Possible         (evalA)
 import           Telomare.RunTime          (hvmEval, optimizedEval, pureEval,
                                             simpleEval)
