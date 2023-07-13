@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE DeriveFunctor         #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE LambdaCase            #-}
@@ -314,6 +315,16 @@ unitTests = testGroup "Unit tests"
   , testCase "test automatic open close lambda 7" $ do
       res <- runTelomareParser (parseLambda <* scn <* eof) "\\a -> (a, (\\a -> (a,0)))"
       fromRight TZero (validateVariables [] res) `compare` expr2 @?= EQ
+  -- , testCase "test tictactoe.tel" $ do
+  --     res :: Either SomeException String <- try tictactoe
+  --     case res of
+  --       Left err -> assertFailure . show $ err
+  --       Right winner ->
+  --         if winner == "Player 2wins!" then
+  --           pure ()
+  --         else assertFailure . show $ "tictactoe compiled but didn't finish as expected\n"
+  --                                   <> "got last line: " <> winner <> "\n"
+  --                                   <> "expected: Player 2wins!"
   -- , testCase "test if tictactoe.tel compiles" $ do
   --     res :: Either SomeException () <- try tictactoe
   --     case res of
@@ -339,7 +350,7 @@ tictactoe = do
   hClose stdin_hdl
   res <- hGetContents stdout_hdl
   let aux = lines res
-      winner = aux !! (length aux - 2)
+      !winner = aux !! (length aux - 2)
   cleanupProcess (Just stdin_hdl, Just stdout_hdl, m_stderr_hdl, p_hdl)
   pure winner
 
