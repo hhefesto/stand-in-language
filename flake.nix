@@ -18,7 +18,9 @@
           project = executable-name: devTools: # [1]
             let addBuildTools = (t.flip hl.addBuildTools) devTools;
                 addBuildDepends = (t.flip hl.addBuildDepends)
-                  [ hvm.defaultPackage."x86_64-linux" ];
+                  [ hvm.defaultPackage."x86_64-linux"
+                    pkgs.nix
+                  ];
             in compiler.developPackage {
               root = pkgs.lib.sourceFilesBySuffices ./.
                        [ ".cabal"
