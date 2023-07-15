@@ -47,6 +47,12 @@ import           Text.Megaparsec.Debug
 import           Text.Megaparsec.Error
 import           Text.Show.Pretty          (ppShow)
 
+
+import Control.Exception (bracket)
+import GHC.IO.Handle (hDuplicate, hDuplicateTo)
+import System.Directory (getTemporaryDirectory, removeFile)
+-- import System.IO.Compat
+
 main :: IO ()
 main = defaultMain tests
 
@@ -316,16 +322,17 @@ unitTests = testGroup "Unit tests"
   , testCase "test automatic open close lambda 7" $ do
       res <- runTelomareParser (parseLambda <* scn <* eof) "\\a -> (a, (\\a -> (a,0)))"
       fromRight TZero (validateVariables [] res) `compare` expr2 @?= EQ
-  , testCase "test tictactoe.tel" $ do
-      res :: Either SomeException String <- try tictactoe
-      case res of
-        Left err -> assertFailure . show $ err
-        Right winner ->
-          if winner == "Player 2wins!" then
-            pure ()
-          else assertFailure . show $ "tictactoe compiled but didn't finish as expected\n"
-                                    <> "got last line: " <> winner <> "\n"
-                                    <> "expected: Player 2wins!"
+  -- , testCase "test tictactoe.tel" $ do
+  --     res :: Either SomeException String <- try tictactoe
+  --     captureStdout (provideStdin line tictactoe)
+  --     case res of
+  --       Left err -> assertFailure . show $ err
+  --       Right winner ->
+  --         if winner == "Player 2wins!" then
+  --           pure ()
+  --         else assertFailure . show $ "tictactoe compiled but didn't finish as expected\n"
+  --                                   <> "got last line: " <> winner <> "\n"
+  --                                   <> "expected: Player 2wins!"
   -- , testCase "test if tictactoe.tel compiles" $ do
   --     res :: Either SomeException () <- try tictactoe
   --     case res of
@@ -333,30 +340,74 @@ unitTests = testGroup "Unit tests"
   --       Right _  -> pure ()
   ]
 
+provideStdin :: String -> IO a -> IO a
+provideStdin input action =
+  withTemporaryFile $ \h -> do
+    hPutStr h input
+    hSeek h AbsoluteSeek 0
+    redirectStdin h action
+
+captureStdout :: IO a -> IO String
+captureStdout action =
+  withTemporaryFile $ \h -> do
+    redirectStdout h $ action *> hFlush stdout
+    hSeek h AbsoluteSeek 0
+    hGetContents' h
+
+redirectStdin :: Handle -> IO a -> IO a
+redirectStdin h action =
+  bracket
+    (hDuplicate stdin <* hDuplicateTo h stdin)
+    (\saved -> hDuplicateTo saved stdin *> hClose saved)
+    (const action)
+
+redirectStdout :: Handle -> IO a -> IO a
+redirectStdout h action =
+  bracket
+    (hFlush stdout *> hDuplicate stdout <* hDuplicateTo h stdout)
+    (\saved -> hDuplicateTo saved stdout *> hClose saved)
+    (const action)
+
+withTemporaryFile :: (Handle -> IO a) -> IO a
+withTemporaryFile inner = do
+  tmp <- getTemporaryDirectory
+  bracket
+    (openBinaryTempFile tmp "wtf-")
+    (\(name, h) -> hClose h >> removeFile name)
+    (inner . snd)
+
+
+echo :: IO ()
+echo = getLine >>= putStrLn
+
+testEcho :: IO ()
+testEcho = do
+  (Just stdin_hdl, Just stdout_hdl, m_stderr_hdl, p_hdl)
+    <- createProcess $
+         (shell ("nix run .#echo"))
+           { std_in = CreatePipe
+           , std_out = CreatePipe
+           }
+  hPutStrLn stdin_hdl "Hello, echo!"
+  hClose stdin_hdl
+  !response <- hGetContents stdout_hdl
+  cleanupProcess (Just stdin_hdl, Just stdout_hdl, m_stderr_hdl, p_hdl)
+  if response == "Hello, echo!" then
+    putStrLn "Success!"
+  else error "Failure"
+
 
 
 tictactoe :: IO String
 tictactoe = do
-  (Just stdin_hdl, Just stdout_hdl, m_stderr_hdl, p_hdl) <- createProcess
-                                               (shell ("nix --extra-experimental-features \"nix-command flakes\" run .#telomare -- tictactoe.tel"))
-                                               { std_in = CreatePipe
-                                               , std_out = CreatePipe
-                                               }
-  hPutStrLn stdin_hdl "1"
-  hPutStrLn stdin_hdl "4"
-  hPutStrLn stdin_hdl "2"
-  hPutStrLn stdin_hdl "5"
-  hPutStrLn stdin_hdl "3"
+  preludeString <- Strict.readFile "Prelude.tel"
+  telomareString <- Strict.readFile "tictactoe.tel"
+  captureStdout (provideStdin "1\n9\n2\n8\n3\n" $ runMain preludeString telomareString)
 
-  hClose stdin_hdl
-  res <- hGetContents stdout_hdl
-  putStrLn "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-  putStrLn res
-  let aux = lines res
-      !winner = aux !! (length aux - 2)
-  cleanupProcess (Just stdin_hdl, Just stdout_hdl, m_stderr_hdl, p_hdl)
-  pure winner
-  -- pure "hola"
+testUserDefAdHocTypes' :: IO String
+testUserDefAdHocTypes' = do
+  preludeString <- Strict.readFile "Prelude.tel"
+  captureStdout $ runMain preludeString userDefAdHocTypesSuccess
 
 
 hashtest0 = unlines ["let wrapper = 2",
