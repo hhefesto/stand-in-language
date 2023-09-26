@@ -66,7 +66,8 @@ decompileUPT =
           PairUP a b -> drawList [showS "(", draw a, showS ",", draw b, showS ")"]
           AppUP f x -> drawList [drawFirstParens f, drawParens x]
           -- TODO flatten nested lambdas
-          LamUP n x -> drawList [showS "\\", showS n, showS " -> ", draw x]
+          LamUP (n, Nothing) x -> drawList [showS "\\", showS n, showS " -> ", draw x]
+          LamUP (n, Just anno) x -> drawList [showS "\\", showS n, showS " : ", pure . show $ anno, showS " -> ", draw x]
           ChurchUP n -> drawList [showS "$", showS $ show n]
           UnsizedRecursionUP t r b -> drawList [showS "{", draw t, showS ",", draw r, showS ",", draw b, showS "}"]
           LeftUP x -> drawList [showS "left ", drawParens x]
@@ -107,8 +108,8 @@ decompileTerm1 = \case
   TLeft x -> LeftUP (decompileTerm1 x)
   TRight x -> RightUP (decompileTerm1 x)
   TTrace x -> TraceUP (decompileTerm1 x)
-  TLam (Open n) x -> LamUP n (decompileTerm1 x)
-  TLam (Closed n) x -> LamUP n (decompileTerm1 x) -- not strictly equivalent
+  TLam (Open n) x -> LamUP (n, Nothing) (decompileTerm1 x)
+  TLam (Closed n) x -> LamUP (n, Nothing) (decompileTerm1 x) -- not strictly equivalent
   TLimitedRecursion t r b -> UnsizedRecursionUP (decompileTerm1 t) (decompileTerm1 r) (decompileTerm1 b)
 
 decompileTerm2 :: Term2 -> Term1

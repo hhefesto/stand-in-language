@@ -187,14 +187,14 @@ unitTests = testGroup "Unit tests"
   ]
 
 caseExpr0UPT =
-  LetUP [ ("foo", LamUP "a" (CaseUP (VarUP "a")
-                               [ (PatternInt 0,VarUP "a")
-                               , (PatternVar "x",AppUP (VarUP "succ") (VarUP "a"))
-                               ]))
-        , ("main", LamUP "i" (PairUP (StringUP "Success")
-                                     (IntUP 0)))
+  LetUP [ ("foo", LamUP ("a", Nothing) (CaseUP (VarUP "a")
+                                         [ (PatternInt 0,VarUP "a")
+                                         , (PatternVar "x",AppUP (VarUP "succ") (VarUP "a"))
+                                         ]))
+        , ("main", LamUP ("i", Nothing) (PairUP (StringUP "Success")
+                                                (IntUP 0)))
         ]
-        (LamUP "i" (PairUP (StringUP "Success") (IntUP 0)))
+        (LamUP ("i", Nothing) (PairUP (StringUP "Success") (IntUP 0)))
 caseExpr0 = unlines
   [ "foo = \\a -> case a of"
   , "              0 -> a"

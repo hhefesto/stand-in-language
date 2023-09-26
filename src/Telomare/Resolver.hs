@@ -93,10 +93,10 @@ fitPatternVarsToCasedUPT p upt = applyVars2UPT varsOnUPT $ pattern2UPT p where
                 -> UnprocessedParsedTerm
                 -> UnprocessedParsedTerm
   applyVars2UPT m = \case
-    LamUP str x ->
+    LamUP arg@(str, anno) x ->
       case Map.lookup str m of
-        Just a  -> AppUP (LamUP str (applyVars2UPT m x)) a
-        Nothing -> LamUP str x
+        Just a  -> AppUP (LamUP arg (applyVars2UPT m x)) a
+        Nothing -> LamUP arg x
     x -> x
 
 -- |Collect all free variable names in a `UnprocessedParsedTerm` expresion
@@ -104,7 +104,7 @@ varsUPT :: UnprocessedParsedTerm -> Set String
 varsUPT = cata alg where
   alg :: Base UnprocessedParsedTerm (Set String) -> Set String
   alg (VarUPF n)     = Set.singleton n
-  alg (LamUPF str x) = del str x
+  alg (LamUPF (str, anno) x) = del str x
   alg e              = F.fold e
   del :: String -> Set String -> Set String
   del n x = if Set.member n x then Set.delete n x else x
@@ -114,7 +114,7 @@ mkLambda4FreeVarUPs upt = go upt freeVars where
   freeVars = Set.toList . varsUPT $ upt
   go x = \case
     []     -> x
-    (y:ys) -> LamUP y $ go x ys
+    (y:ys) -> LamUP (y, Nothing) $ go x ys
 
 findPatternVars :: Pattern -> Map String (UnprocessedParsedTerm -> UnprocessedParsedTerm)
 findPatternVars = cata alg where
@@ -160,17 +160,17 @@ mkCaseAlternative casedUPT caseResult p = appVars2ResultLambdaAlts patternVarsOn
                            -> UnprocessedParsedTerm -- ^ case result as lambda
                            -> UnprocessedParsedTerm
   appVars2ResultLambdaAlts m = \case
-    lam@(LamUP varName upt) ->
+    lam@(LamUP arg@(varName, _) upt) ->
       case Map.lookup varName m of
         Nothing -> lam
-        Just x -> AppUP (LamUP varName (appVars2ResultLambdaAlts (Map.delete varName m) upt)) x
+        Just x -> AppUP (LamUP arg (appVars2ResultLambdaAlts (Map.delete varName m) upt)) x
     x -> x
   makeLambdas :: UnprocessedParsedTerm
               -> [String]
               -> UnprocessedParsedTerm
   makeLambdas upt = \case
     []     -> upt
-    (x:xs) -> LamUP x $ makeLambdas upt xs
+    (x:xs) -> LamUP (x, Nothing) $ makeLambdas upt xs
 
 case2annidatedIfs :: UnprocessedParsedTerm -- ^ Term to be pattern matched
                   -> [Pattern] -- ^ All patterns in a case expression
@@ -281,57 +281,64 @@ makeLambda :: [(String, UnprocessedParsedTerm)] -- ^Bindings
            -> Term1
 makeLambda bindings str term1 =
   if unbound == Set.empty then TLam (Closed str) term1 else TLam (Open str) term1
-  where bindings' = Set.fromList $ fst <$> bindings
-        v = varsTerm1 term1
-        unbound = (v \\ bindings') \\ Set.singleton str
+    where bindings' = Set.fromList $ fst <$> bindings
+          v = varsTerm1 term1
+          unbound = (v \\ bindings') \\ Set.singleton str
 
 -- |Transformation from `UnprocessedParsedTerm` to `Term1` validating and inlining `VarUP`s
 validateVariables :: [(String, UnprocessedParsedTerm)] -- ^ Prelude
                   -> UnprocessedParsedTerm
                   -> Either String Term1
-validateVariables prelude term =
-  let validateWithEnvironment :: UnprocessedParsedTerm
-                              -> State.StateT (Map String Term1) (Either String) Term1
-      validateWithEnvironment = \case
-        LamUP v x -> do
-          oldState <- State.get
-          State.modify (Map.insert v (TVar v))
-          result <- validateWithEnvironment x
-          State.put oldState
-          pure $ makeLambda prelude v result
-        VarUP n -> do
-          definitionsMap <- State.get
-          case Map.lookup n definitionsMap of
-            Just v -> pure v
-            _      -> State.lift . Left  $ "No definition found for " <> n
-        LetUP preludeMap inner -> do
-          oldPrelude <- State.get
-          let addBinding (k,v) = do
-                newTerm <- validateWithEnvironment v
-                State.modify (Map.insert k newTerm)
-          mapM_ addBinding preludeMap
-          result <- validateWithEnvironment inner
-          State.put oldPrelude
-          pure result
-        ITEUP i t e -> TITE <$> validateWithEnvironment i
-                            <*> validateWithEnvironment t
-                            <*> validateWithEnvironment e
-        IntUP x -> pure $ i2t x
-        StringUP s -> pure $ s2t s
-        PairUP a b -> TPair <$> validateWithEnvironment a
-                            <*> validateWithEnvironment b
-        ListUP l -> foldr TPair TZero <$> mapM validateWithEnvironment l
-        AppUP f x -> TApp <$> validateWithEnvironment f
-                          <*> validateWithEnvironment x
-        UnsizedRecursionUP t r b -> TLimitedRecursion <$> validateWithEnvironment t
-          <*> validateWithEnvironment r <*> validateWithEnvironment b
-        ChurchUP n -> pure $ i2c n
-        LeftUP x -> TLeft <$> validateWithEnvironment x
-        RightUP x -> TRight <$> validateWithEnvironment x
-        TraceUP x -> TTrace <$> validateWithEnvironment x
-        CheckUP cf x -> TCheck <$> validateWithEnvironment cf <*> validateWithEnvironment x
-        HashUP x -> THash <$> validateWithEnvironment x
-  in State.evalStateT (validateWithEnvironment term) Map.empty
+validateVariables prelude term = State.evalStateT (validateWithEnvironment term) Map.empty
+  where
+    validateWithEnvironment :: UnprocessedParsedTerm
+                            -> State.StateT (Map String Term1) (Either String) Term1
+    validateWithEnvironment = \case
+      LamUP (v, Nothing) x -> do
+        oldState <- State.get
+        State.modify (Map.insert v (TVar v))
+        result <- validateWithEnvironment x
+        State.put oldState
+        pure $ makeLambda prelude v result
+      LamUP (v, Just anno) x -> do
+        oldState <- State.get
+        State.modify (Map.insert v (TVar v))
+        result <- validateWithEnvironment x
+        result' <- validateWithEnvironment anno -- TODO: check if this makes sense
+        State.put oldState
+        pure $ makeLambda prelude v result
+      VarUP n -> do
+        definitionsMap <- State.get
+        case Map.lookup n definitionsMap of
+          Just v -> pure v
+          _      -> State.lift . Left  $ "No definition found for " <> n
+      LetUP preludeMap inner -> do
+        oldPrelude <- State.get
+        let addBinding (k,v) = do
+              newTerm <- validateWithEnvironment v
+              State.modify (Map.insert k newTerm)
+        mapM_ addBinding preludeMap
+        result <- validateWithEnvironment inner
+        State.put oldPrelude
+        pure result
+      ITEUP i t e -> TITE <$> validateWithEnvironment i
+                          <*> validateWithEnvironment t
+                          <*> validateWithEnvironment e
+      IntUP x -> pure $ i2t x
+      StringUP s -> pure $ s2t s
+      PairUP a b -> TPair <$> validateWithEnvironment a
+                          <*> validateWithEnvironment b
+      ListUP l -> foldr TPair TZero <$> mapM validateWithEnvironment l
+      AppUP f x -> TApp <$> validateWithEnvironment f
+                        <*> validateWithEnvironment x
+      UnsizedRecursionUP t r b -> TLimitedRecursion <$> validateWithEnvironment t
+        <*> validateWithEnvironment r <*> validateWithEnvironment b
+      ChurchUP n -> pure $ i2c n
+      LeftUP x -> TLeft <$> validateWithEnvironment x
+      RightUP x -> TRight <$> validateWithEnvironment x
+      TraceUP x -> TTrace <$> validateWithEnvironment x
+      CheckUP cf x -> TCheck <$> validateWithEnvironment cf <*> validateWithEnvironment x
+      HashUP x -> THash <$> validateWithEnvironment x
 
 -- |Collect all free variable names in a `Term1` expresion
 varsTerm1 :: Term1 -> Set String
@@ -357,8 +364,8 @@ optimizeBuiltinFunctions = transform optimize where
         VarUP "left"  -> LeftUP x
         VarUP "right" -> RightUP x
         VarUP "trace" -> TraceUP x
-        VarUP "pair"  -> LamUP "y" (PairUP x . VarUP $ "y")
-        VarUP "app"   -> LamUP "y" (AppUP x . VarUP $ "y")
+        VarUP "pair"  -> LamUP ("y", Nothing) (PairUP x . VarUP $ "y")
+        VarUP "app"   -> LamUP ("y", Nothing) (AppUP x . VarUP $ "y")
         _             -> oneApp
         -- VarUP "check" TODO
     x -> x
@@ -382,11 +389,11 @@ generateAllHashes = transform interm where
 addBuiltins :: UnprocessedParsedTerm -> UnprocessedParsedTerm
 addBuiltins = LetUP
   [ ("zero", IntUP 0)
-  , ("left", LamUP "x" (LeftUP (VarUP "x")))
-  , ("right", LamUP "x" (RightUP (VarUP "x")))
-  , ("trace", LamUP "x" (TraceUP (VarUP "x")))
-  , ("pair", LamUP "x" (LamUP "y" (PairUP (VarUP "x") (VarUP "y"))))
-  , ("app", LamUP "x" (LamUP "y" (AppUP (VarUP "x") (VarUP "y"))))
+  , ("left", LamUP ("x", Nothing) (LeftUP (VarUP "x")))
+  , ("right", LamUP ("x", Nothing) (RightUP (VarUP "x")))
+  , ("trace", LamUP ("x", Nothing) (TraceUP (VarUP "x")))
+  , ("pair", LamUP ("x", Nothing) (LamUP ("y", Nothing) (PairUP (VarUP "x") (VarUP "y"))))
+  , ("app", LamUP ("x", Nothing) (LamUP ("y", Nothing) (AppUP (VarUP "x") (VarUP "y"))))
   ]
 
 -- |Process an `UnprocessedParsedTerm` to a `Term3` with failing capability.

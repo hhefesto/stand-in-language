@@ -6,6 +6,9 @@
 
 module Telomare.Parser where
 
+import Control.Lens.Combinators (transform)
+import qualified Data.Map as Map
+import Data.Map (Map)
 import Control.Lens.Combinators (Plated (..), makePrisms)
 import Control.Lens.Plated (Plated (..))
 import Control.Monad (void)
@@ -51,7 +54,7 @@ data UnprocessedParsedTerm
   | StringUP String
   | PairUP UnprocessedParsedTerm UnprocessedParsedTerm
   | AppUP UnprocessedParsedTerm UnprocessedParsedTerm
-  | LamUP String UnprocessedParsedTerm
+  | LamUP (String, Maybe UnprocessedParsedTerm) UnprocessedParsedTerm
   | ChurchUP Int
   | UnsizedRecursionUP UnprocessedParsedTerm UnprocessedParsedTerm UnprocessedParsedTerm
   | LeftUP UnprocessedParsedTerm
@@ -115,7 +118,8 @@ instance Show PrettyUPT where
               (',':str) -> str
               _         -> error "removeFirstComma: input does not start with a comma"
       (AppUPF x y) -> "(" <> x <> " " <> "(" <> y <> ")" <>")"
-      (LamUPF str y) -> "\\ " <> str <> " -> " <> indentSansFirstLine (6 + length str) y
+      (LamUPF (str, Nothing) y) -> "\\ " <> str <> " -> " <> indentSansFirstLine (6 + length str) y
+      (LamUPF (str, Just anno) y) -> "\\ " <> str <> " : " <> anno <> " -> " <> indentSansFirstLine (6 + length str) y
       (ChurchUPF x) -> "$" <> show x
       (LeftUPF x) -> "left (" <> indentSansFirstLine 6 x <> ")"
       (RightUPF x) -> "right (" <> indentSansFirstLine 7 x <> ")"
@@ -140,7 +144,8 @@ instance Plated UnprocessedParsedTerm where
     ListUP l    -> ListUP <$> traverse f l
     PairUP a b  -> PairUP <$> f a <*> f b
     AppUP u x   -> AppUP <$> f u <*> f x
-    LamUP s x   -> LamUP s <$> f x
+    LamUP (s, Nothing) x   -> LamUP (s, Nothing) <$> f x
+    LamUP (s, Just anno) x   -> (\y -> LamUP (s,Just y)) <$> f anno <*> f x
     LeftUP x    -> LeftUP <$> f x
     RightUP x   -> RightUP <$> f x
     TraceUP x   -> TraceUP <$> f x
@@ -338,15 +343,48 @@ parseApplied = do
       pure $ foldl AppUP f args
     _ -> fail "expected expression"
 
+-- -- |Parse assignment add adding binding to ParserState.
+-- parseAssignment :: TelomareParser (String, UnprocessedParsedTerm)
+-- parseAssignment = do
+--   var <- identifier <* scn
+--   annotation <- optional . try $ parseRefinementCheck
+--   scn *> symbol "=" <?> "assignment ="
+--   expr <- scn *> parseLongExpr <* scn
+--   case annotation of
+--     Just annot -> pure (var, annot expr)
+--     _          -> pure (var, expr)
+
 -- |Parse lambda expression.
 parseLambda :: TelomareParser UnprocessedParsedTerm
 parseLambda = do
   symbol "\\" <* scn
-  variables <- some identifier <* scn
+  variables <- some varWithMaybeType <* scn
   symbol "->" <* scn
   -- TODO make sure lambda names don't collide with bound names
   term1expr <- parseLongExpr <* scn
-  pure $ foldr LamUP term1expr variables
+  pure $ foldr LamUP (applyVarAnnotations (varMap variables) term1expr) variables
+    where
+      varMap :: [(String, Maybe UnprocessedParsedTerm)] -> Map String UnprocessedParsedTerm
+      varMap = \case
+        [] -> Map.empty
+        ((_, Nothing) : rest) -> varMap rest
+        ((str, Just anno) : rest) -> Map.insert str anno $ varMap rest
+      applyVarAnnotations :: Map String UnprocessedParsedTerm -- ^Args with type annotation
+                          -> UnprocessedParsedTerm -- ^Lambda body
+                          -> UnprocessedParsedTerm -- ^Lambda body with annotations applied to corresponding vars
+      applyVarAnnotations m = transform go where
+        go = \case
+          VarUP str ->
+            case Map.lookup str m of
+              Nothing -> VarUP str
+              Just anno -> CheckUP anno (VarUP str)
+          x -> x
+      varWithMaybeType :: TelomareParser (String, Maybe UnprocessedParsedTerm)
+      varWithMaybeType = do
+        var <- identifier <* scn
+        annotation <- optional . try $ parseRefinementCheck'
+        pure (var, annotation)
+
 
 -- |Parser that fails if indent level is not `pos`.
 parseSameLvl :: Pos -> TelomareParser a -> TelomareParser a
@@ -380,6 +418,10 @@ parseChurch = ChurchUP . fromInteger <$> (symbol "$" *> integer)
 -- |Parse refinement check.
 parseRefinementCheck :: TelomareParser (UnprocessedParsedTerm -> UnprocessedParsedTerm)
 parseRefinementCheck = CheckUP <$> (symbol ":" *> parseLongExpr)
+
+-- |Parse refinement check, but just annotation.
+parseRefinementCheck' :: TelomareParser UnprocessedParsedTerm
+parseRefinementCheck' = symbol ":" *> parseLongExpr
 
 -- |Parse assignment add adding binding to ParserState.
 parseAssignment :: TelomareParser (String, UnprocessedParsedTerm)

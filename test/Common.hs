@@ -252,7 +252,7 @@ instance Arbitrary UnprocessedParsedTerm where
                                    , LeftUP <$> recur (i - 1)
                                    , RightUP <$> recur (i - 1)
                                    , TraceUP <$> recur (i - 1)
-                                   , elements lambdaTerms >>= \var -> LamUP var <$> genTree (var : varList) (i - 1)
+                                   , elements lambdaTerms >>= \var -> LamUP (var, Nothing) <$> genTree (var : varList) (i - 1)
                                    , ITEUP <$> recur third <*> recur third <*> recur third
                                    , UnsizedRecursionUP <$> recur third <*> recur third <*> recur third
                                    , ListUP <$> childList
