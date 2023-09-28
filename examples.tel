@@ -17,12 +17,18 @@ MyInt = let wrapper = \h -> ( \i -> if not i
                                     else abort "Not a MyInt"
                             )
         in wrapper (# wrapper)
--- TODO: this should mean that aux is a MyInt but that isn't the behaviour
-aux : (right MyInt) = \x -> if dEqual (right x) 8 then "Success" else "Failure"
 
+increaseMyInt : (right MyInt) = \ x : (right MyInt)  -> (left MyInt) (succ (right x))
 
+increaseMyInt0 = \ x : (right MyInt)  -> succ (right x)
 
-main = \i -> (aux ((left MyInt) 8), 0)
+s = if dEqual (right (increaseMyInt ((left MyInt) 8))) 9 then "Success" else "Failure"
+f = if dEqual (right (increaseMyInt (8,8))) 9 then "Success" else "Failure" -- This doesn't fail yet
+
+s0 = if dEqual (increaseMyInt0 ((left MyInt) 8)) 9 then "Success" else "Failure"
+f0 = if dEqual (increaseMyInt0 (8,8)) 9 then "Success" else "Failure" -- This doesn't fail yet
+
+main = \i -> (f0, 0)
 
 -- Case example
 -- main =
