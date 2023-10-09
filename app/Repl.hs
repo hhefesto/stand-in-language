@@ -14,7 +14,7 @@ import Data.Bifunctor (first)
 import Data.Functor ((<&>))
 import Data.List
 import qualified Data.Map as Map
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceShowId)
 import Naturals
 import Options.Applicative hiding (ParseError, (<|>))
 import qualified Options.Applicative as O
@@ -25,7 +25,7 @@ import qualified System.IO.Strict as Strict
 import Telomare (IExpr (..), PrettyIExpr (PrettyIExpr),
                  PrettyPartialType (PrettyPartialType),
                  TelomareLike (fromTelomare, toTelomare), Term3)
-import Telomare.Eval (EvalError (..), compileUnitTest)
+import Telomare.Eval (EvalError (..), compileMain)
 import Telomare.Parser (TelomareParser, UnprocessedParsedTerm (..),
                         parseAssignment, parseLongExpr, parsePrelude)
 import Telomare.Resolver (process)
@@ -65,7 +65,7 @@ parseReplStep = try (parseReplAssignment <&> ReplAssignment)
 runReplParser :: [(String, UnprocessedParsedTerm)]
               -> String
               -> Either String (ReplStep [(String, UnprocessedParsedTerm)])
-runReplParser prelude str = fmap (prelude <>) <$> first errorBundlePretty (runParser parseReplStep "" str)
+runReplParser prelude str = traceShowId $ fmap (prelude <>) <$> first errorBundlePretty (runParser parseReplStep "" str)
 
 -- Common functions
 -- ~~~~~~~~~~~~~~~~
@@ -88,7 +88,7 @@ resolveBinding' name bindings = lookup name bindings >>= rightToMaybe . process 
 
 -- |Obtain expression from the bindings and transform them maybe into a IExpr.
 resolveBinding :: String -> [(String, UnprocessedParsedTerm)] -> Maybe IExpr
-resolveBinding name bindings = rightToMaybe $ compileUnitTest =<< maybeToRight (resolveBinding' name bindings)
+resolveBinding name bindings = rightToMaybe $ compileMain =<< maybeToRight (resolveBinding' name bindings)
 
 -- |Print last expression bound to
 -- the _tmp_ variable in the bindings
@@ -100,7 +100,7 @@ printLastExpr eval bindings = do
     case lookup "_tmp_" bindings of
       Nothing -> putStrLn "Could not find _tmp_ in bindings"
       Just upt -> do
-        let compile' x = case compileUnitTest x of
+        let compile' x = case compileMain x of
                            Left err -> Left . show $ err
                            Right r  -> Right r
         case compile' =<< process bindings (LetUP bindings upt) of
