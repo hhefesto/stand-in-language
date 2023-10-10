@@ -65,7 +65,8 @@ parseReplStep = try (parseReplAssignment <&> ReplAssignment)
 runReplParser :: [(String, UnprocessedParsedTerm)]
               -> String
               -> Either String (ReplStep [(String, UnprocessedParsedTerm)])
-runReplParser prelude str = traceShowId $ fmap (prelude <>) <$> first errorBundlePretty (runParser parseReplStep "" str)
+runReplParser prelude str = fmap (prelude <>) <$> first errorBundlePretty (runParser parseReplStep "" str)
+-- runReplParser prelude str = traceShowId $ fmap (prelude <>) <$> first errorBundlePretty (runParser parseReplStep "" str)
 
 -- Common functions
 -- ~~~~~~~~~~~~~~~~
