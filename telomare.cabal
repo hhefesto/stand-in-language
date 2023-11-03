@@ -7,7 +7,7 @@ license:             Apache-2.0
 license-file:        LICENSE
 author:              Sam Griffin
 maintainer:          sam.griffin@gmail.com
-copyright:           2020 Sam Griffin
+copyright:           2023 Sam Griffin
 category:            Language
 build-type:          Simple
 extra-source-files:  CHANGELOG.md, README.md
@@ -79,7 +79,6 @@ executable telomare
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   build-depends:       base
-                     , containers
                      , telomare
                      , strict
                      , optparse-applicative
