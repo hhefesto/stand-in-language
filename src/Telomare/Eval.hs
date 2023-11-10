@@ -1,5 +1,6 @@
-{-# LANGUAGE LambdaCase      #-}
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE PatternSynonyms     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Telomare.Eval where
 
@@ -10,6 +11,7 @@ import Control.Monad.State (StateT)
 import qualified Control.Monad.State as State
 import Control.Monad.Trans.Accum (AccumT)
 import qualified Control.Monad.Trans.Accum as Accum
+import Data.Bifunctor (first)
 import Data.DList (DList)
 import Data.Functor.Foldable (cata, embed, project)
 import Data.Map (Map)
@@ -27,13 +29,15 @@ import Telomare (BreakState, BreakState', ExprA (..), FragExpr (..),
                  Term4 (Term4), UnsizedRecursionToken (..), app, g2s,
                  innerChurchF, insertAndGetKey, pattern AbortAny,
                  pattern AbortRecursion, pattern AbortUser, rootFrag, s2g,
-                 unFragExprUR)
+                 unFragExprUR, PrettyIExpr (PrettyIExpr))
 import Telomare.Optimizer (optimize)
-import Telomare.Parser (UnprocessedParsedTerm (..), parsePrelude)
+import Telomare.Parser (UnprocessedParsedTerm (..), parsePrelude,
+                        parseTopLevelWithPrelude, parseWithPrelude, PrettyUPT (PrettyUPT))
 import Telomare.Possible (evalA)
-import Telomare.Resolver (parseMain)
+import Telomare.Resolver (parseMain, process)
 import Telomare.RunTime (hvmEval, optimizedEval, pureEval, simpleEval)
 import Telomare.TypeChecker (TypeCheckError (..), typeCheck)
+import Text.Megaparsec (errorBundlePretty, runParser)
 
 data ExpP = ZeroP
     | PairP ExpP ExpP
@@ -199,6 +203,47 @@ runMain preludeString s =
       Left e -> putStrLn $ concat ["failed to parse ", s, " ", e]
       Right (Right g) -> evalLoop g
       Right z -> putStrLn $ "compilation failed somehow, with result " <> show z
+
+runMainInteractive :: String -> String -> IO ()
+runMainInteractive preludeString s =
+  let prelude :: [(String, UnprocessedParsedTerm)]
+      prelude =
+        case parsePrelude preludeString of
+          Right p -> p
+          Left pe -> error pe
+  in
+    case parseWithPrelude prelude s of
+      Left e    -> putStrLn $ concat ["failed to parse ", s, " ", e]
+      Right upt ->
+        case compileMain <$> process prelude upt of
+          Left e -> putStrLn $ concat ["failed to process ", s, " ", e]
+          Right (Right g) -> do
+            -- let f :: UnprocessedParsedTerm -> IO ()
+            --     f = \case
+            --           ITEUP x y z -> undefined
+            --           LetUP l x -> undefined
+            --           ListUP l -> undefined
+            --           PairUP x y -> undefined
+            --           AppUP x y -> undefined
+            --           LamUP s x -> undefined
+            --           UnsizedRecursionUP x y z -> undefined
+            --           LeftUP x -> undefined
+            --           RightUP x -> undefined
+            --           TraceUP x -> undefined
+            --           CheckUP x y -> undefined
+            --           HashUP x -> undefined
+            --           CaseUP x l -> undefined
+            let f :: UnprocessedParsedTerm -> IO UnprocessedParsedTerm
+                f x = do
+                  let (Right (Right g')) = compileMain <$> process prelude upt
+                  putStrLn "UnprocessedParsedTerm:"
+                  print . PrettyUPT $ x
+                  putStrLn "IExpr:"
+                  print . PrettyIExpr $ g'
+                  pure x
+            _ <- transformM f upt
+            pure ()
+          Right z -> putStrLn $ "compilation failed somehow, with result " <> show z
 
 schemeEval :: IExpr -> IO ()
 schemeEval iexpr = do
