@@ -45,7 +45,7 @@ makeBaseFunctor ''Pattern
 data UnprocessedParsedTerm
   = VarUP String
   | ITEUP UnprocessedParsedTerm UnprocessedParsedTerm UnprocessedParsedTerm
-  | LetUP [(String, UnprocessedParsedTerm)] UnprocessedParsedTerm
+  | LetUP [(Either Pattern String, UnprocessedParsedTerm)] UnprocessedParsedTerm
   | ListUP [UnprocessedParsedTerm]
   | IntUP Int
   | StringUP String
@@ -381,9 +381,10 @@ parseChurch = ChurchUP . fromInteger <$> (symbol "$" *> integer)
 parseRefinementCheck :: TelomareParser (UnprocessedParsedTerm -> UnprocessedParsedTerm)
 parseRefinementCheck = CheckUP <$> (symbol ":" *> parseLongExpr)
 
--- |Parse assignment add adding binding to ParserState.
-parseAssignment :: TelomareParser (String, UnprocessedParsedTerm)
+-- |Parse assignment with optional annotation in the form of the tuple (variable-name, assigined-upt)
+parseAssignment :: TelomareParser (Either Pattern String, UnprocessedParsedTerm)
 parseAssignment = do
+
   var <- identifier <* scn
   annotation <- optional . try $ parseRefinementCheck
   scn *> symbol "=" <?> "assignment ="
@@ -391,6 +392,28 @@ parseAssignment = do
   case annotation of
     Just annot -> pure (var, annot expr)
     _          -> pure (var, expr)
+
+
+-- let (a,b) = foo
+--     a = case foo of
+--           (a,b) -> a
+--     b = case foo of
+--           (a,b) -> b
+-- in bar a b
+
+-- parsePattern :: TelomareParser Pattern
+-- |Parse assignment and add binding to ParserState.
+parseCaseAssignment :: TelomareParser [(String, UnprocessedParsedTerm)]
+parseCaseAssignment = do
+  pat <- parsePattern <* scn
+  undefined
+
+  -- annotation <- optional . try $ parseRefinementCheck
+  -- scn *> symbol "=" <?> "assignment ="
+  -- expr <- scn *> parseLongExpr <* scn
+  -- case annotation of
+  --   Just annot -> pure (var, annot expr)
+  --   _          -> pure (var, expr)
 
 -- |Parse top level expressions.
 parseTopLevel :: TelomareParser UnprocessedParsedTerm
@@ -401,12 +424,13 @@ parseTopLevelWithPrelude :: [(String, UnprocessedParsedTerm)]    -- ^Prelude
                          -> TelomareParser UnprocessedParsedTerm
 parseTopLevelWithPrelude lst = do
   bindingList <- scn *> many parseAssignment <* eof
-  pure $ LetUP (lst <> bindingList) (fromJust $ lookup "main" bindingList)
+  pure $ LetUP ((fmap . first) Right $ lst <> bindingList)
+               (fromJust $ lookup "main" bindingList)
 
 parseDefinitions :: TelomareParser (UnprocessedParsedTerm -> UnprocessedParsedTerm)
 parseDefinitions = do
   bindingList <- scn *> many parseAssignment <* eof
-  pure $ LetUP bindingList
+  pure . LetUP $ (fmap . first) Right bindingList
 
 -- |Helper function to test parsers without a result.
 runTelomareParser_ :: Show a => TelomareParser a -> String -> IO ()
