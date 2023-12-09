@@ -29,6 +29,8 @@ import Telomare.Parser (Pattern (..), PatternF (..), TelomareParser (..),
                         UnprocessedParsedTerm (..), UnprocessedParsedTermF (..),
                         parseWithPrelude)
 import Text.Megaparsec (errorBundlePretty, runParser)
+import Test.Hspec.Formatters (Formatter(footerFormatter))
+import Debug.Trace (traceShowId)
 
 type VarList = [String]
 
@@ -285,6 +287,54 @@ makeLambda bindings str term1 =
         v = varsTerm1 term1
         unbound = (v \\ bindings') \\ Set.singleton str
 
+-- let (a,b) = foo
+--     c = baz
+-- in bar a b c
+
+-- case foo of
+--   (a, b) ->
+--     let c = baz
+--     in bar a b c
+
+aux = LetUP [ (Right "var0", IntUP 1)
+            , (Left (PatternPair (PatternVar "a") (PatternVar "b")), IntUP 2)
+            , (Right "var1", IntUP 2)
+            , (Left (PatternPair (PatternVar "c") (PatternVar "d")), IntUP 8)
+            ]
+            (IntUP 0)
+b = CaseUP (IntUP 2)
+      [ ( PatternPair (PatternVar "a") (PatternVar "b")
+        , CaseUP (IntUP 8)
+            [ ( PatternPair (PatternVar "c") (PatternVar "d")
+              , LetUP [(Right "var0",IntUP 1),(Right "var1",IntUP 2)] (IntUP 0)
+              )
+            ]
+        )
+      ]
+a = CaseUP (IntUP 2)
+      [ ( PatternPair (PatternVar "a") (PatternVar "b")
+        , LetUP [(Right "var0",IntUP 1),(Right "var1",IntUP 2)] (IntUP 0)
+        )
+      ]
+
+
+processLetUPPatterns :: UnprocessedParsedTerm -> UnprocessedParsedTerm
+processLetUPPatterns = transform go where
+  isRight :: (Either a b, c) -> Bool
+  isRight = \case
+    (Right _, _) -> True
+    (Left _, _) -> False
+  go :: UnprocessedParsedTerm -> UnprocessedParsedTerm
+  go = \case
+    LetUP l x -> let sansPatterns = filter isRight l
+                     withPatterns = filter (not . isRight) l
+                 in case (sansPatterns, withPatterns) of
+                      (sp, []) -> LetUP sp x
+                      ([], [(Left pat, upt)]) -> CaseUP upt [(pat, x)]
+                      (sp, [(Left pat, upt)]) -> CaseUP upt [(pat, LetUP sp x)]
+                      (sp, (Left pat, upt):xs) -> CaseUP upt [(pat, go $ LetUP (xs <> sp) x)]
+    x -> x
+
 -- |Transformation from `UnprocessedParsedTerm` to `Term1` validating and inlining `VarUP`s
 validateVariables :: [(String, UnprocessedParsedTerm)] -- ^ Prelude
                   -> UnprocessedParsedTerm
@@ -306,7 +356,8 @@ validateVariables prelude term =
             _      -> State.lift . Left  $ "No definition found for " <> n
         LetUP preludeMap inner -> do
           oldPrelude <- State.get
-          let addBinding (k,v) = do
+          let addBinding (Left _,_) = error "LetUP with unprocessed pattern assignments"
+              addBinding (Right k,v) = do
                 newTerm <- validateWithEnvironment v
                 State.modify (Map.insert k newTerm)
           mapM_ addBinding preludeMap
@@ -381,12 +432,12 @@ generateAllHashes = transform interm where
 
 addBuiltins :: UnprocessedParsedTerm -> UnprocessedParsedTerm
 addBuiltins = LetUP
-  [ ("zero", IntUP 0)
-  , ("left", LamUP "x" (LeftUP (VarUP "x")))
-  , ("right", LamUP "x" (RightUP (VarUP "x")))
-  , ("trace", LamUP "x" (TraceUP (VarUP "x")))
-  , ("pair", LamUP "x" (LamUP "y" (PairUP (VarUP "x") (VarUP "y"))))
-  , ("app", LamUP "x" (LamUP "y" (AppUP (VarUP "x") (VarUP "y"))))
+  [ (Right "zero", IntUP 0)
+  , (Right "left", LamUP "x" (LeftUP (VarUP "x")))
+  , (Right "right", LamUP "x" (RightUP (VarUP "x")))
+  , (Right "trace", LamUP "x" (TraceUP (VarUP "x")))
+  , (Right "pair", LamUP "x" (LamUP "y" (PairUP (VarUP "x") (VarUP "y"))))
+  , (Right "app", LamUP "x" (LamUP "y" (AppUP (VarUP "x") (VarUP "y"))))
   ]
 
 -- |Process an `UnprocessedParsedTerm` to a `Term3` with failing capability.
@@ -400,7 +451,10 @@ process2Term2 :: [(String, UnprocessedParsedTerm)] -- ^Prelude
               -> Either String Term2
 process2Term2 prelude = fmap generateAllHashes
                       . debruijinize [] <=< validateVariables prelude
+                      . traceShowId
                       . removeCaseUPs
+                      . traceShowId
+                      . processLetUPPatterns
                       . optimizeBuiltinFunctions
                       . addBuiltins
 
@@ -415,4 +469,121 @@ runTelomareParser2Term2 parser prelude str =
 parseMain :: [(String, UnprocessedParsedTerm)] -- ^Prelude: [(VariableName, BindedUPT)]
           -> String                            -- ^Raw string to be parserd.
           -> Either String Term3               -- ^Error on Left.
-parseMain prelude s = parseWithPrelude prelude s >>= process prelude
+parseMain prelude s = (traceShowId $ parseWithPrelude prelude s) >>= process prelude
+
+aa = LetUP [ (Right "id",LamUP "x" (VarUP "x"))
+      , (Right "and",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (VarUP "b") (IntUP 0))))
+      , (Right "or",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (IntUP 1) (VarUP "b"))))
+      , (Right "not",LamUP "x" (ITEUP (VarUP "x") (IntUP 0) (IntUP 1)))
+      , (Right "foldr",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (VarUP "l"))) (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (VarUP "accum")))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+      , (Right "foldl",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (AppUP (AppUP (VarUP "f") (VarUP "accum")) (AppUP (VarUP "left") (VarUP "l"))))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+      , (Right "zipWith",LamUP "f" (LamUP "a" (LamUP "b" (LetUP [(Right "fixed",UnsizedRecursionUP (LamUP "ab" (AppUP (AppUP (VarUP "and") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (VarUP "ab")))) (LamUP "recur" (LamUP "ab" (PairUP (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (AppUP (VarUP "left") (VarUP "ab")))) (AppUP (VarUP "left") (AppUP (VarUP "right") (VarUP "ab")))) (AppUP (VarUP "recur") (PairUP (AppUP (VarUP "right") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (AppUP (VarUP "right") (VarUP "ab")))))))) (LamUP "ab" (IntUP 0)))] (AppUP (VarUP "fixed") (PairUP (VarUP "a") (VarUP "b")))))))
+      , (Right "dEqual",LamUP "a" (LamUP "b" (LetUP [(Right "equalsOne",LamUP "x" (ITEUP (VarUP "x") (AppUP (VarUP "not") (AppUP (VarUP "left") (VarUP "x"))) (IntUP 0)))] (ITEUP (VarUP "a") (AppUP (VarUP "equalsOne") (AppUP (AppUP (AppUP (VarUP "d2c") (AppUP (VarUP "left") (VarUP "a"))) (LamUP "x" (AppUP (VarUP "left") (VarUP "x")))) (VarUP "b"))) (AppUP (VarUP "not") (VarUP "b"))))))
+      , (Right "listEqual",LamUP "a" (LamUP "b" (LetUP [(Right "pairsEqual",AppUP (AppUP (AppUP (VarUP "zipWith") (VarUP "dEqual")) (VarUP "a")) (VarUP "b")),(Right "lengthEqual",AppUP (AppUP (VarUP "dEqual") (AppUP (VarUP "listLength") (VarUP "a"))) (AppUP (VarUP "listLength") (VarUP "b")))] (AppUP (AppUP (AppUP (VarUP "foldr") (VarUP "and")) (IntUP 1)) (PairUP (VarUP "lengthEqual") (VarUP "pairsEqual"))))))
+      , (Right "concat",AppUP (AppUP (VarUP "foldr") (VarUP "listPlus")) (IntUP 0))
+      , (Right "drop",LamUP "n" (LamUP "l" (AppUP (AppUP (VarUP "n") (LamUP "x" (AppUP (VarUP "right") (VarUP "x")))) (VarUP "l"))))
+      , (Right "take",LamUP "n" (LamUP "l" (LetUP [(Right "lengthed",AppUP (AppUP (VarUP "n") (LamUP "x" (PairUP (IntUP 0) (VarUP "x")))) (IntUP 0))] (AppUP (AppUP (AppUP (VarUP "zipWith") (LamUP "a" (LamUP "b" (VarUP "a")))) (VarUP "l")) (VarUP "lengthed")))))
+      , (Right "abort",LamUP "str" (LetUP [(Right "x",CheckUP (LamUP "y" (AppUP (AppUP (VarUP "listPlus") (StringUP "abort: ")) (VarUP "str"))) (IntUP 1))] (VarUP "x")))
+      , (Right "main",LetUP [(Left (PatternPair (PatternVar "x") (PatternVar "y")),IntUP 1),(Right "test",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success")))))] (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0))))
+      ]  (LetUP [(Left (PatternPair (PatternVar "x") (PatternVar "y")),IntUP 1),(Right "test",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success")))))] (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0))))
+
+bb = LetUP [(Right "id",LamUP "x" (VarUP "x"))
+           , (Right "and",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (VarUP "b") (IntUP 0))))
+           , (Right "or",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (IntUP 1) (VarUP "b"))))
+           , (Right "not",LamUP "x" (ITEUP (VarUP "x") (IntUP 0) (IntUP 1)))
+           , (Right "foldr",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (VarUP "l"))) (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (VarUP "accum")))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+           , (Right "foldl",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (AppUP (AppUP (VarUP "f") (VarUP "accum")) (AppUP (VarUP "left") (VarUP "l"))))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+           , (Right "zipWith",LamUP "f" (LamUP "a" (LamUP "b" (LetUP [(Right "fixed",UnsizedRecursionUP (LamUP "ab" (AppUP (AppUP (VarUP "and") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (VarUP "ab")))) (LamUP "recur" (LamUP "ab" (PairUP (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (AppUP (VarUP "left") (VarUP "ab")))) (AppUP (VarUP "left") (AppUP (VarUP "right") (VarUP "ab")))) (AppUP (VarUP "recur") (PairUP (AppUP (VarUP "right") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (AppUP (VarUP "right") (VarUP "ab")))))))) (LamUP "ab" (IntUP 0)))] (AppUP (VarUP "fixed") (PairUP (VarUP "a") (VarUP "b")))))))
+           , (Right "dEqual",LamUP "a" (LamUP "b" (LetUP [(Right "equalsOne",LamUP "x" (ITEUP (VarUP "x") (AppUP (VarUP "not") (AppUP (VarUP "left") (VarUP "x"))) (IntUP 0)))] (ITEUP (VarUP "a") (AppUP (VarUP "equalsOne") (AppUP (AppUP (AppUP (VarUP "d2c") (AppUP (VarUP "left") (VarUP "a"))) (LamUP "x" (AppUP (VarUP "left") (VarUP "x")))) (VarUP "b"))) (AppUP (VarUP "not") (VarUP "b"))))))
+           , (Right "listEqual",LamUP "a" (LamUP "b" (LetUP [(Right "pairsEqual",AppUP (AppUP (AppUP (VarUP "zipWith") (VarUP "dEqual")) (VarUP "a")) (VarUP "b")),(Right "lengthEqual",AppUP (AppUP (VarUP "dEqual") (AppUP (VarUP "listLength") (VarUP "a"))) (AppUP (VarUP "listLength") (VarUP "b")))] (AppUP (AppUP (AppUP (VarUP "foldr") (VarUP "and")) (IntUP 1)) (PairUP (VarUP "lengthEqual") (VarUP "pairsEqual"))))))
+           , (Right "concat",AppUP (AppUP (VarUP "foldr") (VarUP "listPlus")) (IntUP 0))
+           , (Right "drop",LamUP "n" (LamUP "l" (AppUP (AppUP (VarUP "n") (LamUP "x" (AppUP (VarUP "right") (VarUP "x")))) (VarUP "l"))))
+           , (Right "take",LamUP "n" (LamUP "l" (LetUP [(Right "lengthed",AppUP (AppUP (VarUP "n") (LamUP "x" (PairUP (IntUP 0) (VarUP "x")))) (IntUP 0))] (AppUP (AppUP (AppUP (VarUP "zipWith") (LamUP "a" (LamUP "b" (VarUP "a")))) (VarUP "l")) (VarUP "lengthed")))))
+           , (Right "abort",LamUP "str" (LetUP [(Right "x",CheckUP (LamUP "y" (AppUP (AppUP (VarUP "listPlus") (StringUP "abort: ")) (VarUP "str"))) (IntUP 1))] (VarUP "x")))
+           , (Right "main",CaseUP (IntUP 1) [(PatternPair (PatternVar "x") (PatternVar "y"),LetUP [(Right "test",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success")))))] (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0))))])
+           ]  (CaseUP (IntUP 1) [(PatternPair (PatternVar "x") (PatternVar "y"),LetUP [(Right "test",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success")))))] (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0))))])
+
+c = LetUP [(Right "id",LamUP "x" (VarUP "x"))
+          , (Right "and",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (VarUP "b") (IntUP 0))))
+          , (Right "or",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (IntUP 1) (VarUP "b"))))
+          , (Right "not",LamUP "x" (ITEUP (VarUP "x") (IntUP 0) (IntUP 1)))
+          , (Right "succ",LamUP "x" (PairUP (VarUP "x") (IntUP 0)))
+          , (Right "d2c",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f") (AppUP (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "i"))) (VarUP "f")) (VarUP "b"))))))) (LamUP "i" (LamUP "f" (LamUP "b" (VarUP "b")))))
+          , (Right "c2d",LamUP "c" (AppUP (AppUP (VarUP "c") (VarUP "succ")) (IntUP 0)))
+          , (Right "plus",LamUP "m" (LamUP "n" (LamUP "f" (LamUP "x" (AppUP (AppUP (VarUP "m") (VarUP "f")) (AppUP (AppUP (VarUP "n") (VarUP "f")) (VarUP "x")))))))
+          , (Right "times",LamUP "m" (LamUP "n" (LamUP "f" (AppUP (VarUP "m") (AppUP (VarUP "n") (VarUP "f"))))))
+          , (Right "pow",LamUP "m" (LamUP "n" (AppUP (VarUP "n") (VarUP "m"))))
+          , (Right "dMinus",LamUP "a" (LamUP "b" (AppUP (AppUP (AppUP (VarUP "d2c") (VarUP "b")) (LamUP "x" (AppUP (VarUP "left") (VarUP "x")))) (VarUP "a"))))
+          , (Right "minus",LamUP "a" (LamUP "b" (AppUP (VarUP "d2c") (AppUP (AppUP (VarUP "b") (LamUP "x" (AppUP (VarUP "left") (VarUP "x")))) (AppUP (VarUP "c2d") (VarUP "a"))))))
+          , (Right "range",LamUP "a" (LamUP "b" (AppUP (UnsizedRecursionUP (LamUP "i" (AppUP (AppUP (VarUP "dMinus") (VarUP "b")) (VarUP "i"))) (LamUP "recur" (LamUP "i" (PairUP (VarUP "i") (AppUP (VarUP "recur") (PairUP (VarUP "i") (IntUP 0)))))) (LamUP "i" (IntUP 0))) (VarUP "a"))))
+          , (Right "map",LamUP "f" (UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (PairUP (AppUP (VarUP "f") (AppUP (VarUP "left") (VarUP "l"))) (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l")))))) (LamUP "l" (IntUP 0))))
+          , (Right "foldr",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (VarUP "l"))) (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (VarUP "accum")))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+          , (Right "foldl",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (AppUP (AppUP (VarUP "f") (VarUP "accum")) (AppUP (VarUP "left") (VarUP "l"))))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+          , (Right "zipWith",LamUP "f" (LamUP "a" (LamUP "b" (LetUP [(Right "fixed",UnsizedRecursionUP (LamUP "ab" (AppUP (AppUP (VarUP "and") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (VarUP "ab")))) (LamUP "recur" (LamUP "ab" (PairUP (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (AppUP (VarUP "left") (VarUP "ab")))) (AppUP (VarUP "left") (AppUP (VarUP "right") (VarUP "ab")))) (AppUP (VarUP "recur") (PairUP (AppUP (VarUP "right") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (AppUP (VarUP "right") (VarUP "ab")))))))) (LamUP "ab" (IntUP 0)))] (AppUP (VarUP "fixed") (PairUP (VarUP "a") (VarUP "b")))))))
+          , (Right "filter",LamUP "f" (AppUP (AppUP (VarUP "foldr") (LamUP "a" (LamUP "b" (ITEUP (AppUP (VarUP "f") (VarUP "a")) (PairUP (VarUP "a") (VarUP "b")) (VarUP "b"))))) (IntUP 0)))
+          , (Right "dEqual",LamUP "a" (LamUP "b" (LetUP [(Right "equalsOne",LamUP "x" (ITEUP (VarUP "x") (AppUP (VarUP "not") (AppUP (VarUP "left") (VarUP "x"))) (IntUP 0)))] (ITEUP (VarUP "a") (AppUP (VarUP "equalsOne") (AppUP (AppUP (AppUP (VarUP "d2c") (AppUP (VarUP "left") (VarUP "a"))) (LamUP "x" (AppUP (VarUP "left") (VarUP "x")))) (VarUP "b"))) (AppUP (VarUP "not") (VarUP "b"))))))
+          , (Right "listLength",AppUP (AppUP (VarUP "foldr") (LamUP "a" (LamUP "b" (AppUP (VarUP "succ") (VarUP "b"))))) (IntUP 0))
+          , (Right "listEqual",LamUP "a" (LamUP "b" (LetUP [(Right "pairsEqual",AppUP (AppUP (AppUP (VarUP "zipWith") (VarUP "dEqual")) (VarUP "a")) (VarUP "b")),(Right "lengthEqual",AppUP (AppUP (VarUP "dEqual") (AppUP (VarUP "listLength") (VarUP "a"))) (AppUP (VarUP "listLength") (VarUP "b")))] (AppUP (AppUP (AppUP (VarUP "foldr") (VarUP "and")) (IntUP 1)) (PairUP (VarUP "lengthEqual") (VarUP "pairsEqual"))))))
+          , (Right "listPlus",LamUP "a" (LamUP "b" (AppUP (AppUP (AppUP (VarUP "foldr") (LamUP "x" (LamUP "l" (PairUP (VarUP "x") (VarUP "l"))))) (VarUP "b")) (VarUP "a"))))
+          , (Right "concat",AppUP (AppUP (VarUP "foldr") (VarUP "listPlus")) (IntUP 0))
+          , (Right "drop",LamUP "n" (LamUP "l" (AppUP (AppUP (VarUP "n") (LamUP "x" (AppUP (VarUP "right") (VarUP "x")))) (VarUP "l"))))
+          , (Right "take",LamUP "n" (LamUP "l" (LetUP [(Right "lengthed",AppUP (AppUP (VarUP "n") (LamUP "x" (PairUP (IntUP 0) (VarUP "x")))) (IntUP 0))] (AppUP (AppUP (AppUP (VarUP "zipWith") (LamUP "a" (LamUP "b" (VarUP "a")))) (VarUP "l")) (VarUP "lengthed")))))
+          , (Right "factorial",LamUP "n" (AppUP (AppUP (AppUP (VarUP "foldr") (LamUP "a" (LamUP "b" (AppUP (AppUP (VarUP "times") (AppUP (VarUP "d2c") (VarUP "a"))) (VarUP "b"))))) (ChurchUP 1)) (AppUP (AppUP (VarUP "range") (IntUP 1)) (PairUP (VarUP "n") (IntUP 0)))))
+          , (Right "quicksort",UnsizedRecursionUP (LamUP "l" (AppUP (VarUP "right") (VarUP "l"))) (LamUP "recur" (LamUP "l" (LetUP [(Right "t",AppUP (VarUP "left") (VarUP "l")),(Right "test",LamUP "x" (AppUP (AppUP (VarUP "dMinus") (VarUP "x")) (VarUP "t"))),(Right "p1",AppUP (AppUP (VarUP "filter") (VarUP "test")) (AppUP (VarUP "right") (VarUP "l"))),(Right "p2",AppUP (AppUP (VarUP "filter") (LamUP "x" (AppUP (VarUP "not") (AppUP (VarUP "test") (VarUP "x"))))) (AppUP (VarUP "right") (VarUP "l")))] (AppUP (AppUP (VarUP "listPlus") (AppUP (VarUP "recur") (VarUP "p2"))) (PairUP (VarUP "t") (AppUP (VarUP "recur") (VarUP "p1"))))))) (VarUP "id"))
+          , (Right "abort",LamUP "str" (LetUP [(Right "x",CheckUP (LamUP "y" (AppUP (AppUP (VarUP "listPlus") (StringUP "abort: ")) (VarUP "str"))) (IntUP 1))] (VarUP "x")))
+          , (Right "assert",LamUP "t" (LamUP "s" (ITEUP (AppUP (VarUP "not") (VarUP "t")) (PairUP (IntUP 1) (VarUP "s")) (IntUP 0))))
+          , (Right "truncate",LamUP "n" (LetUP [(Right "layer",LamUP "recur" (LamUP "current" (ITEUP (VarUP "current") (PairUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "current"))) (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "current")))) (IntUP 0))))] (AppUP (AppUP (VarUP "n") (VarUP "layer")) (LamUP "x" (IntUP 0)))))
+          , (Right "main",LetUP [(Left (PatternPair (PatternVar "x") (PatternVar "y")),IntUP 1),(Right "test",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success")))))] (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0))))
+          ]  (LetUP [ (Left (PatternPair (PatternVar "x") (PatternVar "y")),IntUP 1)
+                    , (Right "test",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success")))))
+                    ]
+                    (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0))))
+
+
+d = LetUP [(Right "zero",IntUP 0)
+          , (Right "left",LamUP "x" (LeftUP (VarUP "x")))
+          , (Right "right",LamUP "x" (RightUP (VarUP "x")))
+          , (Right "trace",LamUP "x" (TraceUP (VarUP "x")))
+          , (Right "pair",LamUP "x" (LamUP "y" (PairUP (VarUP "x") (VarUP "y"))))
+          , (Right "app",LamUP "x" (LamUP "y" (AppUP (VarUP "x") (VarUP "y"))))
+          ]  (LetUP [(Right "id",LamUP "x" (VarUP "x"))
+                    , (Right "and",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (VarUP "b") (IntUP 0))))
+                    , (Right "or",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (IntUP 1) (VarUP "b"))))
+                    , (Right "not",LamUP "x" (ITEUP (VarUP "x") (IntUP 0) (IntUP 1)))
+                    , (Right "succ",LamUP "x" (PairUP (VarUP "x") (IntUP 0)))
+                    , (Right "d2c",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f") (AppUP (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "i"))) (VarUP "f")) (VarUP "b"))))))) (LamUP "i" (LamUP "f" (LamUP "b" (VarUP "b")))))
+                    , (Right "c2d",LamUP "c" (AppUP (AppUP (VarUP "c") (VarUP "succ")) (IntUP 0)))
+                    , (Right "plus",LamUP "m" (LamUP "n" (LamUP "f" (LamUP "x" (AppUP (AppUP (VarUP "m") (VarUP "f")) (AppUP (AppUP (VarUP "n") (VarUP "f")) (VarUP "x")))))))
+                    , (Right "times",LamUP "m" (LamUP "n" (LamUP "f" (AppUP (VarUP "m") (AppUP (VarUP "n") (VarUP "f"))))))
+                    , (Right "pow",LamUP "m" (LamUP "n" (AppUP (VarUP "n") (VarUP "m"))))
+                    , (Right "dMinus",LamUP "a" (LamUP "b" (AppUP (AppUP (AppUP (VarUP "d2c") (VarUP "b")) (LamUP "x" (LeftUP (VarUP "x")))) (VarUP "a"))))
+                    , (Right "minus",LamUP "a" (LamUP "b" (AppUP (VarUP "d2c") (AppUP (AppUP (VarUP "b") (LamUP "x" (LeftUP (VarUP "x")))) (AppUP (VarUP "c2d") (VarUP "a"))))))
+                    , (Right "range",LamUP "a" (LamUP "b" (AppUP (UnsizedRecursionUP (LamUP "i" (AppUP (AppUP (VarUP "dMinus") (VarUP "b")) (VarUP "i"))) (LamUP "recur" (LamUP "i" (PairUP (VarUP "i") (AppUP (VarUP "recur") (PairUP (VarUP "i") (IntUP 0)))))) (LamUP "i" (IntUP 0))) (VarUP "a"))))
+                    , (Right "map",LamUP "f" (UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (PairUP (AppUP (VarUP "f") (AppUP (VarUP "left") (VarUP "l"))) (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l")))))) (LamUP "l" (IntUP 0))))
+                    , (Right "foldr",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (VarUP "l"))) (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (VarUP "accum")))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+                    , (Right "foldl",LamUP "f" (LamUP "b" (LamUP "ta" (LetUP [(Right "fixed",UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "l" (LamUP "accum" (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "right") (VarUP "l"))) (AppUP (AppUP (VarUP "f") (VarUP "accum")) (AppUP (VarUP "left") (VarUP "l"))))))) (LamUP "l" (LamUP "accum" (VarUP "accum"))))] (AppUP (AppUP (VarUP "fixed") (VarUP "ta")) (VarUP "b"))))))
+                    , (Right "zipWith",LamUP "f" (LamUP "a" (LamUP "b" (LetUP [(Right "fixed",UnsizedRecursionUP (LamUP "ab" (AppUP (AppUP (VarUP "and") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (VarUP "ab")))) (LamUP "recur" (LamUP "ab" (PairUP (AppUP (AppUP (VarUP "f") (AppUP (VarUP "left") (AppUP (VarUP "left") (VarUP "ab")))) (AppUP (VarUP "left") (AppUP (VarUP "right") (VarUP "ab")))) (AppUP (VarUP "recur") (PairUP (AppUP (VarUP "right") (AppUP (VarUP "left") (VarUP "ab"))) (AppUP (VarUP "right") (AppUP (VarUP "right") (VarUP "ab")))))))) (LamUP "ab" (IntUP 0)))] (AppUP (VarUP "fixed") (PairUP (VarUP "a") (VarUP "b")))))))
+                    , (Right "filter",LamUP "f" (AppUP (AppUP (VarUP "foldr") (LamUP "a" (LamUP "b" (ITEUP (AppUP (VarUP "f") (VarUP "a")) (PairUP (VarUP "a") (VarUP "b")) (VarUP "b"))))) (IntUP 0)))
+                    , (Right "dEqual",LamUP "a" (LamUP "b" (LetUP [(Right "equalsOne",LamUP "x" (ITEUP (VarUP "x") (AppUP (VarUP "not") (LeftUP (VarUP "x"))) (IntUP 0)))] (ITEUP (VarUP "a") (AppUP (VarUP "equalsOne") (AppUP (AppUP (AppUP (VarUP "d2c") (LeftUP (VarUP "a"))) (LamUP "x" (LeftUP (VarUP "x")))) (VarUP "b"))) (AppUP (VarUP "not") (VarUP "b"))))))
+                    , (Right "listLength",AppUP (AppUP (VarUP "foldr") (LamUP "a" (LamUP "b" (AppUP (VarUP "succ") (VarUP "b"))))) (IntUP 0))
+                    , (Right "listEqual",LamUP "a" (LamUP "b" (LetUP [(Right "pairsEqual",AppUP (AppUP (AppUP (VarUP "zipWith") (VarUP "dEqual")) (VarUP "a")) (VarUP "b")),(Right "lengthEqual",AppUP (AppUP (VarUP "dEqual") (AppUP (VarUP "listLength") (VarUP "a"))) (AppUP (VarUP "listLength") (VarUP "b")))] (AppUP (AppUP (AppUP (VarUP "foldr") (VarUP "and")) (IntUP 1)) (PairUP (VarUP "lengthEqual") (VarUP "pairsEqual"))))))
+                    , (Right "listPlus",LamUP "a" (LamUP "b" (AppUP (AppUP (AppUP (VarUP "foldr") (LamUP "x" (LamUP "l" (PairUP (VarUP "x") (VarUP "l"))))) (VarUP "b")) (VarUP "a"))))
+                    , (Right "concat",AppUP (AppUP (VarUP "foldr") (VarUP "listPlus")) (IntUP 0))
+                    , (Right "drop",LamUP "n" (LamUP "l" (AppUP (AppUP (VarUP "n") (LamUP "x" (RightUP (VarUP "x")))) (VarUP "l"))))
+                    , (Right "take",LamUP "n" (LamUP "l" (LetUP [(Right "lengthed",AppUP (AppUP (VarUP "n") (LamUP "x" (PairUP (IntUP 0) (VarUP "x")))) (IntUP 0))] (AppUP (AppUP (AppUP (VarUP "zipWith") (LamUP "a" (LamUP "b" (VarUP "a")))) (VarUP "l")) (VarUP "lengthed")))))
+                    , (Right "factorial",LamUP "n" (AppUP (AppUP (AppUP (VarUP "foldr") (LamUP "a" (LamUP "b" (AppUP (AppUP (VarUP "times") (AppUP (VarUP "d2c") (VarUP "a"))) (VarUP "b"))))) (ChurchUP 1)) (AppUP (AppUP (VarUP "range") (IntUP 1)) (PairUP (VarUP "n") (IntUP 0)))))
+                    , (Right "quicksort",UnsizedRecursionUP (LamUP "l" (AppUP (VarUP "right") (VarUP "l"))) (LamUP "recur" (LamUP "l" (LetUP [(Right "t",AppUP (VarUP "left") (VarUP "l")),(Right "test",LamUP "x" (AppUP (AppUP (VarUP "dMinus") (VarUP "x")) (VarUP "t"))),(Right "p1",AppUP (AppUP (VarUP "filter") (VarUP "test")) (AppUP (VarUP "right") (VarUP "l"))),(Right "p2",AppUP (AppUP (VarUP "filter") (LamUP "x" (AppUP (VarUP "not") (AppUP (VarUP "test") (VarUP "x"))))) (AppUP (VarUP "right") (VarUP "l")))] (AppUP (AppUP (VarUP "listPlus") (AppUP (VarUP "recur") (VarUP "p2"))) (PairUP (VarUP "t") (AppUP (VarUP "recur") (VarUP "p1"))))))) (VarUP "id"))
+                    , (Right "abort",LamUP "str" (LetUP [(Right "x",CheckUP (LamUP "y" (AppUP (AppUP (VarUP "listPlus") (StringUP "abort: ")) (VarUP "str"))) (IntUP 1))] (VarUP "x")))
+                    , (Right "assert",LamUP "t" (LamUP "s" (ITEUP (AppUP (VarUP "not") (VarUP "t")) (PairUP (IntUP 1) (VarUP "s")) (IntUP 0))))
+                    , (Right "truncate",LamUP "n" (LetUP [(Right "layer",LamUP "recur" (LamUP "current" (ITEUP (VarUP "current") (PairUP (AppUP (VarUP "recur") (LeftUP (VarUP "current"))) (AppUP (VarUP "recur") (RightUP (VarUP "current")))) (IntUP 0))))] (AppUP (AppUP (VarUP "n") (VarUP "layer")) (LamUP "x" (IntUP 0)))))
+                    , (Right "main",CaseUP (IntUP 1) [(PatternPair (PatternVar "x") (PatternVar "y"),LetUP [(Right "test",LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success")))))] (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0))))])
+                    ]  (CaseUP (IntUP 1)
+                               [ ( PatternPair (PatternVar "x") (PatternVar "y")
+                                 , LetUP [ ( Right "test"
+                                           , LamUP "a" (LamUP "b" (ITEUP (VarUP "a") (StringUP "fail") (ITEUP (VarUP "b") (StringUP "fail") (StringUP "success"))))
+                                           )
+                                         ]
+                                         (LamUP "input" (PairUP (AppUP (AppUP (VarUP "test") (VarUP "x")) (VarUP "y")) (IntUP 0)))
+                                 )
+                               ])
+             )

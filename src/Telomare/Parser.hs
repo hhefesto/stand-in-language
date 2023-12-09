@@ -25,12 +25,13 @@ import Telomare (ParserTerm (..), ParserTermF (..), RecursionPieceFrag,
 import Telomare.TypeChecker (typeCheck)
 import Text.Megaparsec (MonadParsec (eof, notFollowedBy, try), Parsec, Pos,
                         between, choice, errorBundlePretty, many, manyTill,
-                        optional, runParser, sepBy, some, (<?>), (<|>))
+                        optional, runParser, sepBy, some, (<?>), (<|>), eitherP)
 import Text.Megaparsec.Char (alphaNumChar, char, letterChar, space1, string)
 import qualified Text.Megaparsec.Char.Lexer as L
 import Text.Megaparsec.Debug (dbg)
 import Text.Megaparsec.Pos (Pos)
 import Text.Read (readMaybe)
+import GHC.Float (fabsDouble)
 
 -- |AST for patterns in `case` expressions
 data Pattern
@@ -101,9 +102,14 @@ instance Show PrettyUPT where
                           "  then " <> indentSansFirstLine 7 y <> "\n" <>
                           "  else " <> indentSansFirstLine 7 z
       (LetUPF ls x) ->
-        "let " <> indentSansFirstLine 4 (unlines (assignList <$> ls)) <> "\n" <>
+        "let " <> indentSansFirstLine 4
+          (unlines (assignList . first showEither <$> ls)) <> "\n" <>
         "in " <> indentSansFirstLine 3 x
           where
+            showEither :: Either Pattern String -> String
+            showEither = \case
+              Left p -> show p
+              Right s -> s
             assignList :: (String, String) -> String
             assignList (str, upt) = str <> " = " <> indentSansFirstLine (3 + length str) upt
       (ListUPF []) -> "[]"
@@ -359,8 +365,19 @@ parseLet :: TelomareParser UnprocessedParsedTerm
 parseLet = do
   reserved "let" <* scn
   lvl <- L.indentLevel
-  bindingsList <- manyTill (parseSameLvl lvl parseAssignment) (reserved "in") <* scn
-  expr <- parseLongExpr <* scn
+  let eSequenceFirst = \case
+        Left (p, upt) -> (Left p, upt)
+        Right (s, upt) -> (Right s, upt)
+      switchEither = \case
+        Left x -> Right x
+        Right x -> Left x
+  bindingsList <- fmap eSequenceFirst <$>
+    manyTill (parseSameLvl lvl
+                           (switchEither <$>
+                             eitherP (try parseAssignment)
+                                     parsePatternAssignment))
+             (reserved "in")
+  expr <- scn *> parseLongExpr <* scn
   pure $ LetUP bindingsList expr
 
 -- |Parse long expression.
@@ -382,9 +399,8 @@ parseRefinementCheck :: TelomareParser (UnprocessedParsedTerm -> UnprocessedPars
 parseRefinementCheck = CheckUP <$> (symbol ":" *> parseLongExpr)
 
 -- |Parse assignment with optional annotation in the form of the tuple (variable-name, assigined-upt)
-parseAssignment :: TelomareParser (Either Pattern String, UnprocessedParsedTerm)
+parseAssignment :: TelomareParser (String, UnprocessedParsedTerm)
 parseAssignment = do
-
   var <- identifier <* scn
   annotation <- optional . try $ parseRefinementCheck
   scn *> symbol "=" <?> "assignment ="
@@ -401,15 +417,13 @@ parseAssignment = do
 --           (a,b) -> b
 -- in bar a b
 
--- parsePattern :: TelomareParser Pattern
--- |Parse assignment and add binding to ParserState.
-parseCaseAssignment :: TelomareParser [(String, UnprocessedParsedTerm)]
-parseCaseAssignment = do
+parsePatternAssignment :: TelomareParser (Pattern, UnprocessedParsedTerm)
+parsePatternAssignment = do
   pat <- parsePattern <* scn
-  undefined
+  symbol "=" <?> "assignment ="
+  expr <- scn *> parseLongExpr <* scn
+  pure (pat, expr)
 
-  -- annotation <- optional . try $ parseRefinementCheck
-  -- scn *> symbol "=" <?> "assignment ="
   -- expr <- scn *> parseLongExpr <* scn
   -- case annotation of
   --   Just annot -> pure (var, annot expr)

@@ -10,7 +10,7 @@ import Data.Semigroup (Max (..))
 import Telomare (FragExpr (..), FragIndex (FragIndex), IExpr (..), LamType (..),
                  ParserTerm (..), Term1, Term2, Term3 (Term3), Term4 (Term4),
                  buildFragMap, deferF, rootFrag, unFragExprUR)
-import Telomare.Parser (UnprocessedParsedTerm (..))
+import Telomare.Parser (UnprocessedParsedTerm (..), Pattern)
 
 decompileUPT :: UnprocessedParsedTerm -> String
 decompileUPT =
@@ -40,20 +40,26 @@ decompileUPT =
       drawFirstParens x = if needsFirstParens x
         then drawList [showS "(", draw x, showS ")"]
         else draw x
+      showEither :: Either Pattern String -> String
+      showEither = \case
+        Left p -> show p
+        Right s -> s
       draw :: UnprocessedParsedTerm -> State.State Int String
       draw = \case
           VarUP s -> showS s
           ITEUP i t e -> drawList [showS "if ", draw i, showS " then ", draw t, showS " else ", draw e]
           LetUP ((firstName, firstDef):bindingsXS) in_ -> if null bindingsXS
-            then drawList [showS "let ", showS firstName, showS " = ", draw firstDef, showS " in ", draw in_]
+            then drawList [showS "let ", showS (showEither firstName), showS " = ", draw firstDef, showS " in ", draw in_]
             else do
             startIn <- State.get
             l <- showS "let "
             startBind <- State.get
-            fb <- drawList [showS firstName, showS " = ", draw firstDef, pure "\n"]
-            let drawOne (name, upt) = do
+            fb <- drawList [showS (showEither firstName), showS " = ", draw firstDef, pure "\n"]
+            let drawOne :: (Either Pattern String, UnprocessedParsedTerm)
+                        -> State.State Int String
+                drawOne (name, upt) = do
                   State.put startBind
-                  drawList [drawIndent, showS name, showS " = ", draw upt, pure "\n"]
+                  drawList [drawIndent, showS (showEither name), showS " = ", draw upt, pure "\n"]
             displayedBindings <- mconcat <$> traverse drawOne bindingsXS
             State.put startIn
             mconcat <$> sequence [pure l, pure fb, pure displayedBindings, drawIndent, showS "in ", draw in_]

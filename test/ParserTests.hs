@@ -19,7 +19,7 @@ import qualified Data.Map as Map
 import Data.Ord
 import qualified Data.Semigroup as Semigroup
 import qualified Data.Set as Set
-import Debug.Trace (trace, traceShowId)
+import Debug.Trace (trace, traceShowId, traceShow)
 import qualified System.IO.Strict as Strict
 import System.Process hiding (createPipe)
 import Telomare
@@ -187,11 +187,11 @@ unitTests = testGroup "Unit tests"
   ]
 
 caseExpr0UPT =
-  LetUP [ ("foo", LamUP "a" (CaseUP (VarUP "a")
+  LetUP [ (Right "foo", LamUP "a" (CaseUP (VarUP "a")
                                [ (PatternInt 0,VarUP "a")
                                , (PatternVar "x",AppUP (VarUP "succ") (VarUP "a"))
                                ]))
-        , ("main", LamUP "i" (PairUP (StringUP "Success")
+        , (Right "main", LamUP "i" (PairUP (StringUP "Success")
                                      (IntUP 0)))
         ]
         (LamUP "i" (PairUP (StringUP "Success") (IntUP 0)))
@@ -214,8 +214,8 @@ testWtictactoe = do
                 Right p -> p
                 Left pe -> error pe
   case parseMain prelude tictactoe of
-    Right _ -> return True
-    Left _  -> return False
+    Right _ -> pure True
+    Left x  -> traceShow x $ pure False
 
 testLetIndentation = unlines
   [ "let x = 0"

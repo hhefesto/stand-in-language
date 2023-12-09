@@ -260,14 +260,16 @@ instance Arbitrary UnprocessedParsedTerm where
                                       -- listSize <- chooseInt (1, max i 1)
                                       listSize <- choose (2, max i 2)
                                       let childShare = div i listSize
-                                      let makeList = \case
+                                          makeList = \case
                                             [] -> pure []
                                             (v:vl) -> do
                                               newTree <- genTree (v:varList) childShare
                                               ((v,newTree) :) <$> makeList vl
                                       vars <- take listSize <$> identifierList
                                       childList <- makeList vars
-                                      pure $ LetUP (init childList) (snd . last $ childList)
+                                      -- TODO: also include arbitrary pattern assigns
+                                      let childList' = first Right <$> childList
+                                      pure $ LetUP (init childList') (snd . last $ childList')
                                    , PairUP <$> recur half <*> recur half
                                    , AppUP <$> recur half <*> recur half
                                    ]

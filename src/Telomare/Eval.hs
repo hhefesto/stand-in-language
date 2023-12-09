@@ -34,6 +34,7 @@ import Telomare.Possible (evalA)
 import Telomare.Resolver (parseMain)
 import Telomare.RunTime (hvmEval, optimizedEval, pureEval, simpleEval)
 import Telomare.TypeChecker (TypeCheckError (..), typeCheck)
+import qualified System.IO.Strict as Strict
 
 data ExpP = ZeroP
     | PairP ExpP ExpP
@@ -255,3 +256,10 @@ calculateRecursionLimits t3@(Term3 termMap) =
   in case lookup False iterations of
     Just n -> trace ("crl found limit at " <> show n) pure $ convertPT (const n) t3
     _ -> Left . RecursionLimitError $ toEnum 0
+
+prelude :: IO [(String, UnprocessedParsedTerm)]
+prelude = do
+  preludeString <- Strict.readFile "Prelude.tel"
+  case parsePrelude preludeString of
+    Right p -> pure p
+    Left pe -> error pe

@@ -150,7 +150,7 @@ unitTests = testGroup "Unit tests"
       validateVariables [] res `compare` Right expr2 @?= EQ
   , testCase "test tictactoe.tel" $ do
       res <- tictactoe
-      fullRunTicTacToeString `compare` res  @?= EQ
+      fullRunTicTacToeString @?= res
   ]
 
 tictactoe :: IO String
