@@ -27,8 +27,9 @@ import Telomare (BreakState', FragExpr (..), FragExprUR (..), FragIndex (..),
                  deferF, lamF, nextBreakToken, unsizedRecursionWrapper, varNF)
 import Telomare.Parser (Pattern (..), PatternF (..), TelomareParser (..),
                         UnprocessedParsedTerm (..), UnprocessedParsedTermF (..),
-                        parseWithPrelude)
+                        parseWithPrelude, PrettyUPT (..))
 import Text.Megaparsec (errorBundlePretty, runParser)
+import Debug.Trace (trace, traceShow, traceShowId)
 
 type VarList = [String]
 
@@ -233,6 +234,8 @@ removeCaseUPs = transform go where
                            resultCaseAlts
     x -> x
 
+-- debruijinize vl term1 = debruijinize' vl $ trace ("trace statement:\n" <> show term1) term1
+
 debruijinize :: MonadFail m => VarList -> Term1 -> m Term2
 debruijinize _ TZero = pure TZero
 debruijinize vl (TPair a b) = TPair <$> debruijinize vl a <*> debruijinize vl b
@@ -267,11 +270,15 @@ splitExpr' = \case
   TTrace x -> (\tf nx -> SetEnvFrag (PairFrag tf nx)) <$> deferF (pure TraceFrag) <*> splitExpr' x
   TLam (Open ()) x -> lamF $ splitExpr' x
   TLam (Closed ()) x -> clamF $ splitExpr' x
-  TLimitedRecursion t r b -> nextBreakToken >>= (\x -> unsizedRecursionWrapper x (splitExpr' t) (splitExpr' r) (splitExpr' b))
+  TLimitedRecursion t r b -> nextBreakToken >>=
+    (\x -> -- trace ("trace statment: \n" <> (show $ State.evalState (unsizedRecursionWrapper x (splitExpr' t) (splitExpr' r) (splitExpr' b)) (toEnum 0, FragIndex 1, Map.empty)))
+                 unsizedRecursionWrapper x (splitExpr' t) (splitExpr' r) (splitExpr' b))
+                   --  $ trace ("trace statement:\n" <> show term2) term2
 
 splitExpr :: Term2 -> Term3
 splitExpr t = let (bf, (_,_,m)) = State.runState (splitExpr' t) (toEnum 0, FragIndex 1, Map.empty)
-              in Term3 . Map.map FragExprUR $ Map.insert (FragIndex 0) bf m
+                  aux = Term3 . Map.map FragExprUR $ Map.insert (FragIndex 0) bf m
+              in trace ("trace statement:\n" <> show aux) aux
 
 -- |`makeLambda ps vl t1` makes a `TLam` around `t1` with `vl` as arguments.
 -- Automatic recognition of Close or Open type of `TLam`.
@@ -331,6 +338,7 @@ validateVariables prelude term =
         TraceUP x -> TTrace <$> validateWithEnvironment x
         CheckUP cf x -> TCheck <$> validateWithEnvironment cf <*> validateWithEnvironment x
         HashUP x -> THash <$> validateWithEnvironment x
+  -- in State.evalStateT (validateWithEnvironment (traceShowId term)) Map.empty
   in State.evalStateT (validateWithEnvironment term) Map.empty
 
 -- |Collect all free variable names in a `Term1` expresion
@@ -343,6 +351,45 @@ varsTerm1 = cata alg where
   alg e                    = F.fold e
   del :: String -> Set String -> Set String
   del n x = if Set.member n x then Set.delete n x else x
+
+aux = optimizeBuiltinFunctions $ AppUP (VarUP "a") (AppUP (VarUP "left") (VarUP "i"))
+
+aux1 = optimizeBuiltinFunctions $
+  UnsizedRecursionUP
+    (VarUP "id")
+    (LamUP "recur"
+      (LamUP "i"
+        (LamUP "f"
+          (LamUP "b"
+            (AppUP
+              (VarUP "f")
+              (AppUP
+                (AppUP
+                  (AppUP
+                    (VarUP "recur")
+                    (AppUP
+                      (VarUP "left")
+                      (VarUP "i")))
+                  (VarUP "f"))
+                (VarUP "b")))))))
+    (LamUP "i" (LamUP "f" (LamUP "b" (VarUP "b"))))
+
+aux2 = optimizeBuiltinFunctions $
+  (LamUP "recur"
+    (LamUP "i"
+      (LamUP "f"
+        (LamUP "b"
+          (AppUP
+            (VarUP "f")
+            (AppUP
+              (AppUP
+                (AppUP
+                  (VarUP "recur")
+                  (AppUP
+                    (VarUP "left")
+                    (VarUP "i")))
+                (VarUP "f"))
+              (VarUP "b")))))))
 
 optimizeBuiltinFunctions :: UnprocessedParsedTerm -> UnprocessedParsedTerm
 optimizeBuiltinFunctions = transform optimize where
@@ -402,6 +449,7 @@ process2Term2 prelude = fmap generateAllHashes
                       . debruijinize [] <=< validateVariables prelude
                       . removeCaseUPs
                       . optimizeBuiltinFunctions
+                      -- . (\x -> traceShowId x)
                       . addBuiltins
 
 -- |Helper function to compile to Term2
@@ -416,3 +464,44 @@ parseMain :: [(String, UnprocessedParsedTerm)] -- ^Prelude: [(VariableName, Bind
           -> String                            -- ^Raw string to be parserd.
           -> Either String Term3               -- ^Error on Left.
 parseMain prelude s = parseWithPrelude prelude s >>= process prelude
+
+
+-- sane =
+--   TApp
+--     TLam Closed ()
+--       TLeft
+--         TVar 0
+--     TVar 2
+-- insane =
+--   TLeft
+--     TVar 2
+
+-- sane =
+--   TApp
+--     TLam Closed "x"
+--       TLeft
+--         TVar "x"
+--     TVar "i"
+
+-- insane =
+--   TLeft
+--     TVar "i"
+
+-- UnsizedRecursionUP (VarUP "id")
+--                    (LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f") (AppUP (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "i"))) (VarUP "f")) (VarUP "b")))))))
+--                    (LamUP "i" (LamUP "f" (LamUP "b" (VarUP "b"))))
+-- UnsizedRecursionUP (VarUP "id")
+--                    (LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f") (AppUP (AppUP (AppUP (VarUP "recur") (LeftUP (VarUP "i"))) (VarUP "f")) (VarUP "b")))))))
+--                    (LamUP "i" (LamUP "f" (LamUP "b" (VarUP "b"))))
+
+-- (LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f")
+--                                                        (AppUP (AppUP (AppUP (VarUP "recur")
+--                                                                      (LeftUP (VarUP "i"))) (VarUP "f"))
+--                                                               (VarUP "b")))))))
+-- (LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f")
+--                                                        (AppUP (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "i")))
+--                                                                      (VarUP "f"))
+--                                                               (VarUP "b")))))))
+
+
+-- UnsizedRecursionUP (VarUP "id") (LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f") (AppUP (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "i"))) (VarUP "f")) (VarUP "b"))))))) (LamUP "i" (LamUP "f" (LamUP "b" (VarUP "b"))))

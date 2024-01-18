@@ -146,6 +146,7 @@ instance Plated UnprocessedParsedTerm where
     TraceUP x   -> TraceUP <$> f x
     HashUP x    -> HashUP <$> f x
     CheckUP c x -> CheckUP <$> f c <*> f x
+    UnsizedRecursionUP x y z -> UnsizedRecursionUP <$> f x <*> f y <*> f z
     x           -> pure x
 
 -- |TelomareParser :: * -> *
@@ -439,3 +440,13 @@ parseWithPrelude :: [(String, UnprocessedParsedTerm)]   -- ^Prelude
                  -> String                              -- ^Raw string to be parsed
                  -> Either String UnprocessedParsedTerm -- ^Error on Left
 parseWithPrelude prelude str = first errorBundlePretty $ runParser (parseTopLevelWithPrelude prelude) "" str
+
+
+-- (1,1) :< LamUPF "recur" ((1,1) :< LamUPF "i" ((1,1) :< LamUPF "f" ((1,1) :< LamUPF "b" ((1,1) :< AppUPF ((1,17) :< VarUPF "f") ((1,19) :< AppUPF ((1,19) :< AppUPF ((1,19) :< AppUPF ((1,20) :< VarUPF "recur") ((1,26) :< AppUPF ((1,27) :< VarUPF "left") ((1,32) :< VarUPF "i"))) ((1,35) :< VarUPF "f")) ((1,37) :< VarUPF "b"))))))
+
+
+-- LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f") (AppUP (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "i"))) (VarUP "f")) (VarUP "b"))))))
+-- LamUP "recur" (LamUP "i" (LamUP "f" (LamUP "b" (AppUP (VarUP "f") (AppUP (AppUP (AppUP (VarUP "recur") (AppUP (VarUP "left") (VarUP "i"))) (VarUP "f")) (VarUP "b"))))))
+
+
+-- { id , \recur i f b -> f (recur (left i) f b) , \i f b -> b }
