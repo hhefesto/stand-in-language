@@ -256,7 +256,7 @@ debruijinize vl (TLam (Closed n) x) = TLam (Closed ()) <$> debruijinize (n : vl)
 debruijinize vl (TLimitedRecursion t r b) = TLimitedRecursion <$> debruijinize vl t <*> debruijinize vl r <*> debruijinize vl b
 
 splitExpr' :: Term2 -> BreakState' RecursionPieceFrag UnsizedRecursionToken
-splitExpr' = \case
+splitExpr' term2 = (\case
   TZero -> pure ZeroFrag
   TPair a b -> PairFrag <$> splitExpr' a <*> splitExpr' b
   TVar n -> pure $ varNF n
@@ -272,13 +272,64 @@ splitExpr' = \case
   TLam (Closed ()) x -> clamF $ splitExpr' x
   TLimitedRecursion t r b -> nextBreakToken >>=
     (\x -> -- trace ("trace statment: \n" <> (show $ State.evalState (unsizedRecursionWrapper x (splitExpr' t) (splitExpr' r) (splitExpr' b)) (toEnum 0, FragIndex 1, Map.empty)))
-                 unsizedRecursionWrapper x (splitExpr' t) (splitExpr' r) (splitExpr' b))
-                   --  $ trace ("trace statement:\n" <> show term2) term2
+           trace ("trace statment: \n" <> (show x
+                                            <> "\n" <> show t <> "\n"
+                                            <> (show $ State.evalState (splitExpr' t) (toEnum 0, FragIndex 1, Map.empty))
+                                            <> "\n" <> show r <> "\n"
+                                            <> (show $ State.evalState (splitExpr' r) (toEnum 0, FragIndex 1, Map.empty))
+                                            <> "\n" <> show b <> "\n"
+                                            <> (show $ State.evalState (splitExpr' b) (toEnum 0, FragIndex 1, Map.empty))
+                                          ))
+                 unsizedRecursionWrapper x (splitExpr' t) (splitExpr' r) (splitExpr' b))) term2
+                   -- $ trace ("\ntrace statement term2:\n" <> show term2 <> "\n}}}}}}End\n") term2
+
+x :: ParserTerm () Int
+x =
+  -- TLam (Closed ())
+  --   (
+    -- TLam (Open ())
+    --   (
+      -- TLam (Open ())
+      --   (
+          -- TLam (Open ())
+          -- (
+          -- TApp
+          --   (TVar 1)
+            (TApp
+              (TApp
+                (TApp
+                  (TVar 3)
+                  (--TLeft
+                    (TVar 2)))
+                (TVar 1))
+              (TVar 0))
+          -- )
+        -- )
+      -- )
+    -- )
+
+xx  :: FragExpr RecursionPieceFrag
+xx = State.evalState (splitExpr' x) (toEnum 0, FragIndex 1, Map.empty)
+
+
+y :: ParserTerm () Int
+y =
+                (TApp
+                  (TVar 3)
+                  -- (TLeft
+                    (TVar 2))
+   -- )
+
+yy  :: FragExpr RecursionPieceFrag
+yy = State.evalState (splitExpr' y) (toEnum 0, FragIndex 1, Map.empty)
+
 
 splitExpr :: Term2 -> Term3
-splitExpr t = let (bf, (_,_,m)) = State.runState (splitExpr' t) (toEnum 0, FragIndex 1, Map.empty)
+splitExpr t = -- let (bf, (_,_,m)) = State.runState (splitExpr' (traceShowId t)) (toEnum 0, FragIndex 1, Map.empty)
+              let (bf, (_,_,m)) = State.runState (splitExpr' t) (toEnum 0, FragIndex 1, Map.empty)
                   aux = Term3 . Map.map FragExprUR $ Map.insert (FragIndex 0) bf m
-              in trace ("trace statement:\n" <> show aux) aux
+              -- in trace ("trace statement:\n" <> show aux) aux
+              in aux
 
 -- |`makeLambda ps vl t1` makes a `TLam` around `t1` with `vl` as arguments.
 -- Automatic recognition of Close or Open type of `TLam`.

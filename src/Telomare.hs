@@ -437,8 +437,11 @@ pairF = liftA2 PairFrag
 
 appF :: BreakState' a b -> BreakState' a b -> BreakState' a b
 appF c i =
-  let twiddleF = deferF $ pure (PairFrag (LeftFrag (RightFrag EnvFrag)) (PairFrag (LeftFrag EnvFrag) (RightFrag (RightFrag EnvFrag))))
-  in (\tf p -> SetEnvFrag (SetEnvFrag (PairFrag tf p))) <$> twiddleF <*> (PairFrag <$> i <*> c)
+  let twiddleF = deferF $ pure (PairFrag (LeftFrag (RightFrag EnvFrag))
+                                         (PairFrag (LeftFrag EnvFrag)
+                                                   (RightFrag (RightFrag EnvFrag))))
+  in (\tf p -> SetEnvFrag (SetEnvFrag (PairFrag tf p))) <$> twiddleF
+                                                        <*> (PairFrag <$> i <*> c)
 
 lamF :: BreakState' a b -> BreakState' a b
 lamF x = pairF (deferF x) $ pure EnvFrag
