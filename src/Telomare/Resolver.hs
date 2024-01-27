@@ -24,7 +24,8 @@ import Telomare (BreakState', FragExpr (..), FragExprUR (..), FragIndex (..),
                  IExpr (..), LamType (..), ParserTerm (..), ParserTermF (..),
                  RecursionPieceFrag, RecursionSimulationPieces (..), Term1 (..),
                  Term2 (..), Term3 (..), UnsizedRecursionToken, appF, clamF,
-                 deferF, lamF, nextBreakToken, unsizedRecursionWrapper, varNF)
+                 deferF, lamF, nextBreakToken, unsizedRecursionWrapper, varNF,
+                 showRunBreakState')
 import Telomare.Parser (Pattern (..), PatternF (..), TelomareParser (..),
                         UnprocessedParsedTerm (..), UnprocessedParsedTermF (..),
                         parseWithPrelude, PrettyUPT (..))
@@ -255,12 +256,45 @@ debruijinize vl (TLam (Open n) x) = TLam (Open ()) <$> debruijinize (n : vl) x
 debruijinize vl (TLam (Closed n) x) = TLam (Closed ()) <$> debruijinize (n : vl) x
 debruijinize vl (TLimitedRecursion t r b) = TLimitedRecursion <$> debruijinize vl t <*> debruijinize vl r <*> debruijinize vl b
 
+z = 1
+
+xx  :: FragExpr RecursionPieceFrag
+xx = State.evalState (splitExpr' x) (toEnum 0, FragIndex 1, Map.empty)
+
+x :: ParserTerm () Int
+x =
+          -- TApp
+          --   (TVar 1)
+            -- (TApp
+              (TApp
+                (TApp
+                  (TVar 3)
+                  (--TLeft
+                    (TVar 2)))
+                (TVar 1))
+              -- (TVar 0))
+
+foo = putStrLn . showRunBreakState' $
+        appF (splitExpr' y) (pure $ LeftFrag EnvFrag)
+          where
+            v :: BreakState' RecursionPieceFrag UnsizedRecursionToken
+            v = pure $ LeftFrag EnvFrag
+
 splitExpr' :: Term2 -> BreakState' RecursionPieceFrag UnsizedRecursionToken
 splitExpr' term2 = (\case
   TZero -> pure ZeroFrag
   TPair a b -> PairFrag <$> splitExpr' a <*> splitExpr' b
   TVar n -> pure $ varNF n
-  TApp c i -> appF (splitExpr' c) (splitExpr' i)
+  TApp c i -> -- trace "\nsplitExpr'TAppF\n"
+    -- trace (  "\n<<<<splitExpr'TAppF:\n\n"
+    --       <> showRunBreakState' (splitExpr' c) <> "\n"
+    --       <> showRunBreakState' (splitExpr' i) <> "\n\n"
+    --       -- <> show c <> "\n"
+    --       -- <> show i <> "\n\n"
+    --       <> showRunBreakState' (appF (splitExpr' c) (splitExpr' i)) <> "\n"
+    --       <> "\nsplitExpr'TAppF>>>>\n"
+    --       )
+      appF (splitExpr' c) (splitExpr' i)
   TCheck tc c ->
     let performTC = deferF ((\ia -> SetEnvFrag (PairFrag (SetEnvFrag (PairFrag AbortFrag ia)) (RightFrag EnvFrag))) <$> appF (pure $ LeftFrag EnvFrag) (pure $ RightFrag EnvFrag))
     in (\ptc nc ntc -> SetEnvFrag (PairFrag ptc (PairFrag ntc nc))) <$> performTC <*> splitExpr' c <*> splitExpr' tc
@@ -282,35 +316,6 @@ splitExpr' term2 = (\case
                                           ))
                  unsizedRecursionWrapper x (splitExpr' t) (splitExpr' r) (splitExpr' b))) term2
                    -- $ trace ("\ntrace statement term2:\n" <> show term2 <> "\n}}}}}}End\n") term2
-
-x :: ParserTerm () Int
-x =
-  -- TLam (Closed ())
-  --   (
-    -- TLam (Open ())
-    --   (
-      -- TLam (Open ())
-      --   (
-          -- TLam (Open ())
-          -- (
-          -- TApp
-          --   (TVar 1)
-            (TApp
-              (TApp
-                (TApp
-                  (TVar 3)
-                  (--TLeft
-                    (TVar 2)))
-                (TVar 1))
-              (TVar 0))
-          -- )
-        -- )
-      -- )
-    -- )
-
-xx  :: FragExpr RecursionPieceFrag
-xx = State.evalState (splitExpr' x) (toEnum 0, FragIndex 1, Map.empty)
-
 
 y :: ParserTerm () Int
 y =

@@ -27,6 +27,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import Debug.Trace (trace)
 
 {- top level TODO list
  - change AbortFrag form to something more convenient
@@ -236,17 +237,17 @@ instance Plated (FragExpr a) where
 
 showFragAlg :: Show a => (Base (FragExpr a)) (State Int String) -> State Int String
 showFragAlg = \case
-      ZeroFragF         -> sindent "ZeroF"
-      (PairFragF sl sr) -> indentWithTwoChildren "PairF" sl sr
-      EnvFragF          -> sindent "EnvF"
-      (SetEnvFragF sx)  -> indentWithOneChild "SetEnvF" sx
-      (DeferFragF i)    -> sindent $ "DeferF " <> show i
-      AbortFragF        -> sindent "AbortFragF"
-      (GateFragF sx sy) -> indentWithTwoChildren "GateF" sx sy
-      (LeftFragF sl)    -> indentWithOneChild "LeftF" sl
-      (RightFragF sr)   -> indentWithOneChild "RightF" sr
-      TraceFragF        -> sindent "TraceF"
-      (AuxFragF x)      -> sindent $ "AuxF " <> show x
+      ZeroFragF         -> sindent "ZeroFrag"
+      (PairFragF sl sr) -> indentWithTwoChildren "PairFrag" sl sr
+      EnvFragF          -> sindent "EnvFrag"
+      (SetEnvFragF sx)  -> indentWithOneChild "SetEnvFrag" sx
+      (DeferFragF i)    -> sindent $ "DeferFrag " <> show i
+      AbortFragF        -> sindent "AbortFrag"
+      (GateFragF sx sy) -> indentWithTwoChildren "GateFrag" sx sy
+      (LeftFragF sl)    -> indentWithOneChild "LeftFrag" sl
+      (RightFragF sr)   -> indentWithOneChild "RightFrag" sr
+      TraceFragF        -> sindent "TraceFrag"
+      (AuxFragF x)      -> sindent $ "AuxFrag " <> show x
 
 instance Show a => Show (FragExpr a) where
   show fexp = State.evalState (cata showFragAlg fexp) 0
@@ -425,28 +426,45 @@ pattern ToChurch <-
       (Lam (Lam (Lam FirstArg)))
     )
 
-deferF :: BreakState' a b -> BreakState' a b
+deferF :: (Show a, Enum b) => BreakState' a b -> BreakState' a b
 deferF x = do
   bx <- x
   (uri, fi@(FragIndex i), fragMap) <- State.get
   State.put (uri, FragIndex (i + 1), Map.insert fi bx fragMap)
+  -- trace ("\n<<deferF\n" <> show fi <> "\n" <> show bx <> "\ndeferF>>\n")
   pure $ DeferFrag fi
 
 pairF :: BreakState' a b -> BreakState' a b -> BreakState' a b
 pairF = liftA2 PairFrag
 
-appF :: BreakState' a b -> BreakState' a b -> BreakState' a b
+appF :: (Show a, Enum b) => BreakState' a b -> BreakState' a b -> BreakState' a b
 appF c i =
   let twiddleF = deferF $ pure (PairFrag (LeftFrag (RightFrag EnvFrag))
                                          (PairFrag (LeftFrag EnvFrag)
                                                    (RightFrag (RightFrag EnvFrag))))
-  in (\tf p -> SetEnvFrag (SetEnvFrag (PairFrag tf p))) <$> twiddleF
+  -- in trace (  "\n<<<<appF:\n"
+  --          <> showRunBreakState' c <> "\n"
+  --          <> showRunBreakState' i <> "\n"
+  --          <> "\nappF>>>>\n"
+  --          )
+  in
+       (\tf p -> SetEnvFrag (SetEnvFrag (PairFrag tf p))) <$> (trace (showRunBreakState' twiddleF) twiddleF)
                                                         <*> (PairFrag <$> i <*> c)
 
-lamF :: BreakState' a b -> BreakState' a b
+foo = putStrLn . showRunBreakState' $
+        appF (appF v v) v
+          where
+            v :: BreakState' RecursionPieceFrag UnsizedRecursionToken
+            v = pure $ LeftFrag EnvFrag
+
+
+showRunBreakState' :: (Show a, Enum b) => BreakState' a b -> String
+showRunBreakState' bs = show $ State.evalState bs (toEnum 0, FragIndex 1, Map.empty)
+
+lamF :: (Show a, Enum b) => BreakState' a b -> BreakState' a b
 lamF x = pairF (deferF x) $ pure EnvFrag
 
-clamF :: BreakState' a b -> BreakState' a b
+clamF :: (Show a, Enum b) => BreakState' a b -> BreakState' a b
 clamF x = pairF (deferF x) $ pure ZeroFrag
 
 innerChurchF :: Int -> BreakState' a b
