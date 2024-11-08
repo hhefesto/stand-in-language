@@ -135,7 +135,7 @@ unitTests = testGroup "Unit tests"
      res1 @?= res2
   , testCase "Ad hoc user defined types success" $ do
       res <- testUserDefAdHocTypes userDefAdHocTypesSuccess
-      res @?= "\n\a\ndone"
+      res @?= "\n\a\ndone1"
   , testCase "Ad hoc user defined types failure" $ do
       res <- testUserDefAdHocTypes userDefAdHocTypesFailure
       res @?= "\nMyInt must not be 0\ndone"
