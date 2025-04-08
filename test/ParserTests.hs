@@ -83,7 +83,7 @@ unitTests = testGroup "Unit tests"
   , testCase "test if testParseTopLevelwCLwITEwPair parses successfuly" $ do
       res <- parseSuccessful (parseTopLevel <* eof) testParseTopLevelwCLwITEwPair
       res `compare` True @?= EQ
-  , testCase "test parseMain with CL with ITE with Pair parses" $ do
+  , testCase "test main2Term3 with CL with ITE with Pair parses" $ do
       res <- runTestMainwCLwITEwPair
       res `compare` True @?= EQ
   , testCase "testList0" $ do
@@ -205,19 +205,23 @@ caseExpr0 = unlines
   , "main = \\i -> (\"Success\", 0)"
   ]
 
--- |Usefull to see if tictactoe.tel was correctly parsed
--- and was usefull to compare with the deprecated Telomare.Parser
--- Parsec implementation
-testWtictactoe = do
+test2IExpr str =  do
   preludeFile <- Strict.readFile "Prelude.tel"
-  tictactoe <- Strict.readFile "tictactoe.tel"
   let
-    prelude = case parsePrelude preludeFile of
+    prelude :: [Either AnnotatedUPT (String, AnnotatedUPT)]
+    prelude = case parseModule preludeFile of
                 Right p -> p
                 Left pe -> error pe
-  case parseMain prelude tictactoe of
+  case eval2IExpr [("Prelude", prelude)] str of
     Right _ -> return True
     Left _  -> return False
+
+-- |Usefull to see if tictactoe.tel was correctly parsed and precessed to an IExpr
+testWtictactoe = Strict.readFile "tictactoe.tel" >>= test2IExpr
+
+runTestMainwCLwITEwPair = test2IExpr testMainwCLwITEwPair
+
+runTestMainWType = test2IExpr "main : (\\x -> if x then \"fail\" else 0) = 0"
 
 testLetIndentation = unlines
   [ "let x = 0"
@@ -323,27 +327,6 @@ testMainwCLwITEwPair = unlines
   , "        (\"Hello, world!\", 0)"
   , "      else (\"Goodbye, world!\", 0)"
   ]
-
-runTestMainwCLwITEwPair = do
-  preludeFile <- Strict.readFile "Prelude.tel"
-  let
-    prelude = case parsePrelude preludeFile of
-      Right p -> p
-      Left pe -> error pe
-  case parseMain prelude testMainwCLwITEwPair of
-    Right x  -> return True
-    Left err -> return False
-
-runTestMainWType = do
-  let testMain2 = "main : (\\x -> if x then \"fail\" else 0) = 0"
-  preludeFile <- Strict.readFile "Prelude.tel"
-  let
-    prelude = case parsePrelude preludeFile of
-      Right p -> p
-      Left pe -> error pe
-  case parseMain prelude testMain2 of
-    Right x  -> return True
-    Left err -> return False
 
 testList0 = unlines [ "[ 0"
   , ", 1"
