@@ -798,14 +798,22 @@ unitTestSameResult' parse a b = it ("comparing to " <> a) $ case (parse a, parse
   _ -> expectationFailure "unitTestSameResult failed parsing somewhere"
 -}
 
+-- main2Term3 :: [(String, [Either AnnotatedUPT (String, AnnotatedUPT)])] -- ^Modules: [(ModuleName, [Either Import (VariableName, BindedUPT)])]
+--           -> String -- ^Module name with main
+--           -> Either String Term3 -- ^Error on Left
+
+
 main = do
   preludeFile <- Strict.readFile "Prelude.tel"
 
   let
-    prelude = case parsePrelude preludeFile of
+    prelude' = case parsePrelude preludeFile of
       Right p -> p
       Left pe -> error $ show pe
-    parse = parseMain prelude
+    prelude :: [(String, [Either AnnotatedUPT (String, AnnotatedUPT)])]
+    prelude = [("Prelude", fmap Right prelude')]
+    parse :: String -> Either String Term3
+    parse = main2Term3 prelude
 
   hspec $ unitTests parse
     --nexprTests

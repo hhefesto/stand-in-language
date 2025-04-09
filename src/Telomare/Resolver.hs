@@ -527,6 +527,6 @@ resolveMain allModules mainModule = case lookup mainModule allModules of
                    -- Just x -> Right $ DummyLoc :< LetUPF (trace ("!!!!!!@@@@@@@!!!!!!!! " <> (show resolvedPretty)) resolved) x
 
 main2Term3 :: [(String, [Either AnnotatedUPT (String, AnnotatedUPT)])] -- ^Modules: [(ModuleName, [Either Import (VariableName, BindedUPT)])]
-          -> String -- ^Module name with main
-          -> Either String Term3 -- ^Error on Left
+           -> String -- ^Module name with main
+           -> Either String Term3 -- ^Error on Left
 main2Term3 moduleBindings s = resolveMain moduleBindings s >>= process
