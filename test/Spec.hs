@@ -802,6 +802,7 @@ unitTestSameResult' parse a b = it ("comparing to " <> a) $ case (parse a, parse
 --           -> String -- ^Module name with main
 --           -> Either String Term3 -- ^Error on Left
 
+-- parseModule :: String -> Either String [Either AnnotatedUPT (String, AnnotatedUPT)]
 
 main = do
   preludeFile <- Strict.readFile "Prelude.tel"
@@ -811,9 +812,14 @@ main = do
       Right p -> p
       Left pe -> error $ show pe
     prelude :: [(String, [Either AnnotatedUPT (String, AnnotatedUPT)])]
-    prelude = [("Prelude", fmap Right prelude')]
+    prelude = [("Prelude", Right <$> prelude')]
+    parseAuxModule :: String -> (String, [Either AnnotatedUPT (String, AnnotatedUPT)])
+    parseAuxModule str =
+      case sequence ("AuxModule", parseModule ("import Prelude\n" <> str)) of
+        Left e -> error $ show e
+        Right pam -> pam
     parse :: String -> Either String Term3
-    parse = main2Term3 prelude
+    parse str = main2Term3 (parseAuxModule str:prelude) "AuxModule"
 
   hspec $ unitTests parse
     --nexprTests
