@@ -54,6 +54,30 @@
 
       packages.default = self'.packages.telomare;
 
+      packages.agda-telomare =
+        let
+          stdlib = pkgs.agdaPackages.standard-library;
+        in
+        pkgs.stdenv.mkDerivation {
+          name = "agda-telomare";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = [ pkgs.agda pkgs.ghc pkgs.glibcLocales ];
+          LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
+          LC_ALL = "en_US.UTF-8";
+          buildPhase = ''
+            agda -i ${stdlib}/src --compile telomare.agda
+          '';
+          installPhase = ''
+            mkdir -p $out/bin
+            cp telomare $out/bin/agda-telomare
+          '';
+        };
+
+      apps.agda-telomare = {
+        type = "app";
+        program = "${self'.packages.agda-telomare}/bin/agda-telomare";
+      };
+
       apps.default = {
         type = "app";
         program = self.packages.${system}.telomare + "/bin/telomare";
