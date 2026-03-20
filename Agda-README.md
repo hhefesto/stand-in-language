@@ -380,6 +380,149 @@ Tel consumed = `n + 1` exactly.  The telomere is a tight bound, not a loose one.
 
 ---
 
+## Felix integration
+
+[Felix](https://github.com/conal/felix) is Conal Elliott's Agda library for
+categorical denotational design.  It provides four modules that `telomare.agda`
+imports:
+
+| Module | What it contributes |
+|---|---|
+| `Felix.Object` | `Products` / `Coproducts` type-class interfaces |
+| `Felix.Equiv` | `Equivalent` — setoid-based morphism equality |
+| `Felix.Raw` | `Category` (raw) — `id` and `_∘_` without laws |
+| `Felix.Laws` | `Category` (lawful) — identity and associativity laws |
+| `Felix.Homomorphism` | `CategoryH` — functors between lawful categories |
+
+### What Felix guarantees
+
+Felix's `CategoryH` record bundles three machine-checked obligations:
+
+```agda
+record CategoryH (src tgt : Cat) where
+  field
+    F-cong : f ≈ g  →  Fₘ f ≈ Fₘ g     -- preserves equivalence
+    F-id   : Fₘ id  ≈  id               -- preserves identity
+    F-∘    : Fₘ (g ∘ f) ≈ Fₘ g ∘ Fₘ f  -- preserves composition
+```
+
+Filling `⟦⟧-CategoryH` (§15g) makes the **TCM equations machine-checked**:
+Agda will reject any denotation function `⟦_⟧` that fails to be a functor
+from the syntax category `_⇨S_` into the Kleisli category `_→K_`.
+
+### Why this matters
+
+Without Felix a proof obligation like `⟦ g ∘S f ⟧ = ⟦g⟧ ∘K ⟦f⟧` would be an
+informal convention.  With `CategoryH` it is a **type error** to violate it.
+Concretely:
+
+- `F-∘` holding by `refl` (§15g) means compositionality is **definitional**,
+  not just propositional — no proof term is needed.
+- `F-id` holding by `refl` means the identity axiom is also definitional.
+- `F-cong` (the inductive proof in `⟦⟧-cong`) ensures the denotation respects
+  the equational theory of the syntax category, closing the abstraction under
+  rewriting.
+
+### How Felix is provided in the Nix devShell
+
+Felix is fetched as a flake input (`github:conal/felix`) and pre-compiled into
+a dedicated Nix derivation (`felix-compiled`).  The derivation compiles
+`Felix/Homomorphism.agda` (which transitively covers all modules used here)
+from the derivation's own output path, so that the paths baked into the
+`.agdai` interface files match their installed location.  The `agda` wrapper
+in the devShell is then built with `symlinkJoin` + `makeWrapper` to prepend
+`-i ${felixCompiled}/src` to every `agda` invocation — no manual `-i` flag is
+ever needed.
+
+---
+
+## Spacemacs setup
+
+Interactive Agda editing in Spacemacs relies on three pieces:
+
+1. **direnv** activates the project's Nix devShell automatically when a file
+   in the repo is opened.
+2. The devShell provides the wrapped `agda` binary (with felix pre-compiled in)
+   and the `agda-mode` binary.
+3. A hook in `~/.spacemacs` defers to the devShell's `agda-mode` instead of
+   any globally-installed one.
+
+### Prerequisites
+
+- `direnv` installed and its emacs integration active
+  (`direnv-mode` or the `envrc` package loaded in Spacemacs).
+- No separate global `agda` or `agda-mode` install required — everything comes
+  from `nix develop`.
+
+### `.envrc`
+
+The project root contains:
+
+```bash
+use flake . -Lv
+```
+
+This tells direnv to activate `nix develop` when the directory is entered,
+exposing the devShell's `agda`, `agda-mode`, and library paths.
+
+### Relevant `~/.spacemacs` snippet
+
+Add the following inside `dotspacemacs/user-config`:
+
+```elisp
+(defun my/maybe-activate-agda-mode ()
+  "Activate agda2-mode for Agda files using the project's direnv environment.
+Deferred via idle-timer. Derives the agda2.el path directly from the
+agda-mode binary path to avoid shell-command-to-string timing issues."
+  (when (and (buffer-file-name)
+             (string-match-p "\\.l?agda\\(?:\\.md\\)?\\'" (buffer-file-name))
+             (not (eq major-mode 'agda2-mode)))
+    (let ((buf (current-buffer)))
+      (run-with-idle-timer
+       0 nil
+       (lambda ()
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (ignore-errors (direnv-update-directory-environment default-directory))
+             (when (not (eq major-mode 'agda2-mode))
+               (let* ((agda-mode-bin (executable-find "agda-mode"))
+                      (agda2-el (when agda-mode-bin
+                                  (car (last
+                                        (seq-filter
+                                         (lambda (l) (string-suffix-p ".el" l))
+                                         (split-string
+                                          (shell-command-to-string
+                                           (concat agda-mode-bin " locate"))
+                                          "\n" t)))))))
+                 (if (and agda2-el (file-exists-p agda2-el))
+                     (progn
+                       (add-to-list 'load-path (file-name-directory agda2-el))
+                       (unless (featurep 'agda2-mode)
+                         (load-file agda2-el))
+                       (agda2-mode))
+                   (message "agda2-mode: locate failed (bin=%s locate=%s)"
+                            agda-mode-bin agda2-el)))))))))))
+
+(add-hook 'find-file-hook #'my/maybe-activate-agda-mode)
+```
+
+### How it works
+
+1. `find-file-hook` fires on every opened buffer.
+2. The hook checks the filename extension (`.agda`, `.lagda`, `.lagda.md`).
+3. An idle-timer defers the rest so it does not block file opening.
+4. `direnv-update-directory-environment` loads the devShell env for the
+   buffer's directory — making the devShell's `agda` and `agda-mode` first on
+   `PATH`.
+5. `agda-mode locate` returns the path to `agda2.el` from the devShell's
+   `agda-mode` binary.
+6. That `.el` file is loaded and `agda2-mode` is activated.
+
+No extra `agda2-program-args` are needed: the devShell's `agda` wrapper
+already embeds `-i ${felixCompiled}/src`, so `import Felix.*` just works.
+
+---
+
 ## File structure (`telomare.agda`)
 
 | Section | Content |
@@ -397,6 +540,8 @@ Tel consumed = `n + 1` exactly.  The telomere is a tight bound, not a loose one.
 | §11 | Fibonacci — definition and runs |
 | §12 | Non-recursive examples — `addK`, `mulK` |
 | §13 | `main` — IO runner |
+| §14 | Felix lawful instances — `→K-Equiv`, `→K-RawCat`, `→K-LawCat` |
+| §15 | Denotation homomorphism — `_⇨S_`, `⟦_⟧`, `⟦⟧-CategoryH` |
 
 ---
 

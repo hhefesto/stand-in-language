@@ -15,7 +15,8 @@ open import Data.Sum             using (_⊎_; inj₁; inj₂)
 open import Data.Unit            using (⊤; tt)
 open import Data.Bool            using (Bool; true; false; not; if_then_else_)
 open import Function             using (_∘_; id)
-open import Relation.Binary.PropositionalEquality using (_≡_; refl)
+open import Relation.Binary.PropositionalEquality using (_≡_; refl; sym; trans; cong)
+open import Agda.Primitive                        using (lzero)
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- § 1.  SEMANTIC MODEL  (Denotational Design: choose the model first)
@@ -466,6 +467,224 @@ mulK (suc n , m) = bind-tel (mulK (n , m)) (λ acc → step (return-tel (acc + m
 --  • Time and space bounds are read off directly from the initial tel.
 --  • Swapping the category gives different interpretations of the same
 --    program (execution, cost analysis, tracing) — "Compiling to Categories".
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 14.  FELIX INTEGRATION  (github.com/conal/felix)
+--
+--  Felix is Conal Elliott's Agda library for category-theoretic denotational
+--  design. It provides formal interfaces — Category, Cartesian, CategoryH —
+--  that our Kleisli category of TelM already satisfies.
+--
+--  Here we instantiate those interfaces, making the connection explicit:
+--
+--    FR.Category  _→K_   — raw category (idK and ∘K)
+--    FR.Cartesian _→K_   — Cartesian structure (forkK, exlK, exrK)
+--    FL.Category  _→K_   — lawful category (identity laws + associativity)
+--
+--  The denotation function ⟦_⟧ : Telomare syntax → _→K_ would be a
+--  FL.Homomorphism.CategoryH, making the TCM principle machine-checkable.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+import Felix.Object      as FO
+import Felix.Equiv       as FE
+import Felix.Raw         as FR
+import Felix.Laws        as FL
+import Felix.Homomorphism as FH
+
+-- 14a.  Products for Set — needed so Felix knows ⊤ and × for objects
+instance
+  Set-Products : FO.Products Set
+  Set-Products = record { ⊤ = ⊤ ; _×_ = _×_ }
+
+-- 14b.  Equivalence on Kleisli morphisms: pointwise propositional equality
+--       f ≈ g  iff  ∀ a t → f a t ≡ g a t
+instance
+  →K-Equiv : FE.Equivalent lzero _→K_
+  →K-Equiv = record
+    { _≈_   = λ f g → ∀ a t → f a t ≡ g a t
+    ; equiv = record
+        { refl  = λ _ _ → refl
+        ; sym   = λ p a t → sym (p a t)
+        ; trans = λ p q a t → trans (p a t) (q a t)
+        }
+    }
+
+-- 14c.  Raw Category: idK and ∘K satisfy Felix's Category interface
+instance
+  →K-RawCat : FR.Category _→K_
+  →K-RawCat = record { id = idK ; _∘_ = _∘K_ }
+
+-- 14d.  Raw Cartesian: forkK / exlK / exrK satisfy Felix's Cartesian interface
+instance
+  →K-RawCart : FR.Cartesian _→K_
+  →K-RawCart = record { ! = λ _ → return-tel tt ; _▵_ = forkK ; exl = exlK ; exr = exrK }
+
+-- 14e.  Proofs for the lawful Category instance
+--
+--  We need three lemmas beyond §8's left-id / right-id:
+--    Maybe->>=-assoc : monad associativity for Maybe (needed for assoc-tel)
+--    assoc-tel       : ((h ∘K g) ∘K f) a t ≡ (h ∘K (g ∘K f)) a t
+--    >>=-congˡ       : helper for congruence proof
+--    ∘≈-tel          : h ≈ k → f ≈ g → h ∘K f ≈ k ∘K g  (pointwise)
+
+private
+  -- Associativity of Kleisli composition by direct case analysis on f a t.
+  assoc-tel : {A B C D : Set} {f : A →K B} {g : B →K C} {h : C →K D}
+            → ∀ a t → ((h ∘K g) ∘K f) a t ≡ (h ∘K (g ∘K f)) a t
+  assoc-tel {f = f} {g} {h} a t with f a t
+  ... | nothing       = refl
+  ... | just (b , t') with g b t'
+  ...   | nothing        = refl
+  ...   | just (c , t'') = refl
+
+  -- Congruence of >>= in the first argument (the Maybe value).
+  >>=-congˡ : ∀ {α β : Set} (m : Maybe α) {f g : α → Maybe β}
+            → (∀ x → f x ≡ g x) → (m >>= f) ≡ (m >>= g)
+  >>=-congˡ nothing  _  = refl
+  >>=-congˡ (just x) pf = pf x
+
+  -- Congruence of Kleisli composition:
+  --   h ≈ k  →  f ≈ g  →  h ∘K f ≈ k ∘K g  (all ≈ are pointwise)
+  ∘≈-tel : ∀ {α β γ : Set} {h k : β →K γ} {f g : α →K β}
+         → (∀ b t → h b t ≡ k b t)
+         → (∀ a t → f a t ≡ g a t)
+         → ∀ a t → (h ∘K f) a t ≡ (k ∘K g) a t
+  ∘≈-tel {h = h} {g = g} h≈k f≈g a t =
+    trans (cong (λ m → m >>= λ { (b , t') → h b t' }) (f≈g a t))
+          (>>=-congˡ (g a t) λ { (b , t') → h≈k b t' })
+
+-- 14f.  Lawful Category instance: _→K_ satisfies Felix's Laws.Category
+instance
+  →K-LawCat : FL.Category _→K_
+  →K-LawCat = record
+    { identityˡ = λ {_} {_} {f}             → left-id  f
+    ; identityʳ = λ {_} {_} {f}             → right-id f
+    ; assoc     = λ {_} {_} {_} {_} {f} {g} {h} → assoc-tel {f = f} {g = g} {h = h}
+    ; ∘≈        = λ {_} {_} {_} {f} {g} {h} {k} → ∘≈-tel   {h = h} {k = k} {f = f} {g = g}
+    }
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 15.  DENOTATION HOMOMORPHISM  (the TCM principle, machine-checked)
+--
+-- We define Telomare's SYNTAX CATEGORY _⇨S_ and prove that the denotation
+-- function ⟦_⟧ is a Felix CategoryH (functor) into the Kleisli category _→K_.
+--
+-- This makes the TCM equations machine-checked:
+--
+--   ⟦ idS    ⟧ = idK              (F-id,  by definition)
+--   ⟦ g ∘S f ⟧ = ⟦g⟧ ∘K ⟦f⟧     (F-∘,   by definition)
+--   f ≈S g   ⟹  ⟦f⟧ ≈ ⟦g⟧       (F-cong, proved below)
+--
+-- Any violation would be an abstraction leak: implementation behaviour
+-- diverges from the semantic model, making equational reasoning unsound.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- 15a.  Syntax morphisms — the free category over Telomare's primitives.
+--       Objects are Telomare types (Ty); morphisms are terms-in-context.
+infix 0 _⇨S_
+data _⇨S_ : Ty → Ty → Set where
+  idS   : {A : Ty} → A ⇨S A
+  _∘S_  : {A B C : Ty} → (B ⇨S C) → (A ⇨S B) → (A ⇨S C)
+  !S    : {A : Ty} → A ⇨S unit
+  forkS : {A B C : Ty} → (A ⇨S B) → (A ⇨S C) → (A ⇨S (B ⊗ C))
+  exlS  : {A B : Ty} → (A ⊗ B) ⇨S A
+  exrS  : {A B : Ty} → (A ⊗ B) ⇨S B
+
+-- 15b.  Syntactic equivalence — the equational theory of the syntax category.
+--       Identifies morphisms up to the category laws (identity, associativity,
+--       congruence) without collapsing to propositional equality on terms.
+infix 4 _≈S_
+data _≈S_ : {A B : Ty} → (A ⇨S B) → (A ⇨S B) → Set where
+  reflS   : {A B : Ty} {f : A ⇨S B}
+          → f ≈S f
+  symS    : {A B : Ty} {f g : A ⇨S B}
+          → f ≈S g → g ≈S f
+  transS  : {A B : Ty} {f g h : A ⇨S B}
+          → f ≈S g → g ≈S h → f ≈S h
+  -- Category laws (generating the equational theory)
+  ∘-idlS  : {A B : Ty} {f : A ⇨S B}
+          → (idS ∘S f) ≈S f
+  ∘-idrS  : {A B : Ty} {f : A ⇨S B}
+          → (f ∘S idS) ≈S f
+  ∘-assS  : {A B C D : Ty} {f : A ⇨S B} {g : B ⇨S C} {h : C ⇨S D}
+          → ((h ∘S g) ∘S f) ≈S (h ∘S (g ∘S f))
+  ∘-congS : {A B C : Ty} {f f' : A ⇨S B} {g g' : B ⇨S C}
+          → g ≈S g' → f ≈S f' → (g ∘S f) ≈S (g' ∘S f')
+
+-- 15c.  Denotation of syntax morphisms into the Kleisli category.
+--       ⟦_⟧ maps each syntactic term to its semantic Kleisli morphism.
+⟦_⟧ : {A B : Ty} → (A ⇨S B) → (⟦ A ⟧T →K ⟦ B ⟧T)
+⟦ idS        ⟧ = idK
+⟦ g ∘S f     ⟧ = ⟦ g ⟧ ∘K ⟦ f ⟧
+⟦ !S         ⟧ = λ _ → return-tel tt
+⟦ forkS f g  ⟧ = forkK ⟦ f ⟧ ⟦ g ⟧
+⟦ exlS       ⟧ = exlK
+⟦ exrS       ⟧ = exrK
+
+-- 15d.  Felix instances for the syntax category.
+
+-- Equivalence: use the syntactic equational theory as the setoid.
+instance
+  ⇨S-Equiv : FE.Equivalent lzero _⇨S_
+  ⇨S-Equiv = record
+    { _≈_   = _≈S_
+    ; equiv = record { refl = reflS ; sym = symS ; trans = transS }
+    }
+
+-- Raw category: idS and _∘S_ directly.
+instance
+  ⇨S-RawCat : FR.Category _⇨S_
+  ⇨S-RawCat = record { id = idS ; _∘_ = _∘S_ }
+
+-- Lawful category: the syntactic laws are the constructors of _≈S_.
+instance
+  ⇨S-LawCat : FL.Category _⇨S_
+  ⇨S-LawCat = record
+    { identityˡ = λ {_} {_} {f}             → ∘-idlS  {f = f}
+    ; identityʳ = λ {_} {_} {f}             → ∘-idrS  {f = f}
+    ; assoc     = λ {_} {_} {_} {_} {f} {g} {h} → ∘-assS  {f = f} {g = g} {h = h}
+    ; ∘≈        = λ {_} {_} {_} {f} {g} {h} {k} → ∘-congS {f = f} {f' = g} {g = h} {g' = k}
+    }
+
+-- 15e.  Homomorphism structure.
+
+-- Object map: Ty → Set via ⟦_⟧T.
+instance
+  Ty→Set-Hₒ : FH.Homomorphismₒ Ty Set
+  Ty→Set-Hₒ = record { Fₒ = ⟦_⟧T }
+
+-- Morphism map: _⇨S_ → _→K_ via ⟦_⟧.
+instance
+  ⟦⟧-H : FH.Homomorphism _⇨S_ _→K_
+  ⟦⟧-H = record { Fₘ = ⟦_⟧ }
+
+-- 15f.  ⟦_⟧ preserves syntactic equivalence (F-cong).
+--       Each constructor of _≈S_ maps to the corresponding law on _→K_.
+⟦⟧-cong : {A B : Ty} {f g : A ⇨S B}
+         → f ≈S g
+         → ∀ a t → ⟦ f ⟧ a t ≡ ⟦ g ⟧ a t
+⟦⟧-cong reflS                               a t = refl
+⟦⟧-cong (symS p)                            a t = sym   (⟦⟧-cong p a t)
+⟦⟧-cong (transS p q)                        a t = trans (⟦⟧-cong p a t) (⟦⟧-cong q a t)
+⟦⟧-cong (∘-idlS  {f = f})                  a t = left-id  ⟦ f ⟧ a t
+⟦⟧-cong (∘-idrS  {f = f})                  a t = right-id ⟦ f ⟧ a t
+⟦⟧-cong (∘-assS  {f = f} {g = g} {h = h})  a t = assoc-tel {f = ⟦ f ⟧} {g = ⟦ g ⟧} {h = ⟦ h ⟧} a t
+⟦⟧-cong (∘-congS {f = f} {f' = f'} {g = g} {g' = g'} p q) a t =
+  ∘≈-tel {h = ⟦ g ⟧} {k = ⟦ g' ⟧} {f = ⟦ f ⟧} {g = ⟦ f' ⟧} (⟦⟧-cong p) (⟦⟧-cong q) a t
+
+-- 15g.  THE HOMOMORPHISM THEOREM.
+--       ⟦_⟧ is a CategoryH — a functor from the syntax category to _→K_.
+--
+--       F-id and F-∘ hold by DEFINITION (refl): the denotation of idS is idK,
+--       and the denotation of composition IS Kleisli composition.
+--       F-cong is proved by induction on the syntactic equivalence above.
+instance
+  ⟦⟧-CategoryH : FH.CategoryH _⇨S_ _→K_
+  ⟦⟧-CategoryH = record
+    { F-cong = ⟦⟧-cong
+    ; F-id   = λ _ _ → refl    -- ⟦ idS ⟧ = idK,          definitionally
+    ; F-∘    = λ _ _ → refl    -- ⟦ g ∘S f ⟧ = ⟦g⟧ ∘K ⟦f⟧, definitionally
+    }
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- § 13.  MAIN  (run fibonacci results via GHC backend)

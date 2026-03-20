@@ -7,6 +7,10 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
+    felix = {
+      url = "github:conal/felix";
+      flake = false;
+    };
   };
 
   outputs = inputs@{ self, nixpkgs, flake-compat, flake-parts, haskell-flake, ... }:
@@ -49,6 +53,48 @@
             tools = hp: {
               inherit (hp) cabal-install haskell-language-server;
             };
+            mkShellArgs = {
+              nativeBuildInputs =
+                let
+                  agdaWithStdlib = pkgs.agda.withPackages (p: [ p.standard-library ]);
+                  # Pre-compile felix interfaces so agda finds _build/ in $out
+                  # (parent of the -i include path) and never tries to write to
+                  # the read-only nix store.
+                  felixCompiled = pkgs.stdenv.mkDerivation {
+                    name = "felix-compiled";
+                    src = inputs.felix;
+                    nativeBuildInputs = [ agdaWithStdlib ];
+                    # Compile from $out/src so that the paths baked into the
+                    # .agdai files match the final nix store location.
+                    # _build/ lands at $out/ (parent of the -i include path).
+                    buildPhase = ''
+                      mkdir -p $out/src
+                      cp -r src/. $out/src/
+                      cd $out
+                      agda -i src -i ${pkgs.agdaPackages.standard-library}/src src/Felix/Homomorphism.agda
+                    '';
+                    installPhase = ":";
+                  };
+                  myAgda = pkgs.symlinkJoin {
+                    name = "agda-with-felix";
+                    paths = [ agdaWithStdlib ];
+                    buildInputs = [ pkgs.makeWrapper ];
+                    postBuild = ''
+                      wrapProgram $out/bin/agda \
+                        --add-flags "-i ${felixCompiled}/src"
+                    '';
+                  };
+                in [
+                  myAgda
+                  pkgs.glibcLocales
+                ];
+              shellHook = ''
+                export LOCALE_ARCHIVE="${pkgs.glibcLocales}/lib/locale/locale-archive"
+                export LC_ALL="en_US.UTF-8"
+                echo "Agda ready. Compile with:"
+                echo "  agda --compile telomare.agda"
+              '';
+            };
           };
       };
 
@@ -65,7 +111,9 @@
           LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
           LC_ALL = "en_US.UTF-8";
           buildPhase = ''
-            agda -i ${stdlib}/src --compile telomare.agda
+            cp -r ${inputs.felix}/src felix-src
+            chmod -R u+w felix-src
+            agda -i ${stdlib}/src -i felix-src --compile telomare.agda
           '';
           installPhase = ''
             mkdir -p $out/bin
@@ -80,7 +128,7 @@
 
       apps.default = {
         type = "app";
-        program = self.packages.${system}.telomare + "/bin/telomare";
+        program = "${self'.packages.agda-telomare}/bin/agda-telomare";
       };
       apps.repl = {
         type = "app";
