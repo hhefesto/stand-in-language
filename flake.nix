@@ -121,6 +121,28 @@
           '';
         };
 
+      # Type-check telomare-backwards.agda (denotational design with Felix)
+      packages.agda-telomare-backwards =
+        let
+          stdlib = pkgs.agdaPackages.standard-library;
+        in
+        pkgs.stdenv.mkDerivation {
+          name = "agda-telomare-backwards";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = [ pkgs.agda pkgs.glibcLocales ];
+          LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
+          LC_ALL = "en_US.UTF-8";
+          buildPhase = ''
+            cp -r ${inputs.felix}/src felix-src
+            chmod -R u+w felix-src
+            agda -i ${stdlib}/src -i felix-src telomare-backwards.agda
+          '';
+          installPhase = ''
+            mkdir -p $out
+            echo "telomare-backwards type-checked" > $out/result
+          '';
+        };
+
       apps.agda-telomare = {
         type = "app";
         program = "${self'.packages.agda-telomare}/bin/agda-telomare";

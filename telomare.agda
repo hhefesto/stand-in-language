@@ -1,36 +1,59 @@
--- Telomare: A Denotational Specification of a Total Functional Language
--- Following Conal Elliott's Denotational Design + Type Class Morphisms methodology.
+-- Telomare: Denotational Design with Auto-Computed Telomere
+-- Following Conal Elliott's methodology:
+--   • Denotational Design (choose the model first)
+--   • Type Class Morphisms (derive structure homomorphically)
+--   • Compiling to Categories (same program, two interpretations)
 --
--- Core idea: every computation is a function (Tel → Maybe (a × Tel)).
--- Tel (the "telomere") strictly decreases on each recursive unfolding,
--- guaranteeing totality. Time and space are bounded by initial tel.
+-- Core question answered here:
+--   How much telomere (gas) does a program need?
+--   Answer: compute it via a second categorical interpretation.
 
 {-# OPTIONS --guardedness #-}
 module telomare where
 
-open import Data.Nat             using (ℕ; zero; suc; _+_; _*_; _∸_)
+open import Data.Nat             using (ℕ; zero; suc; _+_)
 open import Data.Maybe           using (Maybe; just; nothing; _>>=_)
 open import Data.Product         using (_×_; _,_; proj₁; proj₂)
-open import Data.Sum             using (_⊎_; inj₁; inj₂)
+open import Data.Bool            using (Bool; true; false; if_then_else_)
 open import Data.Unit            using (⊤; tt)
-open import Data.Bool            using (Bool; true; false; not; if_then_else_)
-open import Function             using (_∘_; id)
-open import Relation.Binary.PropositionalEquality using (_≡_; refl; sym; trans; cong)
-open import Agda.Primitive                        using (lzero)
+open import Relation.Binary.PropositionalEquality using (_≡_; refl; sym; trans; cong; subst)
+open import Data.Nat.Properties                   using (+-assoc; +-identityʳ)
+open import Function                              using (_∘_)
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- § 1.  SEMANTIC MODEL  (Denotational Design: choose the model first)
+-- § 1.  DENOTATIONAL DESIGN: CHOOSE THE SEMANTIC MODELS FIRST
 -- ─────────────────────────────────────────────────────────────────────────────
 --
--- The denotation of every computation is:
+-- Following Elliott's Denotational Design principle: choose the model first,
+-- derive all structure from it via Type Class Morphisms.
 --
---   ⟦ e : τ ⟧ : Tel → Maybe (⟦τ⟧ × Tel)
+-- We choose TWO semantic domains — two "views" of the same program:
 --
--- where Tel = ℕ (the "telomere").
--- • just (v , g') means: produced value v, g' tel remains.
--- • nothing       means: telomere exhausted — program halts gracefully.
+--   TelM A  = Tel → Maybe (A × Tel)   Execution: may fail if tel runs out
+--   CostM A = ℕ × A                   Cost:      always succeeds, tracks cost
 --
--- This is the Kleisli category of the monad TelM.
+-- Both are monads. The SAME program structure lives in both categories.
+-- Changing the category gives a different interpretation:
+--   "Compiling to Categories" (Elliott, ICFP 2017)
+--
+-- The ADEQUACY THEOREM connects the two views:
+--   If CostM computes (needed-tel, result) for input a,
+--   then TelM produces just (result, 0) when given exactly needed-tel.
+--
+-- This lets us run programs WITHOUT specifying the tel budget manually —
+-- the budget is CALCULATED from the program structure.
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 2.  THE EXECUTION MONAD: TelM
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- TelM A = Tel → Maybe (A × Tel)  (State ℕ + Failure monad)
+--   • just (v , g') = produced value v, g' tel remains
+--   • nothing       = telomere exhausted — program halts gracefully
+--
+-- Each `step-tel` consumes 1 unit of Tel, bounding recursion depth.
+-- Totality: TelM computations are total functions — they always
+-- return just-or-nothing, never diverge.
 
 Tel : Set
 Tel = ℕ
@@ -38,687 +61,715 @@ Tel = ℕ
 TelM : Set → Set
 TelM A = Tel → Maybe (A × Tel)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- § 2.  TelM IS A MONAD  (instances follow from the semantic model — TCM)
--- ─────────────────────────────────────────────────────────────────────────────
---
--- TCM = Type Class Morphism (Elliott, ICFP 2009).
--- A TCM is a function h : A → B that is a homomorphism for a given type class:
--- the class structure on A corresponds to the class structure on B via h.
--- Here h = ⟦·⟧ (the denotation function).
---
--- TCM principle (Elliott): "the instance's meaning follows the meaning's instance."
--- TelM A ≅ StateT Tel Maybe A, so all instances are derived homomorphically.
-
 return-tel : {A : Set} → A → TelM A
-return-tel a g = just (a , g)          -- pure values cost 0 tel
+return-tel a g = just (a , g)          -- pure value: costs 0 tel
 
 bind-tel : {A B : Set} → TelM A → (A → TelM B) → TelM B
 bind-tel m f g = m g >>= λ { (a , g') → f a g' }
 
--- Consume exactly 1 unit of tel (one "step" / one telomere shortening)
-step : {A : Set} → TelM A → TelM A
-step m zero    = nothing               -- telomere exhausted
-step m (suc g) = m g                   -- consume 1, continue
+step-tel : {A : Set} → TelM A → TelM A
+step-tel m zero    = nothing           -- tel exhausted → halt gracefully
+step-tel m (suc g) = m g              -- consume 1 tel, continue
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- § 3.  TYPES OF THE OBJECT LANGUAGE
--- ─────────────────────────────────────────────────────────────────────────────
-
-data Ty : Set where
-  unit  : Ty
-  bool  : Ty
-  nat   : Ty
-  _⊗_   : Ty → Ty → Ty              -- product
-  _⊕_   : Ty → Ty → Ty              -- sum
-  _⇒_   : Ty → Ty → Ty              -- function (costs tel on apply)
-
--- Denotation of types as Agda types
-⟦_⟧T : Ty → Set
-⟦ unit  ⟧T = ⊤
-⟦ bool  ⟧T = Bool
-⟦ nat   ⟧T = ℕ
-⟦ A ⊗ B ⟧T = ⟦ A ⟧T × ⟦ B ⟧T
-⟦ A ⊕ B ⟧T = ⟦ A ⟧T ⊎ ⟦ B ⟧T
-⟦ A ⇒ B ⟧T = ⟦ A ⟧T → TelM ⟦ B ⟧T   -- functions live in TelM
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 4.  THE KLEISLI CATEGORY OF TelM
---       (Compiling to Categories: programs are morphisms in this category)
+-- § 3.  THE COST MONAD: CostM   (Writer ℕ)
 -- ─────────────────────────────────────────────────────────────────────────────
 --
--- Objects  : Agda types (or ⟦τ⟧T for object-language types)
--- Morphisms: A →K B  =  A → TelM B
+-- CostM A = ℕ × A  (Writer monad for ℕ)
+--   • The ℕ component accumulates the total tel cost
+--   • The A component carries the computed result
 --
--- Identity and composition satisfy the category laws provably.
+-- Operations MIRROR TelM exactly — same structure, different semantics:
+--   return-cost  ↔  return-tel   (0 cost,  value threaded)
+--   bind-cost    ↔  bind-tel     (costs added, values composed)
+--   step-cost    ↔  step-tel     (cost += 1, NOT subtracted from budget)
+--
+-- KEY: CostM never fails. It ALWAYS produces a result.
+-- This is the "static analysis" dual of TelM's "dynamic execution".
 
-infixr 0 _→K_
+CostM : Set → Set
+CostM A = ℕ × A
+
+return-cost : {A : Set} → A → CostM A
+return-cost a = (0 , a)               -- pure value: 0 cost
+
+bind-cost : {A B : Set} → CostM A → (A → CostM B) → CostM B
+bind-cost (n , a) f =
+  let (m , b) = f a
+  in  (n + m , b)                    -- costs add up
+
+step-cost : {A : Set} → CostM A → CostM A
+step-cost (n , a) = (suc n , a)      -- +1 to cost
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 4.  THE TWO KLEISLI CATEGORIES
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- Both TelM and CostM give rise to Kleisli categories:
+--
+--   A →K B  =  A → TelM B    (execution: may fail)
+--   A →C B  =  A → CostM B   (cost analysis: always succeeds)
+--
+-- Same program structure, two interpretations — "Compiling to Categories".
+
+infixr 0 _→K_ _→C_
+
 _→K_ : Set → Set → Set
 A →K B = A → TelM B
 
+_→C_ : Set → Set → Set
+A →C B = A → CostM B
+
+-- Category structure for →K
 idK : {A : Set} → A →K A
 idK = return-tel
 
 _∘K_ : {A B C : Set} → (B →K C) → (A →K B) → (A →K C)
 (g ∘K f) a = bind-tel (f a) g
 
--- Cartesian structure (fork / projections)
-forkK : {A B C : Set} → (A →K B) → (A →K C) → (A →K (B × C))
+-- Category structure for →C
+idC : {A : Set} → A →C A
+idC = return-cost
+
+_∘C_ : {A B C : Set} → (B →C C) → (A →C B) → (A →C C)
+(g ∘C f) a = bind-cost (f a) g
+
+-- Cartesian structure for →K (fork both morphisms, thread tel sequentially)
+forkK : {A B C : Set} → (A →K B) → (A →K C) → A →K (B × C)
 forkK f g a = bind-tel (f a) λ b →
               bind-tel (g a) λ c →
               return-tel (b , c)
 
-exlK : {A B : Set} → (A × B) →K A
-exlK = return-tel ∘ proj₁
-
-exrK : {A B : Set} → (A × B) →K B
-exrK = return-tel ∘ proj₂
+-- Cartesian structure for →C (costs add; both applied to same input)
+-- Using let-binding so proj₁ (forkC f g a) = n + m definitionally
+-- (bind-cost of return-cost would give n + (m + 0), breaking precision proofs)
+forkC : {A B C : Set} → (A →C B) → (A →C C) → A →C (B × C)
+forkC f g a =
+  let (n , vf) = f a
+      (m , vg) = g a
+  in (n + m , (vf , vg))
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- § 5.  THE ONLY RECURSION PRIMITIVE — fix with mandatory tel consumption
+-- § 4.5  TYPE OBJECTS
 -- ─────────────────────────────────────────────────────────────────────────────
 --
--- Every unfolding of fix costs 1 tel.
--- Therefore recursion depth ≤ initial tel.  Totality follows immediately.
+-- Placed here (before §6) so that §6 (Fibonacci) can define FibStateTy : Ty,
+-- making FibState = ⟦ FibStateTy ⟧T an explicit Ty expression.
+-- The typed syntax category _⇨S_ is defined later in §12.
+
+data Ty : Set where
+  unit : Ty
+  nat  : Ty
+  bool : Ty
+  _⊗_  : Ty → Ty → Ty
+
+infixl 5 _⊗_
+
+⟦_⟧T : Ty → Set
+⟦ unit  ⟧T = ⊤
+⟦ nat   ⟧T = ℕ
+⟦ bool  ⟧T = Bool
+⟦ A ⊗ B ⟧T = ⟦ A ⟧T × ⟦ B ⟧T
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 5.  RECURSION PRIMITIVE FOR EXECUTION (TelM)
+-- ─────────────────────────────────────────────────────────────────────────────
 --
--- Implementation note: Agda requires structural recursion.  We satisfy this
--- with the "fuel" pattern: fix-aux recurses on an explicit Tel fuel argument
--- that decreases by 1 on each unfolding.  The computation tel t' is threaded
--- independently.  fix ties the fuel to the computation's own tel supply,
--- so the bound is tight: depth ≤ initial tel.
+-- fixT: every recursive unfolding costs 1 tel (via step-tel).
+-- Totality: fixT-aux recurses structurally on an explicit fuel argument
+-- that equals the initial tel. Recursion depth ≤ initial tel.
+--
+-- No fixT needed for CostM! CostM is always total — we use direct
+-- structural recursion instead. This is the key asymmetry:
+--   TelM needs a fuel trick to terminate in Agda
+--   CostM terminates by structural recursion on the input
 
-private
-  fix-aux : {A : Set} → Tel → ((A →K A) → (A →K A)) → A →K A
-  fix-aux zero    _    _ _       = nothing          -- fuel exhausted ⟹ halt
-  fix-aux (suc f) body a g       = body (fix-aux f body) a g
-
-fix : {A : Set} → ((A →K A) → (A →K A)) → A →K A
-fix body a g = fix-aux g body a g
--- The fuel equals the tel: each unfolding reduces both by 1 (via body's
--- internal step calls), keeping the bound tight.
-
--- Generalised fixpoint: input type S may differ from output type R.
--- (fix is the special case S = R.)
--- Used by `limited` where the state type and result type can differ —
--- e.g. gcd : ℕ×ℕ →K ℕ  (state is a pair, result is a single number).
 private
   fixT-aux : {S R : Set} → Tel → ((S →K R) → S →K R) → S →K R
   fixT-aux zero    _    _ _ = nothing
-  fixT-aux (suc f) body s   = step (body (fixT-aux f body) s)
-  -- `step` here means: each unfolding costs 1 tel AND 1 fuel.
-  -- For a computation needing n recursive calls:
-  --   tel consumed  = n + 1   (n recursive steps + 1 base step)
-  --   tel remaining = t₀ − (n + 1)   when t₀ > n
+  fixT-aux (suc f) body s   = step-tel (body (fixT-aux f body) s)
 
 fixT : {S R : Set} → ((S →K R) → S →K R) → S →K R
 fixT body s g = fixT-aux g body s g
-
--- Iteration derived from fix (nat recursion):
---   iter n base step_fn  runs step_fn exactly n times (or until tel runs out)
-iter : {A : Set} → ℕ → A → (A →K A) → TelM A
-iter zero    acc _  = return-tel acc
-iter (suc n) acc sf = bind-tel (sf acc) (λ acc' → iter n acc' sf)
+-- fuel = tel: each unfolding costs 1 step AND 1 fuel, giving tight bound.
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- § 6.  COMPLEXITY BOUNDS  (derived from the semantic model)
+-- § 6.  FIBONACCI IN BOTH CATEGORIES
 -- ─────────────────────────────────────────────────────────────────────────────
 --
--- Let c : TelM A.  Run it with initial tel t₀.
+-- Fibonacci is the canonical example demonstrating "Compiling to Categories".
 --
---   Time  (steps taken) = t₀ − t_final    ≤ t₀
---   Depth (call depth)  ≤ t₀              (each recursive call costs ≥ 1)
---   Space               = O(depth × frame) = O(t₀)
+-- State: (counter, fib_k, fib_{k+1})    Initial state: (n, 0, 1)
+-- After n recursive steps → (0, fib(n), fib(n+1))
 --
--- Formally: if c t₀ = just (v , t_f) then the number of `step` calls ≤ t₀.
+-- THE STRUCTURAL IDENTITY:
+-- The fibonacci body has the SAME structure in both categories.
+-- The only difference is WHICH monad operations are used:
+--
+--   Execution (→K):            Cost analysis (→C):
+--   ─────────────────          ─────────────────────
+--   base: return-tel a         base: step-cost (return-cost a)
+--   step: step-tel via fixT    step: step-cost (fibCostFn s')
+--
+-- In →K, step-tel is hidden inside fixT-aux.
+-- In →C, step-cost is explicit — each level adds 1.
+-- Result: both track the same count, proving they are consistent.
 
--- Helper: tel consumed
-tel-consumed : {A : Set} → TelM A → Tel → Maybe ℕ
-tel-consumed c g₀ = c g₀ >>= λ { (_ , gf) → just (g₀ ∸ gf) }
+-- FibStateTy expresses the state type in the Ty syntax (§4.5).
+-- FibState is computed by the type denotation ⟦_⟧T.
+-- In §12, fibStepS : FibStateTy ⇨S FibStateTy and
+--         fibExtractS : FibStateTy ⇨S nat are the categorical morphisms
+-- corresponding to the helpers below.
+FibStateTy : Ty
+FibStateTy = nat ⊗ (nat ⊗ nat)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- § 7.  TOTALITY THEOREM
--- ─────────────────────────────────────────────────────────────────────────────
---
--- Every TelM computation terminates: it returns just or nothing, never diverges.
--- This holds by construction — TelM A = Tel → Maybe (A × Tel) is a total function.
--- No partiality, no ⊥, no coinduction needed.
---
--- Proof sketch (by induction on tel):
---   Base:  step m 0       = nothing                       ✓ terminates
---   Step:  step m (suc t) = m t   (recurse on strictly smaller tel)  ✓
-
--- Stated as a proposition: running any TelM computation is decidable.
-data Result (A : Set) : Set where
-  halted   : Result A           -- out of tel
-  finished : A → ℕ → Result A  -- value + tel remaining
-
-run : {A : Set} → TelM A → Tel → Result A
-run c g with c g
-... | nothing       = halted
-... | just (v , gf) = finished v gf
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 8.  TYPE CLASS MORPHISM LAWS  (Elliott's TCM principle as propositions)
--- ─────────────────────────────────────────────────────────────────────────────
---
--- The denotation ⟦·⟧ must be a homomorphism for Category:
---
---   ⟦ id ⟧       ≡ idK
---   ⟦ g ∘ f ⟧    ≡ ⟦g⟧ ∘K ⟦f⟧
---
--- Stated for the Kleisli category laws:
-
--- Left identity:  idK ∘K f ≡ f
-left-id : {A B : Set} (f : A →K B) (a : A) (t : Tel) →
-          (idK ∘K f) a t ≡ f a t
-left-id f a t with f a t
-... | nothing      = refl
-... | just (b , t') = refl
-
--- Right identity: f ∘K idK ≡ f
-right-id : {A B : Set} (f : A →K B) (a : A) (t : Tel) →
-           (f ∘K idK) a t ≡ f a t
-right-id f a t with f a t
-... | nothing      = refl
-... | just (b , t') = refl
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 9.  TELOMARE LIMITED RECURSION  { x , y , z }
--- ─────────────────────────────────────────────────────────────────────────────
---
--- In Telomare, { x , y , z } v means:
---
---   x : S →K Bool   -- test: if truthy, keep recursing; if falsy, take base
---   y : (S →K R) → S →K R  -- body: given recur, compute one step
---   z : S →K R      -- base: answer returned when x fails
---
--- Unfolding:
---   { x , y , z } v  =  if x(v)  then  y (fix {...}) v
---                                 else  z v
---
--- Which is exactly:  fix (λ recur v → if x(v) then y(recur)(v) else z(v))
---
--- The tel (telomere) bounds the number of times the test x can succeed.
--- When tel runs out, the whole computation returns nothing (halts gracefully).
-
-limited : {S R : Set}
-        → (S →K Bool)              -- x : test
-        → ((S →K R) → S →K R)     -- y : body  (takes recur explicitly)
-        → (S →K R)                 -- z : base  (when test fails)
-        → S →K R
-limited test body base =
-  fixT (λ recur s →
-    bind-tel (test s) (λ b →
-      if b then body recur s
-           else base s))
-
--- ── Law: { x , y , z } unfolds exactly once ──────────────────────────────
---
--- limited test body base v g
---   = if test(v) then body (limited test body base) v (g-1)
---                else base v (g-1)
---
--- (The -1 comes from fix's single tel decrement per unfolding.)
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 10.  TELOMARE EXAMPLES TRANSCRIBED
--- ─────────────────────────────────────────────────────────────────────────────
---
--- These mirror the .tel standard library and test files, now typed in TelM.
-
--- 10a.  d2c  (data-to-Church)  from Prelude.tel
---
---   d2c = \n f b -> { id
---                   , \recur i  -> f (recur (left i))
---                   , \i -> b
---                   } n
---
---   State S = ℕ  (the Peano number being consumed)
---   Result R = (ℕ → ℕ) → ℕ → ℕ  (Church numeral: \f b -> ...)
---   test  = id          (non-zero ↔ still counting)
---   body  = \recur i -> f (recur (pred i))
---   base  = \i -> b     (return accumulated base)
---
--- In Agda (simplified to Church-as-iterated-function on ℕ):
-
-d2c : ℕ → (ℕ → ℕ) → ℕ →K ℕ
-d2c n f b = limited
-              (λ i → return-tel (if i ≡? zero then false else true))
-              (λ recur i → bind-tel (recur (pred i)) (λ r → return-tel (f r)))
-              (λ _ → return-tel b)
-              n
-  where
-    pred : ℕ → ℕ
-    pred zero    = zero
-    pred (suc k) = k
-    _≡?_ : ℕ → ℕ → Bool
-    zero  ≡? zero  = true
-    _     ≡? _     = false
-
--- 10b.  isEven  from tc.tel
---
---   isEven = \n -> { \i -> left i
---                  , \recur i -> recur (left (left i), not (right i))
---                  , \i -> right i
---                  } (n, 1)
---
---   State S = ℕ × Bool  (remaining count, parity accumulator)
---   Result R = Bool
---   test  = \(count,_) -> count ≠ 0
---   body  = \recur (count, parity) -> recur (pred count, not parity)
---   base  = \(_,parity) -> parity
-
-isEven : ℕ →K Bool
-isEven n = limited
-             (λ s → return-tel (if proj₁ s ≡ᵇ zero then false else true))
-             (λ recur s → recur (pred (proj₁ s) , not (proj₂ s)))
-             (λ s → return-tel (proj₂ s))
-             (n , true)
-  where
-    _≡ᵇ_ : ℕ → ℕ → Bool
-    zero  ≡ᵇ zero  = true
-    _     ≡ᵇ _     = false
-    pred : ℕ → ℕ
-    pred zero    = zero
-    pred (suc k) = k
-
--- 10c.  map from Prelude.tel — described structurally:
---
---   map = \f -> { id
---               , \recur l -> (f (left l), recur (right l))
---               , \l -> 0
---               }
---
---   = limited id
---             (\recur l -> (f (head l), recur (tail l)))
---             (\l -> [])
---
---   The test is `id`: a non-empty list is truthy, empty list is falsy.
---   Each recursive call strips one element — depth = length of input.
---   Tel bounds the length of lists the program can process.
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 11.  FIBONACCI
--- ─────────────────────────────────────────────────────────────────────────────
---
--- Iterative Fibonacci using `limited` ({x, y, z} in Telomare syntax):
---
---   State S = ℕ × ℕ × ℕ   (counter, fib_k, fib_{k+1})
---   Result R = ℕ
---
---   x = test  : \s -> counter ≠ 0        (keep going while counter > 0)
---   y = body  : \recur (cnt, a, b) ->
---                 recur (cnt − 1, b, a + b)   (one Fibonacci step)
---   z = base  : \(_, a, _) -> a               (return accumulated fib_k)
---
---   Initial state: (n, 0, 1)  so after n steps we have (0, fib n, fib (n+1))
---
--- Tel cost: exactly n + 1 steps  (n recursive + 1 base case).
--- fib n terminates for any tel ≥ n + 1.
+FibState : Set
+FibState = ⟦ FibStateTy ⟧T   -- = ⟦ nat ⟧T × (⟦ nat ⟧T × ⟦ nat ⟧T) = ℕ × ℕ × ℕ
 
 private
-  isNonZero : ℕ → Bool
+  isNonZero : ⟦ nat ⟧T → Bool
   isNonZero zero    = false
   isNonZero (suc _) = true
 
-  predℕ : ℕ → ℕ
+  -- pred on ⟦ nat ⟧T; used in fibStep below and as denotation of predS in §12.
+  predℕ : ⟦ nat ⟧T → ⟦ nat ⟧T
   predℕ zero    = zero
   predℕ (suc k) = k
 
-FibState : Set
-FibState = ℕ × ℕ × ℕ    -- (counter, a = fib_k, b = fib_{k+1})
+  -- State transition: (cnt, a, b) → (pred cnt, b, a+b)
+  -- This is the Agda-level counterpart of fibStepS : FibStateTy ⇨S FibStateTy (§12).
+  -- ⟦ fibStepS ⟧K s = return-tel (fibStep s)   (definitionally, zero cost)
+  fibStep : FibState → FibState
+  fibStep (cnt , a , b) = (predℕ cnt , b , a + b)
 
-fib : ℕ →K ℕ
-fib n = limited {S = FibState} {R = ℕ}
-          -- x : test — continue while counter ≠ 0
-          (λ (s : FibState) → return-tel (isNonZero (proj₁ s)))
-          -- y : body — one Fibonacci step
-          (λ (recur : FibState →K ℕ) (s : FibState) →
-            let cnt = proj₁ s
-                a   = proj₁ (proj₂ s)
-                b   = proj₂ (proj₂ s)
-            in recur (predℕ cnt , b , a + b))
-          -- z : base — return accumulated fib value
-          (λ (s : FibState) → return-tel (proj₁ (proj₂ s)))
-          -- initial state
-          (n , 0 , 1)
+  -- Result extraction: (_, a, _) → a
+  -- This is the Agda-level counterpart of fibExtractS : FibStateTy ⇨S nat (§12).
+  -- fibExtractS = exlS ∘S exrS, so ⟦ fibExtractS ⟧K (_, a, _) = return-tel a
+  fibExtract : FibState → ⟦ nat ⟧T
+  fibExtract (_ , a , _) = a
 
--- ── Running Fibonacci ───────────────────────────────────────────────────────
+-- §6a.  Fibonacci in →K (execution, may fail if tel runs out)
 --
--- `run c t` returns:
---   finished v t'  — value v computed, t' tel remaining
---   halted         — tel exhausted before completion
---
--- For fib n: tel needed = n + 1.
--- Tel consumed per run = n + 1  (one step per recursive call + base case).
--- Tel remaining        = t₀ − (n + 1).
---
--- To evaluate: in Agda, normalise with C-c C-n on any of these names.
-
--- tel = n + 2 throughout: always leaves exactly 1 tel remaining
-fib-0  : Result ℕ ;  fib-0  = run (fib 0)  2
-fib-1  : Result ℕ ;  fib-1  = run (fib 1)  3
-fib-2  : Result ℕ ;  fib-2  = run (fib 2)  4
-fib-3  : Result ℕ ;  fib-3  = run (fib 3)  5
-fib-4  : Result ℕ ;  fib-4  = run (fib 4)  6
-fib-5  : Result ℕ ;  fib-5  = run (fib 5)  7
-fib-6  : Result ℕ ;  fib-6  = run (fib 6)  8
-fib-7  : Result ℕ ;  fib-7  = run (fib 7)  9
-fib-8  : Result ℕ ;  fib-8  = run (fib 8)  10
-fib-9  : Result ℕ ;  fib-9  = run (fib 9)  11
-fib-10 : Result ℕ ;  fib-10 = run (fib 10) 12
-
--- Out-of-tel example:
-fib-10-starved : Result ℕ
-fib-10-starved = run (fib 10) 5    -- needs 11, given 5 → halted
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 12.  EXAMPLE PROGRAMS  (non-recursive)
--- ─────────────────────────────────────────────────────────────────────────────
-
--- Addition — pure (uses Agda's built-in +), costs 0 tel
-addK : (ℕ × ℕ) →K ℕ
-addK (n , m) = return-tel (n + m)
-
--- Multiplication by repeated addition — O(n) tel steps
-mulK : (ℕ × ℕ) →K ℕ
-mulK (zero  , _) = return-tel zero
-mulK (suc n , m) = bind-tel (mulK (n , m)) (λ acc → step (return-tel (acc + m)))
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 12.  SUMMARY OF THE SPECIFICATION
--- ─────────────────────────────────────────────────────────────────────────────
---
---  Semantic model   ⟦e : τ⟧  =  Tel → Maybe (⟦τ⟧ × Tel)          (§1)
---
---  Monad            return-tel, bind-tel, step                      (§2)
---
---  Types            unit | bool | nat | A⊗B | A⊕B | A⇒B           (§3)
---
---  Category         A →K B = A → TelM B                            (§4)
---                   idK, ∘K, forkK, exlK, exrK
---
---  Recursion        fix (1 tel per unfolding, fuel pattern)         (§5)
---
---  Complexity       time ≤ t₀,  space = O(t₀)                      (§6)
---
---  Totality         by construction: TelM is total                  (§7)
---
---  Correctness      TCM laws proved (idK left/right identity)       (§8)
---
---  Limited recur.   { x , y , z }  =  limited x y z                (§9)
---
---    limited test body base
---      = fix (λ recur s → bind-tel (test s) (λ b →
---                           if b then body recur s
---                                else base s))
---
---    x (test)  decides whether to keep recursing
---    y (body)  takes recur explicitly; runs when test succeeds
---    z (base)  the answer returned when test fails
---
---  Examples         d2c, isEven  (§10)
---  Fibonacci        fib, fib-0..fib-10, fib-10-starved  (§11)
---
--- Key design decisions (following Elliott):
---  • Model chosen first (TelM); all instances derived homomorphically.
---  • fix is the ONLY recursion primitive; tel enforces totality.
---  • { x , y , z } is NOT a new primitive — it is derived from fix.
---  • Time and space bounds are read off directly from the initial tel.
---  • Swapping the category gives different interpretations of the same
---    program (execution, cost analysis, tracing) — "Compiling to Categories".
-
--- ─────────────────────────────────────────────────────────────────────────────
--- § 14.  FELIX INTEGRATION  (github.com/conal/felix)
---
---  Felix is Conal Elliott's Agda library for category-theoretic denotational
---  design. It provides formal interfaces — Category, Cartesian, CategoryH —
---  that our Kleisli category of TelM already satisfies.
---
---  Here we instantiate those interfaces, making the connection explicit:
---
---    FR.Category  _→K_   — raw category (idK and ∘K)
---    FR.Cartesian _→K_   — Cartesian structure (forkK, exlK, exrK)
---    FL.Category  _→K_   — lawful category (identity laws + associativity)
---
---  The denotation function ⟦_⟧ : Telomare syntax → _→K_ would be a
---  FL.Homomorphism.CategoryH, making the TCM principle machine-checkable.
--- ─────────────────────────────────────────────────────────────────────────────
-
-import Felix.Object      as FO
-import Felix.Equiv       as FE
-import Felix.Raw         as FR
-import Felix.Laws        as FL
-import Felix.Homomorphism as FH
-
--- 14a.  Products for Set — needed so Felix knows ⊤ and × for objects
-instance
-  Set-Products : FO.Products Set
-  Set-Products = record { ⊤ = ⊤ ; _×_ = _×_ }
-
--- 14b.  Equivalence on Kleisli morphisms: pointwise propositional equality
---       f ≈ g  iff  ∀ a t → f a t ≡ g a t
-instance
-  →K-Equiv : FE.Equivalent lzero _→K_
-  →K-Equiv = record
-    { _≈_   = λ f g → ∀ a t → f a t ≡ g a t
-    ; equiv = record
-        { refl  = λ _ _ → refl
-        ; sym   = λ p a t → sym (p a t)
-        ; trans = λ p q a t → trans (p a t) (q a t)
-        }
-    }
-
--- 14c.  Raw Category: idK and ∘K satisfy Felix's Category interface
-instance
-  →K-RawCat : FR.Category _→K_
-  →K-RawCat = record { id = idK ; _∘_ = _∘K_ }
-
--- 14d.  Raw Cartesian: forkK / exlK / exrK satisfy Felix's Cartesian interface
-instance
-  →K-RawCart : FR.Cartesian _→K_
-  →K-RawCart = record { ! = λ _ → return-tel tt ; _▵_ = forkK ; exl = exlK ; exr = exrK }
-
--- 14e.  Proofs for the lawful Category instance
---
---  We need three lemmas beyond §8's left-id / right-id:
---    Maybe->>=-assoc : monad associativity for Maybe (needed for assoc-tel)
---    assoc-tel       : ((h ∘K g) ∘K f) a t ≡ (h ∘K (g ∘K f)) a t
---    >>=-congˡ       : helper for congruence proof
---    ∘≈-tel          : h ≈ k → f ≈ g → h ∘K f ≈ k ∘K g  (pointwise)
+-- The fixT body uses fibStep and fibExtract — both are denotations of
+-- _⇨S_ morphisms (fibStepS, fibExtractS) defined in §12.
+-- Each unfolding costs 1 tel (via step-tel inside fixT-aux).
 
 private
-  -- Associativity of Kleisli composition by direct case analysis on f a t.
-  assoc-tel : {A B C D : Set} {f : A →K B} {g : B →K C} {h : C →K D}
-            → ∀ a t → ((h ∘K g) ∘K f) a t ≡ (h ∘K (g ∘K f)) a t
-  assoc-tel {f = f} {g} {h} a t with f a t
-  ... | nothing       = refl
-  ... | just (b , t') with g b t'
-  ...   | nothing        = refl
-  ...   | just (c , t'') = refl
+  fibExecBody : (FibState →K ⟦ nat ⟧T) → FibState →K ⟦ nat ⟧T
+  fibExecBody recur s =
+    bind-tel (return-tel (isNonZero (proj₁ s))) λ nonzero →
+    if nonzero
+    then recur (fibStep s)
+    else return-tel (fibExtract s)
 
-  -- Congruence of >>= in the first argument (the Maybe value).
-  >>=-congˡ : ∀ {α β : Set} (m : Maybe α) {f g : α → Maybe β}
-            → (∀ x → f x ≡ g x) → (m >>= f) ≡ (m >>= g)
-  >>=-congˡ nothing  _  = refl
-  >>=-congˡ (just x) pf = pf x
+fib : ⟦ nat ⟧T →K ⟦ nat ⟧T
+fib n = fixT fibExecBody (n , 0 , 1)
 
-  -- Congruence of Kleisli composition:
-  --   h ≈ k  →  f ≈ g  →  h ∘K f ≈ k ∘K g  (all ≈ are pointwise)
-  ∘≈-tel : ∀ {α β γ : Set} {h k : β →K γ} {f g : α →K β}
-         → (∀ b t → h b t ≡ k b t)
-         → (∀ a t → f a t ≡ g a t)
-         → ∀ a t → (h ∘K f) a t ≡ (k ∘K g) a t
-  ∘≈-tel {h = h} {g = g} h≈k f≈g a t =
-    trans (cong (λ m → m >>= λ { (b , t') → h b t' }) (f≈g a t))
-          (>>=-congˡ (g a t) λ { (b , t') → h≈k b t' })
+-- §6b.  Fibonacci in →C (cost analysis, always succeeds)
+--
+-- Direct structural recursion on the counter — no fuel trick needed!
+-- Returns (cost, result):
+--   • cost = number of tel units fib(n) needs  = n + 1
+--   • result = fib(n) (the actual fibonacci value)
+--
+-- Note the structural identity with fibExecBody:
+--   base (cnt=0): step-cost (return-cost a)     mirrors  return-tel a + 1 step-tel
+--   step (cnt>0): step-cost (fibCostFn s')      mirrors  recur s'    + 1 step-tel
+-- The step-tel is buried in fixT-aux for →K; explicit step-cost here.
+--
+-- Implementation note: we take (counter, a, b) as separate ℕ arguments so
+-- that Agda sees structural recursion on the first argument (the counter).
+-- Tupling them into FibState would obscure this for the termination checker.
 
--- 14f.  Lawful Category instance: _→K_ satisfies Felix's Laws.Category
-instance
-  →K-LawCat : FL.Category _→K_
-  →K-LawCat = record
-    { identityˡ = λ {_} {_} {f}             → left-id  f
-    ; identityʳ = λ {_} {_} {f}             → right-id f
-    ; assoc     = λ {_} {_} {_} {_} {f} {g} {h} → assoc-tel {f = f} {g = g} {h = h}
-    ; ∘≈        = λ {_} {_} {_} {f} {g} {h} {k} → ∘≈-tel   {h = h} {k = k} {f = f} {g = g}
-    }
+private
+  fibCostAux : ⟦ nat ⟧T → ⟦ nat ⟧T → ⟦ nat ⟧T → CostM ⟦ nat ⟧T
+  fibCostAux zero    a _ = step-cost (return-cost a)            -- base: cost 1, result a
+  fibCostAux (suc k) a b = step-cost (fibCostAux k b (a + b))  -- 1 + cost of rest
+
+fibCostFn : FibState →C ⟦ nat ⟧T
+fibCostFn (n , a , b) = fibCostAux n a b
+
+-- The cost and result of fib(n):
+fibCost : ⟦ nat ⟧T →C ⟦ nat ⟧T
+fibCost n = fibCostAux n 0 1
+
+-- Quick facts (by computation):
+--   proj₁ (fibCost 0)  = 1   proj₂ (fibCost 0)  = 0
+--   proj₁ (fibCost 1)  = 2   proj₂ (fibCost 1)  = 1
+--   proj₁ (fibCost 5)  = 6   proj₂ (fibCost 5)  = 5
+--   proj₁ (fibCost 10) = 11  proj₂ (fibCost 10) = 55
+-- Cost(n) = n + 1; Result = fib(n).
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- § 15.  DENOTATION HOMOMORPHISM  (the TCM principle, machine-checked)
---
--- We define Telomare's SYNTAX CATEGORY _⇨S_ and prove that the denotation
--- function ⟦_⟧ is a Felix CategoryH (functor) into the Kleisli category _→K_.
---
--- This makes the TCM equations machine-checked:
---
---   ⟦ idS    ⟧ = idK              (F-id,  by definition)
---   ⟦ g ∘S f ⟧ = ⟦g⟧ ∘K ⟦f⟧     (F-∘,   by definition)
---   f ≈S g   ⟹  ⟦f⟧ ≈ ⟦g⟧       (F-cong, proved below)
---
--- Any violation would be an abstraction leak: implementation behaviour
--- diverges from the semantic model, making equational reasoning unsound.
+-- § 7.  THE ADEQUACY THEOREM
 -- ─────────────────────────────────────────────────────────────────────────────
+--
+-- The core theorem connecting TelM (execution) and CostM (cost analysis):
+--
+--   ∀ n → fib n (proj₁ (fibCost n)) ≡ just (proj₂ (fibCost n) , 0)
+--
+-- Reading: running fib(n) with EXACTLY the cost-computed tel budget
+-- always succeeds and produces the cost-computed result with 0 tel remaining.
+--
+-- Proof: by induction on n, both sides reduce definitionally.
+-- The key step: the suc case reduces to the inductive hypothesis
+-- because fixT-aux, step-tel, bind-tel, and if-then-else all reduce
+-- definitionally in Agda's type theory.
+--
+-- This is the payoff of the denotational design:
+-- The TWO interpretations (TelM and CostM) are PROVABLY CONSISTENT.
 
--- 15a.  Syntax morphisms — the free category over Telomare's primitives.
---       Objects are Telomare types (Ty); morphisms are terms-in-context.
-infix 0 _⇨S_
+private
+  -- Lemma: adequacy for arbitrary starting state with counter n, acc a, b
+  -- Uses fibCostAux directly (structurally clear: recurse on n).
+  fib-adequate-aux : ∀ (n a b : ℕ) →
+    fixT-aux (proj₁ (fibCostAux n a b))
+             fibExecBody
+             (n , a , b)
+             (proj₁ (fibCostAux n a b))
+    ≡ just (proj₂ (fibCostAux n a b) , 0)
+  -- Base: fibCostAux 0 a b = (1, a). Both sides reduce to just (a, 0). ✓
+  fib-adequate-aux zero    a b = refl
+  -- Step: fibCostAux (suc k) a b = step-cost (fibCostAux k b (a+b)).
+  -- The goal reduces definitionally to the IH fib-adequate-aux k b (a+b). ✓
+  fib-adequate-aux (suc k) a b = fib-adequate-aux k b (a + b)
+
+-- Main adequacy theorem for fib:
+fib-adequate : ∀ n →
+  fib n (proj₁ (fibCost n)) ≡ just (proj₂ (fibCost n) , 0)
+fib-adequate n = fib-adequate-aux n 0 1
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 7.5  PRECISION: A STRONGER PROPERTY NEEDED FOR COMPOSITION
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- Adequacy says: exec a cost ≡ just (val, 0).
+-- But for composition (g ∘ f), we need more:
+-- When f costs n and g costs m, and we give (g ∘ f) a budget of n+m+extra,
+-- then f must consume exactly n and leave m+extra for g.
+--
+-- This "precision" property is:
+--   exec a (cost + extra) ≡ just (val, extra)   for any extra ℕ
+--
+-- Adequacy is the special case extra = 0.
+-- Precision is proved by exactly the same induction as adequacy.
+
+private
+  fib-precise-aux : ∀ (n a b extra : ℕ) →
+    fixT-aux (proj₁ (fibCostAux n a b) + extra) fibExecBody (n , a , b)
+             (proj₁ (fibCostAux n a b) + extra)
+    ≡ just (proj₂ (fibCostAux n a b) , extra)
+  fib-precise-aux zero    a b extra = refl   -- (1+extra), reduces to just(a,extra) ✓
+  fib-precise-aux (suc k) a b extra = fib-precise-aux k b (a + b) extra
+
+-- Precision for fib: running with cost+extra leaves exactly extra
+fib-precise : ∀ n extra →
+  fib n (proj₁ (fibCost n) + extra) ≡ just (proj₂ (fibCost n) , extra)
+fib-precise n extra = fib-precise-aux n 0 1 extra
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 8.  PROGRAMS: BUNDLING COST AND EXECUTION
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- A Program A B bundles:
+--   • cost-exec : A →C B   — cost interpretation (always succeeds)
+--   • exec      : A →K B   — execution interpretation (may fail)
+--   • adequate  : proof that they are consistent
+--
+-- The adequate field is the machine-checked TCM (Type Class Morphism)
+-- condition (Elliott, ICFP 2009): the two interpretations commute.
+--
+-- Given a Program, we can run it WITHOUT specifying the tel budget.
+-- The budget is AUTOMATICALLY computed from the cost interpretation.
+
+record Program (A B : Set) : Set where
+  field
+    cost-exec : A →C B
+    exec      : A →K B
+    adequate  : ∀ a → exec a (proj₁ (cost-exec a)) ≡ just (proj₂ (cost-exec a) , 0)
+
+-- The fibonacci Program: cost + execution + adequacy, all bundled.
+fibProgram : Program ℕ ℕ
+fibProgram = record
+  { cost-exec = fibCost
+  ; exec      = fib
+  ; adequate  = fib-adequate
+  }
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 9.  AUTO-RUNNING PROGRAMS
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- Given any Program, we can run it with an automatically computed tel budget.
+-- By the adequacy theorem, this ALWAYS succeeds — never halts for lack of tel.
+
+data Result (A : Set) : Set where
+  halted   : Result A
+  finished : A → ℕ → Result A
+
+run : {A : Set} → TelM A → Tel → Result A
+run c g with c g
+... | nothing      = halted
+... | just (v , r) = finished v r
+
+-- Run a Program with auto-computed tel budget
+runAuto : {A B : Set} → Program A B → A → Result B
+runAuto prog a = run (Program.exec prog a) (proj₁ (Program.cost-exec prog a))
+
+-- By fib-adequate (and Program.adequate in general), runAuto always
+-- returns finished — never halted. The tel budget is exactly right.
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 10.  FIBONACCI EXAMPLES WITH AUTO-COMPUTED TELOMERE
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- No manual tel specification needed!
+-- Each example computes its own cost and runs with exactly that budget.
+--
+-- By fib-adequate:   runAuto fibProgram n ≡ finished (proj₂ (fibCost n)) 0
+-- i.e.:              runAuto fibProgram n ≡ finished fib(n) 0   always
+
+fib-auto-0  : Result ℕ ;  fib-auto-0  = runAuto fibProgram 0
+fib-auto-1  : Result ℕ ;  fib-auto-1  = runAuto fibProgram 1
+fib-auto-2  : Result ℕ ;  fib-auto-2  = runAuto fibProgram 2
+fib-auto-3  : Result ℕ ;  fib-auto-3  = runAuto fibProgram 3
+fib-auto-4  : Result ℕ ;  fib-auto-4  = runAuto fibProgram 4
+fib-auto-5  : Result ℕ ;  fib-auto-5  = runAuto fibProgram 5
+fib-auto-6  : Result ℕ ;  fib-auto-6  = runAuto fibProgram 6
+fib-auto-7  : Result ℕ ;  fib-auto-7  = runAuto fibProgram 7
+fib-auto-8  : Result ℕ ;  fib-auto-8  = runAuto fibProgram 8
+fib-auto-9  : Result ℕ ;  fib-auto-9  = runAuto fibProgram 9
+fib-auto-10 : Result ℕ ;  fib-auto-10 = runAuto fibProgram 10
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- § 12.  TYPED SYNTAX CATEGORY
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- Inspired by telomare-backwards.agda (Conal Elliott's denotational design):
+--   • Ty : type-level objects
+--   • A ⇨S B : typed programs-as-syntax (categorical arrows)
+--   • ⟦_⟧K : execution denotation  (A ⇨S B → ⟦A⟧T →K ⟦B⟧T)
+--   • ⟦_⟧C : cost denotation       (A ⇨S B → ⟦A⟧T →C ⟦B⟧T)
+--
+-- KEY addition over telomare-backwards.agda:
+--   Two denotations, not one.  fromSyntax packages both together with a
+--   machine-checked adequacy proof — runFromSyntax then ALWAYS succeeds,
+--   with the tel budget computed automatically from the syntax.
+
+-- §12a. Type objects — see §4.5 for Ty, ⟦_⟧T (moved there so §6 can use them).
+--       Ty has constructors: unit, nat, bool, _⊗_
+--       ⟦_⟧T : Ty → Set   (unit→⊤, nat→ℕ, bool→Bool, A⊗B→⟦A⟧T×⟦B⟧T)
+
+-- §12b. Morphisms (typed programs as categorical arrows)
 data _⇨S_ : Ty → Ty → Set where
-  idS   : {A : Ty} → A ⇨S A
-  _∘S_  : {A B C : Ty} → (B ⇨S C) → (A ⇨S B) → (A ⇨S C)
-  !S    : {A : Ty} → A ⇨S unit
-  forkS : {A B C : Ty} → (A ⇨S B) → (A ⇨S C) → (A ⇨S (B ⊗ C))
-  exlS  : {A B : Ty} → (A ⊗ B) ⇨S A
-  exrS  : {A B : Ty} → (A ⊗ B) ⇨S B
+  idS   : {A : Ty}     → A ⇨S A
+  _∘S_  : {A B C : Ty} → B ⇨S C → A ⇨S B → A ⇨S C
+  !S    : {A : Ty}     → A ⇨S unit
+  forkS : {A B C : Ty} → A ⇨S B → A ⇨S C → A ⇨S (B ⊗ C)
+  exlS  : {A B : Ty}   → (A ⊗ B) ⇨S A
+  exrS  : {A B : Ty}   → (A ⊗ B) ⇨S B
+  addS  :                 (nat ⊗ nat) ⇨S nat      -- addition: ⟦A⟧T×⟦B⟧T→ℕ
+  predS :                 nat ⇨S nat               -- predecessor: pred n
+  fibS  :                 nat ⇨S nat
 
--- 15b.  Syntactic equivalence — the equational theory of the syntax category.
---       Identifies morphisms up to the category laws (identity, associativity,
---       congruence) without collapsing to propositional equality on terms.
-infix 4 _≈S_
-data _≈S_ : {A B : Ty} → (A ⇨S B) → (A ⇨S B) → Set where
-  reflS   : {A B : Ty} {f : A ⇨S B}
-          → f ≈S f
-  symS    : {A B : Ty} {f g : A ⇨S B}
-          → f ≈S g → g ≈S f
-  transS  : {A B : Ty} {f g h : A ⇨S B}
-          → f ≈S g → g ≈S h → f ≈S h
-  -- Category laws (generating the equational theory)
-  ∘-idlS  : {A B : Ty} {f : A ⇨S B}
-          → (idS ∘S f) ≈S f
-  ∘-idrS  : {A B : Ty} {f : A ⇨S B}
-          → (f ∘S idS) ≈S f
-  ∘-assS  : {A B C D : Ty} {f : A ⇨S B} {g : B ⇨S C} {h : C ⇨S D}
-          → ((h ∘S g) ∘S f) ≈S (h ∘S (g ∘S f))
-  ∘-congS : {A B C : Ty} {f f' : A ⇨S B} {g g' : B ⇨S C}
-          → g ≈S g' → f ≈S f' → (g ∘S f) ≈S (g' ∘S f')
+infixr 2 _⇨S_
+infixr 9 _∘S_
 
--- 15c.  Denotation of syntax morphisms into the Kleisli category.
---       ⟦_⟧ maps each syntactic term to its semantic Kleisli morphism.
-⟦_⟧ : {A B : Ty} → (A ⇨S B) → (⟦ A ⟧T →K ⟦ B ⟧T)
-⟦ idS        ⟧ = idK
-⟦ g ∘S f     ⟧ = ⟦ g ⟧ ∘K ⟦ f ⟧
-⟦ !S         ⟧ = λ _ → return-tel tt
-⟦ forkS f g  ⟧ = forkK ⟦ f ⟧ ⟦ g ⟧
-⟦ exlS       ⟧ = exlK
-⟦ exrS       ⟧ = exrK
+-- §12c. Execution denotation: A ⇨S B → ⟦A⟧T →K ⟦B⟧T
+⟦_⟧K : {A B : Ty} → A ⇨S B → ⟦ A ⟧T →K ⟦ B ⟧T
+⟦ idS       ⟧K = idK
+⟦ g ∘S f    ⟧K = ⟦ g ⟧K ∘K ⟦ f ⟧K
+⟦ !S        ⟧K _ = return-tel tt
+⟦ forkS f g ⟧K = forkK ⟦ f ⟧K ⟦ g ⟧K
+⟦ exlS      ⟧K (a , _) = return-tel a
+⟦ exrS      ⟧K (_ , b) = return-tel b
+⟦ addS      ⟧K (a , b) = return-tel (a + b)
+⟦ predS     ⟧K n       = return-tel (predℕ n)
+⟦ fibS      ⟧K = fib
 
--- 15d.  Felix instances for the syntax category.
+-- §12d. Cost denotation: A ⇨S B → ⟦A⟧T →C ⟦B⟧T
+⟦_⟧C : {A B : Ty} → A ⇨S B → ⟦ A ⟧T →C ⟦ B ⟧T
+⟦ idS       ⟧C = idC
+⟦ g ∘S f    ⟧C = ⟦ g ⟧C ∘C ⟦ f ⟧C
+⟦ !S        ⟧C _ = return-cost tt
+⟦ forkS f g ⟧C = forkC ⟦ f ⟧C ⟦ g ⟧C
+⟦ exlS      ⟧C (a , _) = return-cost a
+⟦ exrS      ⟧C (_ , b) = return-cost b
+⟦ addS      ⟧C (a , b) = return-cost (a + b)
+⟦ predS     ⟧C n       = return-cost (predℕ n)
+⟦ fibS      ⟧C = fibCost
 
--- Equivalence: use the syntactic equational theory as the setoid.
-instance
-  ⇨S-Equiv : FE.Equivalent lzero _⇨S_
-  ⇨S-Equiv = record
-    { _≈_   = _≈S_
-    ; equiv = record { refl = reflS ; sym = symS ; trans = transS }
-    }
-
--- Raw category: idS and _∘S_ directly.
-instance
-  ⇨S-RawCat : FR.Category _⇨S_
-  ⇨S-RawCat = record { id = idS ; _∘_ = _∘S_ }
-
--- Lawful category: the syntactic laws are the constructors of _≈S_.
-instance
-  ⇨S-LawCat : FL.Category _⇨S_
-  ⇨S-LawCat = record
-    { identityˡ = λ {_} {_} {f}             → ∘-idlS  {f = f}
-    ; identityʳ = λ {_} {_} {f}             → ∘-idrS  {f = f}
-    ; assoc     = λ {_} {_} {_} {_} {f} {g} {h} → ∘-assS  {f = f} {g = g} {h = h}
-    ; ∘≈        = λ {_} {_} {_} {f} {g} {h} {k} → ∘-congS {f = f} {f' = g} {g = h} {g' = k}
-    }
-
--- 15e.  Homomorphism structure.
-
--- Object map: Ty → Set via ⟦_⟧T.
-instance
-  Ty→Set-Hₒ : FH.Homomorphismₒ Ty Set
-  Ty→Set-Hₒ = record { Fₒ = ⟦_⟧T }
-
--- Morphism map: _⇨S_ → _→K_ via ⟦_⟧.
-instance
-  ⟦⟧-H : FH.Homomorphism _⇨S_ _→K_
-  ⟦⟧-H = record { Fₘ = ⟦_⟧ }
-
--- 15f.  ⟦_⟧ preserves syntactic equivalence (F-cong).
---       Each constructor of _≈S_ maps to the corresponding law on _→K_.
-⟦⟧-cong : {A B : Ty} {f g : A ⇨S B}
-         → f ≈S g
-         → ∀ a t → ⟦ f ⟧ a t ≡ ⟦ g ⟧ a t
-⟦⟧-cong reflS                               a t = refl
-⟦⟧-cong (symS p)                            a t = sym   (⟦⟧-cong p a t)
-⟦⟧-cong (transS p q)                        a t = trans (⟦⟧-cong p a t) (⟦⟧-cong q a t)
-⟦⟧-cong (∘-idlS  {f = f})                  a t = left-id  ⟦ f ⟧ a t
-⟦⟧-cong (∘-idrS  {f = f})                  a t = right-id ⟦ f ⟧ a t
-⟦⟧-cong (∘-assS  {f = f} {g = g} {h = h})  a t = assoc-tel {f = ⟦ f ⟧} {g = ⟦ g ⟧} {h = ⟦ h ⟧} a t
-⟦⟧-cong (∘-congS {f = f} {f' = f'} {g = g} {g' = g'} p q) a t =
-  ∘≈-tel {h = ⟦ g ⟧} {k = ⟦ g' ⟧} {f = ⟦ f ⟧} {g = ⟦ f' ⟧} (⟦⟧-cong p) (⟦⟧-cong q) a t
-
--- 15g.  THE HOMOMORPHISM THEOREM.
---       ⟦_⟧ is a CategoryH — a functor from the syntax category to _→K_.
+-- §12e. Precision: the key property connecting ⟦_⟧K and ⟦_⟧C
 --
---       F-id and F-∘ hold by DEFINITION (refl): the denotation of idS is idK,
---       and the denotation of composition IS Kleisli composition.
---       F-cong is proved by induction on the syntactic equivalence above.
-instance
-  ⟦⟧-CategoryH : FH.CategoryH _⇨S_ _→K_
-  ⟦⟧-CategoryH = record
-    { F-cong = ⟦⟧-cong
-    ; F-id   = λ _ _ → refl    -- ⟦ idS ⟧ = idK,          definitionally
-    ; F-∘    = λ _ _ → refl    -- ⟦ g ∘S f ⟧ = ⟦g⟧ ∘K ⟦f⟧, definitionally
-    }
+-- Precise f: running ⟦f⟧K with (computed-cost + extra) leaves exactly
+--            extra tel remaining for any extra ∈ ℕ.
+--
+-- Adequacy is the special case extra = 0.
+-- Precision is needed to prove adequacy for composed programs by induction:
+-- when f costs n and g costs m, and we give g∘f a budget of (n+m)+extra,
+-- we need f to leave exactly m+extra for g.
+
+Precise : {A B : Ty} → A ⇨S B → Set
+Precise {A} {B} f = ∀ (a : ⟦ A ⟧T) (extra : ℕ) →
+  ⟦ f ⟧K a (proj₁ (⟦ f ⟧C a) + extra) ≡ just (proj₂ (⟦ f ⟧C a) , extra)
+
+precise : {A B : Ty} → (f : A ⇨S B) → Precise f
+-- idS / !S / exlS / exrS / addS / predS: cost = 0, (0 + extra) = extra → refl
+precise idS         a         extra = refl
+precise !S          _         extra = refl
+precise exlS        (a , _)   extra = refl
+precise exrS        (_ , b)   extra = refl
+precise addS        (a , b)   extra = refl
+precise predS       n         extra = refl
+-- fibS: exactly the fib-precise lemma proved in §7.5
+precise fibS        n         extra = fib-precise n extra
+-- g ∘S f: costs add (n for f, m for g); use +-assoc to align the tel budget
+precise (g ∘S f)    a         extra =
+  let n   = proj₁ (⟦ f ⟧C a)
+      vf  = proj₂ (⟦ f ⟧C a)
+      m   = proj₁ (⟦ g ⟧C vf)
+      -- Precision of f at slack (m + extra):
+      --   ⟦f⟧K a (n + (m + extra)) ≡ just (vf , m + extra)
+      pf  = precise f a (m + extra)
+      -- Rewrite n + (m + extra) → (n + m) + extra  [sym of +-assoc]
+      pf' = subst (λ tel → ⟦ f ⟧K a tel ≡ just (vf , m + extra))
+                  (sym (+-assoc n m extra)) pf
+      -- Precision of g at slack extra:
+      --   ⟦g⟧K vf (m + extra) ≡ just (vg , extra)
+      pg  = precise g vf extra
+  in trans (cong (λ mx → mx >>= λ { (v , t') → ⟦ g ⟧K v t' }) pf') pg
+-- forkS f g: run f then g on the same input; costs add
+-- Uses the same +-assoc trick to show f leaves exactly m+extra for g
+precise (forkS f g) a         extra =
+  let n   = proj₁ (⟦ f ⟧C a)
+      vf  = proj₂ (⟦ f ⟧C a)
+      m   = proj₁ (⟦ g ⟧C a)
+      vg  = proj₂ (⟦ g ⟧C a)
+      pf  = precise f a (m + extra)
+      pf' = subst (λ tel → ⟦ f ⟧K a tel ≡ just (vf , m + extra))
+                  (sym (+-assoc n m extra)) pf
+      pg  = precise g a extra
+  in trans
+       (cong (λ mx → mx >>= λ { (b , t') →
+           ⟦ g ⟧K a t' >>= λ { (c , t'') → just ((b , c) , t'') } }) pf')
+       (cong (λ mx → mx >>= λ { (c , t'') → just ((vf , c) , t'') }) pg)
+
+-- §12f. Adequacy for all syntax (from precision at extra = 0)
+--
+-- Running ⟦f⟧K with the CostM-computed budget always succeeds.
+-- Derived from precision by setting extra = 0 and using +-identityʳ.
+⟦⟧-adequate : {A B : Ty} → (f : A ⇨S B) → ∀ a →
+  ⟦ f ⟧K a (proj₁ (⟦ f ⟧C a)) ≡ just (proj₂ (⟦ f ⟧C a) , 0)
+⟦⟧-adequate f a =
+  subst (λ tel → ⟦ f ⟧K a tel ≡ just (proj₂ (⟦ f ⟧C a) , 0))
+        (+-identityʳ (proj₁ (⟦ f ⟧C a)))
+        (precise f a 0)
+
+-- §12g. Bridge: syntax → Program → runAuto
+fromSyntax : {A B : Ty} → A ⇨S B → Program ⟦ A ⟧T ⟦ B ⟧T
+fromSyntax f = record
+  { cost-exec = ⟦ f ⟧C
+  ; exec      = ⟦ f ⟧K
+  ; adequate  = ⟦⟧-adequate f
+  }
+
+-- Run any typed program with automatically computed tel budget.
+-- By ⟦⟧-adequate, this ALWAYS returns finished — never halted.
+runFromSyntax : {A B : Ty} → A ⇨S B → ⟦ A ⟧T → Result ⟦ B ⟧T
+runFromSyntax f = runAuto (fromSyntax f)
+
+-- §12h. Fibonacci sequence expressed and evaluated via Ty typed syntax
+--
+-- The complete pipeline, made explicit as named Agda definitions:
+--
+--   STEP 1: Express the program in the _⇨S_ typed syntax category.
+--           fibS : nat ⇨S nat
+--           (already defined above as a constructor of _⇨S_)
+--
+--   STEP 2: Interpret into CostM via ⟦_⟧C.
+--           fibS-cost n = proj₁ (⟦ fibS ⟧C n)   -- tel budget needed
+--           fibS-val  n = proj₂ (⟦ fibS ⟧C n)   -- fib(n), no execution yet
+--
+--   STEP 3: Interpret into TelM via ⟦_⟧K and run with the cost from Step 2.
+--           fibS-run n = runFromSyntax fibS n
+--           By ⟦⟧-adequate fibS n, this ALWAYS returns finished fib(n) 0.
+--
+-- Steps 2 and 3 are connected by the machine-checked adequacy theorem:
+--   ⟦ fibS ⟧K n (fibS-cost n) ≡ just (fibS-val n , 0)
+
+-- STEP 2: compute the tel budget via the CostM interpretation
+fibS-cost : ℕ → ℕ
+fibS-cost n = proj₁ (⟦ fibS ⟧C n)   -- = n + 1
+
+-- STEP 2 (also): the value, computed purely by CostM (no tel, no execution)
+fibS-val : ℕ → ℕ
+fibS-val n = proj₂ (⟦ fibS ⟧C n)    -- = fib(n)
+
+-- STEP 3: run with the auto-computed budget
+fibS-run : ℕ → Result ℕ
+fibS-run = runFromSyntax fibS
+
+-- The fibonacci sequence (fib(0) … fib(10)) via Ty typed syntax.
+-- Each entry: budget from fibS-cost, result from fibS-run.
+-- Note: identical results to the §10 examples, but derived from _⇨S_ syntax.
+fibS-0  : Result ℕ ; fibS-0  = fibS-run 0
+fibS-1  : Result ℕ ; fibS-1  = fibS-run 1
+fibS-2  : Result ℕ ; fibS-2  = fibS-run 2
+fibS-3  : Result ℕ ; fibS-3  = fibS-run 3
+fibS-4  : Result ℕ ; fibS-4  = fibS-run 4
+fibS-5  : Result ℕ ; fibS-5  = fibS-run 5
+fibS-6  : Result ℕ ; fibS-6  = fibS-run 6
+fibS-7  : Result ℕ ; fibS-7  = fibS-run 7
+fibS-8  : Result ℕ ; fibS-8  = fibS-run 8
+fibS-9  : Result ℕ ; fibS-9  = fibS-run 9
+fibS-10 : Result ℕ ; fibS-10 = fibS-run 10
+
+-- Composed programs: cost is derived from composition structure automatically.
+
+-- fib ∘ fib: compute fib(fib(n))
+-- Cost = (n+1) + (fib(n)+1), derived by ⟦ fibS ∘S fibS ⟧C
+doubleFibS : nat ⇨S nat
+doubleFibS = fibS ∘S fibS
+
+-- Fork: compute (fib(n), fib(n)) — runs fib twice, total cost = 2*(n+1)
+fibPairS : nat ⇨S (nat ⊗ nat)
+fibPairS = forkS fibS fibS
+
+-- §12i. Fibonacci step and extract as _⇨S_ morphisms
+--
+-- The fib state (cnt, a, b) : ⟦ FibStateTy ⟧T = ⟦ nat ⊗ (nat ⊗ nat) ⟧T
+-- is processed by two categorical morphisms:
+--
+--   fibStepS    : FibStateTy ⇨S FibStateTy
+--     (cnt, a, b) ↦ (pred cnt, b, a+b)
+--     built from addS, predS, exlS, exrS, forkS  — all zero-cost primitives
+--     ⟦ fibStepS ⟧K s = return-tel (fibStep s)   (definitionally)
+--
+--   fibExtractS : FibStateTy ⇨S nat
+--     (_, a, _) ↦ a   (= exlS ∘S exrS)
+--     ⟦ fibExtractS ⟧K s = return-tel (fibExtract s)  (definitionally)
+--
+-- These show explicitly that fib's internal operations are Ty morphisms.
+
+-- State transition: (cnt, a, b) → (pred cnt, b, a+b)
+-- forkS picks pred(cnt) and the pair (b, a+b):
+--   first  component: predS ∘S exlS           — pred of counter
+--   second component: forkS (exrS ∘S exrS)    — b (second of second)
+--                          (addS ∘S forkS (exlS ∘S exrS) (exrS ∘S exrS))
+--                                              — a+b (first⊕second of second)
+fibStepS : FibStateTy ⇨S FibStateTy
+fibStepS = forkS (predS ∘S exlS)
+                 (forkS (exrS ∘S exrS)
+                        (addS ∘S forkS (exlS ∘S exrS) (exrS ∘S exrS)))
+
+-- Result extraction: (_, a, _) → a  (first component of the second pair)
+fibExtractS : FibStateTy ⇨S nat
+fibExtractS = exlS ∘S exrS
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- § 13.  MAIN  (run fibonacci results via GHC backend)
+-- § 11.  MAIN: DEMONSTRATE AUTO-COMPUTED TELOMERE
 -- ─────────────────────────────────────────────────────────────────────────────
 
 open import IO            using (IO; putStrLn; Main)
 open import Data.Nat.Show using (show)
 open import Data.String   using (String; _++_)
 
-showVal : Result ℕ → String
-showVal halted          = "?"
-showVal (finished v _)  = show v
+private
+  -- Show a Result ℕ value
+  showResult : Result ℕ → String
+  showResult halted         = "halted"
+  showResult (finished v _) = show v
 
-showRow : String → Result ℕ → String
-showRow label r = "fib(" ++ label ++ ") = " ++ showVal r
-                ++ "  [tel remaining: " ++ telLeft r ++ "]"
-  where
-    telLeft : Result ℕ → String
-    telLeft halted          = "exhausted"
-    telLeft (finished _ g)  = show g
+  -- Show a Result (ℕ × ℕ) value
+  showResultPair : Result (ℕ × ℕ) → String
+  showResultPair halted               = "halted"
+  showResultPair (finished (a , b) _) = "(" ++ show a ++ ", " ++ show b ++ ")"
+
+  -- One row of the fibonacci-via-Ty-syntax table.
+  -- Explicitly shows each stage of the pipeline:
+  --   n  |  ⟦fibS⟧C n (cost)  |  ⟦fibS⟧C n (val)  |  runFromSyntax fibS n
+  showFibSRow : ℕ → String
+  showFibSRow n =
+    let cost = fibS-cost n           -- STEP 2: tel budget from CostM
+        val  = fibS-val  n           -- STEP 2: value from CostM (no execution yet)
+        res  = fibS-run  n           -- STEP 3: TelM run with that exact budget
+    in "  fib(" ++ show n ++ ")"
+       ++ "  cost=⟦fibS⟧C " ++ show n ++ "=" ++ show cost
+       ++ "  val=⟦fibS⟧C " ++ show n ++ "=" ++ show val
+       ++ "  run=" ++ showResult res
+
+  -- One row for a nat ⇨S nat composed syntax program
+  showComposedRow : nat ⇨S nat → String → ℕ → String
+  showComposedRow prog name n =
+    let cost = proj₁ (⟦ prog ⟧C n)
+        res  = runFromSyntax prog n
+    in "  (" ++ name ++ ")(" ++ show n ++ ")"
+       ++ "  auto-cost=" ++ show cost
+       ++ "  result=" ++ showResult res
+
+  showPairRow : ℕ → String
+  showPairRow n =
+    let cost = proj₁ (⟦ fibPairS ⟧C n)
+        res  = runFromSyntax fibPairS n
+    in "  (forkS fibS fibS)(" ++ show n ++ ")"
+       ++ "  auto-cost=" ++ show cost
+       ++ "  result=" ++ showResultPair res
 
 main : Main
 main = IO.run
-  (putStrLn "Fibonacci sequence (fib 0 .. fib 10):"                IO.>>
-   putStrLn (showRow " 0" fib-0)   IO.>>
-   putStrLn (showRow " 1" fib-1)   IO.>>
-   putStrLn (showRow " 2" fib-2)   IO.>>
-   putStrLn (showRow " 3" fib-3)   IO.>>
-   putStrLn (showRow " 4" fib-4)   IO.>>
-   putStrLn (showRow " 5" fib-5)   IO.>>
-   putStrLn (showRow " 6" fib-6)   IO.>>
-   putStrLn (showRow " 7" fib-7)   IO.>>
-   putStrLn (showRow " 8" fib-8)   IO.>>
-   putStrLn (showRow " 9" fib-9)   IO.>>
-   putStrLn (showRow "10" fib-10)  IO.>>
-   putStrLn ""                                                       IO.>>
-   putStrLn ("Out-of-tel: fib(10) with tel 5 → " ++ showVal fib-10-starved))
+  (-- ── HEADER ──────────────────────────────────────────────────────────────
+   putStrLn "================================================================" IO.>>
+   putStrLn "  Fibonacci sequence expressed in the Ty typed syntax (_⇨S_)"   IO.>>
+   putStrLn "================================================================" IO.>>
+   putStrLn ""                                                                 IO.>>
+   putStrLn "  Program:  fibS : nat ⇨S nat"                                   IO.>>
+   putStrLn "  (nat and _⇨S_ come from the Ty typed syntax category, §12)"   IO.>>
+   putStrLn ""                                                                 IO.>>
+   putStrLn "  Pipeline for each n:"                                           IO.>>
+   putStrLn "    STEP 1  fibS : nat ⇨S nat          -- program in Ty syntax"  IO.>>
+   putStrLn "    STEP 2  ⟦fibS⟧C n = (cost, val)   -- CostM: compute budget"  IO.>>
+   putStrLn "    STEP 3  ⟦fibS⟧K n cost = just(val,0) -- TelM: run it"        IO.>>
+   putStrLn "            (= runFromSyntax fibS n)"                             IO.>>
+   putStrLn ""                                                                 IO.>>
+   -- ── FIBONACCI SEQUENCE TABLE ────────────────────────────────────────────
+   putStrLn "  n  │ ⟦fibS⟧C→cost │ ⟦fibS⟧C→val │ runFromSyntax fibS n" IO.>>
+   putStrLn "  ───┼──────────────┼─────────────┼──────────────────────" IO.>>
+   putStrLn (showFibSRow 0)  IO.>>
+   putStrLn (showFibSRow 1)  IO.>>
+   putStrLn (showFibSRow 2)  IO.>>
+   putStrLn (showFibSRow 3)  IO.>>
+   putStrLn (showFibSRow 4)  IO.>>
+   putStrLn (showFibSRow 5)  IO.>>
+   putStrLn (showFibSRow 6)  IO.>>
+   putStrLn (showFibSRow 7)  IO.>>
+   putStrLn (showFibSRow 8)  IO.>>
+   putStrLn (showFibSRow 9)  IO.>>
+   putStrLn (showFibSRow 10) IO.>>
+   putStrLn ""               IO.>>
+   putStrLn "  Note: cost = n+1 (one tel per recursive step)."         IO.>>
+   putStrLn "        val  = fib(n) computed by CostM — no tel spent."  IO.>>
+   putStrLn "        run  = TelM with exactly that budget: always finished." IO.>>
+   putStrLn "        Proof: ⟦⟧-adequate fibS (type-checked by Agda)."  IO.>>
+   putStrLn ""                                                                 IO.>>
+   -- ── COMPOSED SYNTAX PROGRAMS ────────────────────────────────────────────
+   putStrLn "================================================================" IO.>>
+   putStrLn "  Composed _⇨S_ programs — cost derived from structure"          IO.>>
+   putStrLn "================================================================" IO.>>
+   putStrLn ""                                                                 IO.>>
+   putStrLn "  doubleFibS = fibS ∘S fibS : nat ⇨S nat"                       IO.>>
+   putStrLn "  Cost = ⟦fibS∘SfibS⟧C n = (n+1) + (fib(n)+1), auto-computed"  IO.>>
+   putStrLn (showComposedRow doubleFibS "fibS ∘S fibS" 0)  IO.>>
+   putStrLn (showComposedRow doubleFibS "fibS ∘S fibS" 3)  IO.>>
+   putStrLn (showComposedRow doubleFibS "fibS ∘S fibS" 5)  IO.>>
+   putStrLn (showComposedRow doubleFibS "fibS ∘S fibS" 7)  IO.>>
+   putStrLn ""                                                                 IO.>>
+   putStrLn "  fibPairS = forkS fibS fibS : nat ⇨S (nat ⊗ nat)"              IO.>>
+   putStrLn "  Cost = 2*(n+1), auto-computed from fork structure"             IO.>>
+   putStrLn (showPairRow 0)  IO.>>
+   putStrLn (showPairRow 5)  IO.>>
+   putStrLn (showPairRow 10) IO.>>
+   putStrLn ""                                                                 IO.>>
+   putStrLn "================================================================" IO.>>
+   putStrLn "  All tel budgets computed from _⇨S_ syntax. No manual input."  IO.>>
+   putStrLn "  Correctness: precise + ⟦⟧-adequate (Agda-verified)."          IO.>>
+   putStrLn "================================================================")
