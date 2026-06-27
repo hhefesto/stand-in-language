@@ -12,6 +12,28 @@
 
 A virtual machine with a simple grammar evolved from simply typed lambda calculus, that eventually will have powerful static checking and an optimizing backend.
 
+## Agda denotational design, ConCat diagrams & HVM2 (the `agda` branch)
+
+This branch explores telomare as a **denotational design** (Conal Elliott style):
+`telomare.agda` defines a typed categorical syntax `_⇨S_` with **three homomorphic
+interpretations** — execution (`⟦_⟧K`), cost (`⟦_⟧C`), and parallel work/span
+(`⟦_⟧WS`) — so every program carries a **machine-checked, exact gas (tel) cost**.
+The same design is then pushed through Conal's **ConCat** to render circuit SVGs
+and to **emit runnable HVM2 programs**.
+
+| `nix run`/`build` | what it does | docs |
+|---|---|---|
+| `nix run .#agda-telomare` | run the compiled Agda telomare demo | `README-Agda.md` |
+| `nix build .#agda-telomare` | type-check `telomare.agda` (all proofs) | `README-Agda.md` |
+| `nix run .#telomare-ctc-svg` | render the `_⇨S_` morphisms as ConCat **circuit SVGs** → `out/*.svg` | `ctc/DIAGRAMS.md` |
+| `nix run .#ctc-to-hvm` | compile morphisms through ConCat to **HVM2**, run + emit `out/hvm-*.{bend,hvm}` | `ctc/HVM-BACKEND.md` |
+| `nix run .#bend-hello` / `.#bend-sort` | a Bend hello-world / the merge-sort network on HVM2 | `PARALLEL.md` |
+
+Key docs: **`README-Agda.md`** (the Agda design), **`ctc/DIAGRAMS.md`** (ConCat
+circuit diagrams), **`ctc/HVM-BACKEND.md`** (the ConCat→HVM2 backend), and
+**`PARALLEL.md`** (parallel cost + the HVM2 refinement). The sections below
+describe the original upstream Haskell VM.
+
 ## Warning
 This project is in active development. Do expect bugs and general trouble, and please let us know if you run into any by creating a new issue if one does not already exist.
 

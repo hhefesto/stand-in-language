@@ -11,9 +11,11 @@
 {-# OPTIONS --guardedness #-}
 module telomare where
 
-open import Data.Nat             using (ℕ; zero; suc; _+_)
+open import Data.Nat             using (ℕ; zero; suc; _+_; _⊓_; _⊔_)
 open import Data.Maybe           using (Maybe; just; nothing; _>>=_)
 open import Data.Product         using (_×_; _,_; proj₁; proj₂)
+open import Data.Sum             using (_⊎_; inj₁; inj₂)
+open import Data.List            using (List; []; _∷_; length)
 open import Data.Bool            using (Bool; true; false; if_then_else_)
 open import Data.Unit            using (⊤; tt)
 open import Relation.Binary.PropositionalEquality using (_≡_; refl; sym; trans; cong; subst)
@@ -162,14 +164,19 @@ data Ty : Set where
   nat  : Ty
   bool : Ty
   _⊗_  : Ty → Ty → Ty
+  _⊕_  : Ty → Ty → Ty   -- coproduct (sum): enables branching
+  listT : Ty → Ty       -- recursive type: lists (needs more than sums!)
 
 infixl 5 _⊗_
+infixl 4 _⊕_
 
 ⟦_⟧T : Ty → Set
 ⟦ unit  ⟧T = ⊤
 ⟦ nat   ⟧T = ℕ
 ⟦ bool  ⟧T = Bool
 ⟦ A ⊗ B ⟧T = ⟦ A ⟧T × ⟦ B ⟧T
+⟦ A ⊕ B ⟧T = ⟦ A ⟧T ⊎ ⟦ B ⟧T
+⟦ listT A ⟧T = List ⟦ A ⟧T
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- § 5.  RECURSION PRIMITIVE FOR EXECUTION (TelM)
@@ -273,8 +280,18 @@ data _⇨S_ : Ty → Ty → Set where
   forkS : {A B C : Ty} → A ⇨S B → A ⇨S C → A ⇨S (B ⊗ C)
   exlS  : {A B : Ty}   → (A ⊗ B) ⇨S A
   exrS  : {A B : Ty}   → (A ⊗ B) ⇨S B
+  -- Cocartesian structure: injections + case eliminator (data-dependent branching).
+  inlS  : {A B : Ty}   → A ⇨S (A ⊕ B)
+  inrS  : {A B : Ty}   → B ⇨S (A ⊕ B)
+  caseS : {A B C : Ty} → A ⇨S C → B ⇨S C → (A ⊕ B) ⇨S C
+  -- List structure: build (nil/cons) and destruct (uncons → 1 ⊕ head×tail).
+  nilS    : {A : Ty} → unit ⇨S listT A
+  consS   : {A : Ty} → (A ⊗ listT A) ⇨S listT A
+  unconsS : {A : Ty} → listT A ⇨S (unit ⊕ (A ⊗ listT A))
   addS   :                 (nat ⊗ nat) ⇨S nat      -- addition: ⟦A⟧T×⟦B⟧T→ℕ
   predS  :                 nat ⇨S nat               -- predecessor: pred n
+  minS   :                 (nat ⊗ nat) ⇨S nat       -- minimum (compare); costs 1 tel
+  maxS   :                 (nat ⊗ nat) ⇨S nat       -- maximum (compare); costs 1 tel
   constS : {A : Ty} → ℕ → A ⇨S nat                -- constant natural: ignores input
   iterS  : {A : Ty} → A ⇨S A → (nat ⊗ A) ⇨S A    -- bounded iteration: apply f n times
   fixS   : {A B : Ty}
@@ -309,8 +326,18 @@ private
 ⟦ forkS f g ⟧K = forkK ⟦ f ⟧K ⟦ g ⟧K
 ⟦ exlS      ⟧K (a , _) = return-tel a
 ⟦ exrS      ⟧K (_ , b) = return-tel b
+⟦ inlS      ⟧K a = return-tel (inj₁ a)
+⟦ inrS      ⟧K b = return-tel (inj₂ b)
+⟦ caseS l r ⟧K (inj₁ a) = ⟦ l ⟧K a       -- branch on the data: take left
+⟦ caseS l r ⟧K (inj₂ b) = ⟦ r ⟧K b       -- take right
+⟦ nilS      ⟧K _ = return-tel []
+⟦ consS     ⟧K (x , xs) = return-tel (x ∷ xs)
+⟦ unconsS   ⟧K [] = return-tel (inj₁ tt)
+⟦ unconsS   ⟧K (x ∷ xs) = return-tel (inj₂ (x , xs))
 ⟦ addS        ⟧K (a , b) = return-tel (a + b)
 ⟦ predS       ⟧K n       = return-tel (predℕ n)
+⟦ minS        ⟧K (a , b) = step-tel (return-tel (a ⊓ b))
+⟦ maxS        ⟧K (a , b) = step-tel (return-tel (a ⊔ b))
 ⟦ constS k    ⟧K _       = return-tel k
 ⟦ iterS f     ⟧K (n , a) = iterT-aux n ⟦ f ⟧K a
 ⟦ fixS bodyK _ _ ⟧K = fixT bodyK
@@ -323,8 +350,18 @@ private
 ⟦ forkS f g ⟧C = forkC ⟦ f ⟧C ⟦ g ⟧C
 ⟦ exlS      ⟧C (a , _) = return-cost a
 ⟦ exrS      ⟧C (_ , b) = return-cost b
+⟦ inlS      ⟧C a = return-cost (inj₁ a)
+⟦ inrS      ⟧C b = return-cost (inj₂ b)
+⟦ caseS l r ⟧C (inj₁ a) = ⟦ l ⟧C a       -- cost = cost of the TAKEN branch
+⟦ caseS l r ⟧C (inj₂ b) = ⟦ r ⟧C b
+⟦ nilS      ⟧C _ = return-cost []
+⟦ consS     ⟧C (x , xs) = return-cost (x ∷ xs)
+⟦ unconsS   ⟧C [] = return-cost (inj₁ tt)
+⟦ unconsS   ⟧C (x ∷ xs) = return-cost (inj₂ (x , xs))
 ⟦ addS        ⟧C (a , b) = return-cost (a + b)
 ⟦ predS       ⟧C n       = return-cost (predℕ n)
+⟦ minS        ⟧C (a , b) = step-cost (return-cost (a ⊓ b))
+⟦ maxS        ⟧C (a , b) = step-cost (return-cost (a ⊔ b))
 ⟦ constS k    ⟧C _       = return-cost k
 ⟦ iterS f     ⟧C (n , a) = iterC-aux n ⟦ f ⟧C a
 ⟦ fixS _ costF _ ⟧C = costF
@@ -351,6 +388,22 @@ precise exlS        (a , _)   extra = refl
 precise exrS        (_ , b)   extra = refl
 precise addS        (a , b)   extra = refl
 precise predS       n         extra = refl
+-- minS / maxS: cost = 1 (step-cost); (suc 0 + extra) = suc extra, step-tel fires → refl
+precise minS        (a , b)   extra = refl
+precise maxS        (a , b)   extra = refl
+-- inlS / inrS: cost 0 (return), (0 + extra) = extra → refl
+precise inlS        a         extra = refl
+precise inrS        b         extra = refl
+-- caseS l r: cost = taken branch's cost; precision follows by branch-split,
+-- reusing the precision of the chosen branch.  (Cost is now DATA-DEPENDENT, but
+-- still exact & guaranteed per input — the whole point.)
+precise (caseS l r) (inj₁ a)  extra = precise l a extra
+precise (caseS l r) (inj₂ b)  extra = precise r b extra
+-- list constructors: cost 0, (0 + extra) = extra → refl
+precise nilS        _         extra = refl
+precise consS       (x , xs)  extra = refl
+precise unconsS     []        extra = refl
+precise unconsS     (x ∷ xs)  extra = refl
 -- constS k: cost = 0, result = k; (0 + extra) = extra definitionally → refl
 precise (constS _)  _         extra = refl
 -- iterS f: n steps each costing ⟦f⟧C; proved by induction on n (helper below)
@@ -402,6 +455,91 @@ precise (forkS f g) a         extra =
        (cong (λ mx → mx >>= λ { (b , t') →
            ⟦ g ⟧K a t' >>= λ { (c , t'') → just ((b , c) , t'') } }) pf')
        (cong (λ mx → mx >>= λ { (c , t'') → just ((vf , c) , t'') }) pg)
+
+-- §8f. Branching demo: cost is now DATA-DEPENDENT yet still exact + guaranteed.
+--   branchExample : (nat ⊕ (nat ⊗ nat)) ⇨S nat
+--     left  (inj₁ n)     ↦ n          via idS   — cost 0
+--     right (inj₂ (a,b)) ↦ min a b    via minS  — cost 1
+-- The cost the functor reports depends on which branch the input selects; for
+-- each input it is exact, and `precise` (above) guarantees execution succeeds.
+branchExample : (nat ⊕ (nat ⊗ nat)) ⇨S nat
+branchExample = caseS idS minS
+
+branchExample-left  : ⟦ branchExample ⟧C (inj₁ 5)       ≡ (0 , 5)
+branchExample-left  = refl
+branchExample-right : ⟦ branchExample ⟧C (inj₂ (3 , 7)) ≡ (1 , 3)
+branchExample-right = refl
+
+-- §8g. PARALLEL COST: a (work , span) interpretation — a THIRD functor out of the
+-- syntax, in Conal's "same program, another interpretation" style.
+--   work = total operations  = the sequential tel cost (so the §8e execution
+--          guarantee carries over to the work component);
+--   span = critical-path depth = parallel time.
+-- Only forkS exposes parallelism: it ADDS work but takes the MAX of the two spans.
+-- Everything else (∘S, iterS, caseS, primitives) is sequential along its path.
+WS : Set → Set
+WS A = (ℕ × ℕ) × A                            -- ((work , span) , value)
+
+return-ws : {A : Set} → A → WS A
+return-ws a = ((0 , 0) , a)
+
+bind-ws : {A B : Set} → WS A → (A → WS B) → WS B
+bind-ws ((w , s) , a) f =
+  let ((w' , s') , b) = f a
+  in  ((w + w' , s + s') , b)                 -- sequential: work AND span add
+
+step-ws : {A : Set} → WS A → WS A
+step-ws ((w , s) , a) = ((suc w , suc s) , a) -- one op: +1 work, +1 span
+
+_→WS_ : Set → Set → Set
+A →WS B = A → WS B
+
+idWS : {A : Set} → A →WS A
+idWS = return-ws
+
+_∘WS_ : {A B C : Set} → (B →WS C) → (A →WS B) → A →WS C
+(g ∘WS f) a = bind-ws (f a) g
+
+forkWS : {A B C : Set} → (A →WS B) → (A →WS C) → A →WS (B × C)
+forkWS f g a =
+  let ((wf , sf) , vf) = f a
+      ((wg , sg) , vg) = g a
+  in  ((wf + wg , sf ⊔ sg) , (vf , vg))       -- PARALLEL: work adds, span = max
+
+private
+  iterWS-aux : {A : Set} → ℕ → (A →WS A) → A →WS A
+  iterWS-aux zero    _ a = return-ws a
+  iterWS-aux (suc n) f a = step-ws (bind-ws (f a) (iterWS-aux n f))
+
+⟦_⟧WS : {A B : Ty} → A ⇨S B → ⟦ A ⟧T →WS ⟦ B ⟧T
+⟦ idS       ⟧WS = idWS
+⟦ g ∘S f    ⟧WS = ⟦ g ⟧WS ∘WS ⟦ f ⟧WS
+⟦ !S        ⟧WS _ = return-ws tt
+⟦ forkS f g ⟧WS = forkWS ⟦ f ⟧WS ⟦ g ⟧WS
+⟦ exlS      ⟧WS (a , _) = return-ws a
+⟦ exrS      ⟧WS (_ , b) = return-ws b
+⟦ inlS      ⟧WS a = return-ws (inj₁ a)
+⟦ inrS      ⟧WS b = return-ws (inj₂ b)
+⟦ caseS l r ⟧WS (inj₁ a) = ⟦ l ⟧WS a
+⟦ caseS l r ⟧WS (inj₂ b) = ⟦ r ⟧WS b
+⟦ nilS      ⟧WS _ = return-ws []
+⟦ consS     ⟧WS (x , xs) = return-ws (x ∷ xs)
+⟦ unconsS   ⟧WS [] = return-ws (inj₁ tt)
+⟦ unconsS   ⟧WS (x ∷ xs) = return-ws (inj₂ (x , xs))
+⟦ addS      ⟧WS (a , b) = return-ws (a + b)
+⟦ predS     ⟧WS n       = return-ws (predℕ n)
+⟦ minS      ⟧WS (a , b) = step-ws (return-ws (a ⊓ b))
+⟦ maxS      ⟧WS (a , b) = step-ws (return-ws (a ⊔ b))
+⟦ constS k  ⟧WS _       = return-ws k
+⟦ iterS f   ⟧WS (n , a) = iterWS-aux n ⟦ f ⟧WS a
+-- fixS: no span info is bundled, so conservatively span ≔ work (assume the
+-- recursion is sequential — a sound upper bound on parallel depth).
+⟦ fixS _ costF _ ⟧WS a = let (c , v) = costF a in ((c , c) , v)
+
+-- Extract work / span of a program at an input.
+work span : {A B : Ty} → A ⇨S B → ⟦ A ⟧T → ℕ
+work f a = proj₁ (proj₁ (⟦ f ⟧WS a))
+span f a = proj₂ (proj₁ (⟦ f ⟧WS a))
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- § 9.  SYNTAX ADEQUACY AND BRIDGE
@@ -563,6 +701,145 @@ fibPairS : nat ⇨S (nat ⊗ nat)
 fibPairS = forkS fibS fibS
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- § 10b. MERGE SORT AS A SORTING NETWORK IN _⇨S_
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- _⇨S_ has no lists/recursion/branching, so a recursive list merge sort is not
+-- expressible.  But a FIXED-SIZE merge sort is: a sorting network of
+-- compare-and-swap blocks.  The compare-and-swap is exactly
+--
+--     casS = forkS minS maxS : (nat ⊗ nat) ⇨S (nat ⊗ nat)
+--           (x , y)  ↦  (min x y , max x y)
+--
+-- and an 8-input network wires 19 of them "sort the two halves, then merge"
+-- (Batcher's odd-even mergesort).  Every morphism below is built purely from
+-- _⇨S_ constructors, so it is automatically `precise` (precision is
+-- compositional — see §8e).  With minS/maxS each costing 1 tel, the whole
+-- network costs 38 = 19 × 2, independent of the input.
+
+-- The compare-and-swap (the heart of the merge): (x,y) ↦ (min x y, max x y).
+casS : (nat ⊗ nat) ⇨S (nat ⊗ nat)
+casS = forkS minS maxS
+
+-- Eight wires.  With `infixl 5 _⊗_` this is the left-nested 8-tuple
+-- ((((((nat⊗nat)⊗nat)⊗nat)⊗nat)⊗nat)⊗nat)⊗nat ; position 0 is the innermost-left.
+V8 : Ty
+V8 = nat ⊗ nat ⊗ nat ⊗ nat ⊗ nat ⊗ nat ⊗ nat ⊗ nat
+
+private
+  -- Projections of the 8 wires (position k, 0-indexed from the left).
+  π0 π1 π2 π3 π4 π5 π6 π7 : V8 ⇨S nat
+  π0 = exlS ∘S exlS ∘S exlS ∘S exlS ∘S exlS ∘S exlS ∘S exlS
+  π1 = exrS ∘S exlS ∘S exlS ∘S exlS ∘S exlS ∘S exlS ∘S exlS
+  π2 = exrS ∘S exlS ∘S exlS ∘S exlS ∘S exlS ∘S exlS
+  π3 = exrS ∘S exlS ∘S exlS ∘S exlS ∘S exlS
+  π4 = exrS ∘S exlS ∘S exlS ∘S exlS
+  π5 = exrS ∘S exlS ∘S exlS
+  π6 = exrS ∘S exlS
+  π7 = exrS
+
+  -- One half of a compare-and-swap on two chosen wires:
+  --   lo f g = min of the two wires ;  hi f g = max of the two wires.
+  lo hi : (V8 ⇨S nat) → (V8 ⇨S nat) → (V8 ⇨S nat)
+  lo f g = minS ∘S forkS f g
+  hi f g = maxS ∘S forkS f g
+
+  -- Reassemble eight wires into a V8 (left-nested fork tree).
+  mk8 : (V8 ⇨S nat) → (V8 ⇨S nat) → (V8 ⇨S nat) → (V8 ⇨S nat)
+      → (V8 ⇨S nat) → (V8 ⇨S nat) → (V8 ⇨S nat) → (V8 ⇨S nat) → (V8 ⇨S V8)
+  mk8 w0 w1 w2 w3 w4 w5 w6 w7 =
+    forkS (forkS (forkS (forkS (forkS (forkS (forkS w0 w1) w2) w3) w4) w5) w6) w7
+
+  -- The six stages of Batcher odd-even mergesort on 8 wires.
+  -- Comparator (i,j): position i ← min, position j ← max; other positions pass.
+  L1 L2 L3 L4 L5 L6 : V8 ⇨S V8
+  -- sort the two halves [0..3] and [4..7]:
+  L1 = mk8 (lo π0 π1) (hi π0 π1) (lo π2 π3) (hi π2 π3)
+           (lo π4 π5) (hi π4 π5) (lo π6 π7) (hi π6 π7)            -- (0,1)(2,3)(4,5)(6,7)
+  L2 = mk8 (lo π0 π2) (lo π1 π3) (hi π0 π2) (hi π1 π3)
+           (lo π4 π6) (lo π5 π7) (hi π4 π6) (hi π5 π7)            -- (0,2)(1,3)(4,6)(5,7)
+  L3 = mk8 π0 (lo π1 π2) (hi π1 π2) π3
+           π4 (lo π5 π6) (hi π5 π6) π7                            -- (1,2)(5,6)
+  -- merge the two sorted halves:
+  L4 = mk8 (lo π0 π4) (lo π1 π5) (lo π2 π6) (lo π3 π7)
+           (hi π0 π4) (hi π1 π5) (hi π2 π6) (hi π3 π7)            -- (0,4)(1,5)(2,6)(3,7)
+  L5 = mk8 π0 π1 (lo π2 π4) (lo π3 π5)
+           (hi π2 π4) (hi π3 π5) π6 π7                            -- (2,4)(3,5)
+  L6 = mk8 π0 (lo π1 π2) (hi π1 π2) (lo π3 π4)
+           (hi π3 π4) (lo π5 π6) (hi π5 π6) π7                    -- (1,2)(3,4)(5,6)
+
+-- The full 8-input merge-sort network.
+mergeSortS : V8 ⇨S V8
+mergeSortS = L6 ∘S L5 ∘S L4 ∘S L3 ∘S L2 ∘S L1
+
+-- Machine-checked: sorting [7,6,5,4,3,2,1,0] gives [0,1,2,3,4,5,6,7],
+-- and the cost functor reports 38 (= 19 comparators × 2 min/max), by refl.
+mergeSort-test :
+  ⟦ mergeSortS ⟧C ((((((( 7 , 6 ) , 5 ) , 4 ) , 3 ) , 2 ) , 1 ) , 0)
+  ≡ (38 , ((((((( 0 , 1 ) , 2 ) , 3 ) , 4 ) , 5 ) , 6 ) , 7))
+mergeSort-test = refl
+
+-- §10c. PARALLEL COST (work , span), all machine-checked by refl.
+--   fibS 10     : sequential iterS, no fork      → span = work = 10
+--   fibPairS 10 : forkS fibS fibS (parallel)     → work 20 but span 10
+--   mergeSortS  : 6 stages of independent CAS     → work 38 but span 6
+-- The work component equals the §8d cost (sequential tel) — guarantee preserved;
+-- the span component is the parallel depth Bend/HVM could realize.
+fibS-WS : ⟦ fibS ⟧WS 10 ≡ ((10 , 10) , 55)
+fibS-WS = refl
+
+fibPair-WS : ⟦ fibPairS ⟧WS 10 ≡ ((20 , 10) , (55 , 55))
+fibPair-WS = refl
+
+mergeSort-WS :
+  ⟦ mergeSortS ⟧WS ((((((( 7 , 6 ) , 5 ) , 4 ) , 3 ) , 2 ) , 1 ) , 0)
+  ≡ ((38 , 6) , ((((((( 0 , 1 ) , 2 ) , 3 ) , 4 ) , 5 ) , 6 ) , 7))
+mergeSort-WS = refl
+
+-- work = sequential tel cost (the execution guarantee), span < work ⇒ parallelism.
+mergeSort-work-is-cost :
+  work mergeSortS ((((((( 7 , 6 ) , 5 ) , 4 ) , 3 ) , 2 ) , 1 ) , 0)
+  ≡ proj₁ (⟦ mergeSortS ⟧C ((((((( 7 , 6 ) , 5 ) , 4 ) , 3 ) , 2 ) , 1 ) , 0))
+mergeSort-work-is-cost = refl
+
+-- §10d. GENERAL RECURSION OVER LISTS, WITH A PROVED EXACT COST.
+-- With the recursive `listT` type, a genuinely recursive list program is now
+-- expressible — and `fixS` *forces* you to supply a cost function AND prove it.
+-- `lengthS` is the first such program: length of a list, computed by recursion,
+-- with the machine-checked guarantee that it costs exactly (length + 1) tel.
+-- This is the mechanism a general merge sort would use (see the note below).
+lengthS : {A : Ty} → listT A ⇨S nat
+lengthS {A} = fixS bodyK costF precF
+  where
+    bodyK : (⟦ listT A ⟧T →K ℕ) → ⟦ listT A ⟧T →K ℕ
+    bodyK rec []       = return-tel 0
+    bodyK rec (x ∷ xs) = bind-tel (rec xs) (λ n → return-tel (suc n))
+
+    costF : ⟦ listT A ⟧T →C ℕ
+    costF xs = (suc (length xs) , length xs)   -- cost = len+1, value = len
+
+    precF : ∀ xs extra →
+      fixT bodyK xs (proj₁ (costF xs) + extra) ≡ just (proj₂ (costF xs) , extra)
+    precF []       extra = refl
+    precF (x ∷ xs) extra =
+      cong (λ m → m >>= λ { (n , t) → just (suc n , t) }) (precF xs extra)
+
+-- Machine-checked: length [10,20,30] = 3, at exact cost 4 (= 3 + 1).
+lengthS-test : ⟦ lengthS ⟧C (10 ∷ 20 ∷ 30 ∷ []) ≡ (4 , 3)
+lengthS-test = refl
+
+-- NOTE on general merge sort.  It is now *expressible*: lists exist (`listT`),
+-- the merge step is `unconsS` + `caseS` + `minS`/`maxS` (data-dependent branching),
+-- and the divide-and-conquer recursion goes through `fixS` (fuel = tel bounds the
+-- recursion depth).  `fixS` still *forces* a cost guarantee — it will not
+-- type-check without a `precF` proof, exactly as `lengthS` above demonstrates.
+-- The remaining work is that `precF` for merge sort: an exact-tel-cost proof of a
+-- well-founded recursion, which is a substantial separate formalization (a
+-- comparison sort's cost is data-dependent, so the proof tracks the actual
+-- comparisons rather than a closed-form constant).  `lengthS` proves the pattern
+-- end-to-end; merge sort is the same pattern at scale.
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- § 11.  MAIN: DEMONSTRATE AUTO-COMPUTED TELOMARE
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -665,6 +942,16 @@ main = IO.run do
   putStrLn (showPairRow 0)
   putStrLn (showPairRow 5)
   putStrLn (showPairRow 10)
+  putStrLn ""
+  putStrLn "================================================================"
+  putStrLn "  Merge sort as a sorting network in _⇨S_ (8 inputs)"
+  putStrLn "================================================================"
+  putStrLn ""
+  putStrLn "  mergeSortS : V8 ⇨S V8"
+  putStrLn "    = L6 ∘S L5 ∘S L4 ∘S L3 ∘S L2 ∘S L1   (Batcher odd-even mergesort)"
+  putStrLn "    19 compare-and-swaps (casS = forkS minS maxS); each min/max costs 1 tel"
+  putStrLn "  ⟦mergeSortS⟧C [7,6,5,4,3,2,1,0] = (38, [0,1,2,3,4,5,6,7])"
+  putStrLn "    cost 38 = 19 comparators × 2; sorted result — both refl-verified (mergeSort-test)"
   putStrLn ""
   putStrLn "================================================================"
   putStrLn "  All tel budgets computed from _⇨S_ syntax. No manual input."

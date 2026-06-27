@@ -20,3 +20,8 @@ dev-profile*
 *.agdai
 MAlonzo/
 telomare
+
+# ConCat (ctc) generated diagrams (ctc/out when run via cabal; /out when run
+# from the repo root via `nix run .#telomare-ctc-svg`)
+ctc/out/
+/out/

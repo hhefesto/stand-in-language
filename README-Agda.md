@@ -19,24 +19,34 @@ agda --compile telomare.agda && ./telomare   # compile and run
 
 ---
 
-## The Central Idea: Two Interpretations, One Syntax
+## The Central Idea: Many Interpretations, One Syntax
 
 Following Conal Elliott's **Compiling to Categories** (ICFP 2017):
-the same program structure is interpreted in two different categories,
-producing two different semantics.
+the same program structure is interpreted in several different categories,
+each producing a different semantics. telomare now has **three**:
 
 ```
 A ⇨S B  (typed syntax)
   │
-  ├─── ⟦_⟧K ───▶  ⟦A⟧T →K ⟦B⟧T   (execution:  may fail, consumes tel)
+  ├─── ⟦_⟧K  ───▶  ⟦A⟧T →K ⟦B⟧T    (execution:    may fail, consumes tel)
   │
-  └─── ⟦_⟧C ───▶  ⟦A⟧T →C ⟦B⟧T   (cost:       always succeeds, counts tel)
+  ├─── ⟦_⟧C  ───▶  ⟦A⟧T →C ⟦B⟧T    (cost:         always succeeds, counts tel)
+  │
+  └─── ⟦_⟧WS ───▶  ⟦A⟧T → (work,span)×⟦B⟧T   (parallel cost: forkS takes max)
 ```
 
-The **adequacy theorem** connects the two:
+The **adequacy theorem** connects the first two:
 if `⟦f⟧C a = (cost, val)` then `⟦f⟧K a cost = just (val, 0)`.
-
 This lets `runFromSyntax` run any program without a manual budget.
+
+The third interpretation (`⟦_⟧WS`, §8g) computes **work** (= the sequential tel
+cost) and **span** (= parallel critical-path depth) — the cost a parallel runtime
+like HVM2 could realize. (See `PARALLEL.md` and `ctc/HVM-BACKEND.md`.)
+
+The syntax is now **bicartesian with lists**: beyond products it has coproducts
+(`_⊕_`, `caseS`) for data-dependent branching and a recursive list type
+(`listT`), so genuinely recursive programs (e.g. `lengthS`, and in principle a
+list merge sort) are expressible — each still carrying a machine-checked cost.
 
 ---
 
@@ -296,20 +306,28 @@ fixT body s g = fixT-aux g body s g
 
 ```agda
 data Ty : Set where
-  unit : Ty
-  nat  : Ty
-  bool : Ty
-  _⊗_  : Ty → Ty → Ty
+  unit  : Ty
+  nat   : Ty
+  bool  : Ty
+  _⊗_   : Ty → Ty → Ty   -- product
+  _⊕_   : Ty → Ty → Ty   -- coproduct (sum): enables branching
+  listT : Ty → Ty        -- recursive list type
 
 ⟦_⟧T : Ty → Set
-⟦ unit  ⟧T = ⊤
-⟦ nat   ⟧T = ℕ
-⟦ bool  ⟧T = Bool
-⟦ A ⊗ B ⟧T = ⟦ A ⟧T × ⟦ B ⟧T
+⟦ unit   ⟧T = ⊤
+⟦ nat    ⟧T = ℕ
+⟦ bool   ⟧T = Bool
+⟦ A ⊗ B  ⟧T = ⟦ A ⟧T × ⟦ B ⟧T
+⟦ A ⊕ B  ⟧T = ⟦ A ⟧T ⊎ ⟦ B ⟧T
+⟦ listT A ⟧T = List ⟦ A ⟧T
 ```
 
 `Ty` is placed before §8/§10 so typed syntax and fibonacci state objects can be
 expressed as `Ty` terms. The typed syntax category `_⇨S_` appears in §8.
+
+`_⊕_` makes the category **cocartesian** (data-dependent branching via `caseS`).
+`listT` is a **recursive type** — note that sums alone are *not* enough for lists;
+the recursive `listT` is what makes genuinely recursive programs expressible.
 
 ---
 
@@ -365,8 +383,16 @@ data _⇨S_ : Ty → Ty → Set where
   forkS  : A ⇨S B → A ⇨S C → A ⇨S (B ⊗ C)
   exlS   : (A ⊗ B) ⇨S A
   exrS   : (A ⊗ B) ⇨S B
+  inlS    : A ⇨S (A ⊕ B)                  -- sum injections + case eliminator
+  inrS    : B ⇨S (A ⊕ B)
+  caseS   : A ⇨S C → B ⇨S C → (A ⊕ B) ⇨S C
+  nilS    : unit ⇨S listT A               -- list build + destruct (uncons)
+  consS   : (A ⊗ listT A) ⇨S listT A
+  unconsS : listT A ⇨S (unit ⊕ (A ⊗ listT A))
   addS   : (nat ⊗ nat) ⇨S nat      -- addition, zero cost
   predS  : nat ⇨S nat               -- predecessor, zero cost
+  minS   : (nat ⊗ nat) ⇨S nat       -- minimum (compare), costs 1 tel
+  maxS   : (nat ⊗ nat) ⇨S nat       -- maximum (compare), costs 1 tel
   constS : ℕ → A ⇨S nat            -- constant natural, zero cost
   iterS  : A ⇨S A → (nat ⊗ A) ⇨S A -- iterate n times, 1 tel per step
   fixS   : (bodyK : ((⟦A⟧T →K ⟦B⟧T) → ⟦A⟧T →K ⟦B⟧T))
@@ -377,10 +403,13 @@ data _⇨S_ : Ty → Ty → Set where
 ```
 
 `constS k` ignores its input and returns the literal `k` at zero cost.
-`iterS f` takes a pair `(n, a)` and applies `f` exactly `n` times to `a`,
-consuming 1 tel per step — the counter IS the budget.
-`fixS` is still available for general host-level recursion bodies.
-`fibS` uses only `constS` and `iterS` with zero-cost structural combinators.
+`minS`/`maxS` are the comparator primitives (each **costs 1 tel**); the
+compare-and-swap `casS = forkS minS maxS` is the heart of the sorting network.
+`inlS`/`inrS`/`caseS` add **data-dependent branching** (cost = the taken branch's
+cost — exact, but no longer input-independent). `nilS`/`consS`/`unconsS` build and
+destruct **lists**, so recursive list programs (via `fixS`) are now expressible.
+`iterS f` applies `f` exactly `n` times, 1 tel per step — the counter IS the
+budget. `fixS` carries general recursion with a *proved* cost (see `lengthS`, §10d).
 
 #### § 8c–d. Dual Denotations
 
@@ -399,8 +428,12 @@ Each constructor maps homomorphically into both categories:
 | `forkS f g` | `forkK ⟦f⟧K ⟦g⟧K` | `forkC ⟦f⟧C ⟦g⟧C` |
 | `exlS` | `λ (a,_) → return-tel a` | `λ (a,_) → return-cost a` |
 | `exrS` | `λ (_,b) → return-tel b` | `λ (_,b) → return-cost b` |
+| `inlS` / `inrS` | `return-tel ∘ inj₁` / `inj₂` | `return-cost ∘ inj₁` / `inj₂` |
+| `caseS l r` | `λ{inj₁ a→⟦l⟧K a; inj₂ b→⟦r⟧K b}` | cost of the **taken** branch |
+| `nilS`/`consS`/`unconsS` | build `[]` / `_∷_` / match (cost 0) | same (cost 0) |
 | `addS` | `λ (a,b) → return-tel (a+b)` | `λ (a,b) → return-cost (a+b)` |
 | `predS` | `λ n → return-tel (predℕ n)` | `λ n → return-cost (predℕ n)` |
+| `minS` / `maxS` | `step-tel (return-tel (a⊓b))` / `⊔` | `step-cost (return-cost (a⊓b))` / `⊔` |
 | `constS k` | `λ _ → return-tel k` | `λ _ → return-cost k` |
 | `iterS f` | `λ (n,a) → iterT-aux n ⟦f⟧K a` | `λ (n,a) → iterC-aux n ⟦f⟧C a` |
 | `fixS bodyK costF _` | `fixT bodyK` | `costF` |
@@ -444,6 +477,53 @@ Proved by induction on `_⇨S_` constructors. The interesting cases:
 through the nested `>>=` of `forkK`.
 
 **`idS`, `!S`, `exlS`, `exrS`, `addS`, `predS`:** `refl` — cost is 0, so `0 + extra = extra` definitionally.
+
+**`minS`, `maxS`:** cost 1 (via `step-cost`); `suc 0 + extra = suc extra` makes
+`step-tel` fire → `refl`.
+
+**`inlS`, `inrS`, `nilS`, `consS`, `unconsS`:** cost 0 → `refl`.
+
+**`caseS l r`:** proved by **branch-split** — `precise (caseS l r) (inj₁ a) = precise l a`,
+`(inj₂ b) = precise r b`. Cost is now **data-dependent** (it depends on which branch
+the input selects) yet still **exact and guaranteed** per input — the precision
+theorem is unchanged; only input-independence is given up.
+
+#### § 8f. Branching demo — data-dependent cost
+
+```agda
+branchExample : (nat ⊕ (nat ⊗ nat)) ⇨S nat
+branchExample = caseS idS minS
+-- ⟦ branchExample ⟧C (inj₁ 5)       ≡ (0 , 5)   -- left branch: idS, cost 0
+-- ⟦ branchExample ⟧C (inj₂ (3 , 7)) ≡ (1 , 3)   -- right branch: minS, cost 1
+```
+
+Both equalities hold by `refl`: the cost the functor reports depends on the input.
+
+#### § 8g. Parallel cost — a third interpretation `⟦_⟧WS`
+
+A `(work , span)` functor, in the same "same syntax, another interpretation"
+style:
+
+```agda
+WS A = (ℕ × ℕ) × A           -- ((work , span) , value)
+⟦_⟧WS : A ⇨S B → ⟦A⟧T → WS ⟦B⟧T
+```
+
+- **work** = total operations = the sequential `tel` cost (so the §8e guarantee
+  carries to the work component);
+- **span** = critical-path depth = parallel time.
+
+Only `forkS` exposes parallelism: it **adds work** but takes the **max** of the two
+branch spans; everything else (`∘S`, `iterS`, `caseS`, primitives) is sequential.
+Machine-checked examples (all `refl`):
+
+| program | work | span | note |
+|---|---|---|---|
+| `fibS 10` | 10 | 10 | sequential `iterS` → span = work |
+| `fibPairS 10` (`forkS fibS fibS`) | 20 | **10** | the two fibs run in parallel |
+| `mergeSortS` (8-input) | 38 | **6** | 6 layers of independent compare-and-swaps |
+
+and `mergeSort-work-is-cost : work mergeSortS xs ≡ proj₁ (⟦ mergeSortS ⟧C xs)`.
 
 ### § 9 — Syntax Adequacy and Bridge
 
@@ -525,6 +605,51 @@ doubleFibS = fibS ∘S fibS
 fibPairS : nat ⇨S (nat ⊗ nat)
 fibPairS = forkS fibS fibS
 ```
+
+#### § 10b–c. Merge sort as a sorting network, with proved cost
+
+A recursive list merge sort is now expressible (`_⇨S_` has lists + branching +
+`fixS` — see §10d), but a **fixed-size** merge sort is simpler and entirely
+*oblivious*: a **sorting network** of compare-and-swaps (`casS = forkS minS maxS`),
+which is also what the combinational ConCat circuit backend can render.
+`mergeSortS` is the 8-input Batcher odd-even mergesort
+(19 comparators in 6 layers); built purely from `_⇨S_` constructors, it is
+automatically `precise`:
+
+```agda
+casS : (nat ⊗ nat) ⇨S (nat ⊗ nat)
+casS = forkS minS maxS
+
+mergeSortS : V8 ⇨S V8                       -- V8 = a left-nested 8-tuple of nat
+mergeSortS = L6 ∘S L5 ∘S L4 ∘S L3 ∘S L2 ∘S L1
+
+-- machine-checked: sorts AND costs exactly 38 (= 19 comparators × 2 min/max)
+mergeSort-test :
+  ⟦ mergeSortS ⟧C [7,6,5,4,3,2,1,0] ≡ (38 , [0,1,2,3,4,5,6,7])
+mergeSort-test = refl
+```
+
+(The ConCat backends render/run this — `ctc/DIAGRAMS.md` shows the 4-input network
+as an SVG; `ctc/HVM-BACKEND.md` runs the full 8-input network on HVM2.)
+
+#### § 10d. General recursion over lists, with a proved exact cost
+
+With `listT`, a genuinely recursive list program is expressible, and `fixS` *forces*
+a cost function + proof. `lengthS` is the first such program — list length by
+recursion, with the machine-checked guarantee that it costs exactly `length + 1`:
+
+```agda
+lengthS : listT A ⇨S nat
+lengthS = fixS bodyK costF precF        -- costF xs = (suc (length xs) , length xs)
+  -- precF: [] case = refl; cons case = one `cong` over the IH
+
+lengthS-test : ⟦ lengthS ⟧C (10 ∷ 20 ∷ 30 ∷ []) ≡ (4 , 3)   -- value 3, cost 4
+lengthS-test = refl
+```
+
+This is the mechanism a general (recursive, list-based) merge sort would use: its
+exact-cost `precF` is a larger formalization, but the pattern is proved end-to-end
+by `lengthS`.
 
 ---
 
@@ -652,16 +777,34 @@ checked adequacy/precision proofs.
 | §2 | `TelM` — execution monad (`return-tel`, `bind-tel`, `step-tel`) |
 | §3 | `CostM` — cost monad (`return-cost`, `bind-cost`, `step-cost`) |
 | §4 | `_→K_`, `_→C_`, `idK/C`, `∘K/C`, `forkK/C` |
-| §4.5 | `Ty` (with `bool`), `⟦_⟧T` — type objects and denotation |
+| §4.5 | `Ty` (`bool`, `_⊕_`, `listT`), `⟦_⟧T` — type objects and denotation |
 | §5 | `fixT-aux`, `fixT` — recursion primitive (fuel pattern) |
 | §6 | `Program` record |
 | §7 | `Result`, `run`, `runAuto` |
-| §8 | `_⇨S_` (with `addS`, `predS`, `constS`, `iterS`, `fixS`), `iterT-aux`, `iterC-aux`, `⟦_⟧K`, `⟦_⟧C`, `Precise`, `precise` |
+| §8 | `_⇨S_` (`addS`/`predS`/`minS`/`maxS`, `inlS`/`inrS`/`caseS`, `nilS`/`consS`/`unconsS`, `constS`/`iterS`/`fixS`), `⟦_⟧K`, `⟦_⟧C`, `Precise`, `precise`; §8f `branchExample`; §8g `⟦_⟧WS` (work/span) |
 | §9 | `⟦⟧-adequate`, `fromSyntax`, `runFromSyntax` |
-| §10 | `FibStateTy`, `FibState`, pure-syntax `fibS`, `fibProgram`, `fib-auto-*`, `fibS-cost/val/run`, `fibS-0..10`, `doubleFibS`, `fibPairS` |
+| §10 | pure-syntax `fibS`, `fibProgram`, `fibS-cost/val/run`, `doubleFibS`, `fibPairS`; §10b–c `casS`/`mergeSortS` (+`mergeSort-test`, work/span examples); §10d `lengthS` (+`lengthS-test`) |
 | §11 | `main` — IO output showing the full pipeline |
 
 ---
+
+## Beyond Agda: ConCat diagrams, parallel cost, and an HVM2 backend
+
+The same `_⇨S_` design is taken further outside Agda (ConCat operates on Haskell,
+so the morphisms are faithful **Haskell ports**; `telomare.agda` stays the
+machine-checked spec):
+
+- **`ctc/DIAGRAMS.md`** — the morphisms compiled through Conal Elliott's ConCat
+  into the **circuit** category and rendered as SVG wiring diagrams
+  (`nix run .#telomare-ctc-svg`): the Fibonacci step/term, the cost functor
+  (`fib-cost`), `forkS`/`_∘S_`, and the merge-sort network.
+- **`ctc/HVM-BACKEND.md`** — a **new ConCat backend** (`ctc/src/HVM.hs`) whose
+  CCC-class instances emit **HVM2/Bend** code, so `toCcc f :: HVM a b` is a runnable
+  HVM2 program (`nix run .#ctc-to-hvm`). The 8-input `mergeSortS` runs here even
+  though it overflowed the circuit backend.
+- **`PARALLEL.md`** — the `(work, span)` functor (§8g) and the stated refinement
+  relating telomare's proved cost to HVM2's actual cost; `bend/merge_sort.bend`
+  runs the network on HVM2 (`nix run .#bend-sort`).
 
 ## Key references
 

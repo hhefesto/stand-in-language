@@ -1,0 +1,40 @@
+cabal-version:      3.0
+name:               ctc
+version:            0.1.0.0
+synopsis:           Telomare _⇨S_ design rendered as circuits via Conal Elliott's ConCat
+license:            Apache-2.0
+build-type:         Simple
+
+-- The ConCat GHC plugin is locked to GHC 9.4.8; this package is built by its
+-- own pinned toolchain in flake.nix (separate from telomare's ghc96 project).
+executable telomare-ctc
+  main-is:          Main.hs
+  hs-source-dirs:   src
+  build-depends:    base >=4.17 && <5
+                  , concat-classes
+                  , concat-examples
+                  , concat-plugin
+                  , directory
+                  , ghc-prim
+  -- -fno-do-lambda-eta-expansion: the ConCat plugin's eta handling otherwise
+  -- mis-types the unrolled fibUnrolled8 let-chain ("ccc post-transfo check.
+  -- Lint"); the glsl ConCat example uses the same flag.
+  ghc-options:      -O2 -fplugin=ConCat.Plugin -fsimpl-tick-factor=500
+                    -fno-do-lambda-eta-expansion
+  default-language: Haskell2010
+
+-- ConCat → HVM2 backend: a new code-emitting CCC category (HVM.hs) + a driver
+-- that compiles telomare morphism ports to runnable Bend (HVM2) programs.
+executable telomare-hvm
+  main-is:          HvmMain.hs
+  other-modules:    HVM
+  hs-source-dirs:   src
+  build-depends:    base >=4.17 && <5
+                  , concat-classes
+                  , concat-examples
+                  , concat-plugin
+                  , directory
+                  , ghc-prim
+  ghc-options:      -O2 -fplugin=ConCat.Plugin -fsimpl-tick-factor=500
+                    -fno-do-lambda-eta-expansion
+  default-language: Haskell2010
