@@ -23,6 +23,15 @@ executable telomare-ctc
                     -fno-do-lambda-eta-expansion
   default-language: Haskell2010
 
+-- Native-GHC baseline for the run comparison (drainS as a strict loop).
+-- NO ConCat plugin — plain -O2.
+executable telomare-bench-hs
+  main-is:          BenchMain.hs
+  hs-source-dirs:   src
+  build-depends:    base >=4.17 && <5
+  ghc-options:      -O2
+  default-language: Haskell2010
+
 -- ConCat → HVM2 backend: a new code-emitting CCC category (HVM.hs) + a driver
 -- that compiles telomare morphism ports to runnable Bend (HVM2) programs.
 executable telomare-hvm

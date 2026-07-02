@@ -395,6 +395,9 @@ data _⇨S_ : Ty → Ty → Set where
   maxS   : (nat ⊗ nat) ⇨S nat       -- maximum (compare), costs 1 tel
   constS : ℕ → A ⇨S nat            -- constant natural, zero cost
   iterS  : A ⇨S A → (nat ⊗ A) ⇨S A -- iterate n times, 1 tel per step
+  whileS : (A ⇨S (unit ⊕ unit)) → (A ⇨S A) → (nat ⊗ A) ⇨S A
+                                     -- {x,y,z} tail form: fuel-bounded guarded
+                                     -- loop, ON-DEMAND metering (see below)
   fixS   : (bodyK : ((⟦A⟧T →K ⟦B⟧T) → ⟦A⟧T →K ⟦B⟧T))
         → (costF : ⟦A⟧T →C ⟦B⟧T)
         → (precF : ∀ a extra →
@@ -524,6 +527,61 @@ Machine-checked examples (all `refl`):
 | `mergeSortS` (8-input) | 38 | **6** | 6 layers of independent compare-and-swaps |
 
 and `mergeSort-work-is-cost : work mergeSortS xs ≡ proj₁ (⟦ mergeSortS ⟧C xs)`.
+
+#### § 8h. Space — a fourth functor, and the resource-algebra square
+
+The resource functors form a **2×2 family** of (sequential, parallel) monoids on
+ℕ — the discrete cousin of Timely Computation's interval-semiring insight (*the
+algebra is the design*):
+
+| | parallel `+` | parallel `⊔` |
+|---|---|---|
+| **sequential `+`** | work `⟦_⟧C` | span `⟦_⟧WS` |
+| **sequential `⊔`** | **space `⟦_⟧SP`** | (footprint — not instantiated) |
+
+**Space is span's dual**: sequential stages *reuse* memory (`⊔` over `∘S`),
+parallel branches are *simultaneously live* (`+` across `forkS`). `⟦_⟧SP`
+measures peak live size under a word model `sizeT` (unit/nat/bool = 1; `⊗` sums;
+`⊕` adds a tag; lists sum with spine). Machine-checked duality (`refl`):
+
+```agda
+fibPair-space : space fibPairS 10 ≡ space fibS 10 + space fibS 10
+--  span of fibPairS = MAX of branches (10); space = SUM (both live)
+```
+
+`fixS` is measured coarsely (`in ⊔ out` — an opaque body's interior is
+unmeasurable; one more argument for reified recursion). The space model is a
+documented abstraction: no adequacy square yet (that needs a memory-instrumented
+`⟦_⟧K`), in the spirit of Timely Computation's "planned improvements".
+
+#### § 8i. `whileS` — `{x,y,z}` reified, derive-then-refine
+
+Telomare's limited-recursion surface form `{x, y, z}` (test, body, base) in its
+tail form is **derivable** from the existing vocabulary (Conal's small-shared-
+vocabulary discipline — see `tictactoe.agda`):
+
+```agda
+guardS t b = caseS (b ∘S exlS) exlS ∘S distlS ∘S forkS idS t   -- one guarded step
+whileD t b = iterS (guardS t b)                                 -- bounded guarded loop
+```
+
+`whileD` inherits all four interpretations and `precise` *for free*, but bills
+**reserved capacity**: `iterS` ticks once per fuel unit even after the test goes
+false. The **primitive `whileS`** is the *refined cost extraction* — same value,
+**on-demand metering** (each check pays the test's own cost; a taken step pays
+1 tel + the body; when the test goes false the metering stops):
+
+```agda
+drainS = whileS nonZeroS predS
+drainS-test : ⟦ drainS ⟧C (10 , 3) ≡ (7 , 0)   -- 3×(test 1 + tick 1) + final test 1
+-- the whileD equivalent bills 20 = 10 fuel ticks × (tick 1 + test 1)
+```
+
+Its precision proof (`while-prec`/`cont-prec`, mutual fuel induction with a
+case-split on the test value) extends the machine-checked guarantee. Agreement
+(the denotational-design law relating the two): both compute the same value —
+checked by `refl` on the tic-tac-toe games (`agree-*` in `tictactoe.agda`).
+Billing reading: `whileD` = pay for reserved capacity; `whileS` = pay for use.
 
 ### § 9 — Syntax Adequacy and Bridge
 
@@ -781,7 +839,7 @@ checked adequacy/precision proofs.
 | §5 | `fixT-aux`, `fixT` — recursion primitive (fuel pattern) |
 | §6 | `Program` record |
 | §7 | `Result`, `run`, `runAuto` |
-| §8 | `_⇨S_` (`addS`/`predS`/`minS`/`maxS`, `inlS`/`inrS`/`caseS`, `nilS`/`consS`/`unconsS`, `constS`/`iterS`/`fixS`), `⟦_⟧K`, `⟦_⟧C`, `Precise`, `precise`; §8f `branchExample`; §8g `⟦_⟧WS` (work/span) |
+| §8 | `_⇨S_` (`addS`/`predS`/`minS`/`maxS`, `inlS`/`inrS`/`caseS`, `nilS`/`consS`/`unconsS`, `natOutS`/`distlS`, `constS`/`iterS`/`whileS`/`fixS`), `⟦_⟧K`, `⟦_⟧C`, `Precise`, `precise` (incl. `while-prec`); §8f `branchExample`; §8g `⟦_⟧WS` (work/span); §8h `sizeT`/`⟦_⟧SP` (space); §8i `whileS` vs derived `whileD` |
 | §9 | `⟦⟧-adequate`, `fromSyntax`, `runFromSyntax` |
 | §10 | pure-syntax `fibS`, `fibProgram`, `fibS-cost/val/run`, `doubleFibS`, `fibPairS`; §10b–c `casS`/`mergeSortS` (+`mergeSort-test`, work/span examples); §10d `lengthS` (+`lengthS-test`) |
 | §11 | `main` — IO output showing the full pipeline |

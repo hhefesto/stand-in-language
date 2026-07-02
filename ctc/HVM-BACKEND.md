@@ -56,7 +56,13 @@ calls them by name. The recursion size is a **runtime CLI argument**, so the
 | program | what goes through `toCcc` | recursion (primitive) | result |
 |---|---|---|---|
 | `hvm-fib-iter` | `fibAccStep` (step) + `fibInit` | sequential `iterGo` (= telomare `iterS`) | `fib(n)` for runtime `n` (e.g. 30 → 832040) |
+| `hvm-fib-while` | init + final + **test `0 < n`** + body (all four) | **guarded** `whileGo`/`whileStep` (= telomare `whileS`, the `{x,y,z}` tail form) | `fib(n)` for runtime `n` — the loop exits when the *test* fails, fuel only bounds it |
 | `hvm-tree-sum` | `id` (leaf) + `(+)` (combine) | **parallel** `foldGo` over a 2^d tree | `2^d` for runtime depth `d` (d=18 → 262144 in ~0.7s, 15.4M interactions) |
+
+`toBendWhile` mirrors telomare's `whileS` primitive exactly: the emitted Bend is
+a fuel-bounded *guarded* loop (`switch` on fuel, then `switch` on the toCcc'd
+test via a helper — comparisons compile through `OrdCat` to Bend's native u24
+`<`/`==` returning 0/1). The `n - 1` in the body is safe under the `0 < n` guard.
 
 `foldGo`'s two recursive calls are independent, so HVM2 reduces them **in
 parallel** — the genuinely parallel-scaling case. (Why named globals, not a

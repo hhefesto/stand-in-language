@@ -13,7 +13,7 @@ import ConCat.AltCat (toCcc)
 import ConCat.Misc   ((:*), sqr)
 import ConCat.Rebox  ()
 
-import HVM (HVM, render, toBendProgram, toBendIterate, toBendFold)
+import HVM (HVM, render, toBendProgram, toBendIterate, toBendFold, toBendWhile)
 
 -- ── telomare morphism ports (over Int / u24) ──
 fibAccStep :: Int :* Int -> Int :* Int        -- (a,b) ↦ (b, a+b)
@@ -76,6 +76,34 @@ idInt :: Int -> Int
 idInt x = x
 {-# INLINE idInt #-}
 
+-- ── whileS ({x,y,z} tail form): GUARDED fib, runtime fuel ──
+-- state = (counter, (a, b)); test = counter > 0; body decrements + steps fib.
+-- All four morphisms go through toCcc; the guarded fuel-bounded loop is the
+-- primitive template (mirrors telomare's whileS).
+type FibSt = Int :* (Int :* Int)
+
+fibWTest :: FibSt -> Bool
+fibWTest (n, _) = 0 < n
+{-# INLINE fibWTest #-}
+
+fibWBody :: FibSt -> FibSt
+fibWBody (n, (a, b)) = (n - 1, (b, a + b))
+{-# INLINE fibWBody #-}
+
+fibWFinal :: FibSt -> Int
+fibWFinal (_, (a, _)) = a
+{-# INLINE fibWFinal #-}
+
+-- drainS = whileS nonZeroS predS: the run-comparison algorithm (state = bare Int).
+-- SAME test/body as the native baseline (BenchMain.hs — keep in sync).
+drainTest :: Int -> Bool
+drainTest x = 0 < x
+{-# INLINE drainTest #-}
+
+drainBody :: Int -> Int
+drainBody x = x - 1
+{-# INLINE drainBody #-}
+
 emit :: String -> HVM a b -> String -> IO ()
 emit name m input = do
   let bend = toBendProgram m input
@@ -102,6 +130,18 @@ main = do
     (toBendFold (toCcc idInt   :: HVM Int Int)
                 (toCcc addPair :: HVM (Int :* Int) Int))
   putStrLn "hvm-tree-sum   wrote out/hvm-tree-sum.bend  (run: bend run-c <it> D  -> 2^D, parallel fold)"
+  writeFile "out/hvm-fib-while.bend"
+    (toBendWhile (toCcc fibInit   :: HVM Int FibSt)
+                 (toCcc fibWFinal :: HVM FibSt Int)
+                 (toCcc fibWTest  :: HVM FibSt Bool)
+                 (toCcc fibWBody  :: HVM FibSt FibSt))
+  putStrLn "hvm-fib-while  wrote out/hvm-fib-while.bend  (run: bend run-c <it> N  -> fib(N), guarded whileS)"
+  writeFile "out/hvm-drain-while.bend"
+    (toBendWhile (toCcc idInt     :: HVM Int Int)
+                 (toCcc idInt     :: HVM Int Int)
+                 (toCcc drainTest :: HVM Int Bool)
+                 (toCcc drainBody :: HVM Int Int))
+  putStrLn "hvm-drain-while wrote out/hvm-drain-while.bend  (run: bend run-c <it> N  -> 0, drainS)"
   putStrLn ""
   putStrLn "Done. Expected when run on HVM2:"
   putStrLn "  hvm-sqr        5                 -> 25"

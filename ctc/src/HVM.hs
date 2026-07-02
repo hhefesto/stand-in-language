@@ -135,6 +135,33 @@ bendPrelude = unlines
   , "  return lambda p: uncurryCH(f, p)"
   , "def constC(k):"
   , "  return lambda x: k"
+  , "# comparisons / booleans as u24 0-or-1 (Bend's native < and == return 0/1)"
+  , "def lessThanC(p):"
+  , "  (a, b) = p"
+  , "  return a < b"
+  , "def greaterThanC(p):"
+  , "  (a, b) = p"
+  , "  return b < a"
+  , "def leqC(p):"
+  , "  (a, b) = p"
+  , "  return 1 - (b < a)"
+  , "def geqC(p):"
+  , "  (a, b) = p"
+  , "  return 1 - (a < b)"
+  , "def equalC(p):"
+  , "  (a, b) = p"
+  , "  return a == b"
+  , "def notEqualC(p):"
+  , "  (a, b) = p"
+  , "  return 1 - (a == b)"
+  , "def notC(x):"
+  , "  return 1 - x"
+  , "def andC(p):"
+  , "  (a, b) = p"
+  , "  return a * b"
+  , "def orC(p):"
+  , "  (a, b) = p"
+  , "  return 1 - ((1 - a) * (1 - b))"
   ]
 
 -- Assemble a complete, runnable Bend program: prelude + a `main` that applies the
@@ -214,6 +241,43 @@ toBendFold leaf comb = bendPrelude ++ unlines
   , "      return BTree/Node { left: a, right: b }"
   , "def main(d):"
   , "  return foldGo(genTree(d))"
+  ]
+
+-- telomare's whileS — {x,y,z} tail form — emitted mechanically: init, final,
+-- test, body ALL go through toCcc (named globals); the fuel-bounded guarded
+-- loop is the primitive template (two helpers, no nested switch).  Fuel is the
+-- runtime CLI argument.  Run:  bend run-c file.bend <n>
+toBendWhile :: HVM n s -> HVM s b -> HVM s c -> HVM s s -> String
+toBendWhile initM finalM test body = bendPrelude ++ unlines
+  [ ""
+  , "def initFn(n):"
+  , "  i = " ++ render initM
+  , "  return i(n)"
+  , "def finalFn(s):"
+  , "  f = " ++ render finalM
+  , "  return f(s)"
+  , "def testFn(x):"
+  , "  t = " ++ render test
+  , "  return t(x)"
+  , "def bodyFn(x):"
+  , "  b = " ++ render body
+  , "  return b(x)"
+  , "def whileGo(n, x):"
+  , "  switch n:"
+  , "    case 0:"
+  , "      return x"
+  , "    case _:"
+  , "      return whileStep(n, testFn(x), x)"
+  , "def whileStep(n, t, x):"
+  , "  switch t:"
+  , "    case 0:"
+  , "      return x"
+  , "    case _:"
+  , "      return whileGo(n - 1, bodyFn(x))"
+  , "def main(n):"
+  , "  s0 = initFn(n)"
+  , "  sf = whileGo(n, s0)"
+  , "  return finalFn(sf)"
   ]
 
 -- ── CCC instances (mirror ConCat.Syntactic.Syn; emit Bend combinator names) ──

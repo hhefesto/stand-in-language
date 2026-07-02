@@ -139,6 +139,55 @@
           '';
         };
 
+      # Tic-tac-toe as a pure _⇨S_ program (moves → winner); imports telomare.
+      packages.agda-tictactoe =
+        let
+          stdlib = pkgs.agdaPackages.standard-library;
+        in
+        pkgs.stdenv.mkDerivation {
+          name = "agda-tictactoe";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = [ pkgs.agda pkgs.ghc pkgs.glibcLocales ];
+          LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
+          LC_ALL = "en_US.UTF-8";
+          buildPhase = ''
+            cp -r ${inputs.felix}/src felix-src
+            chmod -R u+w felix-src
+            agda -i ${stdlib}/src -i felix-src --compile tictactoe.agda
+          '';
+          installPhase = ''
+            mkdir -p $out/bin
+            cp tictactoe $out/bin/agda-tictactoe
+          '';
+        };
+
+      apps.tictactoe = {
+        type = "app";
+        program = "${self'.packages.agda-tictactoe}/bin/agda-tictactoe";
+      };
+
+      # Bench driver: drainS on the verified ⟦_⟧K runtime (run/predict modes).
+      packages.agda-benchDrain =
+        let
+          stdlib = pkgs.agdaPackages.standard-library;
+        in
+        pkgs.stdenv.mkDerivation {
+          name = "agda-benchDrain";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = [ pkgs.agda pkgs.ghc pkgs.glibcLocales ];
+          LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
+          LC_ALL = "en_US.UTF-8";
+          buildPhase = ''
+            cp -r ${inputs.felix}/src felix-src
+            chmod -R u+w felix-src
+            agda -i ${stdlib}/src -i felix-src --compile benchDrain.agda
+          '';
+          installPhase = ''
+            mkdir -p $out/bin
+            cp benchDrain $out/bin/agda-benchDrain
+          '';
+        };
+
       # Type-check telomare-backwards.agda (denotational design with Felix)
       packages.agda-telomare-backwards =
         let
@@ -229,6 +278,86 @@
         }}/bin/telomare-ctc-svg";
       };
 
+      # Run comparison: ONE telomare _⇨S_ algorithm (drainS = whileS nonZeroS
+      # predS, cost 2N+1 by refl) executed by three runtimes — the verified Agda
+      # ⟦_⟧K, a native GHC loop over the same test/body, and HVM2 via the ConCat
+      # toBendWhile emission.  Prints predictions alongside measured times.
+      #   nix run .#bench-drain
+      apps.bench-drain = {
+        type = "app";
+        program = "${pkgs.writeShellApplication {
+          name = "bench-drain";
+          runtimeInputs = [ pkgs.bend pkgs.gcc pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.gnused ];
+          text = ''
+            # SAFETY (post-incident): every measured command runs under `timeout`;
+            # results stream immediately (survive kills); HVM2 runs ONCE per size.
+            agda_bin=${self'.packages.agda-benchDrain}/bin/agda-benchDrain
+            hs_bin=${self'.packages.ctc}/bin/telomare-bench-hs
+            cd "$PWD"; mkdir -p out
+            ${self'.packages.ctc}/bin/telomare-hvm >/dev/null 2>&1
+            bendf="$PWD/out/hvm-drain-while.bend"
+
+            # best-of-3 wall time in ms, each rep under timeout 60; echoes DNF on timeout
+            timeit() {
+              local best=999999999 s e ms
+              for _ in 1 2 3; do
+                s=$(date +%s%N)
+                if ! timeout 60 "$@" > /dev/null 2>&1; then echo "DNF"; return; fi
+                e=$(date +%s%N)
+                ms=$(( (e - s) / 1000000 ))
+                if [ "$ms" -lt "$best" ]; then best=$ms; fi
+              done
+              echo "$best"
+            }
+
+            sizes=( "$@" )
+            if [ "''${#sizes[@]}" -eq 0 ]; then sizes=( 1000000 4000000 16000000 ); fi
+
+            echo "One algorithm - telomare drainS = whileS nonZeroS predS - three runtimes"
+            echo "  (1) Agda ⟦_⟧K reference (MAlonzo; auto-budget: ⟦_⟧C then ⟦_⟧K)"
+            echo "  (2) native GHC -O2 strict loop (same test/body as the ConCat emission)"
+            echo "  (3) HVM2 bend run-c (ConCat toBendWhile emission; internal -s timer, 1 run)"
+            echo "excluded: bend run-rs (non-affine-clone crash), GPU (AMD box, HVM2 is CUDA-only)"
+            echo ""
+            for N in "''${sizes[@]}"; do
+              # fuel = start = N ⇒ no final test: cost = 2N exactly (test+tick per step)
+              cost=$(( 2 * N ))
+              echo "== N = $N   (predicted cost = 2N = $cost) =="
+              timeout 60 "$agda_bin" "$N" predict | sed 's/^/    /' || true
+              a_ms=$(timeit "$agda_bin" "$N")
+              if [ "$a_ms" = "DNF" ]; then
+                echo "    agda ⟦_⟧K : DNF (>60s)"
+              else
+                a_res=$(timeout 60 "$agda_bin" "$N" || echo "?")
+                a_nspt=$(awk -v t="$a_ms" -v c="$cost" 'BEGIN{printf "%.1f", t*1e6/c}')
+                echo "    agda ⟦_⟧K : ''${a_ms} ms  (''${a_nspt} ns/tel)   [$a_res]"
+              fi
+              h_ms=$(timeit "$hs_bin" "$N")
+              if [ "$h_ms" = "DNF" ]; then
+                echo "    haskell   : DNF (>60s)"
+              else
+                h_res=$(timeout 60 "$hs_bin" "$N" || echo "?")
+                h_nspt=$(awk -v t="$h_ms" -v c="$cost" 'BEGIN{printf "%.1f", t*1e6/c}')
+                echo "    haskell   : ''${h_ms} ms  (''${h_nspt} ns/tel)   [$h_res]"
+              fi
+              # HVM2: ONE run, hard timeout (16M ≈ 1.44B interactions, ~70s+ internal)
+              hv_out=$(timeout 150 bend run-c -s "$bendf" "$N" 2>/dev/null \
+                         | grep -E 'Result|TIME|ITRS' | tr '\n' ' ' || true)
+              if [ -z "$hv_out" ]; then
+                echo "    hvm2      : DNF (>150s)"
+              else
+                hv_time=$(echo "$hv_out" | grep -oE 'TIME: [0-9.]+' | grep -oE '[0-9.]+' || echo 0)
+                hv_nspt=$(awk -v t="$hv_time" -v c="$cost" 'BEGIN{printf "%.1f", t*1e9/c}')
+                echo "    hvm2      : ''${hv_time} s  (''${hv_nspt} ns/tel)   [$hv_out]"
+              fi
+              echo ""
+            done
+            echo "note: agda/haskell times are best-of-3 whole-process (startup included, 60s cap);"
+            echo "hvm2 time is bend's internal -s timer, single run, 150s cap."
+          '';
+        }}/bin/bench-drain";
+      };
+
       # ── Bend: run a hello-world (Higher Order Co's Bend, v1 / HVM2) ─────────
       # Run a Bend hello-world via the C HVM backend (real stdout print).
       # Uses pkgs.bend 0.2.37 (bundles hvm); pkgs.gcc provides the `cc` that
@@ -291,6 +420,11 @@
             for n in 10 20 30; do
               printf 'fib via iterS  n=%s  ->  ' "$n"
               bend run-c "$out_dir/hvm-fib-iter.bend" "$n" 2>/dev/null | sed 's/Result: //'
+            done
+            # whileS ({x,y,z} tail form): guarded loop, all morphisms via toCcc
+            for n in 10 20 30; do
+              printf 'fib via whileS n=%s  ->  ' "$n"
+              bend run-c "$out_dir/hvm-fib-while.bend" "$n" 2>/dev/null | sed 's/Result: //'
             done
             echo "tree-sum via foldC (parallel divide-and-conquer), depth=20:"
             bend run-c -s "$out_dir/hvm-tree-sum.bend" 20 2>/dev/null \

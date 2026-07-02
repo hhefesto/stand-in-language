@@ -42,6 +42,22 @@ And `mergeSort-work-is-cost : work mergeSortS xs ≡ proj₁ (⟦ mergeSortS ⟧
 the work component **is** the proved sequential `tel` cost, so the execution
 guarantee is preserved while the span predicts the parallel speedup.
 
+### The resource-algebra square (now including SPACE)
+
+The resource functors form a 2×2 family of (sequential, parallel) monoids on ℕ —
+telomare's discrete cousin of Timely Computation's interval semiring:
+
+| | parallel `+` | parallel `⊔` |
+|---|---|---|
+| **sequential `+`** | work `⟦_⟧C` | span `⟦_⟧WS` |
+| **sequential `⊔`** | **space `⟦_⟧SP`** | (footprint — not instantiated) |
+
+Space (peak live size, word model) is span's **dual**: sequential stages reuse
+memory (`⊔` over `∘S`), parallel branches are simultaneously live (`+` across
+`forkS`). Machine-checked: `fibPair-space : space fibPairS 10 ≡ space fibS 10 +
+space fibS 10` while `span fibPairS 10 = span fibS 10` (max). `fixS` space is
+coarse (`in ⊔ out`); no adequacy square yet (needs a memory-instrumented `⟦_⟧K`).
+
 ---
 
 ## 2. Refinement to Bend/HVM — the statement
@@ -71,6 +87,12 @@ proof is a separate, research-grade effort; this is flagged honestly):
 > reduction depth is `Θ(span f a)` — the `forkS`-max critical path the `⟦_⟧WS`
 > functor computes. This is the sense in which *telomare proves the parallelism
 > that Bend realizes*.
+
+**Empirical data point for R1/R2** (see `BENCHMARK.md`): for `drainS` on HVM2,
+measured interactions are *exactly linear* in the proved tel cost —
+`ITRS = 45·cost + 15` at both N=1M (90,000,015 / cost 2,000,000) and N=4M
+(360,000,015 / cost 8,000,000). The constant-factor bound R2 is visibly real
+for this program; proving it is still open.
 
 What is **guaranteed today** vs. **stated**:
 - *Guaranteed (machine-checked in Agda):* `⟦f⟧C` computes an exact `tel` that

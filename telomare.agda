@@ -288,12 +288,22 @@ data _⇨S_ : Ty → Ty → Set where
   nilS    : {A : Ty} → unit ⇨S listT A
   consS   : {A : Ty} → (A ⊗ listT A) ⇨S listT A
   unconsS : {A : Ty} → listT A ⇨S (unit ⊕ (A ⊗ listT A))
+  -- nat destructor (the missing eliminator): zero ↦ inl tt, suc n ↦ inr n
+  natOutS : nat ⇨S (unit ⊕ nat)
+  -- distributivity: a branch keeps its surrounding context (distributive category)
+  distlS  : {A B C : Ty} → (A ⊗ (B ⊕ C)) ⇨S ((A ⊗ B) ⊕ (A ⊗ C))
   addS   :                 (nat ⊗ nat) ⇨S nat      -- addition: ⟦A⟧T×⟦B⟧T→ℕ
   predS  :                 nat ⇨S nat               -- predecessor: pred n
   minS   :                 (nat ⊗ nat) ⇨S nat       -- minimum (compare); costs 1 tel
   maxS   :                 (nat ⊗ nat) ⇨S nat       -- maximum (compare); costs 1 tel
   constS : {A : Ty} → ℕ → A ⇨S nat                -- constant natural: ignores input
   iterS  : {A : Ty} → A ⇨S A → (nat ⊗ A) ⇨S A    -- bounded iteration: apply f n times
+  -- {x,y,z} limited recursion, tail form: test x, body y, base = current state,
+  -- fuel-bounded.  Refined ON-DEMAND metering: charges 1 tel per TAKEN step (plus
+  -- the test's own cost each check) and stops charging when the test goes false —
+  -- contrast the derived whileD = iterS (guard t b), which pays every fuel tick
+  -- (reserved capacity).  Same value denotation; different cost extraction.
+  whileS : {A : Ty} → (A ⇨S (unit ⊕ unit)) → (A ⇨S A) → (nat ⊗ A) ⇨S A
   fixS   : {A B : Ty}
         → (bodyK : ((⟦ A ⟧T →K ⟦ B ⟧T) → ⟦ A ⟧T →K ⟦ B ⟧T)
                  )
@@ -318,6 +328,24 @@ private
   iterC-aux zero    _ a = return-cost a
   iterC-aux (suc n) f a = step-cost (bind-cost (f a) (iterC-aux n f))
 
+-- Bounded-while helpers for whileS (mutual with a NAMED continuation, so the
+-- precision proof's `cong`s stay definitional).  Per attempt: run the test (its
+-- own cost flows through bind); false → stop free; true → 1 tel + body, recurse.
+private
+  whileT-aux  : {A : Set} → ℕ → (A →K (⊤ ⊎ ⊤)) → (A →K A) → A →K A
+  whileT-cont : {A : Set} → ℕ → (A →K (⊤ ⊎ ⊤)) → (A →K A) → A → (⊤ ⊎ ⊤) → TelM A
+  whileT-aux zero    t b a = return-tel a
+  whileT-aux (suc k) t b a = bind-tel (t a) (whileT-cont k t b a)
+  whileT-cont k t b a (inj₁ _) = step-tel (bind-tel (b a) (whileT-aux k t b))
+  whileT-cont k t b a (inj₂ _) = return-tel a
+
+  whileC-aux  : {A : Set} → ℕ → (A →C (⊤ ⊎ ⊤)) → (A →C A) → A →C A
+  whileC-cont : {A : Set} → ℕ → (A →C (⊤ ⊎ ⊤)) → (A →C A) → A → (⊤ ⊎ ⊤) → CostM A
+  whileC-aux zero    t b a = return-cost a
+  whileC-aux (suc k) t b a = bind-cost (t a) (whileC-cont k t b a)
+  whileC-cont k t b a (inj₁ _) = step-cost (bind-cost (b a) (whileC-aux k t b))
+  whileC-cont k t b a (inj₂ _) = return-cost a
+
 -- §8c. Execution denotation: A ⇨S B → ⟦A⟧T →K ⟦B⟧T
 ⟦_⟧K : {A B : Ty} → A ⇨S B → ⟦ A ⟧T →K ⟦ B ⟧T
 ⟦ idS       ⟧K = idK
@@ -334,12 +362,17 @@ private
 ⟦ consS     ⟧K (x , xs) = return-tel (x ∷ xs)
 ⟦ unconsS   ⟧K [] = return-tel (inj₁ tt)
 ⟦ unconsS   ⟧K (x ∷ xs) = return-tel (inj₂ (x , xs))
+⟦ natOutS   ⟧K zero    = step-tel (return-tel (inj₁ tt))
+⟦ natOutS   ⟧K (suc n) = step-tel (return-tel (inj₂ n))
+⟦ distlS    ⟧K (a , inj₁ b) = return-tel (inj₁ (a , b))
+⟦ distlS    ⟧K (a , inj₂ c) = return-tel (inj₂ (a , c))
 ⟦ addS        ⟧K (a , b) = return-tel (a + b)
 ⟦ predS       ⟧K n       = return-tel (predℕ n)
 ⟦ minS        ⟧K (a , b) = step-tel (return-tel (a ⊓ b))
 ⟦ maxS        ⟧K (a , b) = step-tel (return-tel (a ⊔ b))
 ⟦ constS k    ⟧K _       = return-tel k
 ⟦ iterS f     ⟧K (n , a) = iterT-aux n ⟦ f ⟧K a
+⟦ whileS t b  ⟧K (n , a) = whileT-aux n ⟦ t ⟧K ⟦ b ⟧K a
 ⟦ fixS bodyK _ _ ⟧K = fixT bodyK
 
 -- §8d. Cost denotation: A ⇨S B → ⟦A⟧T →C ⟦B⟧T
@@ -358,12 +391,17 @@ private
 ⟦ consS     ⟧C (x , xs) = return-cost (x ∷ xs)
 ⟦ unconsS   ⟧C [] = return-cost (inj₁ tt)
 ⟦ unconsS   ⟧C (x ∷ xs) = return-cost (inj₂ (x , xs))
+⟦ natOutS   ⟧C zero    = step-cost (return-cost (inj₁ tt))
+⟦ natOutS   ⟧C (suc n) = step-cost (return-cost (inj₂ n))
+⟦ distlS    ⟧C (a , inj₁ b) = return-cost (inj₁ (a , b))
+⟦ distlS    ⟧C (a , inj₂ c) = return-cost (inj₂ (a , c))
 ⟦ addS        ⟧C (a , b) = return-cost (a + b)
 ⟦ predS       ⟧C n       = return-cost (predℕ n)
 ⟦ minS        ⟧C (a , b) = step-cost (return-cost (a ⊓ b))
 ⟦ maxS        ⟧C (a , b) = step-cost (return-cost (a ⊔ b))
 ⟦ constS k    ⟧C _       = return-cost k
 ⟦ iterS f     ⟧C (n , a) = iterC-aux n ⟦ f ⟧C a
+⟦ whileS t b  ⟧C (n , a) = whileC-aux n ⟦ t ⟧C ⟦ b ⟧C a
 ⟦ fixS _ costF _ ⟧C = costF
 
 -- §8e. Precision: the key property connecting ⟦_⟧K and ⟦_⟧C
@@ -404,6 +442,12 @@ precise nilS        _         extra = refl
 precise consS       (x , xs)  extra = refl
 precise unconsS     []        extra = refl
 precise unconsS     (x ∷ xs)  extra = refl
+-- natOutS: cost 1 (step), like minS/maxS; case-split on zero/suc → refl
+precise natOutS     zero      extra = refl
+precise natOutS     (suc n)   extra = refl
+-- distlS: cost 0 structural; case-split on the sum → refl
+precise distlS      (a , inj₁ b) extra = refl
+precise distlS      (a , inj₂ c) extra = refl
 -- constS k: cost = 0, result = k; (0 + extra) = extra definitionally → refl
 precise (constS _)  _         extra = refl
 -- iterS f: n steps each costing ⟦f⟧C; proved by induction on n (helper below)
@@ -423,6 +467,38 @@ precise (iterS f)   (n , a)   extra = iter-prec n a extra
           ih  = iter-prec k vf extra
       in trans (cong (λ mx → mx >>= λ { (v , t') → iterT-aux k ⟦ f ⟧K v t' }) pf')
                ih
+-- whileS t b: mutual induction on fuel, mirroring iter-prec, with a lemma for
+-- the continuation (case-split on the test's value).  Per attempt the budget is
+-- ct + m (+ extra): precision of t hands the continuation exactly m + extra;
+-- false → cost 0, stop (refl); true → 1 tick + body (precision of b) + IH.
+precise (whileS t b) (n , a) extra = while-prec n a extra
+  where
+    while-prec : ∀ n a extra →
+      whileT-aux n ⟦ t ⟧K ⟦ b ⟧K a (proj₁ (whileC-aux n ⟦ t ⟧C ⟦ b ⟧C a) + extra)
+      ≡ just (proj₂ (whileC-aux n ⟦ t ⟧C ⟦ b ⟧C a) , extra)
+    cont-prec : ∀ k a v extra →
+      whileT-cont k ⟦ t ⟧K ⟦ b ⟧K a v (proj₁ (whileC-cont k ⟦ t ⟧C ⟦ b ⟧C a v) + extra)
+      ≡ just (proj₂ (whileC-cont k ⟦ t ⟧C ⟦ b ⟧C a v) , extra)
+    while-prec zero    a extra = refl
+    while-prec (suc k) a extra =
+      let ct  = proj₁ (⟦ t ⟧C a)
+          vt  = proj₂ (⟦ t ⟧C a)
+          m   = proj₁ (whileC-cont k ⟦ t ⟧C ⟦ b ⟧C a vt)
+          pt  = precise t a (m + extra)
+          pt' = subst (λ tel → ⟦ t ⟧K a tel ≡ just (vt , m + extra))
+                      (sym (+-assoc ct m extra)) pt
+      in trans (cong (λ mx → mx >>= λ { (v , g') → whileT-cont k ⟦ t ⟧K ⟦ b ⟧K a v g' }) pt')
+               (cont-prec k a vt extra)
+    cont-prec k a (inj₂ _) extra = refl
+    cont-prec k a (inj₁ _) extra =
+      let cb  = proj₁ (⟦ b ⟧C a)
+          vb  = proj₂ (⟦ b ⟧C a)
+          cr  = proj₁ (whileC-aux k ⟦ t ⟧C ⟦ b ⟧C vb)
+          pb  = precise b a (cr + extra)
+          pb' = subst (λ tel → ⟦ b ⟧K a tel ≡ just (vb , cr + extra))
+                      (sym (+-assoc cb cr extra)) pb
+      in trans (cong (λ mx → mx >>= λ { (v' , g') → whileT-aux k ⟦ t ⟧K ⟦ b ⟧K v' g' }) pb')
+               (while-prec k vb extra)
 -- fixS: precision proof is packaged in the constructor.
 precise (fixS _ _ precF) a    extra = precF a extra
 -- g ∘S f: costs add (n for f, m for g); use +-assoc to align the tel budget
@@ -511,6 +587,15 @@ private
   iterWS-aux zero    _ a = return-ws a
   iterWS-aux (suc n) f a = step-ws (bind-ws (f a) (iterWS-aux n f))
 
+  -- whileS: the loop is sequential (each test/body depends on the previous
+  -- state), so work and span both accumulate along the taken path.
+  whileWS-aux  : {A : Set} → ℕ → (A →WS (⊤ ⊎ ⊤)) → (A →WS A) → A →WS A
+  whileWS-cont : {A : Set} → ℕ → (A →WS (⊤ ⊎ ⊤)) → (A →WS A) → A → (⊤ ⊎ ⊤) → WS A
+  whileWS-aux zero    t b a = return-ws a
+  whileWS-aux (suc k) t b a = bind-ws (t a) (whileWS-cont k t b a)
+  whileWS-cont k t b a (inj₁ _) = step-ws (bind-ws (b a) (whileWS-aux k t b))
+  whileWS-cont k t b a (inj₂ _) = return-ws a
+
 ⟦_⟧WS : {A B : Ty} → A ⇨S B → ⟦ A ⟧T →WS ⟦ B ⟧T
 ⟦ idS       ⟧WS = idWS
 ⟦ g ∘S f    ⟧WS = ⟦ g ⟧WS ∘WS ⟦ f ⟧WS
@@ -526,12 +611,17 @@ private
 ⟦ consS     ⟧WS (x , xs) = return-ws (x ∷ xs)
 ⟦ unconsS   ⟧WS [] = return-ws (inj₁ tt)
 ⟦ unconsS   ⟧WS (x ∷ xs) = return-ws (inj₂ (x , xs))
+⟦ natOutS   ⟧WS zero    = step-ws (return-ws (inj₁ tt))
+⟦ natOutS   ⟧WS (suc n) = step-ws (return-ws (inj₂ n))
+⟦ distlS    ⟧WS (a , inj₁ b) = return-ws (inj₁ (a , b))
+⟦ distlS    ⟧WS (a , inj₂ c) = return-ws (inj₂ (a , c))
 ⟦ addS      ⟧WS (a , b) = return-ws (a + b)
 ⟦ predS     ⟧WS n       = return-ws (predℕ n)
 ⟦ minS      ⟧WS (a , b) = step-ws (return-ws (a ⊓ b))
 ⟦ maxS      ⟧WS (a , b) = step-ws (return-ws (a ⊔ b))
 ⟦ constS k  ⟧WS _       = return-ws k
 ⟦ iterS f   ⟧WS (n , a) = iterWS-aux n ⟦ f ⟧WS a
+⟦ whileS t b ⟧WS (n , a) = whileWS-aux n ⟦ t ⟧WS ⟦ b ⟧WS a
 -- fixS: no span info is bundled, so conservatively span ≔ work (assume the
 -- recursion is sequential — a sound upper bound on parallel depth).
 ⟦ fixS _ costF _ ⟧WS a = let (c , v) = costF a in ((c , c) , v)
@@ -540,6 +630,93 @@ private
 work span : {A B : Ty} → A ⇨S B → ⟦ A ⟧T → ℕ
 work f a = proj₁ (proj₁ (⟦ f ⟧WS a))
 span f a = proj₂ (proj₁ (⟦ f ⟧WS a))
+
+-- §8h. SPACE: a FOURTH functor — peak live size.  The resource functors form a
+-- 2×2 family of (sequential , parallel) monoids on ℕ:
+--     work  (+ , +)  = ⟦_⟧C     span (+ , ⊔) = ⟦_⟧WS
+--     space (⊔ , +)  = ⟦_⟧SP    (footprint (⊔ , ⊔) not instantiated)
+-- Space is span's DUAL: sequential stages REUSE memory (⊔ over composition),
+-- parallel branches are simultaneously live (+ across forkS).
+--
+-- Word model of value size (a model choice, documented not proved):
+sizeT : (A : Ty) → ⟦ A ⟧T → ℕ
+sizeT unit _ = 1
+sizeT nat  _ = 1
+sizeT bool _ = 1
+sizeT (A ⊗ B) (a , b) = sizeT A a + sizeT B b
+sizeT (A ⊕ B) (inj₁ a) = suc (sizeT A a)          -- +1 for the tag
+sizeT (A ⊕ B) (inj₂ b) = suc (sizeT B b)
+sizeT (listT A) [] = 1
+sizeT (listT A) (x ∷ xs) = suc (sizeT A x + sizeT (listT A) xs)
+
+private
+  -- a primitive holds its input and its output: peak = in ⊔ out
+  prim-sp : {A B : Ty} → ⟦ A ⟧T → ⟦ B ⟧T → ℕ × ⟦ B ⟧T
+  prim-sp {A} {B} a b = (sizeT A a ⊔ sizeT B b , b)
+
+  iterSP-aux : {A : Set} → (A → ℕ) → ℕ → (A → ℕ × A) → A → ℕ × A
+  iterSP-aux sz zero    _ a = (sz a , a)
+  iterSP-aux sz (suc n) f a =
+    let (p  , b) = f a
+        (pr , c) = iterSP-aux sz n f b
+    in (p ⊔ pr , c)
+
+  whileSP-aux  : {A : Set} → (A → ℕ) → ℕ
+               → (A → ℕ × (⊤ ⊎ ⊤)) → (A → ℕ × A) → A → ℕ × A
+  whileSP-cont : {A : Set} → (A → ℕ) → ℕ
+               → (A → ℕ × (⊤ ⊎ ⊤)) → (A → ℕ × A) → A → (⊤ ⊎ ⊤) → ℕ × A
+  whileSP-aux sz zero    t b a = (sz a , a)
+  whileSP-aux sz (suc k) t b a =
+    let (pt , v) = t a
+        (pc , r) = whileSP-cont sz k t b a v
+    in (pt ⊔ pc , r)
+  whileSP-cont sz k t b a (inj₁ _) =
+    let (pb , a') = b a
+        (pr , r)  = whileSP-aux sz k t b a'
+    in (pb ⊔ pr , r)
+  whileSP-cont sz k t b a (inj₂ _) = (sz a , a)
+
+-- The space denotation.  Primitives: in ⊔ out.  ∘S: max of stage peaks (reuse).
+-- forkS: SUM of branch peaks (both live at once — the parallel-space reading).
+-- caseS: taken branch.  fixS: coarse in ⊔ out (opaque recursion's interior is
+-- unmeasurable — one more argument for reified recursion like whileS).
+⟦_⟧SP : {A B : Ty} → A ⇨S B → ⟦ A ⟧T → ℕ × ⟦ B ⟧T
+⟦_⟧SP {A} idS a = (sizeT A a , a)
+⟦ g ∘S f    ⟧SP a =
+  let (pf , vf) = ⟦ f ⟧SP a
+      (pg , vg) = ⟦ g ⟧SP vf
+  in (pf ⊔ pg , vg)
+⟦ !S        ⟧SP a = prim-sp a tt
+⟦ forkS f g ⟧SP a =
+  let (pf , vf) = ⟦ f ⟧SP a
+      (pg , vg) = ⟦ g ⟧SP a
+  in (pf + pg , (vf , vg))
+⟦ exlS      ⟧SP p@(a , _) = prim-sp p a
+⟦ exrS      ⟧SP p@(_ , b) = prim-sp p b
+⟦ inlS      ⟧SP a = prim-sp a (inj₁ a)
+⟦ inrS      ⟧SP b = prim-sp b (inj₂ b)
+⟦ caseS l r ⟧SP (inj₁ a) = ⟦ l ⟧SP a
+⟦ caseS l r ⟧SP (inj₂ b) = ⟦ r ⟧SP b
+⟦ nilS      ⟧SP a = prim-sp a []
+⟦ consS     ⟧SP p@(x , xs) = prim-sp p (x ∷ xs)
+⟦ unconsS   ⟧SP p@[] = prim-sp p (inj₁ tt)
+⟦ unconsS   ⟧SP p@(x ∷ xs) = prim-sp p (inj₂ (x , xs))
+⟦ natOutS   ⟧SP zero = prim-sp zero (inj₁ tt)
+⟦ natOutS   ⟧SP n@(suc k) = prim-sp n (inj₂ k)
+⟦ distlS    ⟧SP p@(a , inj₁ b) = prim-sp p (inj₁ (a , b))
+⟦ distlS    ⟧SP p@(a , inj₂ c) = prim-sp p (inj₂ (a , c))
+⟦ addS      ⟧SP p@(a , b) = prim-sp p (a + b)
+⟦ predS     ⟧SP n = prim-sp n (predℕ n)
+⟦ minS      ⟧SP p@(a , b) = prim-sp p (a ⊓ b)
+⟦ maxS      ⟧SP p@(a , b) = prim-sp p (a ⊔ b)
+⟦ constS k  ⟧SP a = prim-sp a k
+⟦ iterS {A} f  ⟧SP (n , a) = iterSP-aux (sizeT A) n ⟦ f ⟧SP a
+⟦ whileS {A} t b ⟧SP (n , a) = whileSP-aux (sizeT A) n ⟦ t ⟧SP ⟦ b ⟧SP a
+⟦ fixS {A} {B} _ costF _ ⟧SP a =
+  let v = proj₂ (costF a) in (sizeT A a ⊔ sizeT B v , v)
+
+space : {A B : Ty} → A ⇨S B → ⟦ A ⟧T → ℕ
+space f a = proj₁ (⟦ f ⟧SP a)
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- § 9.  SYNTAX ADEQUACY AND BRIDGE
@@ -802,6 +979,17 @@ mergeSort-work-is-cost :
   ≡ proj₁ (⟦ mergeSortS ⟧C ((((((( 7 , 6 ) , 5 ) , 4 ) , 3 ) , 2 ) , 1 ) , 0))
 mergeSort-work-is-cost = refl
 
+-- SPACE examples (the (⊔ , +) functor ⟦_⟧SP), machine-checked by refl.
+-- addS holds its 2-word input and 1-word output at once: peak 2.
+add-space : ⟦ addS ⟧SP (2 , 3) ≡ (2 , 5)
+add-space = refl
+
+-- Space is span's DUAL on forkS: fibPairS runs two fibS pipelines in parallel —
+-- span takes their MAX (parallel time) while space takes their SUM (both
+-- accumulator pipelines are live at once).
+fibPair-space : space fibPairS 10 ≡ space fibS 10 + space fibS 10
+fibPair-space = refl
+
 -- §10d. GENERAL RECURSION OVER LISTS, WITH A PROVED EXACT COST.
 -- With the recursive `listT` type, a genuinely recursive list program is now
 -- expressible — and `fixS` *forces* you to supply a cost function AND prove it.
@@ -827,6 +1015,22 @@ lengthS {A} = fixS bodyK costF precF
 -- Machine-checked: length [10,20,30] = 3, at exact cost 4 (= 3 + 1).
 lengthS-test : ⟦ lengthS ⟧C (10 ∷ 20 ∷ 30 ∷ []) ≡ (4 , 3)
 lengthS-test = refl
+
+-- §10e. whileS — {x,y,z} (tail form) with ON-DEMAND metering, machine-checked.
+-- drainS counts a number down to zero under a fuel bound.  With fuel 10, start 3:
+-- three taken steps (test 1 tel + tick 1 tel each) + the final false test 1 tel
+-- = 7 tel — the metering STOPS when the test goes false, unlike the derived
+-- whileD = iterS (guard t b) (see tictactoe.agda), which bills every fuel tick
+-- (reserved capacity).  Same value; refined cost extraction.
+private
+  nonZeroS : nat ⇨S (unit ⊕ unit)
+  nonZeroS = caseS inrS (inlS ∘S !S) ∘S natOutS   -- zero↦false, suc↦true
+
+drainS : (nat ⊗ nat) ⇨S nat
+drainS = whileS nonZeroS predS
+
+drainS-test : ⟦ drainS ⟧C (10 , 3) ≡ (7 , 0)
+drainS-test = refl
 
 -- NOTE on general merge sort.  It is now *expressible*: lists exist (`listT`),
 -- the merge step is `unconsS` + `caseS` + `minS`/`maxS` (data-dependent branching),
