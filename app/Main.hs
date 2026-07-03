@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
@@ -5,15 +6,24 @@ module Main where
 import Data.Maybe (mapMaybe)
 import qualified Options.Applicative as O
 import System.FilePath (takeBaseName)
-import Telomare.Eval (runMain)
+import Telomare.Eval (runMain, runMainCore)
+import Telomare.HvmBackend (emitProgram)
+import Telomare.HvmBackendCcc (emitProgramCcc)
 
-newtype TelomareOpts
-  = TelomareOpts {telomareFile :: String}
+data TelomareOpts
+  = TelomareOpts { telomareFile :: String
+                 , emitHvm      :: Bool
+                 , emitHvmCcc   :: Bool
+                 }
   deriving Show
 
 telomareOpts :: O.Parser TelomareOpts
 telomareOpts = TelomareOpts
   <$> O.argument O.str (O.metavar "TELOMARE-FILE")
+  <*> O.switch (O.long "emit-hvm"
+                <> O.help "compile (parse, resolve, size recursion) and print a Bend/HVM2 program instead of evaluating")
+  <*> O.switch (O.long "emit-hvm-ccc"
+                <> O.help "like --emit-hvm, but via the experimental ConCat-style combinator backend (native closures, no defunctionalization)")
 
 -- | Recursively load only the modules reachable from the entry file.
 getModulesFor :: String -> IO [(String, String)]
@@ -45,4 +55,6 @@ main = do
   topts <- O.execParser opts
   let entryModule = takeBaseName (telomareFile topts)
   allModules <- getModulesFor entryModule
-  runMain allModules entryModule
+  if | emitHvmCcc topts -> runMainCore allModules entryModule (putStr . emitProgramCcc)
+     | emitHvm topts -> runMainCore allModules entryModule (putStr . emitProgram)
+     | otherwise -> runMain allModules entryModule

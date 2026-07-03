@@ -80,6 +80,40 @@
         type = "app";
         program = self.packages.${system}.telomare + "/bin/telomare-evaluare";
       };
+      # telomare compiler hosted on Bend/HVM2 (bend/ — see bend/PORT.md).
+      # Two stages: the compiler runs under `bend run-rs` (lazy Rust runtime)
+      # and returns the generated program as a pure result value; the
+      # generated (defunctionalized) program runs under the standalone HVM C
+      # interpreter. Scripted: `nix run .#telomare-bend -- game.tel < moves`.
+      apps.telomare-bend = {
+        type = "app";
+        program = "${pkgs.writeShellApplication {
+          name = "telomare-bend";
+          runtimeInputs = [ pkgs.bend pkgs.hvm pkgs.gawk pkgs.gnused pkgs.coreutils ];
+          text = ''
+            export BEND_BIN=bend
+            export HVM_BIN=hvm
+            exec "${self}/bend/run_telomare_bend.sh" "$@"
+          '';
+        }}/bin/telomare-bend";
+      };
+      # Hybrid pipeline: the Haskell compiler front end (parse/resolve/
+      # Possible.hs recursion sizing) emits a defunctionalized Bend program
+      # (`telomare --emit-hvm`, src/Telomare/HvmBackend.hs) which HVM2
+      # executes natively. `nix run .#telomare-hvm -- game.tel < moves`.
+      apps.telomare-hvm = {
+        type = "app";
+        program = "${pkgs.writeShellApplication {
+          name = "telomare-hvm";
+          runtimeInputs = [ pkgs.bend pkgs.hvm pkgs.gawk pkgs.coreutils ];
+          text = ''
+            export TELOMARE_BIN="${self.packages.${system}.telomare}/bin/telomare"
+            export BEND_BIN=bend
+            export HVM_BIN=hvm
+            exec "${self}/bend/run_telomare_hvm.sh" "$@"
+          '';
+        }}/bin/telomare-hvm";
+      };
       apps.lsp = {
         type = "app";
         program = "${pkgs.writeShellApplication {

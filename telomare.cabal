@@ -35,6 +35,8 @@ library
                      , PrettyPrint
                      , Telomare
                      , Telomare.Eval
+                     , Telomare.HvmBackend
+                     , Telomare.HvmBackendCcc
                      , Telomare.Decompiler
                      , Telomare.Parser
                      , Telomare.Possible
