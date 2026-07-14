@@ -11,15 +11,30 @@ license:            Apache-2.0
 author:             hhefesto
 maintainer:         hhefesto@rdataa.com
 build-type:         Simple
+extra-source-files: test/golden/*.txt
+                  , test/programs/*.tel
 
 common warnings
     ghc-options: -Wall
 
 library
     import:           warnings
-    exposed-modules:  Telomare3.Core
+    exposed-modules:  Telomare3.Budget
+                    , Telomare3.Core
+                    , Telomare3.Denotation
+                    , Telomare3.Infer
+                    , Telomare3.Tel.Eval
+                    , Telomare3.Tel.Frontend
+                    , Telomare3.Tel.Loop
     hs-source-dirs:   src
     build-depends:    base
+                    , containers
+                    , data-fix
+                    , filepath
+                    , free
+                    , mtl
+                    , recursion-schemes
+                    , telomare
     default-language: Haskell2010
 
 executable telomare3
@@ -27,6 +42,9 @@ executable telomare3
     main-is:          Main.hs
     hs-source-dirs:   app
     build-depends:    base
+                    , containers
+                    , optparse-applicative
+                    , telomare
                     , telomare3
     default-language: Haskell2010
 
@@ -34,7 +52,15 @@ test-suite telomare3-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
+    other-modules:    BudgetOracle
+                    , InferOracle
+                    , Laws
+                    , ParityTel
+                    , SpecVectors
     hs-source-dirs:   test
     build-depends:    base
+                    , containers
+                    , directory
+                    , QuickCheck
                     , telomare3
     default-language: Haskell2010

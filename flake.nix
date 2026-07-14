@@ -306,7 +306,12 @@
         # postulates). Copied out of the store because agda writes .agdai
         # interface files next to the sources.
         telomare3-spec = pkgs.runCommand "telomare3-spec"
-          { nativeBuildInputs = [ agdaWithStdlib ]; } ''
+          {
+            nativeBuildInputs = [ agdaWithStdlib pkgs.glibcLocales ];
+            # agda needs a UTF-8 locale for its Unicode-heavy output/sources
+            LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
+            LC_ALL = "en_US.UTF-8";
+          } ''
             cp -r ${./telomare3/spec} spec
             chmod -R u+w spec
             cd spec

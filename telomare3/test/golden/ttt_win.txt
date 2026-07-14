@@ -1,0 +1,36 @@
+1|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 1's turn
+please input number of square: 
+O|2|3
+-+-+-
+X|5|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|O|3
+-+-+-
+X|5|6
+-+-+-
+7|8|9
+Player 1's turn
+please input number of square: 
+O|O|3
+-+-+-
+X|X|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+Player 2 wins!

@@ -1,119 +1,90 @@
-# HANDOFF — telomare3 (updated 2026-07-13)
+# HANDOFF — telomare3 (updated 2026-07-13; objective: .tel compatibility runtime)
 
-Cross-machine/session state for the **telomare3** effort: a greenfield
-reimplementation of telomare from first principles (Conal Elliott-style
-denotational design) using everything learned about EAL. Everything that came
-before is archived, not maintained: `design/HANDOFF-TELOMARE2-ARCHIVE.md`.
+Cross-machine/session state for **telomare3**: a greenfield reimplementation
+of telomare via denotational design + EAL. **Current objective: every .tel
+program that runs on telomare1 must run on telomare3** — full interactive IO
+(the transcript loop) and a playable two-player tictactoe, in the spirit of
+telomare1 (equivalent behavior; byte-identity not required). Predecessor-era
+handoff archived at `design/HANDOFF-TELOMARE2-ARCHIVE.md`.
 
 ## What this is / how to resume
 
-- Branch `bend-port`. The telomare2 corpus + T2 backend + telomare3 M0 are
-  committed ("telomare2 design + T2 backend verdict; telomare3 restart (M0)").
-  Commits only when the user asks. Flake builds see only git-*tracked* files —
-  `git add` every new file before any `nix build`/`nix run`/`nix flake check`.
-- One-command health check: `nix flake check` (builds telomare1 + telomare3,
-  runs both test suites, type-checks the Agda spec via `checks.telomare3-spec`).
-- The roadmap and its rationale: `design/TELOMARE3-DESIGN.md` (charter) with
-  the milestone board below kept in sync.
-- telomare1 (`src/`, `telomare.cabal`) and the bend/HVM2 work (`bend/`) are
-  **on hold**: zero edits, must keep building; their staged-but-uncommitted
-  state is carried as-is.
+- Branch `bend-port`. M0 is committed ("telomare2 design + T2 backend
+  verdict; telomare3 restart (M0)"); M1–M3 and later work are **staged but
+  uncommitted**. Commits only when the user asks. Flake builds see only
+  git-*tracked* files — `git add` every new file before any nix command.
+- One-command health check: `nix flake check` (telomare1 + telomare3 builds,
+  both test suites, Agda spec check `checks.telomare3-spec`).
+- Roadmap + full progress log: `design/TELOMARE3-DESIGN.md` (§7 has the
+  detailed M0–M3 records; this file keeps only the board).
+- telomare1 (`src/`, `telomare.cabal`) and `bend/` are on hold: **zero
+  edits**, but telomare1 is now allowed as a **library dependency** of
+  telomare3 (frontend reuse — user decision).
 
-## Firm decisions (user-stated)
+## Firm decisions (user-stated, current)
 
-- Whole compiler, **core-first**: semantic core (the Possible-successor,
-  where recursion sizing ≡ EAL box-depth/budget inference) comes first;
-  parser/backends follow.
-- Lives in **`telomare3/`** — its own cabal package (`telomare3`, namespace
-  `Telomare3.*`, GHC 9.6, same haskell-flake project), wired via root
-  `cabal.project`.
-- **Agda-first**: `telomare3/spec/` (`--safe`, zero postulates) is the source
-  of truth; Haskell mirrors it constructor-for-constructor. Imported
-  metatheory is cited in comments, never axiomatized.
-- **New surface language** in the telomare spirit (total, bounded,
-  `{test,step,base}`-spirit recursion, refinements); `tictactoe` hand-ported
-  as the north-star benchmark, telomare1 as oracle.
+- **Surface = the .tel language** (compatibility mode). The earlier "design
+  a fresh .t3 syntax" decision is SUPERSEDED; any future surface work builds
+  on .tel.
+- **Frontend reused from telomare1** as a library dep (Parser/Resolver as a
+  base; be critical — industry standards where telomare1 is idiosyncratic:
+  Either-based errors, no partial functions, clean optparse CLI).
+- **No Possible.hs.** telomare3's budgets come from the EAL side (M4).
+  Running .tel now = telomare3's own **metered Tier-2 evaluator**: native
+  `{test,step,base}` recursion (iterate until the base fires) + a work
+  meter — "deoptimize, never reject". Parity rationale: telomare1's sizing
+  only proves a bound suffices; at runtime the base fires early, so
+  while-semantics ≡ sized-church semantics on everything telomare1 accepts.
+  Unsizable programs additionally run here (improvement, documented).
+- Acceptance: CLI program running (`telomare3 foo.tel < input` behaves like
+  telomare1's, spirit-level). REPL/LSP/unit-test harness stay telomare1's.
+- Agda-first discipline unchanged for the spec side (`telomare3/spec/`,
+  `--safe`, zero postulates; Haskell mirrors it).
 
-## Design lessons inherited (each one paragraph, with pointer)
-
-- **The central thesis, now definitional:** Possible.hs recursion-limit
-  inference and EAL box-depth inference are the same analysis
-  (`design/VALIDATION.md`: box-nesting order = sizing dependency order on the
-  whole `{t,s,b}` fragment). Division of labor validated empirically:
-  **levels by structure** (no evaluation — `src/Telomare/Levels.hs` does full
-  tictactoe in 37 ms), **budgets by evaluation**.
-- **boxVal soundness:** `boxVal : A ⇨ !A` for general `A` is UNSOUND
-  (`dup ∘ boxVal` smuggles contraction on an open input). Promotion with
-  empty context only: `(unit ⇨ B) → (unit ⇨ !B)`. Discovered while
-  formalizing `design/telomare2.agda`; easy to get wrong again.
-- **The four §16 debts are the telomare3 agenda** (TELOMARE2-DESIGN.md §16):
-  (1) `!` has no denotation — telomare3 attempts length spaces over an EAL
-  resource monoid (Dal Lago–Hofmann); (2) box placement has no universal
-  property — telomare3 specifies `place` = least decoration in the erasure
-  fiber (Galois insertion) and proves the Levels.hs-style algorithm against
-  it; (3) grades are machine-anchored — cost object = resource monoid,
-  backends = monoid homomorphisms, telomare1's "+2 padding" derived not
-  measured; (4) discipline intensional vs semantics extensional — Tier 2 is
-  a fidelity *theorem* (`⟦place M⟧V = ⟦M⟧V^S`), deoptimize-never-reject.
-- **HVM2 lacks level-annotated fans.** The T2 backend experiment
-  (`design/T2-BEND-BACKEND.md`) proved the affine discipline works (+1–2%
-  overhead, fixes the OOM class) but depth-2 sharing (`whoWon.board : !!`)
-  defeats every single-level forcing regime. Tier 1 proper needs labeled
-  fans with levels as labels; **Tier 2 metered reduction is mandatory**, and
-  telomare3 does not target vanilla HVM2 for the fast path.
-- **Refinements are the totality certificate.** Removing `validBoard`-style
-  asserts makes programs UNSIZABLE (`RecursionLimitError`), not merely
-  unchecked. In telomare3 refinements denote (subset types), parameterize
-  the abstract interpretation's γ, and refinement predicates must be
-  ordinary surface programs.
-- **Cost anchors** (agda branch `BENCHMARK.md`): ~45 HVM2 interactions per
-  tel, ~240 ns/tel on the metered Haskell runtime — the measured ratios of
-  two homomorphic images of the one cost object.
-
-## Milestone board (details + exit criteria in design/TELOMARE3-DESIGN.md)
+## Milestone board
 
 | M | What | Status |
 |---|------|--------|
-| M0 | Scaffolding (`telomare3/` package, `cabal.project`, flake wiring: `apps.telomare3`, `checks.telomare3-spec`, agda in devShell) + HANDOFF restart + charter | **DONE 2026-07-13** (all exit criteria verified; also cleared pre-existing hlint/stylish debt so `format-lint` is green) |
-| M1 | Agda core spec: port `design/telomare2.agda` into `telomare3/spec/T3/*`, collapse the four resource functors into one graded `⟦_⟧G` over a CostAlgebra, adequacy stated once; §10 examples reprove by refl | pending |
-| M2 | Haskell mirror (`Telomare3.Core`/`Denotation`) + spec-vector tests (1:1 with Examples.agda) + QuickCheck law tests | pending |
-| M3 | Surface category + placement: ε, factorization `⟦_⟧V = ⟦_⟧V^S ∘ ε`, `place`, `place-least`; levels oracle vs telomare1 `--emit-levels` | pending |
-| M4 | Possible-successor budgets: Shape/γφ abstract domain, calculated transfer functions, `foldByLevel`, stability lemma; oracle vs telomare1 churchK numbers (dPow 5,6,8; whoWon {10}{5}{3}) | pending |
-| M5 | `!` denotation (length spaces; timeboxed, non-blocking; parallelizable after M1) or documented design-axiom fallback | pending |
-| M6 | Surface language: syntax design → `Telomare3.Parser` + `Elaborate`; `examples/prelude.t3` | pending |
-| M7 | Tier-2 metered evaluator + `examples/tictactoe.t3`; transcript byte-parity vs `nix run . -- tictactoe.tel` | pending |
+| M0 | Scaffolding, flake wiring, charter, HANDOFF restart | DONE 2026-07-13 (committed) |
+| M1 | Agda core spec ported + consolidated (one graded `⟦_⟧G`/CostAlgebra, adequacy once, whileS+guardS with priced probes) | DONE 2026-07-13 — see charter §7 |
+| M2 | Haskell mirror + 24 spec vectors + 6 QuickCheck laws ×1000 | DONE 2026-07-13 — see charter §7 |
+| M3 | Surface category + placement: ε-factor, meet-closure, `place-least`, `core-dominates`; `Telomare3.Infer` + levels oracle vs telomare1 `--emit-levels` | DONE 2026-07-13 — see charter §7 |
+| **M-tel** | **.tel compat runtime**: `Telomare3.Tel.{Frontend,Eval,Loop}` + CLI — telomare1 frontend (dep) → Term3 → telomare3 IR with native recursion; metered Tier-2 evaluator; transcript IO loop | **DONE 2026-07-14** — tictactoe plays via `nix run .#telomare3 -- tictactoe.tel`; 4 scripted games BYTE-identical to telomare1 goldens; simpleplus/tc_ultra_minimal match; sizing_fail5 runs (telomare1 rejects it); details charter §7 |
+| M4 | Possible-successor budgets: `spec/T3/Abstract.agda` (Shape/γ, transfer = fuel-bounded abstract unrolling, SOUND + while-stable proved) + `Telomare3.Budget` mirror | **DONE 2026-07-14** — S1/S2/S3 by refl; churchK oracle = bound+2 (dPow (3,6)↦(5,8); whoWon (8,3)↦(10,5)); ⊤ budget = Tier-2 notice; charter §7 |
+| M5 | `!` denotation attempt | **CLOSED 2026-07-14** — arbiter FIRED: `spec/T3/Sem/Length.agda` machine-checks that additive length spaces admit NO realizer for iterS (`iterS-not-additive`); design axiom recorded (elementary-growth monoid deferred, Dal Lago–Hofmann cited); charter §7 |
+
+## Design lessons still steering M4/M5 (pointers)
+
+- Sizing ≡ EAL box-depth inference (design/VALIDATION.md); levels by
+  structure (proved least in `T3/Place.agda`), budgets by evaluation (M4).
+- `boxVal` promotion is empty-context only (dup∘boxVal smuggles contraction).
+- Probes (guard/while tests) are implicit copies and are PRICED in the dup
+  grade (T3.Sem.Graded chargeProbe).
+- HVM2 lacks level-annotated fans ⇒ Tier 1 needs labeled fans; Tier 2
+  metered reduction is mandatory (design/T2-BEND-BACKEND.md).
+- Cost anchors: ~45 ITRS/tel, ~240 ns/tel (agda branch BENCHMARK.md).
 
 ## How to verify everything
 
 ```sh
 nix flake check                                   # everything at once
-nix run .#telomare3                               # the M0 executable
-nix develop --command cabal test telomare3        # Haskell tests (M2+)
-nix develop --command agda --safe telomare3/spec/Everything.agda   # spec
-nix develop --command agda --safe design/telomare2.agda            # frozen predecessor still checks
-# telomare1 oracle commands (M3/M4): telomare --emit-levels / --emit-hvm
-#   (each oracle number in test/InferOracle.hs carries its producing command)
+nix run .#telomare3 -- tictactoe.tel              # interactive game (M-tel)
+nix develop --command cabal test telomare3        # vectors + laws + oracle + parity
+nix develop --command agda --safe telomare3/spec/Everything.agda
+nix run .#format-lint
 ```
 
 ## Standing constraints (user-stated)
 
-- No python — shell/awk only.
-- No commits unless explicitly asked; stage (`git add`) every new file so the
-  flake sees it.
-- Document progress in the repo's md files; keep THIS file current.
-- If any bend/hvm invocation happens (shouldn't this round): timeout-wrap it,
-  cap output (`head`), one big-arena binary at a time, kill leftovers via
-  `/proc/PID/exe` (never `pkill -f`, it self-matches).
+- No python — shell/awk only. No commits unless explicitly asked; stage new
+  files before nix builds. Document progress in the repo's md files; keep
+  THIS file current. Timeout-wrap + cap output on any bend/hvm run (not
+  expected this round); kill leftovers via /proc/PID/exe, never `pkill -f`.
 
 ## Archive & evidence pointers
 
-- `design/HANDOFF-TELOMARE2-ARCHIVE.md` — the full telomare1/2-era handoff
-  (workstreams A/B, toolchain hazards, GC pinning of bend/hvm).
-- `design/TELOMARE2-DESIGN.md` (§12 migration, §14 open questions, §16
-  debts), `design/telomare2.agda` (frozen), `design/VALIDATION.md`,
-  `design/T2-BEND-BACKEND.md`.
-- `bend/HYBRID_PROGRESS.md`, `bend/PORT.md` — the HVM2 negative result.
-- agda branch: `telomare.agda`, `README-Agda.md`, `BENCHMARK.md` (45
-  ITRS/tel, ~240 ns/tel).
-- Conal Elliott papers in `~/src/conal-elliott/` (Denotational Design,
-  Compiling to Categories, Timely Computation).
+`design/TELOMARE3-DESIGN.md` (charter + progress log) ·
+`design/HANDOFF-TELOMARE2-ARCHIVE.md` (telomare1/2-era handoff, toolchain
+hazards) · `design/TELOMARE2-DESIGN.md` / `VALIDATION.md` /
+`T2-BEND-BACKEND.md` / `telomare2.agda` (frozen) · agda branch
+`BENCHMARK.md`.

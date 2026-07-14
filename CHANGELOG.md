@@ -110,6 +110,56 @@
   `nix run .#telomare3`, spec gate `checks.telomare3-spec`, agda+stdlib in
   the dev shell, `HANDOFF.md` restarted (predecessor archived to
   `design/HANDOFF-TELOMARE2-ARCHIVE.md`).
+* telomare3 M1–M3 landed (all Agda `--safe`, zero postulates; details in
+  `design/TELOMARE3-DESIGN.md` §7):
+  - M1 `telomare3/spec/T3/*`: telomare2.agda ported + consolidated — ONE
+    graded interpretation `⟦_⟧G` over a CostAlgebra (work/dup/space
+    instances), generic value coherence `G-val`, adequacy restated once;
+    new `whileS`/`guardS` primitives whose probes (reads that don't
+    consume) are PRICED in the dup grade; §10 examples reprove by refl.
+  - M2 Haskell mirror `Telomare3.{Core,Denotation}` (GADT + STy
+    singletons only where grading reads types) with `cabal test
+    telomare3`: 24 spec vectors 1:1 by name with Examples.agda + 6
+    QuickCheck laws ×1000 re-checking the proved theorems.
+  - M3 surface + placement: `T3/Surface/*`, `T3/Place.agda` — erasure ε,
+    factorization `stripV ∘ ⟦_⟧V ≡ ⟦ε _⟧VS ∘ stripV`, meet-closure,
+    `place-least` (the least-boxing universal property, telomare2 §16
+    debt 2 discharged on the compiler-owned fragment), `core-dominates`
+    (typed core terms stratify above the structural placement of their
+    erasure).  `Telomare3.Infer` mirrors the spec + the Levels.hs recipe;
+    `test/InferOracle.hs` reproduces telomare1's `--emit-levels` facts on
+    a structural tictactoe reduction (towerHeight 3, `whoWon.board : !!`,
+    `main.input : !!`, `main.newBoard : !`, strata {0,1,2}).
+* telomare3 M-tel: the .tel compatibility runtime —
+  `nix run .#telomare3 -- game.tel` runs .tel programs with full
+  interactive IO on telomare3's own metered Tier-2 evaluator
+  (`Telomare3.Tel.{Frontend,Eval,Loop}`).  Frontend reuses telomare1's
+  Parser/Resolver as a library dependency; **no Possible.hs** — `{t,s,b}`
+  recursion runs natively (a `VRec` ladder value unrolling one step per
+  demanded call, metered per site), so compilation is near-instant and
+  programs telomare1 rejects as unsizable (e.g. `sizing_fail5.tel`) run.
+  Two-player tictactoe plays; four scripted games byte-identical to
+  telomare1 golden transcripts; simpleplus/tc_ultra_minimal transcripts
+  match.  CLI: `--certificate` (structural levels report), `--meter`
+  (work report on stderr), `--max-steps` (fuel cap).  Parity suite in
+  `telomare3/test/ParityTel.hs` over frozen program copies.  Details and
+  the two documented semantic deviations (lazy gate selection,
+  value-aborts) in `design/TELOMARE3-DESIGN.md` §7.
+* telomare3 M4: the Possible-successor — budgets by calculated abstract
+  interpretation (`spec/T3/Abstract.agda`, --safe, 0 postulates): Shape
+  domain + γ, budget trees over the M3 skeletons, transfer with
+  fuel-bounded abstract unrolling (VALIDATION S2 = the definition, S3 =
+  composition), PROVED sound (per-combinator logical relation) and
+  stable (`while-stable`); unbounded fuel = ⊤ budget = Tier-2 notice,
+  never rejection.  `spec/T3/Examples/Budgets.agda` refl-computes the
+  probe budgets; churchK oracle mapping k = bound + 2 (dPow (3,6)↦(5,8),
+  whoWon strata (8,3)↦(10,5)).  Haskell mirror `Telomare3.Budget` +
+  `test/BudgetOracle.hs` vectors 1:1.
+* telomare3 M5 closed: the intrinsic `!`-denotation attempt
+  (`spec/T3/Sem/Length.agda`) machine-checks its own arbiter firing —
+  `iterS-not-additive`: additive length spaces admit no realizer for
+  fuel-carrying iteration.  Design axiom recorded (elementary-growth
+  resource monoid deferred; graded semantics remains the cost layer).
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

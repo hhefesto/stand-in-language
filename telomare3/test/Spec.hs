@@ -1,9 +1,33 @@
+-- | Test driver: spec vectors (Examples.agda 1:1) + law properties
+-- (Agda-proved theorems, QuickChecked on the mirror; ≥1000 cases each).
 module Main (main) where
 
-import Control.Monad (unless)
+import Control.Monad (forM, forM_, unless)
 import System.Exit (exitFailure)
-import Telomare3.Core (telomare3Version)
+import Test.QuickCheck (quickCheckWithResult, stdArgs)
+import Test.QuickCheck.Test (Args (..), isSuccess)
 
--- M0 placeholder test; real spec-vector and law tests arrive at M2.
+import BudgetOracle (budgetVectors)
+import InferOracle (inferProps, oracleVectors)
+import Laws (lawProps)
+import ParityTel (parityVectors)
+import SpecVectors (specVectors)
+
 main :: IO ()
-main = unless (take 9 telomare3Version == "telomare3") exitFailure
+main = do
+  telParity <- parityVectors
+  let vectors = specVectors <> oracleVectors <> budgetVectors <> telParity
+      props   = lawProps <> inferProps
+      failedVectors = [n | (n, ok) <- vectors, not ok]
+  forM_ vectors $ \(n, ok) ->
+    putStrLn ((if ok then "PASS " else "FAIL ") <> n)
+  lawResults <- forM props $ \(n, p) -> do
+    putStrLn ("LAW  " <> n)
+    r <- quickCheckWithResult (stdArgs { maxSuccess = 1000 }) p
+    pure (n, isSuccess r)
+  let failedLaws = [n | (n, ok) <- lawResults, not ok]
+  unless (null failedVectors && null failedLaws) $ do
+    forM_ (failedVectors <> failedLaws) (putStrLn . ("FAILED: " <>))
+    exitFailure
+  putStrLn ("all " <> show (length vectors) <> " vectors + "
+            <> show (length props) <> " laws OK")

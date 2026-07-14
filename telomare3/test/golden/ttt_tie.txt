@@ -1,0 +1,64 @@
+1|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 1's turn
+please input number of square: 
+O|X|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|X|O
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 1's turn
+please input number of square: 
+O|X|O
+-+-+-
+4|X|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|X|O
+-+-+-
+O|X|6
+-+-+-
+7|8|9
+Player 1's turn
+please input number of square: 
+O|X|O
+-+-+-
+O|X|X
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|X|O
+-+-+-
+O|X|X
+-+-+-
+7|O|9
+Player 1's turn
+please input number of square: 
+O|X|O
+-+-+-
+O|X|X
+-+-+-
+X|O|9
+Player 2's turn
+please input number of square: 
+the game is a tie
