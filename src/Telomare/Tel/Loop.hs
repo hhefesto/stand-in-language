@@ -101,8 +101,7 @@ runTelLoop fuel prog = go Nothing (Left ())
                     go (Just (line, ns)) (Right total))
     accumulate acc m = case acc of
       Left ()  -> m
-      Right m0 -> Meter (mApplies m0 + mApplies m) (mGates m0 + mGates m)
-                        (mUnrolls m0 <> mUnrolls m)
+      Right m0 -> combineMeters m0 m
 
 -- | Pure transcript for tests: outputs joined by newlines, one line per
 -- iteration, ending like the interactive loop (no "done").  Runs at most

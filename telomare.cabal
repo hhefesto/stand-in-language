@@ -12,6 +12,7 @@ maintainer:         hhefesto@rdataa.com
 category:           Language
 build-type:         Simple
 extra-source-files: README.md
+                  , STORY.md
                   , test/golden/*.txt
                   , test/programs/*.tel
 
@@ -74,12 +75,14 @@ test-suite telomare-test
     other-modules:    BudgetOracle
                     , InferOracle
                     , Laws
+                    , MeterVectors
                     , ParityTel
                     , SpecVectors
     hs-source-dirs:   test
     build-depends:    base
                     , containers
                     , directory
+                    , free
                     , QuickCheck
                     , telomare
     default-language: Haskell2010

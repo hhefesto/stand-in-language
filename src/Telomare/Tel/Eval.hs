@@ -34,8 +34,11 @@
 module Telomare.Tel.Eval
   ( TelExpr (..)
   , Value (..)
+  , RecursionSite (..)
   , Meter (..)
   , emptyMeter
+  , combineMeters
+  , renderMeter
   , TelError (..)
   , EvalM
   , runEval
@@ -47,10 +50,22 @@ module Telomare.Tel.Eval
 
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.State (State, get, gets, modify', put, runState)
+import Data.List (sortOn)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Telomare.Compat.Syntax (BasicExpr, UnsizedRecursionToken, pattern PairB,
-                               pattern ZeroB)
+import Data.Maybe (fromMaybe)
+import Telomare.Compat.Syntax (BasicExpr, LocTag (..), SourcePosition (..),
+                               SourceSpan (..), UnsizedRecursionToken (..),
+                               pattern PairB, pattern ZeroB)
+
+-- | A native recursion site with its stable compatibility token and best known
+-- source location. The token keeps repeated generated locations distinct.
+data RecursionSite = RecursionSite
+  { rsToken :: !UnsizedRecursionToken
+  , rsLoc   :: !LocTag
+  , rsOwner :: !(Maybe String)
+  }
+  deriving (Eq, Ord, Show)
 
 -- | The .tel core, plus the native recursion node (which replaces the
 -- church tower the old sizing pass would install).
@@ -64,7 +79,7 @@ data TelExpr
   | TLeft TelExpr
   | TRight TelExpr
   | TAbort
-  | TUnbounded UnsizedRecursionToken
+  | TUnbounded RecursionSite
   deriving (Eq, Show)
 
 -- | Machine values.  Closures are @VPair (VDefer code) env@ by the .tel
@@ -78,7 +93,7 @@ data Value
   | VAborted BasicExpr
     -- ^ an abort VALUE: propagates and may be discarded; fatal only if it
     -- survives into the iteration result
-  | VRec UnsizedRecursionToken Value Value
+  | VRec RecursionSite Value Value
     -- ^ @VRec tok step fenv@: the limit of @rWrap^n(abort)@; 'forceValue'
     -- unrolls one layer by applying @step@ to the ladder itself.
   deriving (Eq, Show)
@@ -88,12 +103,86 @@ data Value
 data Meter = Meter
   { mApplies :: !Int                              -- ^ function applications
   , mGates   :: !Int                              -- ^ gate selections
-  , mUnrolls :: !(Map UnsizedRecursionToken Int)  -- ^ per-site recursion depth
+  , mUnrolls :: !(Map RecursionSite Int)          -- ^ per-site recursion depth
   }
   deriving (Eq, Show)
 
 emptyMeter :: Meter
 emptyMeter = Meter 0 0 Map.empty
+
+combineMeters :: Meter -> Meter -> Meter
+combineMeters a b = Meter
+  { mApplies = mApplies a + mApplies b
+  , mGates = mGates a + mGates b
+  , mUnrolls = Map.unionWith (+) (mUnrolls a) (mUnrolls b)
+  }
+
+renderMeter :: Meter -> String
+renderMeter m = unlines $
+  [ "-- Telomare Tier-2 work meter"
+  , "function applications: " <> commaInt (mApplies m)
+  , "gate selections:        " <> commaInt (mGates m)
+  , "recursion unrolls:      " <> commaInt totalUnrolls
+      <> " across " <> show siteCount <> plural " site" siteCount
+  ] <> siteTable
+  where
+    rows = sortOn rowSort
+      [ (site, n, siteName site, renderLoc (rsLoc site), fromMaybe "unknown" (rsOwner site))
+      | (site, n) <- Map.toList (mUnrolls m)
+      ]
+    rowSort (site, n, _, _, _) = (negate n, unUnsizedRecursionToken (rsToken site))
+    totalUnrolls = sum [n | (_, n, _, _, _) <- rows]
+    siteCount = length rows
+    sourceWidth = maximum (length "source" : [length s | (_, _, _, s, _) <- rows])
+    functionWidth = maximum (length "function" : [length f | (_, _, _, _, f) <- rows])
+    siteTable
+      | null rows = []
+      | otherwise =
+          [ ""
+          , "  " <> padRight 5 "site" <> " "
+              <> padRight sourceWidth "source" <> "  "
+              <> padRight functionWidth "function" <> "  unrolls"
+          ] <> [ "  " <> padRight 5 sid <> " "
+                 <> padRight sourceWidth source <> "  "
+                 <> padRight functionWidth function <> "  " <> commaInt n
+               | (_, n, sid, source, function) <- rows
+               ]
+
+siteName :: RecursionSite -> String
+siteName = ('#' :) . show . unUnsizedRecursionToken . rsToken
+
+renderLoc :: LocTag -> String
+renderLoc = \case
+  SourceLoc span' -> renderSpan span'
+  GeneratedLoc label (Just parent) -> "generated " <> label <> " from " <> renderLoc parent
+  GeneratedLoc label Nothing       -> "generated " <> label
+  BuiltinLoc label                 -> "builtin " <> label
+  RuntimeLoc                       -> "runtime"
+  DecompiledLoc                    -> "decompiled"
+  UnknownLoc                       -> "unknown"
+
+renderSpan :: SourceSpan -> String
+renderSpan span' = file <> ":" <> show line <> ":" <> show col
+  where
+    file = fromMaybe "<source>" (sourceSpanFile span')
+    SourcePosition line col _ = sourceSpanStart span'
+
+commaInt :: Int -> String
+commaInt n
+  | n < 0 = '-' : commaInt (negate n)
+  | otherwise = reverse . go 0 . reverse $ show n
+  where
+    go :: Int -> String -> String
+    go _ []       = []
+    go 3 xs       = ',' : go 0 xs
+    go k (x : xs) = x : go (k + 1) xs
+
+padRight :: Int -> String -> String
+padRight width s = s <> replicate (max 0 (width - length s)) ' '
+
+plural :: String -> Int -> String
+plural word 1 = word
+plural word _ = word <> "s"
 
 data TelError
   = TelStuck String        -- ^ ill-formed application/projection
@@ -120,7 +209,7 @@ tickApply = modify' (\(m, f) -> (m { mApplies = mApplies m + 1 }, f)) >> spend
 tickGate :: EvalM ()
 tickGate = modify' (\(m, f) -> (m { mGates = mGates m + 1 }, f))
 
-tickUnroll :: UnsizedRecursionToken -> EvalM ()
+tickUnroll :: RecursionSite -> EvalM ()
 tickUnroll tok =
   modify' (\(m, f) ->
     (m { mUnrolls = Map.insertWith (+) tok 1 (mUnrolls m) }, f)) >> spend

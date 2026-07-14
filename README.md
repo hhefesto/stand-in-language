@@ -4,6 +4,8 @@ Telomare is a total-language experiment built around one goal: programs should
 have ordinary executable behavior and knowable resource structure. The current
 implementation is the regular `telomare` package and executable.
 
+For the long type-by-type narrative, see [`STORY.md`](STORY.md).
+
 The repository now has one active implementation:
 
 - `spec/`: the Agda source of truth, checked with `--safe` and no postulates.

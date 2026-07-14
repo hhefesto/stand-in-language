@@ -24,7 +24,8 @@ import Telomare.Compat.PrettyPrint (indentSansFirstLine)
 import Telomare.Compat.Syntax
 import Telomare.Compat.TypeChecker (typeCheck)
 import Text.Megaparsec (MonadParsec (eof, notFollowedBy, try), ParseErrorBundle,
-                        Parsec, Pos, SourcePos (sourceColumn, sourceLine),
+                        Parsec, Pos,
+                        SourcePos (sourceColumn, sourceLine, sourceName),
                         between, choice, errorBundlePretty, getOffset,
                         getSourcePos, many, manyTill, optional, runParser,
                         sepBy, some, unPos, (<?>), (<|>))
@@ -131,7 +132,9 @@ sourcePositionFromPos offset pos = SourcePosition
 
 sourceLocFromPositions :: (Int, SourcePos) -> (Int, SourcePos) -> LocTag
 sourceLocFromPositions (startOffset, start) (endOffset, end) = SourceLoc SourceSpan
-  { sourceSpanFile = Nothing
+  { sourceSpanFile = case sourceName start of
+      "" -> Nothing
+      n  -> Just n
   , sourceSpanStart = sourcePositionFromPos startOffset start
   , sourceSpanEnd = sourcePositionFromPos endOffset end
   }
@@ -749,10 +752,16 @@ parseWithPrelude prelude str = bimap errorBundlePretty AnnotatedUPT $ runParser 
   prelude' = fmap (second unAnnotatedUPT) prelude
 
 parseModule :: String -> Either String [Either AnnotatedUPT (String, AnnotatedUPT)]
-parseModule str = first errorBundlePretty $ parseModuleDetailed str
+parseModule = parseModuleNamed ""
+
+parseModuleNamed :: FilePath -> String -> Either String [Either AnnotatedUPT (String, AnnotatedUPT)]
+parseModuleNamed name str = first errorBundlePretty $ parseModuleDetailedNamed name str
 
 parseModuleDetailed :: String -> Either (ParseErrorBundle String Void) [Either AnnotatedUPT (String, AnnotatedUPT)]
-parseModuleDetailed = wrapUp . runParser (concat <$> (scn *> many parseImportOrAssignment <* eof)) "" where
+parseModuleDetailed = parseModuleDetailedNamed ""
+
+parseModuleDetailedNamed :: FilePath -> String -> Either (ParseErrorBundle String Void) [Either AnnotatedUPT (String, AnnotatedUPT)]
+parseModuleDetailedNamed name = wrapUp . runParser (concat <$> (scn *> many parseImportOrAssignment <* eof)) name where
   wrapUp = second (fmap (bimap AnnotatedUPT (second AnnotatedUPT)))
 
 -- |Parse either a single expression or top level definitions defaulting to the `main` definition.

@@ -20,22 +20,27 @@ module Telomare.Tel.Frontend
   , term3ToTel
   ) where
 
+import Control.Comonad.Cofree (Cofree ((:<)))
 import qualified Control.Comonad.Trans.Cofree as CofreeT
 import Control.Exception (IOException, try)
 import Data.Bifunctor (bimap, second)
 import Data.Fix (Fix (..))
 import Data.Functor.Foldable (cata)
 import Data.List (isPrefixOf, nub)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import System.FilePath (takeBaseName, takeDirectory, (<.>), (</>))
 
-import Telomare.Compat.Parser (parseModule)
+import Telomare.Compat.Parser (parseModuleNamed)
 import Telomare.Compat.Resolver (main2Term3, main2Term3let)
 import qualified Telomare.Compat.Syntax as Compat
-import Telomare.Compat.Syntax (AbortableF (..), BasicExprF (..), StuckF (..),
-                               Term3, Term3F (..), unAnnotatedUPT)
+import Telomare.Compat.Syntax (AbortableF (..), AnnotatedUPT (..),
+                               BasicExprF (..), LocTag (..),
+                               SourcePosition (..), SourceSpan (..),
+                               StuckF (..), Term3, Term3F (..), unAnnotatedUPT)
 import Telomare.Compat.TypeChecker (typeCheck)
 
-import Telomare.Tel.Eval (TelExpr (..))
+import Telomare.Tel.Eval (RecursionSite (..), TelExpr (..))
 
 data Tel3Error
   = ModuleLoadError String
@@ -91,7 +96,7 @@ loadModulesFor path =
 compileTel :: [(String, String)] -> String -> Either Tel3Error TelExpr
 compileTel moduleSrcs entry = do
   parsed <- traverse
-    (\(n, src) -> either (Left . ParseError n) (Right . (,) n) (parseModule src))
+    (\(n, src) -> either (Left . ParseError n) (Right . (,) n) (parseModuleNamed (n <> ".tel") src))
     moduleSrcs
   -- unwrap the parser's AnnotatedUPT newtype for the resolver
   let modules =
@@ -101,7 +106,7 @@ compileTel moduleSrcs entry = do
     Just e  -> Left (TypeError (show e))
     Nothing -> Right ()
   t3 <- either (Left . ResolveError . show) Right (main2Term3let modules entry)
-  term3ToTel t3
+  term3ToTelWithOwners (ownerMap parsed) t3
   where
     -- main :: (Zero -> Zero, Any), the .tel transcript entry type
     mainType = Fix (Compat.PairTypeP
@@ -112,9 +117,14 @@ compileTel moduleSrcs entry = do
 -- becomes 'TUnbounded'; the refinement wrapper emits the compatibility
 -- runtime shape and runs checks at runtime.
 term3ToTel :: Term3 -> Either Tel3Error TelExpr
-term3ToTel = cata go
+term3ToTel = term3ToTelWithOwners Map.empty
+
+type LocKey = (Maybe FilePath, Int)
+
+term3ToTelWithOwners :: Map LocKey String -> Term3 -> Either Tel3Error TelExpr
+term3ToTelWithOwners owners = cata go
   where
-    go (_ CofreeT.:< t) = case t of
+    go (anno CofreeT.:< t) = case t of
       Term3B ZeroSF               -> Right TZero
       Term3B (PairSF a b)         -> TPair <$> a <*> b
       Term3S EnvSF                -> Right TEnv
@@ -125,8 +135,10 @@ term3ToTel = cata go
       Term3S (RightSF x)          -> TRight <$> x
       Term3A AbortF               -> Right TAbort
       Term3A (AbortedF _)         -> Left (ConvError "AbortedF in source term")
-      Term3Unsized tok            -> Right (TUnbounded tok)
+      Term3Unsized tok            -> Right (TUnbounded (RecursionSite tok anno (ownerFor anno)))
       Term3CheckingWrapper _ tc c -> checkingWrapper <$> tc <*> c
+
+    ownerFor loc = locKey loc >>= (`Map.lookup` owners)
 
     -- SetEnv (Pair performTC (Pair tc c)) with
     -- performTC = Defer (SetEnv (Pair (SetEnv (Pair Abort (tc `app` c)))
@@ -144,3 +156,29 @@ term3ToTel = cata go
     app c i = TSetEnv (TSetEnv (TPair twiddle (TPair i c)))
     twiddle = TDefer (TPair (TLeft (TRight TEnv))
                             (TPair (TLeft TEnv) (TRight (TRight TEnv))))
+
+ownerMap :: [(String, [Either AnnotatedUPT (String, AnnotatedUPT)])] -> Map LocKey String
+ownerMap parsed = Map.fromListWith keepExisting
+  [ (key, moduleName <> "." <> defName)
+  | (moduleName, entries) <- parsed
+  , Right (defName, AnnotatedUPT body) <- entries
+  , (key, _) <- ownerEntries body
+  ]
+  where
+    keepExisting _ old = old
+
+ownerEntries :: Compat.AUPT -> [(LocKey, ())]
+ownerEntries (loc :< term) = here <> foldMap ownerEntries term
+  where
+    here = case locKey loc of
+      Just key -> [(key, ())]
+      Nothing  -> []
+
+locKey :: LocTag -> Maybe LocKey
+locKey = \case
+  SourceLoc span' -> Just
+    ( sourceSpanFile span'
+    , sourcePositionOffset (sourceSpanStart span')
+    )
+  GeneratedLoc _ parent -> parent >>= locKey
+  _ -> Nothing

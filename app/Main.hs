@@ -11,13 +11,12 @@
 module Main (main) where
 
 import Control.Monad (when)
-import qualified Data.Map as Map
 import Options.Applicative
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 
 import Telomare.Compat.Levels (levelsReport)
-import Telomare.Tel.Eval (Meter (..))
+import Telomare.Tel.Eval (renderMeter)
 import Telomare.Tel.Frontend (compileTel, loadModulesFor, renderTel3Error)
 import Telomare.Tel.Loop (runTelLoop)
 
@@ -52,13 +51,4 @@ run o = loadModulesFor (optFile o) >>= \case
       Left e -> hPutStrLn stderr (renderTel3Error e) >> exitFailure
       Right prog -> do
         meter <- runTelLoop (optMaxSteps o) prog
-        when (optMeter o) $ hPutStrLn stderr (meterReport meter)
-
-meterReport :: Meter -> String
-meterReport m = unlines
-  ([ "-- Telomare Tier-2 work meter"
-   , "applies: " <> show (mApplies m)
-   , "gate selections: " <> show (mGates m)
-   ] <> [ "recursion site " <> show tok <> ": " <> show n <> " unrolls"
-        | (tok, n) <- Map.toList (mUnrolls m)
-        ])
+        when (optMeter o) $ hPutStrLn stderr (renderMeter meter)

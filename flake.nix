@@ -2,39 +2,83 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    haskell-flake.url = "github:srid/haskell-flake";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
     };
   };
 
-  outputs = inputs@{ self, nixpkgs, flake-parts, haskell-flake, ... }:
+  outputs = inputs@{ self, nixpkgs, flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "x86_64-linux" "aarch64-linux" ];
-      imports = [ inputs.haskell-flake.flakeModule ];
       perSystem = { self', system, pkgs, ... }:
         let
           agdaWithStdlib = pkgs.agda.withPackages (p: [ p.standard-library ]);
+          hp = pkgs.haskell.packages.ghc96;
+          telomare = hp.mkDerivation {
+            pname = "telomare";
+            version = "0.1.0.0";
+            src = ./.;
+            isLibrary = true;
+            isExecutable = true;
+            libraryHaskellDepends = with hp; [
+              base
+              bytestring
+              containers
+              cryptonite
+              data-fix
+              deepseq
+              deriving-compat
+              dlist
+              filepath
+              free
+              genvalidity
+              lens
+              megaparsec
+              memory
+              mtl
+              recursion-schemes
+              strict
+              transformers
+              utf8-string
+              validity
+            ];
+            executableHaskellDepends = with hp; [
+              base
+              containers
+              optparse-applicative
+            ];
+            testHaskellDepends = with hp; [
+              base
+              containers
+              directory
+              free
+              QuickCheck
+            ];
+            doCheck = true;
+            homepage = "https://github.com/hhefesto/stand-in-language";
+            description = "Total language runtime with knowable bounds";
+            license = pkgs.lib.licenses.asl20;
+            mainProgram = "telomare";
+          };
         in {
-          haskellProjects.default = {
-            basePackages = pkgs.haskell.packages.ghc96;
-            devShell = {
-              enable = true;
-              tools = hp: {
-                inherit (hp) cabal-install haskell-language-server;
-              };
-              mkShellArgs = {
-                nativeBuildInputs = [ agdaWithStdlib ];
-              };
-            };
+          packages = {
+            default = telomare;
+            inherit telomare;
           };
 
-          packages.default = self'.packages.telomare;
+          devShells.default = pkgs.mkShell {
+            nativeBuildInputs = [
+              agdaWithStdlib
+              hp.cabal-install
+              hp.haskell-language-server
+            ];
+          };
 
           apps.default = {
             type = "app";
             program = self'.packages.telomare + "/bin/telomare";
+            meta.description = "Run a .tel program on the Telomare Tier-2 runtime";
           };
 
           apps.format-lint = {
@@ -82,9 +126,11 @@
                 printf 'Formatting and linting are OK\n'
               '';
             }}/bin/telomare-format-lint-check";
+            meta.description = "Check Haskell formatting and hlint hints";
           };
 
-          checks = self'.packages // {
+          checks = {
+            inherit telomare;
             telomare-spec = pkgs.runCommand "telomare-spec"
               {
                 nativeBuildInputs = [ agdaWithStdlib pkgs.glibcLocales ];

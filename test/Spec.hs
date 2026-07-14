@@ -10,13 +10,14 @@ import Test.QuickCheck.Test (Args (..), isSuccess)
 import BudgetOracle (budgetVectors)
 import InferOracle (inferProps, oracleVectors)
 import Laws (lawProps)
+import MeterVectors (meterVectors)
 import ParityTel (parityVectors)
 import SpecVectors (specVectors)
 
 main :: IO ()
 main = do
   telParity <- parityVectors
-  let vectors = specVectors <> oracleVectors <> budgetVectors <> telParity
+  let vectors = specVectors <> oracleVectors <> budgetVectors <> meterVectors <> telParity
       props   = lawProps <> inferProps
       failedVectors = [n | (n, ok) <- vectors, not ok]
   forM_ vectors $ \(n, ok) ->
