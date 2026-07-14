@@ -182,10 +182,13 @@ The compatibility frontend is still present because existing `.tel` syntax and
 fixtures depend on it. It has been moved into `Telomare.Compat.*` so it is no
 longer confused with the active semantic core.
 
-The CLI `--certificate` report is currently the structural levels report from
-the compatibility frontend. The newer budget and placement mirrors exist in
-`Telomare.Budget` and `Telomare.Infer`, but they are not yet a single integrated
-user certificate pipeline.
+The CLI `--certificate` report is currently a static compatibility placement
+estimate. It groups source `{test, step, base}` recursion sites, shows the
+inferred box levels at which they are observed, and reports binding depth
+pressure. It is not a runtime meter, termination proof, or formal EAL typing.
+The newer budget and placement mirrors exist in `Telomare.Budget` and
+`Telomare.Infer`, but they are not yet a single integrated user certificate
+pipeline.
 
 The Agda spec defines a space grade; the Haskell mirror currently implements
 work and duplication. The spec also proves that simple additive word-size

@@ -44,7 +44,7 @@ under the `.tel` display/state protocol.
 
 The CLI options line up with that path:
 
-- `--certificate` prints the compatibility structural-level report.
+- `--certificate` prints the static compatibility placement report.
 - `--meter` prints the Tier-2 runtime meter.
 - `--max-steps N` gives the runtime a fuel cap.
 
@@ -415,8 +415,11 @@ The Agda spec proves that valid placements are meet-closed and that structural
 placement computes the least solution. In other words, the level assignment is
 not a runtime guess; it is a structural fact about the recursion skeleton.
 
-The CLI `--certificate` currently uses a compatibility structural-level report,
-not the full newer budget pipeline.
+The CLI `--certificate` currently uses a static compatibility placement report,
+not the full newer budget pipeline. It groups source `{test, step, base}`
+recursion sites, reports contextual inferred box levels, gives static dependency
+witnesses, and shows binding depth pressure. It is deliberately labeled as a
+compatibility approximation rather than a formal EAL typing or runtime budget.
 
 ## Abstract Budgets
 

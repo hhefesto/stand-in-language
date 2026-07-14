@@ -3,7 +3,7 @@
 -- | Telomare CLI: run .tel programs on the Telomare Tier-2 runtime.
 --
 --   telomare game.tel                 interactive transcript loop
---   telomare --certificate game.tel   print the structural levels report first
+--   telomare --certificate game.tel   print static placement estimate first
 --   telomare --meter game.tel         work-meter report on stderr at exit
 --   telomare --max-steps N game.tel   metered fuel cap (Tier-2 "never
 --                                     reject": exhaustion is a runtime
@@ -31,7 +31,7 @@ opts :: Parser Opts
 opts = Opts
   <$> argument str (metavar "TELOMARE-FILE" <> help ".tel program to run")
   <*> switch (long "certificate"
-              <> help "print the structural EAL levels report before running")
+              <> help "print the static compatibility placement report before running")
   <*> switch (long "meter"
               <> help "print the Tier-2 work meter to stderr on exit")
   <*> optional (option auto (long "max-steps" <> metavar "N"
