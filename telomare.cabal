@@ -4,7 +4,7 @@ version:            0.1.0.0
 synopsis:           Total language runtime with knowable bounds
 description:
   Telomare is a total-language experiment with a machine-checked core,
-  graded resource semantics, and a metered .tel compatibility runtime.
+  graded resource semantics, and typed .tel2 finite machines.
 license:            Apache-2.0
 license-file:       LICENSE
 author:             hhefesto
@@ -12,9 +12,11 @@ maintainer:         hhefesto@rdataa.com
 category:           Language
 build-type:         Simple
 extra-source-files: README.md
-                  , STORY.md
-                  , test/golden/*.txt
-                  , test/programs/*.tel
+                   , STORY.md
+                   , design/generate-tictactoe.hs
+                   , test/golden/*.txt
+                   , test/programs/*.tel
+                   , test/programs/*.tel2
 
 common warnings
     ghc-options: -Wall
@@ -23,9 +25,13 @@ library
     import:           warnings
     hs-source-dirs:   src
     exposed-modules:  Telomare.Budget
+                    , Telomare.Compiler.Direct
+                    , Telomare.Copyable
                     , Telomare.Core
+                    , Telomare.CoreMachine
                     , Telomare.Denotation
                     , Telomare.Infer
+                    , Telomare.Surface
                     , Telomare.Tel.Eval
                     , Telomare.Tel.Frontend
                     , Telomare.Tel.Loop
@@ -64,6 +70,7 @@ executable telomare
     hs-source-dirs:   app
     build-depends:    base
                     , containers
+                    , filepath
                     , optparse-applicative
                     , telomare
     default-language: Haskell2010
@@ -74,11 +81,14 @@ test-suite telomare-test
     main-is:          Spec.hs
     other-modules:    BudgetOracle
                     , CertificateVectors
+                    , CopyVectors
                     , InferOracle
                     , Laws
                     , MeterVectors
                     , ParityTel
                     , SpecVectors
+                    , SurfaceVectors
+                    , Tel2Vectors
     hs-source-dirs:   test
     build-depends:    base
                     , containers

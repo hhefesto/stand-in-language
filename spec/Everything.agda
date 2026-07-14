@@ -7,12 +7,14 @@
 -- gates the whole specification. Discipline: --safe everywhere, zero
 -- postulates; imported metatheory is cited in comments, never axiomatized.
 --
--- The core category, surface erasure, placement, abstract budgets, resource
--- grades, and length-space arbiter are all checked from this entry point.
+-- The core category, witnessed copying, surface erasure, compiler relations,
+-- placement, abstract budgets, resource grades, and length-space arbiter are
+-- all checked from this entry point.
 module Everything where
 
 import T3.Core.Ty
 import T3.Core.Syntax
+import T3.Core.Copyable
 import T3.Sem.Value
 import T3.Sem.Graded
 import T3.Sem.Exec
@@ -22,6 +24,8 @@ import T3.Surface.Ty
 import T3.Surface.Syntax
 import T3.Surface.Sem
 import T3.Place
+import T3.Compiler.Direct
+import T3.Compiler.FiniteMachine
 import T3.Abstract
 import T3.Examples.Budgets
 import T3.Sem.Length

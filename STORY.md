@@ -5,50 +5,79 @@ making resource behavior mysterious. Its core claim is simple: a program should
 not only compute a value; it should also expose enough structure to explain how
 much work, copying, placement depth, and recursion budget it needs.
 
-The current repository contains two connected but not yet unified stories:
+The active executable and formal layers are:
 
 ```text
-.tel source
-  -> AnnotatedUPT
-  -> Term1
-  -> Term2
-  -> Term3
-  -> TelExpr
-  -> Value
-  -> transcript output + Meter
+.tel2 finite-machine source
+  -> Morph Unit Reply + Morph (Text * State) Reply
+  -> evalV / evalG / evalK
+  -> host I/O driver
 
-Morph a b
-  -> Val a -> Val b
+UMorph a b
+  -> evalU
+  -> compileDirect
+  -> Morph (Lift a) (Lift b)
   -> graded work / duplication / fuel execution
   -> placement skeletons
   -> abstract recursion budgets
 ```
 
-The first path is what the `telomare` executable runs today. The second path is
-the typed formal core mirrored in Haskell and proved in Agda. There is not yet a
-`.tel -> Morph` compiler, so this document keeps the boundary explicit.
+`UMorph` is the typed box-free formal surface, and `Morph` is the typed
+resource-aware core. The current `.tel2` finite-machine frontend targets a small
+affine `Morph` fragment directly. There is not yet a pointful `.tel2 -> UMorph`
+frontend or a general placement pass, so this document keeps those boundaries
+explicit.
+
+The first part of that future bridge exists independently of `.tel2` parsing:
+Haskell mirrors the formal box-free `UMorph` surface category and directly
+elaborates its affine fragment to `Morph`. The compiler accepts ordinary
+structure, data operations, guards, and natural duplication. It explicitly
+rejects general duplication and recursion until modal placement is implemented.
+Agda proves that every successful direct elaboration erases to its source term
+and preserves value semantics.
+
+This subset uses named finite states and exact text rules. It is not a filename
+builtin and has no compatibility fallback; the tic-tac-toe source contains all
+reachable states and transitions. Affine partition morphisms reconstruct failed
+keys rather than copying them implicitly. Its generated transition table is an
+extensional normal form for this first milestone, not the final pointful syntax.
+
+That normal form is intentionally denotational. A deterministic finite machine
+is a total function from input and state to output and optional next state. The
+source lists the graph of that function, and `compileMachine` interprets the
+graph compositionally into core sums, products, constants, and observations.
+There is no separate source evaluator and no Haskell transition function in the
+runtime.
+
+EAL remains useful even though tic-tac-toe needs no recursion or boxes. Dispatch
+is affine, failed comparisons reconstruct their consumed values, and the linear
+search cost appears in the formal work grade. Explicit reusable copying is a
+separate witnessed algebra in `T3.Core.Copyable` and `Telomare.Copyable`; it is
+not implicit variable reuse.
 
 ## The Executable Path
 
-The executable starts with a file path and ends with an interactive transcript.
+The executable accepts a `.tel2` file and ends with an interactive transcript.
 
 ```haskell
-loadModulesFor :: FilePath -> IO (Either Tel3Error (String, [(String, String)]))
-compileTel     :: [(String, String)] -> String -> Either Tel3Error TelExpr
-runTelLoop     :: Maybe Int -> TelExpr -> IO Meter
+compileMachine :: String -> Either MachineError Machine
+runMachineIO   :: Maybe Natural -> Bool -> Machine -> IO (Either String ())
 ```
 
-`loadModulesFor` reads the entry module and textual imports. `compileTel` turns
-loaded source into the runtime IR. `runTelLoop` evaluates the resulting program
-under the `.tel` display/state protocol.
+`compileMachine` resolves source declarations into typed initialization and step
+`Morph` values. `runMachineIO` transports text and state values while all
+transition behavior remains in those morphisms.
 
 The CLI options line up with that path:
 
-- `--certificate` prints the static compatibility placement report.
-- `--meter` prints the Tier-2 runtime meter.
-- `--max-steps N` gives the runtime a fuel cap.
+- `--certificate` prints the typed machine and core-depth summary.
+- `--meter` prints accumulated formal work.
+- `--max-work N` caps formal work across the interaction.
 
-## Surface Syntax
+Supplying a historical `.tel` file is an error. The compatibility implementation
+is retained temporarily for regression comparison, not as an executable fallback.
+
+## Archived `.tel` Syntax
 
 The parser produces located syntax:
 
@@ -126,8 +155,8 @@ data PartialTypeF f
   | PairTypeP f f
 ```
 
-The CLI requires `main` to look like a closure that accepts the transcript input
-shape:
+The archived compatibility checker requires `main` to look like a closure that
+accepts the transcript input shape:
 
 ```text
 main :: (Zero -> Zero, Any)
@@ -285,9 +314,47 @@ and unknown fallbacks are used when source metadata is unavailable.
 `--max-steps` spends fuel on function applications and recursion unrolls. Gate
 selections are counted but do not spend fuel.
 
+## The Formal Surface Bridge
+
+`Telomare.Surface` mirrors the Agda `T3.Surface` category. Its types omit `Bang`,
+and its morphisms include free surface duplication and bounded recursion:
+
+```haskell
+data UTy = UUnit | UNat | UTy :**: UTy | UTy :++: UTy | UList UTy
+data UMorph (a :: UTy) (b :: UTy) where
+```
+
+`Telomare.Compiler.Direct` implements the first placement-free compiler slice:
+
+```haskell
+compileDirect :: UMorph a b -> Either DirectError (Morph (Lift a) (Lift b))
+```
+
+It compiles identity, composition, tensor, product and sum structure, lists,
+naturals, constants, guards, and natural duplication. Natural duplication uses
+`DupNatS`, the explicit measured atom exemption. General duplication and all
+three recursion constructors return `DirectError` because they need modal
+placement.
+
+`eraseMorph` removes core modal structure. The surface vectors compare `evalU`
+with `evalV` after compilation and check that erasing each successful result
+reproduces the source structure. They also check explicit rejection of the
+deferred constructs and exercise `UIter`, `UFold`, and `UWhile` through their
+surface semantics.
+
+The Agda `T3.Compiler.Direct` relation mirrors the successful compiler cases.
+`direct-erases` proves that successful elaboration erases exactly to its source,
+and `direct-factor` derives semantic preservation from the existing core
+factorization theorem. Both are checked under `--safe` through
+`Everything.agda`.
+
+This is not yet the pointful `.tel2` compiler: typed source elaboration, higher-order
+lowering, general modal placement, and recursion placement remain separate
+milestones.
+
 ## The Formal Core
 
-The formal story starts at a typed core, not at `.tel` syntax.
+The resource-aware formal story starts at a typed core, not at `.tel` syntax.
 
 ```haskell
 data Ty
@@ -415,7 +482,7 @@ The Agda spec proves that valid placements are meet-closed and that structural
 placement computes the least solution. In other words, the level assignment is
 not a runtime guess; it is a structural fact about the recursion skeleton.
 
-The CLI `--certificate` currently uses a static compatibility placement report,
+The archived compatibility `--certificate` implementation used a static placement report,
 not the full newer budget pipeline. It groups source `{test, step, base}`
 recursion sites, reports contextual inferred box levels, gives static dependency
 witnesses, and shows binding depth pressure. It is deliberately labeled as a
@@ -455,11 +522,12 @@ site trace.
 Telomare deliberately separates proof from regression evidence:
 
 - `spec/Everything.agda` is checked with `--safe` and no postulates.
-- The Haskell core mirrors the Agda definitions.
+- The Haskell surface, direct compiler, erasure, and core mirror the Agda definitions and elaboration relation.
 - QuickCheck laws test the Haskell mirror against Agda-proved properties.
-- Example vectors mirror Agda computations.
-- `.tel` golden transcripts test the compatibility runtime.
-- Meter vectors test readable source-aware runtime evidence.
+- Core example vectors mirror Agda computations.
+- Surface vectors check all direct compiler constructors, semantic parity, erasure, and deferred-feature diagnostics.
+- `.tel2` golden transcripts test scripted typed `Morph` machines.
+- Legacy `.tel` transcript and meter vectors remain temporary regression evidence.
 
 The Agda proofs are the source of truth for the typed core. The Haskell tests
 guard implementation drift.
@@ -468,13 +536,15 @@ guard implementation drift.
 
 The honest boundary is the most important part of the story:
 
-- `.tel` programs currently run through the compatibility frontend and Tier-2 runtime.
-- The formal totality and adequacy theorems apply to typed `Morph`, not arbitrary `.tel` programs.
-- There is not yet a `.tel -> Morph` compiler.
-- Unknown `.tel` recursion is handled by native demand-driven runtime recursion and optional fuel.
-- The runtime meter reports what happened; it is not yet the same object as the Agda work grade.
+- The executable accepts `.tel2` only; `.tel` compatibility code is archival.
+- `.tel2` finite machines compile and run through typed `Morph` artifacts only.
+- The formal totality and adequacy theorems apply to every generated `Morph`.
+- The proved direct compiler covers the placement-free `UMorph -> Morph` fragment.
+- There is not yet a pointful `.tel2 -> UMorph` frontend or general modal and recursion placement pass.
+- The `.tel2` meter is the formal core work grade, not a compatibility event counter.
 - Haskell does not yet mirror the Agda space grade.
 
-Telomare today is therefore both a practical `.tel` runtime and a machine-checked
-semantic core. The next major unification step is to make the practical path
-land in the typed core, so the executable language inherits the full proof story.
+Telomare today has a core-only finite-machine executable and a machine-checked
+surface/core bridge. The next source-language step is typed pointful affine
+`.tel2 -> UMorph` elaboration with explicit copying, followed by modal placement
+for general duplication and bounded recursion.

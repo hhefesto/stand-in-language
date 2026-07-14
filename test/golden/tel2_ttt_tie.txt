@@ -1,0 +1,60 @@
+1|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 1/X to move.
+Move (1-9 or q): X|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 2/O to move.
+Move (1-9 or q): X|O|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 1/X to move.
+Move (1-9 or q): X|O|X
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 2/O to move.
+Move (1-9 or q): X|O|X
+-+-+-
+4|O|6
+-+-+-
+7|8|9
+Player 1/X to move.
+Move (1-9 or q): X|O|X
+-+-+-
+4|O|6
+-+-+-
+7|X|9
+Player 2/O to move.
+Move (1-9 or q): X|O|X
+-+-+-
+O|O|6
+-+-+-
+7|X|9
+Player 1/X to move.
+Move (1-9 or q): X|O|X
+-+-+-
+O|O|X
+-+-+-
+7|X|9
+Player 2/O to move.
+Move (1-9 or q): X|O|X
+-+-+-
+O|O|X
+-+-+-
+7|X|O
+Player 1/X to move.
+Move (1-9 or q): X|O|X
+-+-+-
+O|O|X
+-+-+-
+X|X|O
+Tie game.

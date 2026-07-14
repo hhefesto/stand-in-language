@@ -9,16 +9,20 @@ import Test.QuickCheck.Test (Args (..), isSuccess)
 
 import BudgetOracle (budgetVectors)
 import CertificateVectors (certificateVectors)
+import CopyVectors (copyVectors)
 import InferOracle (inferProps, oracleVectors)
 import Laws (lawProps)
 import MeterVectors (meterVectors)
 import ParityTel (parityVectors)
 import SpecVectors (specVectors)
+import SurfaceVectors (surfaceVectors)
+import Tel2Vectors (tel2Vectors)
 
 main :: IO ()
 main = do
   telParity <- parityVectors
-  let vectors = specVectors <> oracleVectors <> budgetVectors <> certificateVectors <> meterVectors <> telParity
+  tel2 <- tel2Vectors
+  let vectors = specVectors <> surfaceVectors <> copyVectors <> oracleVectors <> budgetVectors <> certificateVectors <> meterVectors <> telParity <> tel2
       props   = lawProps <> inferProps
       failedVectors = [n | (n, ok) <- vectors, not ok]
   forM_ vectors $ \(n, ok) ->

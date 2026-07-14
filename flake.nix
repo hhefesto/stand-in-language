@@ -78,7 +78,7 @@
           apps.default = {
             type = "app";
             program = self'.packages.telomare + "/bin/telomare";
-            meta.description = "Run a .tel program on the Telomare Tier-2 runtime";
+            meta.description = "Compile and run a .tel2 machine through Morph";
           };
 
           apps.format-lint = {
