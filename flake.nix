@@ -78,7 +78,7 @@
           apps.default = {
             type = "app";
             program = self'.packages.telomare + "/bin/telomare";
-            meta.description = "Compile and run a .tel2 machine through Morph";
+            meta.description = "Compile and run a .tel2 grid game through Morph";
           };
 
           apps.format-lint = {
@@ -99,6 +99,7 @@
                 format_status=0
                 if [ "''${#hs_files[@]}" -gt 0 ]; then
                   for hs_file in "''${hs_files[@]}"; do
+                    [ -f "$hs_file" ] || continue
                     formatted_file="$tmp_dir/$(basename "$hs_file")"
                     stylish-haskell "$hs_file" > "$formatted_file"
 

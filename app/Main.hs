@@ -1,6 +1,6 @@
 -- | Telomare CLI: compile and run typed-core .tel2 programs.
 --
---   telomare game.tel2                 interactive machine driver
+--   telomare game.tel2                 interactive grid-game driver
 --   telomare --certificate game.tel2   print typed core summary first
 --   telomare --meter game.tel2         print formal work on stderr at exit
 --   telomare --max-work N game.tel2    cap global formal work
@@ -52,7 +52,7 @@ runCoreMachine o = do
     Left (MachineError err) -> hPutStrLn stderr err >> exitFailure
     Right machine -> do
       when (optCertificate o) $ putStrLn
-        ("typed finite machine: " <> show (machineStateCount machine)
+        ("typed finite-grid game: " <> show (machineStateCount machine)
           <> " states, " <> show (machineRuleCount machine)
           <> " rules, core depth " <> show (depth (machineStep machine)))
       result <- runMachineIO (optMaxWork o) (optMeter o) machine

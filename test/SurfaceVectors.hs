@@ -1,7 +1,7 @@
-{-# LANGUAGE DataKinds          #-}
-{-# LANGUAGE FlexibleContexts   #-}
-{-# LANGUAGE TypeFamilies       #-}
-{-# LANGUAGE TypeOperators      #-}
+{-# LANGUAGE DataKinds        #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies     #-}
+{-# LANGUAGE TypeOperators    #-}
 
 module SurfaceVectors (surfaceVectors) where
 
@@ -11,20 +11,20 @@ import Telomare.Denotation (evalV)
 import Telomare.Surface
 
 toCore :: SUTy a -> UVal a -> Val (Lift a)
-toCore SUUnit       ()         = ()
-toCore SUNat        n          = n
-toCore (SUProd a b) (x, y)     = (toCore a x, toCore b y)
-toCore (SUSum a _)  (Left x)   = Left (toCore a x)
-toCore (SUSum _ b)  (Right y)  = Right (toCore b y)
-toCore (SUList a)   xs         = fmap (toCore a) xs
+toCore SUUnit       ()        = ()
+toCore SUNat        n         = n
+toCore (SUProd a b) (x, y)    = (toCore a x, toCore b y)
+toCore (SUSum a _)  (Left x)  = Left (toCore a x)
+toCore (SUSum _ b)  (Right y) = Right (toCore b y)
+toCore (SUList a)   xs        = fmap (toCore a) xs
 
 fromCore :: SUTy a -> Val (Lift a) -> UVal a
-fromCore SUUnit       ()         = ()
-fromCore SUNat        n          = n
-fromCore (SUProd a b) (x, y)     = (fromCore a x, fromCore b y)
-fromCore (SUSum a _)  (Left x)   = Left (fromCore a x)
-fromCore (SUSum _ b)  (Right y)  = Right (fromCore b y)
-fromCore (SUList a)   xs         = fmap (fromCore a) xs
+fromCore SUUnit       ()        = ()
+fromCore SUNat        n         = n
+fromCore (SUProd a b) (x, y)    = (fromCore a x, fromCore b y)
+fromCore (SUSum a _)  (Left x)  = Left (fromCore a x)
+fromCore (SUSum _ b)  (Right y) = Right (fromCore b y)
+fromCore (SUList a)   xs        = fmap (fromCore a) xs
 
 eqU :: SUTy a -> UVal a -> UVal a -> Bool
 eqU SUUnit       ()         ()         = True

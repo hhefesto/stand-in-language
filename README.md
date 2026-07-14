@@ -29,7 +29,7 @@ nix develop
 cabal run telomare -- test/programs/tictactoe.tel2
 ```
 
-The `.tel2` path compiles a declarative finite machine to typed `Morph`
+The `.tel2` path compiles a declarative finite-grid game to typed `Morph`
 artifacts and executes them with `evalV`, `evalG`, and `evalK`. It does not use
 the compatibility frontend or `TelExpr`.
 
@@ -158,53 +158,73 @@ results erase back to the original surface structure. In Agda,
 
 Both proofs are checked under `--safe` and are imported by `Everything.agda`.
 This bridge begins at `UMorph`; general pointful `.tel2` elaboration into `UMorph`
-remains future work. The deliberately smaller `.tel2` finite-machine frontend
+remains future work. The deliberately smaller `.tel2` finite-grid-game frontend
 described below lands directly in `Morph` without claiming to implement that
 future pointful language.
 
-## Core-Only `.tel2` Machines
+## Core-Only `.tel2` Grid Games
 
-`Telomare.CoreMachine` implements a line-oriented, typed finite-machine subset.
-Its declarations are compositional machine data:
+`Telomare.CoreMachine` implements a line-oriented, typed finite-grid-game
+algebra. This is its complete version 1 grammar; quoted values use Haskell string
+escapes, `INT` is decimal, and declaration order is immaterial except that
+players retain source order and the first player starts:
 
 ```text
-telomare-finite-machine 1
-initial "state-key"
-global "q" stop "Goodbye.\n"
-state "state-key" "display text"
-on "1" goto "next-state"
-on "2" stay "That square is occupied.\n"
-default stay "Invalid input.\n"
+telomare-grid-game 1
+board ROWS COLUMNS
+cells CELL_COUNT
+player "PLAYER_NAME" "MARK"
+moves "INPUT_1" ... "INPUT_CELL_COUNT"
+quit "INPUT" "MESSAGE"
+winning CELL_1 ... CELL_N
+cell-separator "TEXT"
+row-separator "TEXT"
+turn-message "TEMPLATE"
+prompt "TEXT"
+invalid-message "TEXT"
+occupied-message "TEXT"
+win-message "TEMPLATE"
+tie-message "TEXT"
 ```
+
+`player` and `winning` are repeated declarations; winning indices are
+one-based. Comments are whole lines beginning with `#`. `CELL_COUNT` must equal
+`ROWS * COLUMNS`; move inputs and player marks are non-empty and distinct;
+winning cells are non-empty, distinct, and in range; and the quit input differs
+from every move. `{player}` and `{mark}` in turn and win templates denote the
+current player's declared values. Empty cells render with their move input,
+occupied cells with their owner's mark, cells and rows with the declared
+separators, and the first declared player takes the first turn.
 
 The fixed ABI is `Text = List Nat`, `State = List Nat`,
 `Input = Text * State`, and `Reply = Text * (Unit + State)`, where the left
 continuation branch stops. Compilation resolves every declaration into closed
 `Morph Unit Reply` and `Morph Input Reply` artifacts. Exact key matching is
 built from `NatOutS`, `UnconsS`, sums, products, and affine reconstruction;
-there is no filename dispatch, game primitive, embedded Haskell transition
-function, semantic fallback, or `unsafeCoerce`.
+there is no filename dispatch, tic-tac-toe primitive, embedded Haskell
+transition function, semantic fallback, `TelExpr`, or `unsafeCoerce`.
 
-`test/programs/tictactoe.tel2` contains the complete generated finite machine.
-The small generator in `design/generate-tictactoe.hs` only maintains that
-declarative fixture and is not linked into the compiler or executable. This
-large table is an extensional normal form for the first milestone, not the final
-pointful `.tel2` syntax. Its advantage is semantic transparency: every accepted
-input/state pair and result is source data, while the compiler only supplies the
-generic finite-machine interpretation into `Morph`.
-
-This is a denotational choice: a deterministic finite machine denotes a total
-function from input and state to output and optional next state. The source gives
-that function extensionally; compilation builds it from sums, products, natural
-and list observations, and constants. There is no source evaluator whose answer
-must later be reconciled with the core.
+Denotationally, declarations form a finite algebra. A position is a vector of
+`CELL_COUNT` optional player indices paired with a current player. `moves`
+denotes indexed placement, `winning` denotes a finite disjunction of finite
+conjunctions, and rendering/messages denote text constructors. A turn first
+partitions quit, move, occupied, invalid, win, tie, and continuation cases. The
+compiler computes the finite reachable carrier and interprets each partition,
+constant, and continuation compositionally into core sums, products, list and
+natural observations, and constants. Reachable-state expansion is transient;
+no generated transition data is committed or carried as executable host code.
+`test/programs/tictactoe.tel2` is therefore a 29-line rule specification rather
+than an extensional transition table.
 
 Dispatch is affine. A failed text or state comparison reconstructs exactly the
 value it consumed and passes it to the next branch. It neither copies the value
-nor consults host equality. The resulting large linear search is intentionally
-not hidden: `NatOutS` observations contribute to the formal work grade, making
-the cost of this simple normal form visible. A later intensional pointful syntax
-can optimize the representation while preserving this denotation.
+nor consults host equality at runtime. Compile-time finite expansion can produce
+a large `Morph`, and its current linear dispatch is intentionally not hidden:
+`NatOutS` observations contribute to the formal work grade. The source is
+intensional and reusable, but generated core size and dispatch complexity remain
+limitations. No recursion, `DupS`, or implicit contraction is needed; failed
+partitions reconstruct consumed affine values. General EAL placement and
+pointful copying remain work for the future language.
 
 ## Resource Semantics
 
@@ -274,18 +294,21 @@ proofs are the formal source of truth for surface elaboration and core semantics
 The formal totality and adequacy theorems apply to every generated `Morph`.
 `UMorph -> Morph` also inherits value semantics through the direct compiler's
 erasure theorem. There is still no general pointful `.tel2 -> UMorph` frontend or
-modal placement pass; the finite-machine frontend instead targets a small
+modal placement pass; the finite-grid-game frontend instead targets a small
 auditable affine core fragment directly.
 
 The archived `.tel` parser and Tier-2 runtime are still compiled and regression
 tested during migration, but `app/Main.hs` neither imports nor invokes them.
 Supplying a `.tel` file to the executable is an error.
 
-The `.tel2` subset is intentionally first-order and finite: it has named states,
-exact text inputs, global rules, and `goto`/`stay`/`stop` targets. It does not yet
-provide pointful expressions, user-defined algebraic data, inferred copying, or
-recursion. Its dispatch currently compiles to linear affine partitions, favoring
-a small auditable core translation over compact or asymptotically fast code.
+The `.tel2` subset is intentionally first-order and finite. It describes only
+finite grid placement games with ordered players, exact text inputs, winning
+cell sets, and fixed rendering/message conventions. It does not yet provide
+pointful expressions, user-defined algebraic data, inferred copying, recursion,
+alternative turn policies, captures, movement, or non-placement updates. Its
+transient reachable-state expansion and linear affine dispatch favor a small
+auditable core translation over compact generated core or asymptotically fast
+execution.
 
 The Agda spec defines a space grade; the Haskell mirror currently implements
 work and duplication. The spec also proves that simple additive word-size

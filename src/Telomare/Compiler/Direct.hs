@@ -47,34 +47,34 @@ stripSTy (SBang a)   = stripSTy a
 
 -- | Compile the directly affine fragment into canonically lifted core types.
 compileDirect :: UMorph a b -> Either DirectError (Morph (Lift a) (Lift b))
-compileDirect UId             = Right IdS
-compileDirect (g :..: f)      = (:.:) <$> compileDirect g <*> compileDirect f
-compileDirect (f :****: g)    = (:***:) <$> compileDirect f <*> compileDirect g
-compileDirect (UDup SUNat)    = Right DupNatS
-compileDirect (UDup _)        = Left GeneralDuplication
-compileDirect USwap           = Right SwapS
-compileDirect UAssoc          = Right AssocS
-compileDirect UUnassoc        = Right UnassocS
-compileDirect UExl            = Right ExlS
-compileDirect UExr            = Right ExrS
-compileDirect UWeak           = Right WeakS
-compileDirect URunit          = Right RunitS
-compileDirect ULunit          = Right LunitS
-compileDirect UInl            = Right InlS
-compileDirect UInr            = Right InrS
-compileDirect (UCase l r)     = CaseS <$> compileDirect l <*> compileDirect r
-compileDirect UDistl          = Right DistlS
-compileDirect UNil            = Right NilS
-compileDirect UCons           = Right ConsS
-compileDirect UUncons         = Right UnconsS
-compileDirect UNatOut         = Right NatOutS
-compileDirect USuc            = Right SucS
-compileDirect UAdd            = Right AddS
-compileDirect (UConst k)      = Right (ConstS k)
-compileDirect (UGuard sa t)   = GuardS (liftSTy sa) <$> compileDirect t
-compileDirect (UIter _)       = Left (RecursionRequiresPlacement Iteration)
-compileDirect (UFold _)       = Left (RecursionRequiresPlacement Fold)
-compileDirect (UWhile _ _ _)  = Left (RecursionRequiresPlacement While)
+compileDirect UId            = Right IdS
+compileDirect (g :..: f)     = (:.:) <$> compileDirect g <*> compileDirect f
+compileDirect (f :****: g)   = (:***:) <$> compileDirect f <*> compileDirect g
+compileDirect (UDup SUNat)   = Right DupNatS
+compileDirect (UDup _)       = Left GeneralDuplication
+compileDirect USwap          = Right SwapS
+compileDirect UAssoc         = Right AssocS
+compileDirect UUnassoc       = Right UnassocS
+compileDirect UExl           = Right ExlS
+compileDirect UExr           = Right ExrS
+compileDirect UWeak          = Right WeakS
+compileDirect URunit         = Right RunitS
+compileDirect ULunit         = Right LunitS
+compileDirect UInl           = Right InlS
+compileDirect UInr           = Right InrS
+compileDirect (UCase l r)    = CaseS <$> compileDirect l <*> compileDirect r
+compileDirect UDistl         = Right DistlS
+compileDirect UNil           = Right NilS
+compileDirect UCons          = Right ConsS
+compileDirect UUncons        = Right UnconsS
+compileDirect UNatOut        = Right NatOutS
+compileDirect USuc           = Right SucS
+compileDirect UAdd           = Right AddS
+compileDirect (UConst k)     = Right (ConstS k)
+compileDirect (UGuard sa t)  = GuardS (liftSTy sa) <$> compileDirect t
+compileDirect (UIter _)      = Left (RecursionRequiresPlacement Iteration)
+compileDirect (UFold _)      = Left (RecursionRequiresPlacement Fold)
+compileDirect (UWhile _ _ _) = Left (RecursionRequiresPlacement While)
 
 -- | Erase every core exponential back to the cartesian surface syntax.
 eraseMorph :: Morph a b -> UMorph (Strip a) (Strip b)

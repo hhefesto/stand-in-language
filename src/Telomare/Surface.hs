@@ -1,7 +1,7 @@
-{-# LANGUAGE DataKinds          #-}
-{-# LANGUAGE GADTs              #-}
-{-# LANGUAGE TypeFamilies       #-}
-{-# LANGUAGE TypeOperators      #-}
+{-# LANGUAGE DataKinds     #-}
+{-# LANGUAGE GADTs         #-}
+{-# LANGUAGE TypeFamilies  #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Box-free cartesian surface category.
 --
@@ -107,37 +107,37 @@ infixr 3 :****:
 
 -- | Plain total surface semantics.
 evalU :: UMorph a b -> UVal a -> UVal b
-evalU UId a                    = a
-evalU (g :..: f) a             = evalU g (evalU f a)
-evalU (f :****: g) (a, c)      = (evalU f a, evalU g c)
-evalU (UDup _) a               = (a, a)
-evalU USwap (a, b)             = (b, a)
-evalU UAssoc ((a, b), c)       = (a, (b, c))
-evalU UUnassoc (a, (b, c))     = ((a, b), c)
-evalU UExl (a, _)              = a
-evalU UExr (_, b)              = b
-evalU UWeak _                  = ()
-evalU URunit a                 = (a, ())
-evalU ULunit a                 = ((), a)
-evalU UInl a                   = Left a
-evalU UInr b                   = Right b
-evalU (UCase l _) (Left a)     = evalU l a
-evalU (UCase _ r) (Right b)    = evalU r b
-evalU UDistl (a, Left b)       = Left (a, b)
-evalU UDistl (a, Right c)      = Right (a, c)
-evalU UNil _                   = []
-evalU UCons (x, xs)            = x : xs
-evalU UUncons []               = Left ()
-evalU UUncons (x : xs)         = Right (x, xs)
-evalU UNatOut 0                = Left ()
-evalU UNatOut n                = Right (n - 1)
-evalU USuc n                   = n + 1
-evalU UAdd (a, b)              = a + b
-evalU (UConst k) _             = k
-evalU (UGuard _ t) a           = guardU a (evalU t a)
-evalU (UIter f) (n, a)         = iterU n (evalU f) a
-evalU (UFold f) (xs, b)        = foldU xs (evalU f) b
-evalU (UWhile _ t s) (n, a)    = whileU n (evalU t) (evalU s) a
+evalU UId a                 = a
+evalU (g :..: f) a          = evalU g (evalU f a)
+evalU (f :****: g) (a, c)   = (evalU f a, evalU g c)
+evalU (UDup _) a            = (a, a)
+evalU USwap (a, b)          = (b, a)
+evalU UAssoc ((a, b), c)    = (a, (b, c))
+evalU UUnassoc (a, (b, c))  = ((a, b), c)
+evalU UExl (a, _)           = a
+evalU UExr (_, b)           = b
+evalU UWeak _               = ()
+evalU URunit a              = (a, ())
+evalU ULunit a              = ((), a)
+evalU UInl a                = Left a
+evalU UInr b                = Right b
+evalU (UCase l _) (Left a)  = evalU l a
+evalU (UCase _ r) (Right b) = evalU r b
+evalU UDistl (a, Left b)    = Left (a, b)
+evalU UDistl (a, Right c)   = Right (a, c)
+evalU UNil _                = []
+evalU UCons (x, xs)         = x : xs
+evalU UUncons []            = Left ()
+evalU UUncons (x : xs)      = Right (x, xs)
+evalU UNatOut 0             = Left ()
+evalU UNatOut n             = Right (n - 1)
+evalU USuc n                = n + 1
+evalU UAdd (a, b)           = a + b
+evalU (UConst k) _          = k
+evalU (UGuard _ t) a        = guardU a (evalU t a)
+evalU (UIter f) (n, a)      = iterU n (evalU f) a
+evalU (UFold f) (xs, b)     = foldU xs (evalU f) b
+evalU (UWhile _ t s) (n, a) = whileU n (evalU t) (evalU s) a
 
 guardU :: a -> Either () () -> Either a ()
 guardU a (Left ())  = Left a
@@ -172,30 +172,30 @@ data UShape
   deriving (Eq, Show)
 
 shapeU :: UMorph a b -> UShape
-shapeU UId             = ShId
-shapeU (g :..: f)      = ShComp (shapeU g) (shapeU f)
-shapeU (f :****: g)    = ShTensor (shapeU f) (shapeU g)
-shapeU (UDup _)        = ShDup
-shapeU USwap           = ShSwap
-shapeU UAssoc          = ShAssoc
-shapeU UUnassoc        = ShUnassoc
-shapeU UExl            = ShExl
-shapeU UExr            = ShExr
-shapeU UWeak           = ShWeak
-shapeU URunit          = ShRunit
-shapeU ULunit          = ShLunit
-shapeU UInl            = ShInl
-shapeU UInr            = ShInr
-shapeU (UCase l r)     = ShCase (shapeU l) (shapeU r)
-shapeU UDistl          = ShDistl
-shapeU UNil            = ShNil
-shapeU UCons           = ShCons
-shapeU UUncons         = ShUncons
-shapeU UNatOut         = ShNatOut
-shapeU USuc            = ShSuc
-shapeU UAdd            = ShAdd
-shapeU (UConst k)      = ShConst k
-shapeU (UGuard _ t)    = ShGuard (shapeU t)
-shapeU (UIter f)       = ShIter (shapeU f)
-shapeU (UFold f)       = ShFold (shapeU f)
-shapeU (UWhile _ t s)  = ShWhile (shapeU t) (shapeU s)
+shapeU UId            = ShId
+shapeU (g :..: f)     = ShComp (shapeU g) (shapeU f)
+shapeU (f :****: g)   = ShTensor (shapeU f) (shapeU g)
+shapeU (UDup _)       = ShDup
+shapeU USwap          = ShSwap
+shapeU UAssoc         = ShAssoc
+shapeU UUnassoc       = ShUnassoc
+shapeU UExl           = ShExl
+shapeU UExr           = ShExr
+shapeU UWeak          = ShWeak
+shapeU URunit         = ShRunit
+shapeU ULunit         = ShLunit
+shapeU UInl           = ShInl
+shapeU UInr           = ShInr
+shapeU (UCase l r)    = ShCase (shapeU l) (shapeU r)
+shapeU UDistl         = ShDistl
+shapeU UNil           = ShNil
+shapeU UCons          = ShCons
+shapeU UUncons        = ShUncons
+shapeU UNatOut        = ShNatOut
+shapeU USuc           = ShSuc
+shapeU UAdd           = ShAdd
+shapeU (UConst k)     = ShConst k
+shapeU (UGuard _ t)   = ShGuard (shapeU t)
+shapeU (UIter f)      = ShIter (shapeU f)
+shapeU (UFold f)      = ShFold (shapeU f)
+shapeU (UWhile _ t s) = ShWhile (shapeU t) (shapeU s)

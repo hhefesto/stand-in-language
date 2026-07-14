@@ -4,7 +4,7 @@ version:            0.1.0.0
 synopsis:           Total language runtime with knowable bounds
 description:
   Telomare is a total-language experiment with a machine-checked core,
-  graded resource semantics, and typed .tel2 finite machines.
+  graded resource semantics, and typed .tel2 finite-grid games.
 license:            Apache-2.0
 license-file:       LICENSE
 author:             hhefesto
@@ -13,7 +13,6 @@ category:           Language
 build-type:         Simple
 extra-source-files: README.md
                    , STORY.md
-                   , design/generate-tictactoe.hs
                    , test/golden/*.txt
                    , test/programs/*.tel
                    , test/programs/*.tel2

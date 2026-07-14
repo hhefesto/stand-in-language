@@ -1,10 +1,8 @@
-{-# LANGUAGE DataKinds     #-}
+{-# LANGUAGE DataKinds        #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeOperators    #-}
 
--- | A deliberately small .tel2 frontend for declarative finite machines.
--- Source declarations are resolved to two closed, typed core artifacts; the
--- driver never receives an executable Haskell transition function.
+-- | An intensional finite-grid-game frontend for typed core Morph programs.
 module Telomare.CoreMachine
   ( TextT
   , StateT
@@ -17,9 +15,9 @@ module Telomare.CoreMachine
   , runMachineIO
   ) where
 
-import Control.Monad (foldM, when)
+import Control.Monad (foldM, unless, when)
 import Data.Char (chr, ord)
-import Data.List (isPrefixOf)
+import Data.List (intercalate, isPrefixOf)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Numeric.Natural (Natural)
@@ -43,53 +41,89 @@ data Machine = Machine
 newtype MachineError = MachineError String
   deriving (Eq, Show)
 
+data Player = Player String String
+
+data Game = Game
+  { gameRows         :: Int
+  , gameColumns      :: Int
+  , gameCells        :: Int
+  , gamePlayers      :: [Player]
+  , gameMoves        :: [String]
+  , gameQuitInput    :: String
+  , gameQuitMessage  :: String
+  , gameWinningLines :: [[Int]]
+  , gameCellSep      :: String
+  , gameRowSep       :: String
+  , gameTurnMessage  :: String
+  , gamePrompt       :: String
+  , gameInvalid      :: String
+  , gameOccupied     :: String
+  , gameWinMessage   :: String
+  , gameTieMessage   :: String
+  }
+
+data Draft = Draft
+  { draftBoard    :: Maybe (Int, Int)
+  , draftCells    :: Maybe Int
+  , draftPlayers  :: [Player]
+  , draftMoves    :: Maybe [String]
+  , draftQuit     :: Maybe (String, String)
+  , draftLines    :: [[Int]]
+  , draftCellSep  :: Maybe String
+  , draftRowSep   :: Maybe String
+  , draftTurn     :: Maybe String
+  , draftPrompt   :: Maybe String
+  , draftInvalid  :: Maybe String
+  , draftOccupied :: Maybe String
+  , draftWin      :: Maybe String
+  , draftTie      :: Maybe String
+  }
+
 data Target = Goto String | Stay String | Stop String
 data Rule = Rule String Target
-data StateDecl = StateDecl String String [Rule] (Maybe Target)
-data Source = Source (Maybe String) [Rule] [StateDecl]
+data StateDecl = StateDecl String String [Rule] Target
+type Board = [Maybe Int]
 
--- | Parse and compile the finite-machine subset. Its grammar is line based:
--- @initial STATE@, @global INPUT stop TEXT@,
--- @state STATE DISPLAY@, @on INPUT (goto STATE|stay PREFIX|stop TEXT)@, and
--- @default (stay PREFIX|stop TEXT)@. All strings use Haskell escapes.
+-- | Parse a finite-grid-game algebra and interpret it into two closed Morphs.
+-- Finite reachable-state expansion is a compiler implementation detail, not
+-- part of the source language or runtime representation.
 compileMachine :: String -> Either MachineError Machine
 compileMachine source = do
-  Source initial globals states <- parseSource source
-  initialKey <- maybe (bad "missing initial declaration") Right initial
-  table <- foldM insertState Map.empty states
-  initialState <- lookupState table initialKey
-  compiledStates <- traverse (compileState table globals) states
-  let initCore = constReply (stateDisplay initialState) (Right initialKey)
+  game <- parseSource source
+  let positions = reachable game
+      states = fmap (positionState game) positions
+      table = Map.fromList [(key, state) | state@(StateDecl key _ _ _) <- states]
+  compiled <- traverse (compileState table (quitRule game)) states
+  initial <- case states of
+    state : _ -> Right state
+    []        -> bad "game has no initial position"
+  let initCore = constReply (stateDisplay initial) (Right (stateKey initial))
       missing = constReply "Internal machine state error.\n" (Left ())
-      stepCore = foldr dispatchState missing compiledStates
-      rules = length globals + sum (fmap countRules states)
+      stepCore = foldr dispatchState missing compiled
   pure Machine
     { machineInit = initCore
     , machineStep = stepCore
     , machineStateCount = length states
-    , machineRuleCount = rules
+    , machineRuleCount = sum [length rules + 2 | StateDecl _ _ rules _ <- states]
     }
-  where
-    insertState table state@(StateDecl key _ _ _)
-      | Map.member key table = bad ("duplicate state " <> show key)
-      | otherwise = Right (Map.insert key state table)
-    countRules (StateDecl _ _ rs d) = length rs + maybe 0 (const 1) d
+
+stateKey :: StateDecl -> String
+stateKey (StateDecl key _ _ _) = key
 
 stateDisplay :: StateDecl -> String
 stateDisplay (StateDecl _ display _ _) = display
 
-lookupState :: Map.Map String StateDecl -> String -> Either MachineError StateDecl
-lookupState table key = maybe (bad ("unknown state " <> show key)) Right (Map.lookup key table)
+quitRule :: Game -> Rule
+quitRule game = Rule (gameQuitInput game) (Stop (gameQuitMessage game))
 
 compileState
   :: Map.Map String StateDecl
-  -> [Rule]
+  -> Rule
   -> StateDecl
   -> Either MachineError (String, Morph InputT ReplyT)
-compileState table globals (StateDecl key display rules fallback) = do
-  branches <- traverse (compileRule table key display) (globals <> rules)
-  fallbackCore <- maybe (bad ("state " <> show key <> " has no default rule"))
-    (compileTarget table key display) fallback
+compileState table global (StateDecl key display rules fallback) = do
+  branches <- traverse (compileRule table key display) (global : rules)
+  fallbackCore <- compileTarget table key display fallback
   pure (key, foldr dispatchInput fallbackCore branches)
 
 compileRule
@@ -109,11 +143,95 @@ compileTarget
   -> Target
   -> Either MachineError (Morph InputT ReplyT)
 compileTarget table _ _ (Goto target) = do
-  state <- lookupState table target
+  state <- maybe (bad ("unknown generated state " <> show target)) Right
+    (Map.lookup target table)
   pure (constReply (stateDisplay state) (Right target))
 compileTarget _ key display (Stay prefix) =
   pure (constReply (prefix <> display) (Right key))
 compileTarget _ _ _ (Stop output) = pure (constReply output (Left ()))
+
+positionState :: Game -> (Board, Int) -> StateDecl
+positionState game (board, player) =
+  StateDecl key display rules (Stay (gameInvalid game))
+  where
+    key = positionKey board player
+    display = renderBoard game board <> renderTemplate game player (gameTurnMessage game)
+      <> gamePrompt game
+    rules = zipWith moveRule [0 ..] (gameMoves game)
+    moveRule cell input
+      | Just _ <- board !! cell = Rule input (Stay (gameOccupied game))
+      | wins game board' player = Rule input
+          (Stop (renderBoard game board' <> renderTemplate game player (gameWinMessage game)))
+      | all occupied board' = Rule input (Stop (renderBoard game board' <> gameTieMessage game))
+      | otherwise = Rule input (Goto (positionKey board' (nextPlayer game player)))
+      where
+        board' = replace cell (Just player) board
+
+reachable :: Game -> [(Board, Int)]
+reachable game = go [(replicate (gameCells game) Nothing, 0)] Map.empty
+  where
+    go [] _ = []
+    go (position@(board, player) : queue) seen
+      | Map.member key seen = go queue seen
+      | otherwise = position : go (queue <> children) (Map.insert key () seen)
+      where
+        key = positionKey board player
+        children =
+          [ (board', nextPlayer game player)
+          | cell <- [0 .. gameCells game - 1]
+          , not (occupied (board !! cell))
+          , let board' = replace cell (Just player) board
+          , not (wins game board' player)
+          , not (all occupied board')
+          ]
+
+positionKey :: Board -> Int -> String
+positionKey board player = show player <> ":" <> intercalate "," (fmap cell board)
+  where
+    cell Nothing  = "_"
+    cell (Just n) = show n
+
+replace :: Int -> a -> [a] -> [a]
+replace n value values = take n values <> [value] <> drop (n + 1) values
+
+occupied :: Maybe a -> Bool
+occupied Nothing  = False
+occupied (Just _) = True
+
+nextPlayer :: Game -> Int -> Int
+nextPlayer game player = (player + 1) `mod` length (gamePlayers game)
+
+wins :: Game -> Board -> Int -> Bool
+wins game board player = any (all ((== Just player) . (board !!)))
+  (gameWinningLines game)
+
+renderBoard :: Game -> Board -> String
+renderBoard game board = intercalate (gameRowSep game)
+  [ intercalate (gameCellSep game) (fmap renderCell row)
+  | row <- chunks (gameColumns game) (zip [0 :: Int ..] board)
+  ] <> "\n"
+  where
+    renderCell (cell, Nothing)  = gameMoves game !! cell
+    renderCell (_, Just player) = playerMark (gamePlayers game !! player)
+
+chunks :: Int -> [a] -> [[a]]
+chunks _ []     = []
+chunks n values = take n values : chunks n (drop n values)
+
+playerMark :: Player -> String
+playerMark (Player _ mark) = mark
+
+renderTemplate :: Game -> Int -> String -> String
+renderTemplate game player = replaceAll "{mark}" mark . replaceAll "{player}" name
+  where Player name mark = gamePlayers game !! player
+
+replaceAll :: String -> String -> String -> String
+replaceAll needle replacement = go
+  where
+    go [] = []
+    go value@(char : rest)
+      | needle `isPrefixOf` value = replacement <> go (drop (length needle) value)
+      | otherwise = char : go rest
 
 dispatchState
   :: (String, Morph InputT ReplyT)
@@ -129,12 +247,10 @@ dispatchInput
 dispatchInput (input, hit) miss =
   CaseS hit miss :.: distRight :.: (partitionText (encode input) :***: IdS)
 
--- | Distribute a coproduct in the left component of a product.
 distRight :: Morph ((a ':+: b) ':*: c) ((a ':*: c) ':+: (b ':*: c))
 distRight = CaseS (InlS :.: SwapS) (InrS :.: SwapS) :.: DistlS :.: SwapS
 
--- These partitions are linear: every mismatch branch reconstructs exactly
--- the value it consumed. No ambient host equality or hidden copy is involved.
+-- Failed comparisons reconstruct their input, so dispatch remains affine.
 partitionNat :: Natural -> Morph 'Nat ('Nat ':+: 'Nat)
 partitionNat 0 = CaseS (InlS :.: ConstS 0) (InrS :.: SucS) :.: NatOutS
 partitionNat n = CaseS (InrS :.: ConstS 0) recur :.: NatOutS
@@ -149,8 +265,7 @@ partitionText (c : cs) = CaseS empty nonempty :.: UnconsS
     empty = InrS :.: NilS
     nonempty :: Morph ('Nat ':*: TextT) (TextT ':+: TextT)
     nonempty = rebuild :.: distRight :.: (partitionNat c :***: IdS)
-    rebuild :: Morph (('Nat ':*: TextT) ':+: ('Nat ':*: TextT))
-                     (TextT ':+: TextT)
+    rebuild :: Morph (('Nat ':*: TextT) ':+: ('Nat ':*: TextT)) (TextT ':+: TextT)
     rebuild = CaseS matching (InrS :.: ConsS)
     matching :: Morph ('Nat ':*: TextT) (TextT ':+: TextT)
     matching = CaseS (InlS :.: ConsS) (InrS :.: ConsS)
@@ -166,8 +281,7 @@ constContinuation (Right st) = InrS :.: constText st
 
 constText :: String -> Morph 'Unit TextT
 constText = foldr cons NilS . encode
-  where
-    cons c rest = ConsS :.: (ConstS c :***: rest) :.: LunitS
+  where cons c rest = ConsS :.: (ConstS c :***: rest) :.: LunitS
 
 encode :: String -> [Natural]
 encode = fmap (fromIntegral . ord)
@@ -175,8 +289,7 @@ encode = fmap (fromIntegral . ord)
 decode :: [Natural] -> String
 decode = fmap (chr . fromIntegral)
 
--- | Scripted pure driver used by tests. Each transition is checked through
--- evalV, evalG/workAlg, and evalK with exactly the denoted work budget.
+-- | Every scripted transition is checked through all three core semantics.
 runMachineScript :: Machine -> [String] -> Either String (String, Natural)
 runMachineScript machine inputs = do
   (reply, initialWork) <- runCore (machineInit machine) ()
@@ -197,13 +310,11 @@ runCore morph input =
          | value == gradedValue && value == executed -> Right (value, spent)
        _ -> Left "core evaluator disagreement"
 
--- | Host I/O driver. Parsing input and rendering Text are its only semantic
--- responsibilities; all state transitions and replies come from Morph.
 runMachineIO :: Maybe Natural -> Bool -> Machine -> IO (Either String ())
 runMachineIO fuel report machine = do
   result <- runInteractive fuel 0 (machineInit machine) ()
   case result of
-    Left err -> pure (Left err)
+    Left err                        -> pure (Left err)
     Right (reply, remaining, spent) -> loop remaining spent reply
   where
     loop remaining spent (output, continuation) = do
@@ -217,7 +328,7 @@ runMachineIO fuel report machine = do
             input <- getLine
             result <- runInteractive remaining spent (machineStep machine) (encode input, state)
             case result of
-              Left err -> pure (Left err)
+              Left err                          -> pure (Left err)
               Right (reply, remaining', spent') -> loop remaining' spent' reply
     finish spent = do
       when report (hPutStrLn stderr ("core work: " <> show spent))
@@ -242,57 +353,132 @@ runInteractive limit already morph input = pure $ do
             Right (value, fmap (const remaining) limit, already + needed)
       _ -> Left "core evaluator disagreement"
 
-parseSource :: String -> Either MachineError Source
+parseSource :: String -> Either MachineError Game
 parseSource source = case filter significant (zip [1 :: Int ..] (lines source)) of
-  ((_, "telomare-finite-machine 1") : rest) -> finish =<< foldM parseLine empty rest
-  ((line, _) : _) -> badAt line "expected telomare-finite-machine 1 header"
+  ((_, "telomare-grid-game 1") : rest) -> validate =<< foldM parseLine emptyDraft rest
+  ((line, _) : _) -> badAt line "expected telomare-grid-game 1 header"
   [] -> bad "empty source"
   where
-    significant (_, line) = not (null line) && not ("#" `isPrefixOf` line)
-    empty = (Nothing, [], [], Nothing)
-    finish (initial, globals, states, current) =
-      Right (Source initial globals (states <> foldMap pure current))
+    significant (_, line) = not (all (== ' ') line)
+      && not ("#" `isPrefixOf` dropWhile (== ' ') line)
 
-parseLine
-  :: (Maybe String, [Rule], [StateDecl], Maybe StateDecl)
-  -> (Int, String)
-  -> Either MachineError (Maybe String, [Rule], [StateDecl], Maybe StateDecl)
-parseLine (initial, globals, states, current) (lineNo, line)
-  | Just rest <- stripWord "initial" line = do
-      key <- quoted lineNo rest
-      pure (Just key, globals, states, current)
-  | Just rest <- stripWord "global" line = do
-      (input, target) <- ruleParts lineNo rest
-      pure (initial, globals <> [Rule input target], states, current)
-  | Just rest <- stripWord "state" line = do
-      (key, display) <- twoQuoted lineNo rest
-      pure (initial, globals, states <> foldMap pure current,
-            Just (StateDecl key display [] Nothing))
-  | Just rest <- stripWord "on" line = do
-      state <- maybe (badAt lineNo "on outside a state") Right current
-      (input, target) <- ruleParts lineNo rest
-      let StateDecl key display rules fallback = state
-      pure (initial, globals, states,
-            Just (StateDecl key display (rules <> [Rule input target]) fallback))
-  | Just rest <- stripWord "default" line = do
-      state <- maybe (badAt lineNo "default outside a state") Right current
-      target <- targetParts lineNo rest
-      let StateDecl key display rules _ = state
-      pure (initial, globals, states, Just (StateDecl key display rules (Just target)))
+emptyDraft :: Draft
+emptyDraft = Draft Nothing Nothing [] Nothing Nothing [] Nothing Nothing Nothing
+  Nothing Nothing Nothing Nothing Nothing
+
+parseLine :: Draft -> (Int, String) -> Either MachineError Draft
+parseLine draft (lineNo, input)
+  | Just rest <- stripWord "board" input = do
+      values <- integers lineNo rest
+      case values of
+        [rows, columns] -> setOnce lineNo "board" (draftBoard draft)
+          (\value -> draft {draftBoard = Just value}) (rows, columns)
+        _ -> badAt lineNo "board expects ROWS COLUMNS"
+  | Just rest <- stripWord "cells" input = do
+      value <- integer lineNo rest
+      setOnce lineNo "cells" (draftCells draft)
+        (\n -> draft {draftCells = Just n}) value
+  | Just rest <- stripWord "player" input = do
+      (name, mark) <- twoQuoted lineNo rest
+      pure draft {draftPlayers = draftPlayers draft <> [Player name mark]}
+  | Just rest <- stripWord "moves" input = do
+      values <- quotedList lineNo rest
+      setOnce lineNo "moves" (draftMoves draft)
+        (\moves -> draft {draftMoves = Just moves}) values
+  | Just rest <- stripWord "quit" input = do
+      value <- twoQuoted lineNo rest
+      setOnce lineNo "quit" (draftQuit draft)
+        (\quit -> draft {draftQuit = Just quit}) value
+  | Just rest <- stripWord "winning" input = do
+      values <- integers lineNo rest
+      pure draft {draftLines = draftLines draft <> [fmap (subtract 1) values]}
+  | otherwise = parseTextDeclaration draft lineNo input
+
+parseTextDeclaration :: Draft -> Int -> String -> Either MachineError Draft
+parseTextDeclaration draft lineNo input
+  | Just rest <- stripWord "cell-separator" input = text "cell-separator" draftCellSep
+      (\v -> draft {draftCellSep = Just v}) rest
+  | Just rest <- stripWord "row-separator" input = text "row-separator" draftRowSep
+      (\v -> draft {draftRowSep = Just v}) rest
+  | Just rest <- stripWord "turn-message" input = text "turn-message" draftTurn
+      (\v -> draft {draftTurn = Just v}) rest
+  | Just rest <- stripWord "prompt" input = text "prompt" draftPrompt
+      (\v -> draft {draftPrompt = Just v}) rest
+  | Just rest <- stripWord "invalid-message" input = text "invalid-message" draftInvalid
+      (\v -> draft {draftInvalid = Just v}) rest
+  | Just rest <- stripWord "occupied-message" input = text "occupied-message" draftOccupied
+      (\v -> draft {draftOccupied = Just v}) rest
+  | Just rest <- stripWord "win-message" input = text "win-message" draftWin
+      (\v -> draft {draftWin = Just v}) rest
+  | Just rest <- stripWord "tie-message" input = text "tie-message" draftTie
+      (\v -> draft {draftTie = Just v}) rest
   | otherwise = badAt lineNo "unrecognised declaration"
+  where
+    text name field setter rest = do
+      value <- quoted lineNo rest
+      setOnce lineNo name (field draft) setter value
 
-ruleParts :: Int -> String -> Either MachineError (String, Target)
-ruleParts line input = do
-  (label, rest) <- firstQuoted line input
-  target <- targetParts line rest
-  pure (label, target)
+setOnce :: Int -> String -> Maybe a -> (a -> Draft) -> a -> Either MachineError Draft
+setOnce line name old setter value = case old of
+  Just _  -> badAt line ("duplicate " <> name <> " declaration")
+  Nothing -> Right (setter value)
 
-targetParts :: Int -> String -> Either MachineError Target
-targetParts line input
-  | Just rest <- stripWord "goto" input = Goto <$> quoted line rest
-  | Just rest <- stripWord "stay" input = Stay <$> quoted line rest
-  | Just rest <- stripWord "stop" input = Stop <$> quoted line rest
-  | otherwise = badAt line "expected goto, stay, or stop"
+validate :: Draft -> Either MachineError Game
+validate draft = do
+  (rows, columns) <- required "board" (draftBoard draft)
+  cells <- required "cells" (draftCells draft)
+  moves <- required "moves" (draftMoves draft)
+  (quitInput, quitMessage) <- required "quit" (draftQuit draft)
+  cellSep <- required "cell-separator" (draftCellSep draft)
+  rowSep <- required "row-separator" (draftRowSep draft)
+  turn <- required "turn-message" (draftTurn draft)
+  prompt <- required "prompt" (draftPrompt draft)
+  invalid <- required "invalid-message" (draftInvalid draft)
+  occupiedMessage <- required "occupied-message" (draftOccupied draft)
+  win <- required "win-message" (draftWin draft)
+  tie <- required "tie-message" (draftTie draft)
+  let players = draftPlayers draft
+      winningLines = draftLines draft
+      unique values = length values == Map.size (Map.fromList [(value, ()) | value <- values])
+      playerNames = [name | Player name _ <- players]
+      marks = [mark | Player _ mark <- players]
+  unless (rows > 0 && columns > 0 && cells == rows * columns)
+    (bad "board dimensions must be positive and multiply to cells")
+  unless (length players >= 2) (bad "at least two players are required")
+  unless (not (any null playerNames) && not (any null marks) && unique marks)
+    (bad "player names and distinct marks must be non-empty")
+  unless (length moves == cells && not (any null moves) && unique moves)
+    (bad "moves must contain one distinct non-empty input per cell")
+  unless (not (null quitInput) && quitInput `notElem` moves)
+    (bad "quit input must be non-empty and distinct from moves")
+  unless (not (null winningLines) && all (validLine cells) winningLines)
+    (bad "winning lines must be non-empty, distinct in-range cell indices")
+  pure Game
+    { gameRows = rows, gameColumns = columns, gameCells = cells
+    , gamePlayers = players, gameMoves = moves
+    , gameQuitInput = quitInput, gameQuitMessage = quitMessage
+    , gameWinningLines = winningLines, gameCellSep = cellSep, gameRowSep = rowSep
+    , gameTurnMessage = turn, gamePrompt = prompt, gameInvalid = invalid
+    , gameOccupied = occupiedMessage, gameWinMessage = win, gameTieMessage = tie
+    }
+validLine :: Int -> [Int] -> Bool
+validLine cells values = not (null values) && all (\n -> n >= 0 && n < cells) values
+  && length values == Map.size (Map.fromList [(value, ()) | value <- values])
+
+required :: String -> Maybe a -> Either MachineError a
+required name = maybe (bad ("missing " <> name <> " declaration")) Right
+
+integer :: Int -> String -> Either MachineError Int
+integer line input = case reads input of
+  [(value, rest)] | all (== ' ') rest -> Right value
+  _                                   -> badAt line "expected integer"
+
+integers :: Int -> String -> Either MachineError [Int]
+integers line input = traverse readOne (words input)
+  where
+    readOne value = case reads value of
+      [(n, "")] -> Right n
+      _         -> badAt line "expected integers"
 
 quoted :: Int -> String -> Either MachineError String
 quoted line input = do
@@ -305,10 +491,18 @@ twoQuoted line input = do
   second <- quoted line rest
   pure (first, second)
 
+quotedList :: Int -> String -> Either MachineError [String]
+quotedList line = go [] . dropWhile (== ' ')
+  where
+    go values [] = Right (reverse values)
+    go values input = do
+      (value, rest) <- firstQuoted line input
+      go (value : values) rest
+
 firstQuoted :: Int -> String -> Either MachineError (String, String)
 firstQuoted line input = case reads input of
   [(value, rest)] -> Right (value, dropWhile (== ' ') rest)
-  _ -> badAt line "expected quoted string"
+  _               -> badAt line "expected quoted string"
 
 stripWord :: String -> String -> Maybe String
 stripWord word input = dropWhile (== ' ') <$> stripPrefix (word <> " ") input

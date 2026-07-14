@@ -8,7 +8,7 @@ much work, copying, placement depth, and recursion budget it needs.
 The active executable and formal layers are:
 
 ```text
-.tel2 finite-machine source
+.tel2 finite-grid-game algebra
   -> Morph Unit Reply + Morph (Text * State) Reply
   -> evalV / evalG / evalK
   -> host I/O driver
@@ -23,7 +23,7 @@ UMorph a b
 ```
 
 `UMorph` is the typed box-free formal surface, and `Morph` is the typed
-resource-aware core. The current `.tel2` finite-machine frontend targets a small
+resource-aware core. The current `.tel2` finite-grid-game frontend targets a small
 affine `Morph` fragment directly. There is not yet a pointful `.tel2 -> UMorph`
 frontend or a general placement pass, so this document keeps those boundaries
 explicit.
@@ -36,24 +36,28 @@ rejects general duplication and recursion until modal placement is implemented.
 Agda proves that every successful direct elaboration erases to its source term
 and preserves value semantics.
 
-This subset uses named finite states and exact text rules. It is not a filename
-builtin and has no compatibility fallback; the tic-tac-toe source contains all
-reachable states and transitions. Affine partition morphisms reconstruct failed
-keys rather than copying them implicitly. Its generated transition table is an
-extensional normal form for this first milestone, not the final pointful syntax.
+This subset is a compact algebra for finite grid placement games, not a filename
+builtin and not a compatibility fallback. Source declares dimensions and cell
+count, ordered player names and marks, a move input per cell, winning cell sets,
+quit behavior, separators, and messages. Turn and win templates substitute only
+`{player}` and `{mark}`. The first player starts and turns cycle in declaration
+order. The exact grammar and validation constraints are listed in `README.md`.
 
-That normal form is intentionally denotational. A deterministic finite machine
-is a total function from input and state to output and optional next state. The
-source lists the graph of that function, and `compileMachine` interprets the
-graph compositionally into core sums, products, constants, and observations.
-There is no separate source evaluator and no Haskell transition function in the
-runtime.
+Denotationally, a position is a finite vector of optional player indices and a
+current-player index. Placement, finite winning predicates, turn cycling, and
+rendering are interpreted compositionally. `compileMachine` enumerates the
+finite reachable carrier internally, then lowers its partitions and results to
+core sums, products, constants, and natural/list observations. The expansion is
+not source data and is not committed. There is no separate runtime source
+evaluator and no Haskell transition function in `Machine`.
 
-EAL remains useful even though tic-tac-toe needs no recursion or boxes. Dispatch
-is affine, failed comparisons reconstruct their consumed values, and the linear
-search cost appears in the formal work grade. Explicit reusable copying is a
-separate witnessed algebra in `T3.Core.Copyable` and `Telomare.Copyable`; it is
-not implicit variable reuse.
+EAL remains useful even though these games need no recursion or boxes. Dispatch
+is affine: failed comparisons reconstruct their consumed values, and linear
+search cost appears in the formal work grade. Finite expansion happens at
+compile time; the runtime executes only typed `Morph`. Explicit reusable copying
+remains a separate witnessed algebra in `T3.Core.Copyable` and
+`Telomare.Copyable`, not implicit variable reuse. The price of this incremental
+subset is potentially large generated core and linear dispatch.
 
 ## The Executable Path
 
@@ -537,14 +541,16 @@ guard implementation drift.
 The honest boundary is the most important part of the story:
 
 - The executable accepts `.tel2` only; `.tel` compatibility code is archival.
-- `.tel2` finite machines compile and run through typed `Morph` artifacts only.
+- `.tel2` finite-grid games compile and run through typed `Morph` artifacts only.
 - The formal totality and adequacy theorems apply to every generated `Morph`.
 - The proved direct compiler covers the placement-free `UMorph -> Morph` fragment.
 - There is not yet a pointful `.tel2 -> UMorph` frontend or general modal and recursion placement pass.
 - The `.tel2` meter is the formal core work grade, not a compatibility event counter.
 - Haskell does not yet mirror the Agda space grade.
 
-Telomare today has a core-only finite-machine executable and a machine-checked
-surface/core bridge. The next source-language step is typed pointful affine
+Telomare today has a core-only finite-grid-game executable and a machine-checked
+surface/core bridge. The `.tel2` subset does not cover arbitrary state machines,
+pointful expressions, user data, recursion, movement, captures, or alternative
+turn policies. The next general source-language step is typed pointful affine
 `.tel2 -> UMorph` elaboration with explicit copying, followed by modal placement
 for general duplication and bounded recursion.
