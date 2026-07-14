@@ -78,7 +78,7 @@
           apps.default = {
             type = "app";
             program = self'.packages.telomare + "/bin/telomare";
-            meta.description = "Compile and run a .tel2 grid game through Morph";
+            meta.description = "Compile and run a typed affine .tel2 program";
           };
 
           apps.format-lint = {

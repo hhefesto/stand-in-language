@@ -1,10 +1,10 @@
 ------------------------------------------------------------------------
--- The generic natural-key partition used by the finite-machine compiler.
--- Both branches reconstruct the consumed input, so dispatch is affine.
+-- Generic affine equality partition for natural literals.
+-- Both branches reconstruct the consumed input.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
-module T3.Compiler.FiniteMachine where
+module T3.Compiler.Partition where
 
 open import Data.Nat using (ℕ; zero; suc)
 open import Data.Sum using (inj₁; inj₂)

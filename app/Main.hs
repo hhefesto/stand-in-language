@@ -1,9 +1,9 @@
 -- | Telomare CLI: compile and run typed-core .tel2 programs.
 --
---   telomare game.tel2                 interactive grid-game driver
---   telomare --certificate game.tel2   print typed core summary first
---   telomare --meter game.tel2         print formal work on stderr at exit
---   telomare --max-work N game.tel2    cap global formal work
+--   telomare program.tel2              interactive machine driver
+--   telomare --certificate program.tel2  print typed core summary first
+--   telomare --meter program.tel2        print formal work on stderr at exit
+--   telomare --max-work N program.tel2   cap global formal work
 module Main (main) where
 
 import Control.Monad (when)
@@ -13,8 +13,8 @@ import System.Exit (exitFailure)
 import System.FilePath (takeExtension)
 import System.IO (hPutStrLn, stderr)
 
-import Telomare.Core (depth)
-import Telomare.CoreMachine
+import Telomare.Machine
+import Telomare.Tel2
 
 data Opts = Opts
   { optFile        :: FilePath
@@ -40,22 +40,20 @@ main = run =<< execParser
 
 run :: Opts -> IO ()
 run o
-  | takeExtension (optFile o) == ".tel2" = runCoreMachine o
+  | takeExtension (optFile o) == ".tel2" = runTel2 o
   | otherwise = do
       hPutStrLn stderr "only typed-core .tel2 programs are executable"
       exitFailure
 
-runCoreMachine :: Opts -> IO ()
-runCoreMachine o = do
+runTel2 :: Opts -> IO ()
+runTel2 o = do
   source <- readFile (optFile o)
-  case compileMachine source of
-    Left (MachineError err) -> hPutStrLn stderr err >> exitFailure
-    Right machine -> do
+  case compileTel2 source of
+    Left (CompileError err) -> hPutStrLn stderr err >> exitFailure
+    Right program -> do
       when (optCertificate o) $ putStrLn
-        ("typed finite-grid game: " <> show (machineStateCount machine)
-          <> " states, " <> show (machineRuleCount machine)
-          <> " rules, core depth " <> show (depth (machineStep machine)))
-      result <- runMachineIO (optMaxWork o) (optMeter o) machine
+        ("typed affine program: core depth " <> show (programDepth program))
+      result <- runProgramIO (optMaxWork o) (optMeter o) program
       case result of
         Left err -> hPutStrLn stderr err >> exitFailure
         Right () -> pure ()
