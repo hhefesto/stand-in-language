@@ -1,353 +1,85 @@
-name:                telomare
-version:             0.1.0.0
-synopsis:            A simple but robust virtual machine
-description:         Please see README.md
-homepage:            https://github.com/Stand-In-Language/stand-in-language#readme
-license:             Apache-2.0
-license-file:        LICENSE
-author:              Sam Griffin
-maintainer:          sam.griffin@gmail.com
-copyright:           2020 Sam Griffin
-category:            Language
-build-type:          Simple
-extra-source-files:  CHANGELOG.md, README.md
-cabal-version:       >=1.10
-extra-libraries:     chez
+cabal-version:      3.0
+name:               telomare
+version:            0.1.0.0
+synopsis:           Total language runtime with knowable bounds
+description:
+  Telomare is a total-language experiment with a machine-checked core,
+  graded resource semantics, and a metered .tel compatibility runtime.
+license:            Apache-2.0
+license-file:       LICENSE
+author:             hhefesto
+maintainer:         hhefesto@rdataa.com
+category:           Language
+build-type:         Simple
+extra-source-files: README.md
+                  , test/golden/*.txt
+                  , test/programs/*.tel
 
-data-files:          bench/MemoryBench/cases
-                   , Prelude.tel
-                   , tictactoe.tel
-                   , examples.tel
-                   , simpleplus.tel
-                   , testchar.tel
+common warnings
+    ghc-options: -Wall
 
 library
-  hs-source-dirs:      src
-  other-extensions:    GADTs
-                     , EmptyDataDecls
-                     , DeriveFunctor
-                     , FlexibleContexts
-                     , ScopedTypeVariables
-                     , OverloadedStrings
-                     , RecursiveDo
-                     , LambdaCase
-  exposed-modules:     Debug
-                     , PrettyPrint
-                     , Telomare
-                     , Telomare.Eval
-                     , Telomare.HvmBackend
-                     , Telomare.HvmBackendCcc
-                     , Telomare.Levels
-                     , Telomare.T2Backend
-                     , Telomare.Decompiler
-                     , Telomare.Parser
-                     , Telomare.Possible
-                     , Telomare.PossibleData
-                     , Telomare.Resolver
-                     , Telomare.RunTime
-                     , Telomare.TypeChecker
-  build-depends:       base
-                     , base16-bytestring
-                     , binary
-                     , bytestring
-                     , clock
-                     , containers
-                     , data-fix
-                     , deepseq
-                     , derive-storable
-                     , dlist
-                     , megaparsec
-                     , memory
-                     , mtl
-                     , recursion-schemes
-                     , stm
-                     , text
-                     , transformers
-                     , vector
-                     -- , sbv
-                     , strict
-                     , tasty
-                     , tasty-hunit
-                     , deriving-compat
-                     , lens
-                     , hspec
-                     , QuickCheck
-                     , cryptonite
-                     , bytestring
-                     , crypto-api
-                     , utf8-string
-                     , validity
-                     , genvalidity
-                     , genvalidity-containers
-                     , process
-                     , free
-  -- uncomment this line to get a cabal repl. Use appropiate complete path (will error with a relative path).
-  -- extra-lib-dirs:      /home/hhefesto/src/telomare/lib
-  default-language:    Haskell2010
-  -- ghc-options:         -v3
+    import:           warnings
+    hs-source-dirs:   src
+    exposed-modules:  Telomare.Budget
+                    , Telomare.Core
+                    , Telomare.Denotation
+                    , Telomare.Infer
+                    , Telomare.Tel.Eval
+                    , Telomare.Tel.Frontend
+                    , Telomare.Tel.Loop
+                    , Telomare.Compat.Levels
+                    , Telomare.Compat.Parser
+                    , Telomare.Compat.PossibleData
+                    , Telomare.Compat.PrettyPrint
+                    , Telomare.Compat.Resolver
+                    , Telomare.Compat.Syntax
+                    , Telomare.Compat.TypeChecker
+    build-depends:    base
+                    , bytestring
+                    , containers
+                    , cryptonite
+                    , data-fix
+                    , deepseq
+                    , deriving-compat
+                    , dlist
+                    , filepath
+                    , free
+                    , genvalidity
+                    , lens
+                    , megaparsec
+                    , memory
+                    , mtl
+                    , recursion-schemes
+                    , strict
+                    , transformers
+                    , utf8-string
+                    , validity
+    default-language: Haskell2010
 
 executable telomare
-  hs-source-dirs:      app
-  main-is:             Main.hs
-  ghc-options:         -threaded
-                       -rtsopts
-                       -with-rtsopts=-N
-  build-depends:       base
-                     , containers
-                     , directory
-                     , filepath
-                     , optparse-applicative
-                     , stm
-                     , strict
-                     , telomare
-  default-language:    Haskell2010
-
-executable telomare-repl
-  hs-source-dirs:      app
-  main-is:             Repl.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
-  build-depends:       base
-                     , containers
-                     , free
-                     , haskeline
-                     , megaparsec
-                     , mtl
-                     , optparse-applicative
-                     , recursion-schemes
-                     , stm
-                     , strict
-                     , telomare
-  default-language:    Haskell2010
-
-executable telomare-evaluare
-  hs-source-dirs: app
-  main-is: Evaluare.hs
-  ghc-options: -threaded -Wall
-  build-depends:
-                base,
-                containers,
-                free,
-                mtl,
-                reflex,
-                reflex-vty,
-                stm,
-                strict,
-                telomare,
-                text,
-                time,
-                transformers,
-                vty
-  default-language: Haskell2010
-  default-extensions:
-    BangPatterns
-    ConstraintKinds
-    CPP
-    DataKinds
-    DefaultSignatures
-    DeriveFunctor
-    DeriveGeneric
-    FlexibleContexts
-    FlexibleInstances
-    FunctionalDependencies
-    GADTs
-    GeneralizedNewtypeDeriving
-    KindSignatures
-    LambdaCase
-    MultiParamTypeClasses
-    MultiWayIf
-    OverloadedStrings
-    PatternGuards
-    PolyKinds
-    QuasiQuotes
-    RankNTypes
-    RecursiveDo
-    ScopedTypeVariables
-    StandaloneDeriving
-    TemplateHaskell
-    TupleSections
-    TypeApplications
-    TypeFamilies
-
-executable telomare-lsp
-  main-is:             LSP.hs
-  hs-source-dirs:      app
-
-  build-depends:       base
-                      , containers
-                      , data-fix
-                      , directory
-                      , filepath
-                      , free
-                      , lens
-                      , lsp
-                      , lsp-types
-                      , megaparsec
-                      , process
-                      , stm
-                      , telomare
-                      , text
-                      , time
-                      , aeson
-
-  default-language:    Haskell2010
-  ghc-options:         -Wall
-                       -threaded
-                       -rtsopts
-                       -with-rtsopts=-N
-                       -Wunused-packages
+    import:           warnings
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    build-depends:    base
+                    , containers
+                    , optparse-applicative
+                    , telomare
+    default-language: Haskell2010
 
 test-suite telomare-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             Spec.hs
-  other-modules:       Common
-  build-depends:       QuickCheck
-                     , base
-                     , containers
-                     , data-fix
-                     , dlist
-                     , free
-                     , hspec
-                     , hspec-core
-                     , mtl
-                     , recursion-schemes
-                     , stm
-                     , strict
-                     , telomare
-                     , unix
-  ghc-options:         -threaded
-                       -rtsopts
-                       -- -prof                         -- uncomment this and the following for profiling
-                       -- -fprof-auto
-                       -- "-with-rtsopts=-N -p -s -hT"
-  default-language:    Haskell2010
-
-test-suite telomare-parser-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             ParserTests.hs
-  other-modules:       Common
-  build-depends:       QuickCheck
-                     , base
-                     , containers
-                     , data-fix
-                     , free
-                     , lens
-                     , megaparsec
-                     , mtl
-                     , process
-                     , recursion-schemes
-                     , stm
-                     , strict
-                     , tasty
-                     , tasty-hunit
-                     , tasty-quickcheck
-                     , telomare
-                     , unix
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
-  default-language:    Haskell2010
-
-test-suite telomare-resolver-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             ResolverTests.hs
-  other-modules:       Common
-                     , CaseTests
-  build-depends:       Diff
-                     , QuickCheck
-                     , base
-                     , containers
-                     , data-fix
-                     , free
-                     , megaparsec
-                     , mtl
-                     , pretty-show
-                     , recursion-schemes
-                     , stm
-                     , strict
-                     , tasty
-                     , tasty-hunit
-                     , tasty-quickcheck
-                     , telomare
-                     , unix
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
-  default-language:    Haskell2010
-
-test-suite telomare-sizing-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             SizingTest.hs
-  other-modules:       Common
-                     , SizingTests
-  build-depends:       base
-                     , containers
-                     , data-fix
-                     , dlist
-                     , hspec
-                     , hspec-core
-                     , mtl
-                     , recursion-schemes
-                     , telomare
-                     , strict
-                     , QuickCheck
-                     , unix
-                     , free
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
-  default-language:    Haskell2010
-
-test-suite telomare-udt-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             UDTTests.hs
-  other-modules:       Common
-                     , NatUDTTests
-  build-depends:       base
-                     , containers
-                     , data-fix
-                     , free
-                     , megaparsec
-                     , QuickCheck
-                     , recursion-schemes
-                     , strict
-                     , tasty
-                     , tasty-hunit
-                     , tasty-quickcheck
-                     , telomare
-                     , unix
-
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
-  default-language:    Haskell2010
-
-benchmark telomare-serializer-benchmark
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      bench/
-  default-language:    Haskell2010
-  Main-is:             SerializerBench.hs
-  build-depends:       base, telomare, deepseq, strict, vector, criterion, criterion-measurement
-  ghc-options:         -with-rtsopts=-T
-
-benchmark telomare-memory-benchmark
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      bench/
-  default-language:    Haskell2010
-  Main-is:             MemoryBench.hs
-  other-modules:       MemoryBench.Cases
-                     -- , MemoryBench.LLVM
-                     , Paths_telomare
-  build-depends:       base
-                     , telomare
-                     , deepseq
-                     , strict
-                     , weigh
-                     , parsec
-                     , mtl
-                     , containers
-                     , bytestring
-                     -- , llvm-hs-pure
-                     -- , llvm-hs
-  ghc-options:
-                         -threaded
-
-source-repository head
-  type:     git
-  location: https://github.com/Stand-In-Language/stand-in-language
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    other-modules:    BudgetOracle
+                    , InferOracle
+                    , Laws
+                    , ParityTel
+                    , SpecVectors
+    hs-source-dirs:   test
+    build-depends:    base
+                    , containers
+                    , directory
+                    , QuickCheck
+                    , telomare
+    default-language: Haskell2010

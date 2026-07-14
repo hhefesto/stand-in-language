@@ -1,54 +1,39 @@
-# comment to fire up github actions 2
-name: "Telomare CI"
+name: Telomare CI
+
 on:
   pull_request:
   push:
+
 jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    - uses: cachix/install-nix-action@v25
-      with:
-        install_url: https://releases.nixos.org/nix/nix-2.31.5/install
-        nix_path: nixpkgs=channel:nixos-unstable
-        extra_nix_config: |
-          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-    - uses: DeterminateSystems/magic-nix-cache-action@v2
-    - uses: cachix/cachix-action@v14
-      with:
-        name: telomare
-        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-        extraPullNames: nix-community
-    - name: Build and test
-      run: |
-        echo nix build and tests:
-        nix -Lv flake check
-        echo "Setting up cabal..."
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@v25
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.31.5/install
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      - uses: cachix/cachix-action@v14
+        with:
+          name: telomare
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+          extraPullNames: nix-community
+      - name: Build and test
+        run: |
+          nix -Lv flake check
+          nix -Lv develop -c cabal update
+          nix -Lv develop -c cabal test telomare-test
+          nix -Lv develop -c agda --safe spec/Everything.agda
 
-        nix -Lv develop -c cabal update
-
-        echo "Testing telomare-repl..."
-        REPL_OUTPUT=$(nix -Lv run .#telomare-repl -- --expr 'succ 7' 2>/dev/null | tail -n 1)
-        echo "REPL output: $REPL_OUTPUT"
-        if [[ "$REPL_OUTPUT" == "8" ]]; then
-            echo "REPL test passed"
-        else
-            echo "REPL test failed: expected 8, got '$REPL_OUTPUT'"
-            exit 1
-        fi
-        echo building for legacy nix-shell:
-        nix-build
-        nix-shell --run "echo OK"
-        echo ${{ github.ref }}
-        echo ${{ github.repository }}
   format:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout telomare repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: cachix/install-nix-action@v25
@@ -62,107 +47,5 @@ jobs:
           name: telomare
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
           extraPullNames: nix-community
-      - name: stylish-haskell formatting
-        run: |
-          nix develop -c stylish-haskell -irv .
-          output=$(git diff)
-          if [ "$output" = "" ]; then
-              echo "Success! No formatting suggestions."
-          else
-              echo "Failure: stylish-haskell has some formatting suggestions:"
-              echo "$output"
-              exit 1
-          fi
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout telomare repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: cachix/install-nix-action@v25
-        with:
-          install_url: https://releases.nixos.org/nix/nix-2.31.5/install
-          extra_nix_config: |
-            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-      - uses: DeterminateSystems/magic-nix-cache-action@v2
-      - uses: cachix/cachix-action@v14
-        with:
-          name: telomare
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-          extraPullNames: nix-community
-      - name: hlint linting
-        run: |
-          output=$(nix develop -c hlint . --no-exit-code)
-          if [ "$output" = "No hints" ]; then
-              echo "Success! No Hlint suggestions."
-          else
-              echo "Failure: Hlint has some suggestions for your commit"
-              echo "$output"
-              exit 1
-          fi
-  release:
-    if: ${{ (github.ref == 'refs/heads/master') && (github.repository == 'Stand-In-Language/stand-in-language') }}
-    needs: [tests, format, lint]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout telomare repository
-        uses: actions/checkout@v4
-        with:
-          repository: Stand-In-Language/stand-in-language
-          token: ${{ secrets.API_TOKEN_GITHUB }}
-          path: ./telomare
-          fetch-depth: 0
-      - name: Checkout telomare site repository
-        uses: actions/checkout@v4
-        with:
-          repository: Stand-In-Language/stand-in-language.github.io
-          token: ${{ secrets.API_TOKEN_GITHUB }}
-          path: ./stand-in-language.github.io
-          fetch-depth: 0
-      - uses: cachix/install-nix-action@v25
-        with:
-          install_url: https://releases.nixos.org/nix/nix-2.31.5/install
-          extra_nix_config: |
-            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-      - uses: DeterminateSystems/magic-nix-cache-action@v2
-      - uses: cachix/cachix-action@v14
-        with:
-          name: telomare
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-          extraPullNames: nix-community
-      - name: haddock build
-        run: |
-          ls
-          cd telomare
-          nix -Lv develop -c cabal update
-          (nix develop -c cabal haddock --haddock-hyperlink-source) > ../haddock-output
-          echo OK Haddock build
-      - name: haddock copy
-        run: |
-          ls
-          # Check if the file exists
-          if [ ! -e haddock-output ]; then
-              echo "Error: File 'haddock-output' does not exist."
-              exit 1
-          fi
-
-          # Check if the file is empty
-          if [ ! -s haddock-output ]; then
-              echo "Error: File 'haddock-output' is empty."
-              exit 1
-          fi
-          current_dir=$(pwd)
-          # takes the last line of the haddock-output and removes overlapping paths with
-          # the current directory and also takes away the file name at the end of the path
-          # N.b. this command depends on `cabal haddock --haddock-hyperlink-source` displaying
-          # the location of the documentation as the last line of its output
-          doc_loc=$(tail -n 1 haddock-output | sed "s|^$current_dir/\(.*\)/.*|\1|")
-          rm -rf stand-in-language.github.io/docs/haddock/
-          mkdir stand-in-language.github.io/docs/haddock/
-          cp -r "$doc_loc"/. stand-in-language.github.io/docs/haddock
-      - uses: EndBug/add-and-commit@v9
-        with:
-          message: 'haddock documentation automatically updated'
-          cwd: './stand-in-language.github.io/'
-          default_author: github_actions
+      - name: Format and lint
+        run: nix run .#format-lint

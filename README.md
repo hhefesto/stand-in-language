@@ -1,205 +1,198 @@
 # Telomare
-> A simple but robust virtual machine
 
-<p float="left">
-  <img src="https://github.com/Stand-in-Language/stand-in-language/actions/workflows/telomare-ci.yml/badge.svg" />
-  <a href="https://gitter.im/stand-in-language/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge"
-     title="Join the chat at https://gitter.im/stand-in-language/Lobby">
-    <img src="https://badges.gitter.im/stand-in-language/Lobby.svg" /> 
-  </a>
-</p>
+Telomare is a total-language experiment built around one goal: programs should
+have ordinary executable behavior and knowable resource structure. The current
+implementation is the regular `telomare` package and executable.
 
+The repository now has one active implementation:
 
-A virtual machine with a simple grammar evolved from simply typed lambda calculus, that eventually will have powerful static checking and an optimizing backend.
-
-## Warning
-This project is in active development. Do expect bugs and general trouble, and please let us know if you run into any by creating a new issue if one does not already exist.
+- `spec/`: the Agda source of truth, checked with `--safe` and no postulates.
+- `src/Telomare/`: the Haskell mirror and runtime.
+- `src/Telomare/Compat/`: the explicitly moved compatibility frontend needed to read existing `.tel` programs.
+- `app/Main.hs`: the `telomare` executable.
+- `test/`: semantic vectors, laws, budget and placement checks, and `.tel` transcript fixtures.
 
 ## Quick Start
 
-1. Clone this repository and change directory to it:
-   ```sh
-   $ git clone https://github.com/Stand-In-Language/stand-in-language.git
-   $ cd stand-in-language
-   ```
-2. [Install Nix](https://nixos.org/nix/download.html):
-   ```sh
-   $ curl https://nixos.org/nix/install | sh
-   ```
-3. Optional (reduces build time by using telomare's cache):
-   ```sh
-   # Install cachix with nix-env or adding `cachix` to your `/etc/nixos/configuration.nix`'s' `environment.systemPackages` if in NixOS.
-   $ cachix use telomare
-   ```
-4. Enter a Nix shell. This will setup an environment where all external dependencies will be available (such as `cabal` for building):
-   ```sh
-   $ nix develop # or nix develop -c zsh
-   ```
-5. Build the project:
-   ```sh
-   $ cabal build # or nix build
-   ```
-6. Run the tictactoe example and start playing with a friend (or run your own telomare file):
-   ```sh
-   $ cabal run telomare -- tictactoe.tel # or nix run . -- tictactoe.tel
-   ```
-7. Profit!
+Run an existing `.tel` program through the Telomare Tier-2 runtime:
 
-## Telomare REPL
-1. Run:
-   ```sh
-   $ cd <your/local/proyect/location>/telomare
-   $ nix develop -c zsh
-   $ cabal run telomare-repl -- --haskell # or nix run .#repl
-   ```
-2. Profit!
-
-## Editor Support (LSP)
-
-Telomare ships a language server (`telomare-lsp`) and an Emacs major mode
-under [`emacs-telomare-mode/`](emacs-telomare-mode/), with variants for
-Spacemacs, Doom, and vanilla Emacs.
-
-### LSP capabilities
-
-The language server provides:
-
-- **Diagnostics** — on every document open and edit it reports parse
-  errors, missing imported modules, undefined variable references, and
-  resolver errors. Diagnostics are cleared when the document is closed.
-- **Go to definition** — jumps to local `let`, lambda, and case-pattern
-  binders, to top-level definitions, and to definitions in qualified
-  imported modules.
-- **Find references** — lists every reference to a symbol, optionally
-  including its declaration.
-- **Semantic-token highlighting** — keywords, comments, strings,
-  numbers, and operators, for the whole file or a requested range.
-- **Code action** — *Partially evaluate*: select an expression and the
-  server evaluates it, reporting the result in an editor popup.
-- **Workspace commands**:
-  - `telomare.version` — reports the server version as a UTC timestamp.
-  - `telomare.partialEval` — evaluates a given expression; this backs
-    the partial-evaluation code action.
-
-Document sync is full-text (whole-document). Hover and rename are not
-implemented yet.
-
-### Installing the Emacs mode
-
-The recommended Spacemacs setup is to load Telomare's Emacs mode from the
-same Telomare flake input that provides the language server. Do not point
-Spacemacs at a random checkout unless you are actively developing the mode;
-make the editor use the same pinned source that NixOS or Home Manager builds.
-
-For a NixOS/Home Manager Spacemacs config, add Telomare as a flake input and
-load the mode file from that input:
-
-```elisp
-(load "${telomare}/emacs-telomare-mode/telomare-mode-spacemacs.el")
+```sh
+nix run . -- test/programs/tictactoe.tel
 ```
 
-The mode auto-detects the surrounding flake source path and starts the LSP with
-`nix run path:<telomare-source>#lsp --`. This matters for Nix store paths:
-`nix run /nix/store/...-source#lsp --` is parsed incorrectly by Nix, while
-`nix run path:/nix/store/...-source#lsp --` is the intended absolute-path flake
-form.
+Or use Cabal inside the development shell:
 
-For a manual checkout-based setup, load the mode from this repository and set
-`TELOMARE_ROOT` only if auto-detection cannot find `flake.nix`:
-
-```elisp
-(load "/path/to/telomare/emacs-telomare-mode/telomare-mode-spacemacs.el")
+```sh
+nix develop
+cabal run telomare -- test/programs/tictactoe.tel
 ```
 
-For Doom and vanilla Emacs setup, see
-[`emacs-telomare-mode/README.md`](emacs-telomare-mode/README.md).
+Useful runtime options:
 
-### Keybindings
-
-The mode binds only features the server implements. Some entries below
-come from `lsp-mode` rather than Telomare's mode — these are marked
-*(lsp-mode)*. Spacemacs exposes the major-mode leader as `SPC m` in Evil
-state and as `M-m m` in holy-mode; the leader entries are otherwise the
-same bindings.
-
-**Spacemacs — Evil mode** (`SPC m` major-mode leader):
-
-| Key | Action |
-|-----|--------|
-| `SPC m g` | Go to definition |
-| `SPC m G` | Find references |
-| `SPC m a` | Execute code action (partial evaluation) |
-| `SPC m v` | Show Telomare LSP version |
-| `C-c C-v` | Show Telomare LSP version |
-| `g d` | Go to definition *(lsp-mode / Evil default)* |
-
-**Spacemacs — holy mode** (`M-m m` major-mode leader):
-
-| Key | Action |
-|-----|--------|
-| `M-m m g` | Go to definition |
-| `M-m m G` | Find references |
-| `M-m m a` | Execute code action (partial evaluation) |
-| `M-m m v` | Show Telomare LSP version |
-| `C-c C-v` | Show Telomare LSP version |
-| `M-.` | Go to definition *(lsp-mode)* |
-| `M-?` | Find references *(lsp-mode)* |
-| `M-,` | Jump back *(xref)* |
-
-Vanilla Emacs binds `M-.`, `M-?`, `C-c a`, and `C-c C-v`.
-
-### Troubleshooting
-
-If navigation does not work, check the active LSP session with
-`M-x lsp-describe-session`, restart it with `M-x lsp-workspace-restart`, and
-confirm the server command with:
-
-```elisp
-M-: (telomare--lsp-command)
+```sh
+cabal run telomare -- --certificate test/programs/tictactoe.tel
+cabal run telomare -- --meter test/programs/tictactoe.tel
+cabal run telomare -- --max-steps 10000 test/programs/tictactoe.tel
 ```
 
-The expected command shape is:
+Development checks:
 
-```elisp
-("nix" "run" "path:/nix/store/...-source#lsp" "--")
+```sh
+cabal test telomare-test
+agda --safe spec/Everything.agda
+nix flake check
+nix run .#format-lint
 ```
 
-### LSP version command
+## The Telomare Spirit
 
-`C-c C-v` (or `SPC m v` / `M-m m v` in Spacemacs) reports the server
-version as a UTC timestamp truncated to minutes, using the parent commit
-timestamp when git history is available and the flake source timestamp
-when launched from a Nix store source without `.git`. It can also be
-invoked directly:
+Telomare is not trying to be a Turing-complete language with a bolt-on timeout.
+It is trying to make bounded computation part of the meaning of a program.
 
-```elisp
-(lsp-request "workspace/executeCommand"
-             `(:command "telomare.version" :arguments []))
-```
+The formal core is total. Recursion is structural or fuel-carrying, so a core
+term denotes a total function. Resource observations are also semantic objects:
+the same syntax can be interpreted as values, work, duplication pressure, space,
+or fuel-metered execution.
 
-The command shows an editor message such as:
+The current `.tel` executable is intentionally practical. It reuses the moved
+compatibility parser, resolver, and type checker for existing `.tel` syntax,
+then runs on a new metered runtime. This runtime does not use the old sizing
+pass. Recursion sites become native demand-driven recursion nodes, so programs
+that were previously rejected as unsized can still run, and `--max-steps` can
+turn nontermination into an explicit runtime fuel error.
+
+## Mathematical Core
+
+The checked core is a first-order typed category.
+
+Types include unit, naturals, products, sums, lists, and the modal type `!A`.
+The value interpretation maps them to ordinary Agda sets:
 
 ```text
-Telomare LSP version: 2026-05-22T10:14Z
+[[unit]]     = 1
+[[nat]]      = Nat
+[[A * B]]    = [[A]] x [[B]]
+[[A + B]]    = [[A]] + [[B]]
+[[list A]]   = List [[A]]
+[[!A]]       = [[A]]
 ```
 
-## Git Hooks
+The last equation is deliberate: bang decorations do not change the value set.
+They change the resource discipline. Agda proves that erasing those decorations
+preserves value semantics.
 
-You can setup your git configuration to automatically format and look for lint suggestions. Just run:
+The core is affine and EAL-inspired:
 
-``` sh
-$ git config core.hooksPath hooks
+- Weakening is allowed.
+- General contraction is absent.
+- Structural duplication exists only at `!A` through `dupS`.
+- Natural numbers have a separate atom-level duplication primitive.
+- Promotion is restricted; there is no dereliction and no digging.
+
+This is the resource idea behind the language: copying is not implicit ambient
+power. Copying has a place in the syntax, and the semantics can charge for it.
+
+## Resource Semantics
+
+`T3.Sem.Graded` defines a generic graded interpretation. A cost algebra supplies
+sequential composition, parallel composition, primitive charges, loop-step
+charges, and probe charges. Agda proves that the value component of every graded
+interpretation agrees with the ordinary value semantics.
+
+Implemented grades include:
+
+- Work: charges `natOutS` and each taken loop step.
+- Duplication: charges `dupS`, natural-number duplication, and guard/while probes.
+- Space in the Agda spec: charges by input/output word size with max for sequential composition and addition for parallel composition.
+
+For the work grade, Agda proves precision with slack:
+
+```text
+evalK f a (work f a + extra) = just (evalV f a, extra)
 ```
 
-## Contributing
-If you'd like to contribute, please fork the repository and use a feature branch. Pull requests are warmly welcome.
+With `extra = 0`, this is adequacy: running with exactly the computed work grade
+returns exactly the denoted value and consumes exactly the supplied work.
 
-## Links
-1. [A Better Model of Computation](http://sfultong.blogspot.com/2016/12/a-better-model-of-computation.html?m=1) by Sfultong
-2. [SIL: Explorations in non-Turing Completeness](http://sfultong.blogspot.com/2017/09/sil-explorations-in-non-turing.html?m=1) by Sfultong
-3. [Deconstructing Lambdas, Closures and Application](http://sfultong.blogspot.com/2018/04/deconstructing-lambdas-closures-and.html?m=1) by Sfultong
-4. [Join the community's chat](https://gitter.im/stand-in-language/Lobby)
+## Placement And Budgets
 
+Telomare separates two analyses that historically became tangled.
 
-## Licensing
-The code in this project is licensed under the Apache License 2.0. For more information, please refer to the [LICENSE file](https://github.com/Stand-In-Language/stand-in-language/blob/master/LICENSE).
+Placement is structural. A recursion skeleton records recursion sites and
+call-offset edges. Agda proves that valid placements are meet-closed and that the
+structural placement algorithm computes the least solution. This gives a
+mathematical form to the intuition that iteration levels should be inferred by
+syntax, not by runtime probing.
+
+Budgets are value-sensitive. The abstract interpreter tracks shapes such as
+bounded naturals, products, sums, bounded lists, and unknown top. It proves that
+transfer soundly over-approximates output values. Recursion-site budget trees
+record finite bounds when known and `top` when the analysis loses a finite
+bound. Nested recursion joins inner budgets over every abstract outer unrolling,
+matching the “maximum over outer iterations” behavior expected from the level
+structure.
+
+The spec also proves a stability fact for bounded while loops: once the test has
+stopped, adding more fuel does not change the result.
+
+## Runtime Model
+
+The active executable runs `.tel` programs as follows:
+
+1. Load the entry module and imports relative to the entry file.
+2. Parse, resolve, and type-check using the moved compatibility frontend.
+3. Convert the old unsized recursion marker into Telomare's native runtime node.
+4. Run the Tier-2 metered environment machine.
+
+The interactive protocol is the existing `.tel` protocol: `main` is a closure
+that receives an input/state value and returns display/state. The loop prints the
+display string, reads a line when the state continues, and exits when the state
+is zero. End-of-file exits cleanly.
+
+The meter reports:
+
+- function applications;
+- gate selections;
+- per-site recursion unroll counts.
+
+## Verification
+
+The checked and tested evidence is intentionally layered:
+
+- Agda: `spec/Everything.agda` imports the full specification and checks with `--safe` and no postulates.
+- Haskell mirror: core value, work, duplication, execution, placement, and budget functions mirror the spec.
+- Tests: Agda example vectors, placement oracles, budget oracles, `.tel` transcript parity, and QuickCheck laws.
+- Golden transcripts: tictactoe fixtures and small programs exercise the compatibility runtime.
+
+The Haskell tests are regression evidence for the mirror and runtime. The Agda
+proofs are the formal source of truth for the core semantics.
+
+## Current Limits
+
+The formal totality and adequacy theorems apply to the typed core, not yet to the
+full `.tel` compatibility runtime.
+
+The current `.tel` runtime is Tier 2: it deoptimizes instead of rejecting when a
+finite bound is unknown. Without `--max-steps`, a genuinely unbounded `.tel`
+program can keep running.
+
+The compatibility frontend is still present because existing `.tel` syntax and
+fixtures depend on it. It has been moved into `Telomare.Compat.*` so it is no
+longer confused with the active semantic core.
+
+The CLI `--certificate` report is currently the structural levels report from
+the compatibility frontend. The newer budget and placement mirrors exist in
+`Telomare.Budget` and `Telomare.Infer`, but they are not yet a single integrated
+user certificate pipeline.
+
+The Agda spec defines a space grade; the Haskell mirror currently implements
+work and duplication. The spec also proves that simple additive word-size
+majorization is not enough for the current fuel-carrying list-building
+iteration, so richer resource models remain part of the research program.
+
+Tier-1 labeled-fan execution and a proved fidelity theorem for the compatibility
+runtime remain future work.
+
+## License
+
+Telomare is licensed under Apache-2.0. See `LICENSE`.

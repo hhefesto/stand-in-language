@@ -1,78 +1,64 @@
-{-# LANGUAGE MultiWayIf          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
 
-module Main where
+-- | Telomare CLI: run .tel programs on the Telomare Tier-2 runtime.
+--
+--   telomare game.tel                 interactive transcript loop
+--   telomare --certificate game.tel   print the structural levels report first
+--   telomare --meter game.tel         work-meter report on stderr at exit
+--   telomare --max-steps N game.tel   metered fuel cap (Tier-2 "never
+--                                     reject": exhaustion is a runtime
+--                                     error, not a compile rejection)
+module Main (main) where
 
-import Data.Maybe (mapMaybe)
-import qualified Options.Applicative as O
-import System.FilePath (takeBaseName)
-import Telomare.Eval (runMain, runMainCore)
-import Telomare.HvmBackend (emitProgram)
-import Telomare.HvmBackendCcc (emitProgramCcc)
-import Telomare.Levels (levelsReport)
-import Telomare.T2Backend (T2Mode (..), emitProgramT2)
+import Control.Monad (when)
+import qualified Data.Map as Map
+import Options.Applicative
+import System.Exit (exitFailure)
+import System.IO (hPutStrLn, stderr)
 
-data TelomareOpts
-  = TelomareOpts { telomareFile  :: String
-                 , emitHvm       :: Bool
-                 , emitHvmCcc    :: Bool
-                 , emitLevels    :: Bool
-                 , emitT2        :: Bool
-                 , emitT2Lazy    :: Bool
-                 , emitT2LetOnly :: Bool
-                 }
-  deriving Show
+import Telomare.Compat.Levels (levelsReport)
+import Telomare.Tel.Eval (Meter (..))
+import Telomare.Tel.Frontend (compileTel, loadModulesFor, renderTel3Error)
+import Telomare.Tel.Loop (runTelLoop)
 
-telomareOpts :: O.Parser TelomareOpts
-telomareOpts = TelomareOpts
-  <$> O.argument O.str (O.metavar "TELOMARE-FILE")
-  <*> O.switch (O.long "emit-hvm"
-                <> O.help "compile (parse, resolve, size recursion) and print a Bend/HVM2 program instead of evaluating")
-  <*> O.switch (O.long "emit-hvm-ccc"
-                <> O.help "like --emit-hvm, but via the experimental ConCat-style combinator backend (native closures, no defunctionalization)")
-  <*> O.switch (O.long "emit-levels"
-                <> O.help "print the structural EAL box-level assignment of every {test,step,base} recursion site reachable from main (prototype; see design/VALIDATION.md)")
-  <*> O.switch (O.long "emit-t2"
-                <> O.help "like --emit-hvm, but under the Telomare 2 affine discipline: contracted computed lets and iteration step closures are normalized at their box sites (src/Telomare/T2Backend.hs)")
-  <*> O.switch (O.long "emit-t2-lazy"
-                <> O.help "the --emit-t2 emitter with the discipline disabled (baseline for A/B measurement)")
-  <*> O.switch (O.long "emit-t2-letonly"
-                <> O.help "the --emit-t2 emitter with only the let-binding (dupS) rule, no iteration-entry boxing")
+data Opts = Opts
+  { optFile        :: FilePath
+  , optCertificate :: Bool
+  , optMeter       :: Bool
+  , optMaxSteps    :: Maybe Int
+  }
 
--- | Recursively load only the modules reachable from the entry file.
-getModulesFor :: String -> IO [(String, String)]
-getModulesFor entryModule = go [entryModule] []
-  where
-    go [] loaded = return loaded
-    go (m:queue) loaded
-      | m `elem` fmap fst loaded = go queue loaded
-      | otherwise = do
-          let filePath = m <> ".tel"
-          content <- readFile filePath
-          let imports = extractImports content
-          go (queue <> imports) ((m, content) : loaded)
-
-    extractImports :: String -> [String]
-    extractImports = mapMaybe parseImportLine . lines
-
-    parseImportLine :: String -> Maybe String
-    parseImportLine line = case words line of
-      ("import":"qualified":name:_) -> Just name
-      ("import":name:_)             -> Just name
-      _                             -> Nothing
+opts :: Parser Opts
+opts = Opts
+  <$> argument str (metavar "TELOMARE-FILE" <> help ".tel program to run")
+  <*> switch (long "certificate"
+              <> help "print the structural EAL levels report before running")
+  <*> switch (long "meter"
+              <> help "print the Tier-2 work meter to stderr on exit")
+  <*> optional (option auto (long "max-steps" <> metavar "N"
+              <> help "abort evaluation after N metered steps"))
 
 main :: IO ()
-main = do
-  let opts = O.info (telomareOpts O.<**> O.helper)
-        ( O.fullDesc
-          <> O.progDesc "A simple but robust virtual machine" )
-  topts <- O.execParser opts
-  let entryModule = takeBaseName (telomareFile topts)
-  allModules <- getModulesFor entryModule
-  if | emitHvmCcc topts -> runMainCore allModules entryModule (putStr . emitProgramCcc)
-     | emitHvm topts -> runMainCore allModules entryModule (putStr . emitProgram)
-     | emitT2 topts -> runMainCore allModules entryModule (putStr . emitProgramT2 T2Eager)
-     | emitT2Lazy topts -> runMainCore allModules entryModule (putStr . emitProgramT2 T2Lazy)
-     | emitT2LetOnly topts -> runMainCore allModules entryModule (putStr . emitProgramT2 T2LetOnly)
-     | emitLevels topts -> putStr (levelsReport allModules entryModule)
-     | otherwise -> runMain allModules entryModule
+main = run =<< execParser
+  (info (opts <**> helper)
+    (fullDesc <> progDesc "telomare: run .tel programs on the Tier-2 metered runtime"))
+
+run :: Opts -> IO ()
+run o = loadModulesFor (optFile o) >>= \case
+  Left e -> hPutStrLn stderr (renderTel3Error e) >> exitFailure
+  Right (entry, modules) -> do
+    when (optCertificate o) $ putStr (levelsReport modules entry)
+    case compileTel modules entry of
+      Left e -> hPutStrLn stderr (renderTel3Error e) >> exitFailure
+      Right prog -> do
+        meter <- runTelLoop (optMaxSteps o) prog
+        when (optMeter o) $ hPutStrLn stderr (meterReport meter)
+
+meterReport :: Meter -> String
+meterReport m = unlines
+  ([ "-- Telomare Tier-2 work meter"
+   , "applies: " <> show (mApplies m)
+   , "gate selections: " <> show (mGates m)
+   ] <> [ "recursion site " <> show tok <> ": " <> show n <> " unrolls"
+        | (tok, n) <- Map.toList (mUnrolls m)
+        ])
