@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE PatternSynonyms     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Experimental \"compiling to categories\" HVM2 backend, patterned on the
@@ -45,7 +44,7 @@ data Bnd = Atom String | App String [Bnd]
 renderBnd :: Bnd -> String
 renderBnd (Atom s)     = s
 renderBnd (App s [])   = s
-renderBnd (App s args) = s <> "(" <> intercalate ", " (map renderBnd args) <> ")"
+renderBnd (App s args) = s <> "(" <> intercalate ", " (fmap renderBnd args) <> ")"
 
 -- ---------------------------------------------------------------------------
 -- the functor: CompiledExpr -> Bnd

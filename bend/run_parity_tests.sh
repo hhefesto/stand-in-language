@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# M6 parity harness: pipe the same move scripts through the Haskell
-# telomare and the Bend-hosted telomare, diff the transcripts.
+# Parity harness: pipe the same move scripts through the Haskell telomare
+# and the hybrid Haskell+HVM2 telomare, diff the transcripts.
+# NOTE: tictactoe evaluation currently exceeds practical HVM2 budgets
+# (see bend/HYBRID_PROGRESS.md "Final Diagnosis") — this harness exists to
+# retest cheaply if the emitter or HVM improves; expect FAILs today.
 # Usage: bend/run_parity_tests.sh <haskell-telomare-bin> [scratch-dir]
-# Requires: nix (for the bend runner), timeout.
+# Env: TELOMARE_HVM_RUNNER (try gen-c-big), plus run_telomare_hvm.sh vars.
+# Requires: the driver's toolchain (bend, hvm, gawk; gcc for gen-c-big).
 set -u
 ORACLE="${1:?usage: run_parity_tests.sh <telomare-bin> [scratch]}"
 SCRATCH="${2:-$(mktemp -d)}"
@@ -40,9 +44,9 @@ for name in "${!scripts[@]}"; do
   printf '%s\n' "${scripts[$name]}" > "$SCRATCH/$name.in"
   # Haskell oracle reads stdin lines
   timeout 120 "$ORACLE" tictactoe.tel < "$SCRATCH/$name.in" > "$SCRATCH/$name.oracle" 2>&1
-  # Bend compiler (two-stage driver; the compile is cached after the first
-  # run, so the suite pays stage-1 once and stage-2 per script)
-  timeout 7200 bend/run_telomare_bend.sh tictactoe.tel < "$SCRATCH/$name.in" > "$SCRATCH/$name.bend" 2>&1
+  # Hybrid driver (stage 1 cached after the first run, so the suite pays
+  # GHC compile+size once and HVM execution per script)
+  timeout 7200 bend/run_telomare_hvm.sh tictactoe.tel < "$SCRATCH/$name.in" > "$SCRATCH/$name.bend" 2>&1
   if diff -u "$SCRATCH/$name.oracle" "$SCRATCH/$name.bend" > "$SCRATCH/$name.diff"; then
     echo "PASS $name"
   else

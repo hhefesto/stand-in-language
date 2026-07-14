@@ -459,3 +459,54 @@ rewired to the two-stage driver (bend + hvm + python3 runtime inputs).
   printing `OOM` forever (one parity run wrote an 8.5GB transcript of
   "OOM" lines before being killed). Always cap output (`head`/`grep -m`)
   and never trust exit codes alone; check for the OOM marker.
+
+## 2026-07-03 — H: the hybrid pipeline (Haskell front end, HVM2 runtime)
+
+Direction change (user): stop self-hosting the front half. GHC runs
+parse → resolve → Possible.hs sizing (the part that needs lazy graph
+reduction — 68s for tictactoe where the Bend port DNF'd at 4+ hours),
+then a new Haskell emitter produces the same defunctionalized generated
+program this port's `bend/emitter.bend` pioneered, and HVM2 executes it.
+
+- `src/Telomare/HvmBackend.hs` — Haskell twin of `bend/emitter.bend`
+  (same TV encoding, per-fid `d<slot>` defs, lifted gate matches,
+  tvDispatch switch, evalLoop driver). Emission is instant under GHC.
+  `telomare --emit-hvm foo.tel` prints the program; split point is the
+  `CompiledExpr` right after `findChurchSizeD` in `Telomare.Eval.compile`.
+- `bend/run_telomare_hvm.sh` + flake app `.#telomare-hvm` — same
+  two-stage driver contract as the self-hosted version, but stage 1 is
+  the GHC binary (cached by source+binary-content hash). Runners:
+  `gen-hvm` (default), `bend-run-c`, and `gen-c-big` (gen-c + gcc,
+  single thread, arena raised to 1<<30; binary cached; avoids HVM2
+  lesson #6's OOM print-loop).
+- `src/Telomare/HvmBackendCcc.hs` (`--emit-hvm-ccc`) — the ConCat-style
+  experiment patterned on agda:ctc/src/HVM.hs: CompiledExpr interpreted
+  into a Bnd combinator term over a closure-based prelude (Defer=curry,
+  SetEnv=apply, TV/L holds real lambdas). Outcome exactly as predicted
+  by this port's defunctionalization story: e1 (affine) works; echo's
+  church towers die on BOTH runtimes (`Result: *` erasure on run-c,
+  "clone a non-affine global reference" on the lazy runtime). That is
+  the definitive "why defunctionalize" data point.
+
+Results (oracle-diffed): e1 0.15s end-to-end; simpleplus parity;
+echo-`$127` parity 15s cold / 1.6s warm (was 734s self-hosted).
+
+**Tictactoe: understood, not fixed.** One evalLoop iteration of the
+sized game does not complete on any HVM2 configuration: interpreter and
+134M-node/thread compiled binaries OOM-loop; a single-threaded 1B-node
+(~13GB) binary stops OOMing but produces no result in 30 min ($127) /
+40 min ($63); the lazy Rust runtime refuses the encoding outright
+(cloning refs to non-affine defs — every `d<slot>` uses env non-affinely).
+GHC evaluates the same CompiledExpr in under a second. Root cause is the
+interaction-net cost model: shared reads COPY structure through dup
+nodes, and tictactoe re-reads its board through hundreds of gate checks
+inside `$127` abort towers — copies of copies, a ~10^4–10^5 interaction
+gap. Same wall the tree-walking interpreter hit (536M-node OOM at $63),
+so it is intrinsic to this program shape on HVM2, independent of
+encoding. Future leverage: emission strategies that keep bulk state out
+of the copied path, or an HVM with by-reference shared reads.
+
+Driver/emitter hardening landed with the diagnosis: `tel_main()` is
+computed once, forced/rebuilt in `main` (dup lands on data, not on a
+bare nullary ref), and threaded through the loop — HVM2 re-unfolds
+nullary global refs at every reference site otherwise.

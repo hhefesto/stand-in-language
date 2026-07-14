@@ -15,3 +15,5 @@ result
 result-*
 dev-profile*
 .direnv/
+.nix-gc-roots/
+*.agdai

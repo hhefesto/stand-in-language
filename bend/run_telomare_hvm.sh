@@ -14,7 +14,12 @@
 #      TELOMARE_BIN (the Haskell telomare binary, default `telomare`),
 #      TELOMARE_EMIT_FLAG (--emit-hvm [default] or --emit-hvm-ccc),
 #      BEND_BIN, HVM_BIN, TELOMARE_HVM_CACHE (default ~/.cache/telomare-hvm),
-#      TELOMARE_HVM_MAX_OUTPUT_BYTES (default 10485760).
+#      TELOMARE_HVM_RUNNER (gen-hvm [default], bend-run-c, or gen-c-big:
+#        `hvm gen-c` + gcc, single-threaded, node arena raised to 1<<30 —
+#        ~13 GB peak; avoids the C interpreter's small per-thread arena and
+#        its OOM print-loop; the compiled binary is cached beside the .bend),
+#      TELOMARE_HVM_GCC (gcc binary for gen-c-big, default `gcc`),
+#      TELOMARE_HVM_MAX_OUTPUT_BYTES (default 268435456).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 tel_file="${1:?usage: run_telomare_hvm.sh <program.tel> [prelude.tel]}"
@@ -24,7 +29,8 @@ emit_flag="${TELOMARE_EMIT_FLAG:---emit-hvm}"
 bend="${BEND_BIN:-bend}"
 hvm="${HVM_BIN:-hvm}"
 budget="${TELOMARE_HVM_TIMEOUT:-1800}"
-max_output="${TELOMARE_HVM_MAX_OUTPUT_BYTES:-10485760}"
+max_output="${TELOMARE_HVM_MAX_OUTPUT_BYTES:-268435456}"
+runner="${TELOMARE_HVM_RUNNER:-gen-hvm}"
 cache_dir="${TELOMARE_HVM_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/telomare-hvm}"
 
 work="$(mktemp -d)"
@@ -132,10 +138,72 @@ fi
 cp "$cached" "$work/run.bend"
 emit_inputs "$work/inputs.txt" >> "$work/run.bend"
 
-timeout "$budget" "$bend" gen-hvm "$work/run.bend" > "$work/run.hvm" 2>"$work/stage2.err" \
-  || { echo "telomare-hvm: stage 2 (gen-hvm) failed" >&2; show_err "$work/stage2.err"; exit 1; }
 rm -f "$work/output-capped"
-timeout "$budget" "$hvm" run-c "$work/run.hvm" 2>"$work/stage2.err" \
+set +e
+case "$runner" in
+  gen-hvm)
+    timeout "$budget" "$bend" gen-hvm "$work/run.bend" > "$work/run.hvm" 2>"$work/stage2.err"
+    gen_status=$?
+    if [ "$gen_status" -ne 0 ]; then
+      set -e
+      echo "telomare-hvm: stage 2 (gen-hvm) failed with status $gen_status" >&2
+      show_err "$work/stage2.err"
+      exit 1
+    fi
+    run_cmd=(timeout "$budget" "$hvm" run-c "$work/run.hvm")
+    ;;
+  bend-run-c)
+    run_cmd=(timeout "$budget" "$bend" run-c "$work/run.bend")
+    ;;
+  gen-c-big)
+    # hvm gen-c + gcc, single-threaded, arena raised to 1<<30 nodes (~13 GB
+    # peak). The interpreter's per-thread slice (G_NODE_LEN/TPC) is what
+    # overflows on large programs — and on overflow it loops printing "OOM"
+    # instead of exiting. gen-c bakes the inputs into the program, so the
+    # binary is cached by the hash of program+inputs (same-input replays are
+    # free; new inputs cost one gcc run).
+    #
+    # CRITICAL for large programs (e.g. tictactoe, ~32k defs): hvm gen-c
+    # hardcodes the Book's definition table to `Def defs_buf[0x4000]` (16384).
+    # A program with more defs than that overflows the fixed array and the
+    # binary SEGFAULTS in ~2s (not an OOM loop — a genuine out-of-bounds
+    # crash). We patch it to 0x20000 (131072). TELOMARE_HVM_DEFS_BUF overrides.
+    gcc_bin="${TELOMARE_HVM_GCC:-gcc}"
+    defs_buf="${TELOMARE_HVM_DEFS_BUF:-0x20000}"
+    tpc_l2="${TELOMARE_HVM_TPC_L2:-0}"
+    run_hash="$(sha256sum "$work/run.bend" | cut -c1-32)"
+    cached_bin="$cache_dir/$run_hash.bin"
+    if [ ! -x "$cached_bin" ]; then
+      timeout "$budget" "$bend" gen-hvm "$work/run.bend" > "$work/run.hvm" 2>"$work/stage2.err" \
+        && timeout "$budget" "$hvm" gen-c "$work/run.hvm" > "$work/run.c" 2>>"$work/stage2.err"
+      gen_status=$?
+      if [ "$gen_status" -ne 0 ]; then
+        set -e
+        echo "telomare-hvm: stage 2 (gen-c) failed with status $gen_status" >&2
+        show_err "$work/stage2.err"
+        exit 1
+      fi
+      sed "s/#define G_NODE_LEN (1ul << 29)/#define G_NODE_LEN (1ul << 30)/; s/#define G_VARS_LEN (1ul << 29)/#define G_VARS_LEN (1ul << 30)/; s/Def defs_buf\[0x4000\]/Def defs_buf[$defs_buf]/" \
+        "$work/run.c" > "$work/run_big.c"
+      timeout "$budget" "$gcc_bin" -O2 -DTPC_L2="$tpc_l2" -lm -lpthread "$work/run_big.c" -o "$work/run.bin" 2>"$work/stage2.err"
+      cc_status=$?
+      if [ "$cc_status" -ne 0 ]; then
+        set -e
+        echo "telomare-hvm: stage 2 (gcc) failed with status $cc_status" >&2
+        show_err "$work/stage2.err"
+        exit 1
+      fi
+      mv "$work/run.bin" "$cached_bin"
+    fi
+    run_cmd=(timeout "$budget" "$cached_bin")
+    ;;
+  *)
+    set -e
+    echo "telomare-hvm: unknown TELOMARE_HVM_RUNNER '$runner'" >&2
+    exit 1
+    ;;
+esac
+"${run_cmd[@]}" 2>"$work/stage2.err" \
   | awk -v max="$max_output" -v capped="$work/output-capped" '
       {
         bytes += length($0) + 1
@@ -146,6 +214,18 @@ timeout "$budget" "$hvm" run-c "$work/run.hvm" 2>"$work/stage2.err" \
         }
         print
       }
-    ' > "$work/stage2.out" \
-  || { echo "telomare-hvm: stage 2 (run) failed" >&2; show_err "$work/stage2.err"; [ ! -e "$work/output-capped" ] || exit 99; exit 1; }
+    ' > "$work/stage2.out"
+stage2_status=(${PIPESTATUS[@]})
+set -e
+if [ "${stage2_status[1]}" -ne 0 ]; then
+  echo "telomare-hvm: stage 2 (run) output processing failed with status ${stage2_status[1]}" >&2
+  show_err "$work/stage2.err"
+  [ ! -e "$work/output-capped" ] || exit 99
+  exit 1
+fi
+if [ "${stage2_status[0]}" -ne 0 ]; then
+  echo "telomare-hvm: stage 2 (run) failed with status ${stage2_status[0]}" >&2
+  show_err "$work/stage2.err"
+  exit 1
+fi
 decode_result < "$work/stage2.out"

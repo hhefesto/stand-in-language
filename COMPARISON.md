@@ -149,6 +149,25 @@ side completes); the identified fix is a WHNF-style demand-driven evaluator.
 Everything is timeout-guarded; see `nix run .#telomare-bend` and
 `bend/PORT.md` for the full log.
 
+### Hybrid pipeline status (Haskell front end + HVM2 runtime)
+
+A fourth artifact closes the loop: `telomare --emit-hvm` keeps GHC for
+parse/resolve/Possible.hs sizing (68 s for tictactoe, where the
+self-hosted port DNF'd) and emits the sized program as the same
+defunctionalized Bend/HVM2 code the Bend port's emitter pioneered
+(`nix run .#telomare-hvm`). Oracle-verified: e1 (0.15 s end-to-end),
+simpleplus, echo-`$127` (15 s cold, ~1.6 s warm — 49× the self-hosted
+734 s). Full tictactoe *evaluation* remains beyond practical HVM2
+budgets on every runtime/arena configuration tried (1B-node
+single-thread included): interaction nets pay physical copies for
+shared reads that GHC gets by reference, and the game's board-times-
+refinement-towers shape multiplies them — diagnosis in
+`bend/HYBRID_PROGRESS.md`. An experimental ConCat-style combinator
+backend (`--emit-hvm-ccc`, after the agda branch's ctc/HVM.hs) works on
+affine programs and demonstrates precisely why the direct backend must
+defunctionalize: real closures duplicated through church towers are
+erased (C runtime) or refused (lazy runtime) by HVM2.
+
 ### What the comparison teaches
 
 1. **The sizing engine is the language.** All three artifacts stand or fall

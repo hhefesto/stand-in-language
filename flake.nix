@@ -15,6 +15,12 @@
       imports = [ inputs.haskell-flake.flakeModule ];
       perSystem = { self', system, pkgs, ... }:
         let
+          # Agda toolchain for the telomare3 machine-checked spec
+          # (telomare3/spec/, --safe, zero postulates) and for re-checking
+          # design/telomare2.agda in-branch. Same idiom the `agda` branch's
+          # dev shell used, so the cross-branch `nix develop ?ref=agda`
+          # trick is retired.
+          agdaWithStdlib = pkgs.agda.withPackages (p: [ p.standard-library ]);
           lspVersion =
             if self ? lastModifiedDate then
               let
@@ -63,6 +69,15 @@
             tools = hp: {
               inherit (hp) cabal-install haskell-language-server;
             };
+            # bend/hvm in the dev shell serves two purposes: they are on PATH
+            # for the hybrid/T2 drivers, and — because .envrc uses
+            # `use flake .` with nix-direnv + keep-outputs — the direnv
+            # gcroot now pins their store paths, so `nix-collect-garbage`
+            # cannot sweep them again (it did once; restoring meant
+            # rebuilding from the pinned nixpkgs rev, see HANDOFF.md).
+            mkShellArgs = {
+              nativeBuildInputs = [ pkgs.bend pkgs.hvm agdaWithStdlib ];
+            };
           };
       };
 
@@ -75,6 +90,13 @@
       apps.repl = {
         type = "app";
         program = self.packages.${system}.telomare + "/bin/telomare-repl";
+      };
+      # Telomare 3: greenfield reimplementation (telomare3/ package,
+      # design/TELOMARE3-DESIGN.md). Spec-first: telomare3/spec/ (Agda)
+      # is the source of truth, checked by checks.telomare3-spec.
+      apps.telomare3 = {
+        type = "app";
+        program = self.packages.${system}.telomare3 + "/bin/telomare3";
       };
       apps.evaluare = {
         type = "app";
@@ -105,7 +127,7 @@
         type = "app";
         program = "${pkgs.writeShellApplication {
           name = "telomare-hvm";
-          runtimeInputs = [ pkgs.bend pkgs.hvm pkgs.gawk pkgs.coreutils ];
+          runtimeInputs = [ pkgs.bend pkgs.hvm pkgs.gcc pkgs.gawk pkgs.coreutils ];
           text = ''
             export TELOMARE_BIN="${self.packages.${system}.telomare}/bin/telomare"
             export BEND_BIN=bend
@@ -113,6 +135,29 @@
             exec "${self}/bend/run_telomare_hvm.sh" "$@"
           '';
         }}/bin/telomare-hvm";
+      };
+      # Telomare 2 backend: same front end, but emission follows the T2
+      # affine discipline (design/TELOMARE2-DESIGN.md par.12; explicit forced
+      # duplication at contraction/box sites, src/Telomare/T2Backend.hs).
+      # `nix run .#telomare2 -- game.tel < moves`. Env overrides pass through
+      # (TELOMARE_HVM_RUNNER, TELOMARE_HVM_TIMEOUT, TELOMARE_EMIT_FLAG=
+      # --emit-t2-lazy for the discipline-off baseline, ...).
+      apps.telomare2 = {
+        type = "app";
+        program = "${pkgs.writeShellApplication {
+          name = "telomare2";
+          runtimeInputs = [ pkgs.bend pkgs.hvm pkgs.gcc pkgs.gawk pkgs.gnused pkgs.coreutils ];
+          text = ''
+            export TELOMARE_BIN="${self.packages.${system}.telomare}/bin/telomare"
+            export BEND_BIN=bend
+            export HVM_BIN=hvm
+            export TELOMARE_EMIT_FLAG="''${TELOMARE_EMIT_FLAG:---emit-t2}"
+            # gen-c-big: single-threaded compiled runtime with the arena and
+            # def-table sizes large programs (tictactoe) need.
+            export TELOMARE_HVM_RUNNER="''${TELOMARE_HVM_RUNNER:-gen-c-big}"
+            exec "${self}/bend/run_telomare_hvm.sh" "$@"
+          '';
+        }}/bin/telomare2";
       };
       apps.lsp = {
         type = "app";
@@ -256,7 +301,19 @@
         }}/bin/telomare-push-cachix";
       };
 
-      checks = self'.packages;
+      checks = self'.packages // {
+        # Type-check the telomare3 Agda specification (--safe, no
+        # postulates). Copied out of the store because agda writes .agdai
+        # interface files next to the sources.
+        telomare3-spec = pkgs.runCommand "telomare3-spec"
+          { nativeBuildInputs = [ agdaWithStdlib ]; } ''
+            cp -r ${./telomare3/spec} spec
+            chmod -R u+w spec
+            cd spec
+            agda --safe Everything.agda
+            touch $out
+          '';
+      };
     };
   };
 }

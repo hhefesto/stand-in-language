@@ -37,6 +37,8 @@ library
                      , Telomare.Eval
                      , Telomare.HvmBackend
                      , Telomare.HvmBackendCcc
+                     , Telomare.Levels
+                     , Telomare.T2Backend
                      , Telomare.Decompiler
                      , Telomare.Parser
                      , Telomare.Possible
