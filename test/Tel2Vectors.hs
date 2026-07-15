@@ -1,10 +1,12 @@
 module Tel2Vectors (tel2Vectors) where
 
 import Data.List (isInfixOf)
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, getTemporaryDirectory, makeAbsolute,
+                         withCurrentDirectory)
 
-import Telomare.Compiler.Direct (erasureMatches)
+import Telomare.Compiler.Direct (eraseMorph, erasureMatches)
 import Telomare.Machine
+import Telomare.Surface (UShape (..), shapeU)
 import Telomare.Tel2
 
 baseDir :: IO FilePath
@@ -16,7 +18,22 @@ tel2Vectors :: IO [(String, Bool)]
 tel2Vectors = do
   base <- baseDir
   source <- readFile (base <> "test/programs/tictactoe.tel2")
-  case compileTel2 source of
+  prelude <- readFile (base <> "stdlib/Prelude.tel2")
+  exampleSource <- readFile (base <> "test/programs/examples.tel2")
+  importCycle <- rejectsFile "tel2 rejects import cycles" (base <> "test/programs/CycleA.tel2") "import cycle"
+  missing <- rejectsFile "tel2 rejects missing modules" (base <> "test/programs/MissingImport.tel2") "cannot load module NotPresent"
+  packagedPrelude <- acceptsFileBehavior "tel2 loads packaged Prelude"
+    (base <> "test/programs/PreludeHelpers.tel2") ["check"] "true\n"
+  cwdIndependent <- acceptsFileAwayFromWorkspace
+    "tel2 packaged stdlib resolution is cwd-independent"
+    (base <> "test/programs/PreludeHelpers.tel2") ["check"] "true\n"
+  localShadow <- acceptsFileBehavior "tel2 sibling module shadows packaged stdlib"
+    (base <> "test/programs/shadow/Entry.tel2") ["check"] "local\n"
+  headerMismatch <- rejectsFile "tel2 validates shadowing module headers"
+    (base <> "test/programs/header-mismatch/Entry.tel2") "declares module Wrong"
+  exampleResult <- compileTel2File (base <> "test/programs/examples.tel2")
+  compiledFile <- compileTel2File (base <> "test/programs/tictactoe.tel2")
+  case compiledFile of
     Left _ -> pure [("tel2 tictactoe parses and compiles", False)]
     Right program -> do
       games <- sequence
@@ -37,15 +54,104 @@ tel2Vectors = do
             , rejects "tel2 rejects cyclic aliases" cyclicAliasSource
             , rejects "tel2 rejects non-exhaustive enum cases" incompleteCaseSource
             , rejects "tel2 rejects duplicate tuple binders" duplicateBinderSource
+            , rejects "tel2 rejects cyclic definitions" cyclicDefinitionSource
             ]
           explicit = accepts "tel2 accepts explicit copy" copySource
           namedData = accepts "tel2 accepts named finite data and case" dataSource
-          mutation = sourceMutation source
-      pure (compiled : explicit : namedData : mutation : malformed <> games)
+          forward = accepts "tel2 compiles forward definition references" forwardReferenceSource
+          recursion = recursionVectors exampleResult
+          addition = acceptsBehavior "tel2 primitive addition is exact"
+            additionSource ["check"] "eleven\n"
+          needsLegacy = ("tel2 example genuinely depends on LegacyPrelude",
+            case compileTel2 (anonymous prelude <> anonymous exampleSource) of
+              Left _  -> True
+              Right _ -> False)
+          illegalRecursion =
+            [ rejectsWith "tel2 rejects captured iteration seed" capturedSeedSource "seed cannot capture"
+            , rejectsWith "tel2 rejects captured iteration continuation" capturedContinuationSource "continuation cannot capture"
+            , rejectsWith "tel2 rejects recursion requiring general placement" helperIterationSource "whole entry-level"
+            , rejectsWith "tel2 rejects captured fold input" capturedFoldInputSource "fold input cannot capture"
+            , rejectsWith "tel2 rejects captured fold seed" capturedFoldSeedSource "fold seed cannot capture"
+            , rejectsWith "tel2 rejects captured while seed" capturedWhileSeedSource "while seed cannot capture"
+            , rejectsWith "tel2 rejects nested closed recursion" nestedRecursionSource "whole entry-level"
+            , rejectsWith "tel2 rejects helper fold requiring placement" helperFoldSource "whole entry-level"
+            ]
+          needsPrelude = ("tictactoe genuinely depends on imported Prelude",
+            case compileTel2 (anonymous source) of Left _ -> True; Right _ -> False)
+          mutation = sourceMutation (anonymous prelude <> anonymous source)
+      pure (compiled : explicit : namedData : forward : addition : packagedPrelude
+        : cwdIndependent : localShadow : headerMismatch
+        : needsPrelude : needsLegacy : mutation
+        : importCycle : missing : recursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
-  erasureMatches initial == Right True && erasureMatches step == Right True
+  direct initial && direct step
+  where
+    direct source = erasureMatches source == Right True
+
+recursionVectors :: Either CompileError Program -> [(String, Bool)]
+recursionVectors (Left _) = [("tel2 Prelude/LegacyPrelude example compiles", False)]
+recursionVectors (Right program) =
+  [ ("tel2 Prelude/LegacyPrelude example compiles", True)
+  , ("tel2 recursion emits IterS", programHasIter program)
+  , ("tel2 recursion emits FoldS", programHasFold program)
+  , ("tel2 recursion emits WhileS", programHasWhile program)
+  , ("tel2 primitive addition emits AddS", programHasAdd program)
+  , ("tel2 recursion emits nonzero core depth", programDepth program > 0)
+  , ("tel2 recursion has exact surface/core behavior",
+      case runProgramScript program ["show"] of
+        Right (output, spent) -> output ==
+          "IterS=5; FoldS=198; WhileS=3; AddS=15.\nAll recursive and arithmetic results are exact.\n"
+          && spent >= 5
+        Left _ -> False)
+  , ("tel2 closed recursion has exact formal work",
+      runProgramScript program [] == Right
+        ("IterS=5; FoldS=198; WhileS=3; AddS=15.\n", 21))
+  ]
+
+programHasIter :: Program -> Bool
+programHasIter = programHasShape isIter
+  where
+    isIter ShIter {} = True
+    isIter _         = False
+
+programHasAdd :: Program -> Bool
+programHasAdd = programHasShape (== ShAdd)
+
+programHasFold :: Program -> Bool
+programHasFold = programHasShape isFold
+  where
+    isFold ShFold {} = True
+    isFold _         = False
+
+programHasWhile :: Program -> Bool
+programHasWhile = programHasShape isWhile
+  where
+    isWhile ShWhile {} = True
+    isWhile _          = False
+
+programHasShape :: (UShape -> Bool) -> Program -> Bool
+programHasShape predicate (Program _ _ _ initial step) =
+  entryHasShape initial || entryHasShape step
+  where
+    entryHasShape (CoreEntry _ _ _ core) = go (shapeU (eraseMorph core))
+    go shape = predicate shape || case shape of
+      ShComp x y   -> go x || go y
+      ShTensor x y -> go x || go y
+      ShCase x y   -> go x || go y
+      ShGuard x    -> go x
+      ShIter x     -> go x
+      ShFold x     -> go x
+      ShWhile x y  -> go x || go y
+      _            -> False
+
+acceptsBehavior :: String -> String -> [String] -> String -> (String, Bool)
+acceptsBehavior name source inputs expected = (name, case compileTel2 source of
+  Left _ -> False
+  Right program -> case runProgramScript program inputs of
+    Right (output, _) -> output == expected
+    Left _            -> False)
 
 golden :: FilePath -> Program -> String -> [String] -> IO (String, Bool)
 golden base program name inputs = do
@@ -56,8 +162,37 @@ golden base program name inputs = do
 rejects :: String -> String -> (String, Bool)
 rejects name source = (name, case compileTel2 source of Left _ -> True; Right _ -> False)
 
+rejectsWith :: String -> String -> String -> (String, Bool)
+rejectsWith name source expected = (name, case compileTel2 source of
+  Left (CompileError message) -> expected `isInfixOf` message
+  Right _                     -> False)
+
 accepts :: String -> String -> (String, Bool)
 accepts name source = (name, case compileTel2 source of Left _ -> False; Right _ -> True)
+
+rejectsFile :: String -> FilePath -> String -> IO (String, Bool)
+rejectsFile name path expected = do
+  result <- compileTel2File path
+  pure (name, case result of
+    Left (CompileError message) -> expected `isInfixOf` message
+    Right _                     -> False)
+
+acceptsFileBehavior :: String -> FilePath -> [String] -> String -> IO (String, Bool)
+acceptsFileBehavior name path inputs expected = do
+  result <- compileTel2File path
+  pure (name, case result of
+    Left _ -> False
+    Right program -> case runProgramScript program inputs of
+      Left _            -> False
+      Right (output, _) -> output == expected)
+
+acceptsFileAwayFromWorkspace
+  :: String -> FilePath -> [String] -> String -> IO (String, Bool)
+acceptsFileAwayFromWorkspace name path inputs expected = do
+  absolute <- makeAbsolute path
+  temporary <- getTemporaryDirectory
+  withCurrentDirectory temporary
+    (acceptsFileBehavior name absolute inputs expected)
 
 sourceMutation :: String -> (String, Bool)
 sourceMutation source = ("tel2 source mutation changes denotation", original /= changed)
@@ -74,6 +209,11 @@ replace _ _ [] = []
 
 isPrefix :: String -> String -> Bool
 isPrefix prefix value = take (length prefix) value == prefix
+
+anonymous :: String -> String
+anonymous = unlines . filter (not . header) . lines
+  where
+    header line = "module " `isPrefix` line || "import " `isPrefix` line
 
 small :: String -> String
 small initial = unlines
@@ -129,4 +269,97 @@ duplicateBinderSource = unlines
   , "def bad(p: Nat * Nat): Nat = let (x,x): Nat * Nat = p in x;"
   , "def init(u: Unit): Reply State = (\"\",right 0);"
   , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+forwardReferenceSource :: String
+forwardReferenceSource = unlines
+  [ "type State = Later;"
+  , "def init(u: Unit): Reply State = (\"\",right make(u));"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  , "def make(u: Unit): Later = 7;"
+  , "type Later = Nat;"
+  ]
+
+cyclicDefinitionSource :: String
+cyclicDefinitionSource = unlines
+  [ "type State = Nat;"
+  , "def a(n: Nat): Nat = b(n);"
+  , "def b(n: Nat): Nat = a(n);"
+  , "def init(u: Unit): Reply State = (\"\",right 0);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+capturedSeedSource :: String
+capturedSeedSource = unlines
+  [ "type State = Nat;"
+  , "def keepUnit(x: Unit): Unit = x;"
+  , "def init(u: Unit): Reply State = let x: Unit = iterate 1 from u with keepUnit in (\"\",right 0);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+capturedContinuationSource :: String
+capturedContinuationSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def init(u: Unit): Reply State = let n: Nat = iterate 1 from 0 with increment in let z: Unit = u in (\"\",right n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+helperIterationSource :: String
+helperIterationSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def count(u: Unit): Nat = let n: Nat = iterate 2 from 0 with increment in n;"
+  , "def init(u: Unit): Reply State = (\"\",right count(u));"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+capturedFoldInputSource :: String
+capturedFoldInputSource = unlines
+  [ "type State = Nat;"
+  , "def sum(p: Nat * Nat): Nat = add p;"
+  , "def init(u: Unit): Reply State = let n: Nat = fold let z: Unit = u in \"A\" from 0 with sum in (\"\",right n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+capturedFoldSeedSource :: String
+capturedFoldSeedSource = unlines
+  [ "type State = Nat;"
+  , "def sum(p: Nat * Nat): Nat = add p;"
+  , "def init(u: Unit): Reply State = let n: Nat = fold \"A\" from let z: Unit = u in 0 with sum in (\"\",right n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+capturedWhileSeedSource :: String
+capturedWhileSeedSource = unlines
+  [ "type State = Nat;"
+  , "def stop(n: Nat): Unit + Unit = left ();"
+  , "def inc(n: Nat): Nat = suc n;"
+  , "def init(u: Unit): Reply State = let n: Nat = while 2 from let z: Unit = u in 0 testing stop stepping inc in (\"\",right n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+nestedRecursionSource :: String
+nestedRecursionSource = unlines
+  [ "type State = Nat;"
+  , "def sum(p: Nat * Nat): Nat = add p;"
+  , "def inc(n: Nat): Nat = suc n;"
+  , "def init(u: Unit): Reply State = let n: Nat = iterate 1 from fold \"A\" from 0 with sum with inc in (\"\",right n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+helperFoldSource :: String
+helperFoldSource = unlines
+  [ "type State = Nat;"
+  , "def sum(p: Nat * Nat): Nat = add p;"
+  , "def folded(u: Unit): Nat = let n: Nat = fold \"A\" from 0 with sum in n;"
+  , "def init(u: Unit): Reply State = (\"\",right folded(u));"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+additionSource :: String
+additionSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = (\"\",right add (4,7));"
+  , "def step(x: Text * State): Reply State = let (input,state): Text * State = x in matchNat state of { 11 -> (\"eleven\\n\",left ()); n -> (\"wrong\\n\",left ()) };"
   ]

@@ -1,3 +1,6 @@
+module tictactoe;
+import Prelude;
+
 # Tic-tac-toe in the general affine language. 0 is empty, 1 is X, 2 is O.
 data Result = Continue | XWon | OWon | Tied;
 type Triple = Nat * Nat * Nat;
@@ -51,7 +54,11 @@ def outcome(s: State): Nat =
   let (board,turn): State = s in
   let (forWin,forFull): Board * Board = copy board in
   let w: Nat = winner(forWin) in
-  matchNat w of { 0 -> matchNat full(forFull) of { 0 -> 0; _ -> 3 }; x -> x };
+  let (forZero,result): Nat * Nat = copy w in
+  case natIsZero(forZero) of {
+    True -> matchNat full(forFull) of { 0 -> 0; _ -> 3 };
+    False -> result;
+  };
 
 # Each renderer prepends one fixed-width cell to an affine tail.
 def r1(x: Nat * Text): Text = let (c,t): Nat * Text = x in matchNat c of { 0 -> prepend "1|" t; 1 -> prepend "X|" t; 2 -> prepend "O|" t; _ -> prepend "?|" t };
@@ -76,8 +83,6 @@ def turnText(turn: Nat): Text = matchNat turn of {
   1 -> "Player 1/X to move.\nMove (1-9 or q): ";
   _ -> "Player 2/O to move.\nMove (1-9 or q): "
 };
-def other(turn: Nat): Nat = matchNat turn of { 1 -> 2; _ -> 1 };
-
 def keep(s: State): Reply State =
   let (displayState,nextState): State * State = copy s in
   let (board,turn): State = displayState in
@@ -98,7 +103,7 @@ def occupied(s: State): Reply State =
 
 def next(s: State): Reply State =
   let (board,turn): State = s in
-  let nextTurn: Nat = other(turn) in keep((board,nextTurn));
+  let nextTurn: Nat = otherPlayer(turn) in keep((board,nextTurn));
 def xWon(s: State): Reply State = let (board,turn): State = s in (render((board,"Player 1/X wins!\n")),left ());
 def oWon(s: State): Reply State = let (board,turn): State = s in (render((board,"Player 2/O wins!\n")),left ());
 def tied(s: State): Reply State = let (board,turn): State = s in (render((board,"Tie game.\n")),left ());

@@ -1,0 +1,41 @@
+module examples;
+import Prelude;
+import LegacyPrelude;
+
+# A tiny executable tour of the source/core boundary. Three independent closed
+# loops are promoted explicitly, merged while boxed, and consumed by one BoxS.
+type State = Nat * Nat * Nat * Nat;
+
+def sumStep(values: Nat * Nat): Nat = natAdd(values);
+def reachedThree(n: Nat): Unit + Unit =
+  matchNat n of { 3 -> left (); _ -> right () };
+
+def init(u: Unit): Reply State =
+  let total: Nat = iterate 5 from 0 with increment in
+  let ascii: Nat = fold "ABC" from 0 with sumStep in
+  let stopped: Nat = while 10 from 0 testing reachedThree stepping increment in
+  let copies: Nat * Nat = copy total in
+  let (exact,forSum): Nat * Nat = copies in
+  let sum: Nat = dPlus((forSum,10)) in
+  ("IterS=5; FoldS=198; WhileS=3; AddS=15.\n",
+    right (exact,ascii,stopped,sum));
+
+def step(request: Text * State): Reply State =
+  let (input,state): Text * State = request in
+  matchText input of {
+    "q" -> ("Stopped.\n",left ());
+    _ -> let (exact,ascii,stopped,sum): State = state in
+         matchNat exact of {
+           5 -> matchNat ascii of {
+             198 -> matchNat stopped of {
+               3 -> matchNat sum of {
+                 15 -> ("All recursive and arithmetic results are exact.\n",left ());
+                 n -> ("Unexpected AddS result.\n",left ())
+               };
+               n -> ("Unexpected WhileS result.\n",left ())
+             };
+             n -> ("Unexpected FoldS result.\n",left ())
+           };
+           n -> ("Unexpected recursive result.\n",left ())
+         }
+  };

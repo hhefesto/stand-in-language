@@ -1,0 +1,6 @@
+module HeaderMismatchEntry;
+import Prelude;
+
+type State = Nat;
+def init(u: Unit): Reply State = ("",right 0);
+def step(x: Text * State): Reply State = ("",left ());

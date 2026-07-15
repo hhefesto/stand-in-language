@@ -11,11 +11,15 @@ author:             hhefesto
 maintainer:         hhefesto@rdataa.com
 category:           Language
 build-type:         Simple
+data-files:         stdlib/*.tel2
 extra-source-files: README.md
                    , STORY.md
+                   , design/PRELUDE_MIGRATION.md
                    , test/golden/*.txt
                    , test/programs/*.tel
                    , test/programs/*.tel2
+                   , test/programs/header-mismatch/*.tel2
+                   , test/programs/shadow/*.tel2
 
 common warnings
     ghc-options: -Wall
@@ -23,6 +27,8 @@ common warnings
 library
     import:           warnings
     hs-source-dirs:   src
+    autogen-modules:  Paths_telomare
+    other-modules:    Paths_telomare
     exposed-modules:  Telomare.Budget
                     , Telomare.Compiler.Direct
                     , Telomare.Copyable
@@ -48,6 +54,7 @@ library
                     , cryptonite
                     , data-fix
                     , deepseq
+                    , directory
                     , deriving-compat
                     , dlist
                     , filepath

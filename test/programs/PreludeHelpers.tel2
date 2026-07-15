@@ -1,0 +1,9 @@
+module PreludeHelpers;
+import Prelude;
+
+type State = Nat;
+def init(u: Unit): Reply State =
+  ("",right boolToNat(boolAnd((True,boolNot(False)))));
+def step(x: Text * State): Reply State =
+  let (input,state): Text * State = x in
+  matchNat state of { 1 -> ("true\n",left ()); n -> ("false\n",left ()) };

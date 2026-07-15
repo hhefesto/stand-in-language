@@ -47,8 +47,8 @@ run o
 
 runTel2 :: Opts -> IO ()
 runTel2 o = do
-  source <- readFile (optFile o)
-  case compileTel2 source of
+  compiled <- compileTel2File (optFile o)
+  case compiled of
     Left (CompileError err) -> hPutStrLn stderr err >> exitFailure
     Right program -> do
       when (optCertificate o) $ putStrLn

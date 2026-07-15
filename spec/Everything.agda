@@ -25,6 +25,7 @@ import T3.Surface.Syntax
 import T3.Surface.Sem
 import T3.Place
 import T3.Compiler.Direct
+import T3.Compiler.ClosedRecursion
 import T3.Compiler.Partition
 import T3.Source.Affine
 import T3.Abstract

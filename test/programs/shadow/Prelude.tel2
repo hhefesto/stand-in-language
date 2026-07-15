@@ -1,0 +1,3 @@
+module Prelude;
+
+def shadowValue(u: Unit): Nat = 9;

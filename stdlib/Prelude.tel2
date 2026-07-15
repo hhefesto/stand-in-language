@@ -1,0 +1,37 @@
+module Prelude;
+
+# A monomorphic, total foundation over the current direct core fragment.
+data Bool = False | True;
+
+def natIdentity(n: Nat): Nat = n;
+def boolIdentity(value: Bool): Bool = value;
+
+def boolNot(value: Bool): Bool = case value of {
+  False -> True;
+  True -> False;
+};
+
+def boolAnd(values: Bool * Bool): Bool =
+  let (a,b): Bool * Bool = values in
+  case a of { False -> False; True -> b; };
+
+def boolOr(values: Bool * Bool): Bool =
+  let (a,b): Bool * Bool = values in
+  case a of { False -> b; True -> True; };
+
+def boolXor(values: Bool * Bool): Bool =
+  let (a,b): Bool * Bool = values in
+  case a of { False -> b; True -> boolNot(b); };
+
+def boolToNat(value: Bool): Nat = case value of {
+  False -> 0;
+  True -> 1;
+};
+
+def natIsZero(n: Nat): Bool = matchNat n of { 0 -> True; _ -> False };
+def natIsPositive(n: Nat): Bool = boolNot(natIsZero(n));
+def natAdd(values: Nat * Nat): Nat = add values;
+def otherPlayer(player: Nat): Nat = matchNat player of { 1 -> 2; _ -> 1 };
+def increment(n: Nat): Nat = suc n;
+def natDouble(n: Nat): Nat =
+  let pair: Nat * Nat = copy n in natAdd(pair);

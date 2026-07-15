@@ -1,12 +1,13 @@
-{-# LANGUAGE DataKinds        #-}
-{-# LANGUAGE GADTs            #-}
-{-# LANGUAGE TypeFamilies     #-}
-{-# LANGUAGE TypeOperators    #-}
+{-# LANGUAGE DataKinds     #-}
+{-# LANGUAGE GADTs         #-}
+{-# LANGUAGE TypeFamilies  #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Generic terminal ABI and core evaluator agreement runner.
 module Telomare.Machine
   ( TextU
   , ReplyU
+  , CoreEntry (..)
   , Program (..)
   , programDepth
   , runProgramScript
@@ -16,15 +17,27 @@ module Telomare.Machine
 import Control.Monad (when)
 import Data.Char (chr, ord)
 import Data.Maybe (fromMaybe)
+import Data.Type.Equality ((:~:) (Refl))
 import Numeric.Natural (Natural)
 import System.IO (hFlush, hPutStrLn, isEOF, stderr, stdout)
 
+import Telomare.Compiler.Direct (Strip)
 import Telomare.Core
 import Telomare.Denotation
 import Telomare.Surface
 
 type TextU = 'UList 'UNat
 type ReplyU s = TextU ':**: ('UUnit ':++: s)
+
+-- | A compiled entry may end at a decorated core object. Its erasure must be
+-- exactly the source result; the host never inserts a box coercion.
+data CoreEntry a b where
+  CoreEntry
+    :: SUTy a
+    -> STy c
+    -> (Strip c :~: b)
+    -> Morph (Lift a) c
+    -> CoreEntry a b
 
 -- | The source chooses @s@. The host retains only its witness and the two
 -- compiled entry morphisms required by the terminal protocol.
@@ -33,12 +46,14 @@ data Program where
     :: SUTy s
     -> UMorph 'UUnit (ReplyU s)
     -> UMorph (TextU ':**: s) (ReplyU s)
-    -> Morph 'Unit (Lift (ReplyU s))
-    -> Morph (Lift (TextU ':**: s)) (Lift (ReplyU s))
+    -> CoreEntry 'UUnit (ReplyU s)
+    -> CoreEntry (TextU ':**: s) (ReplyU s)
     -> Program
 
 programDepth :: Program -> Natural
-programDepth (Program _ _ _ initial step) = max (depth initial) (depth step)
+programDepth (Program _ _ _ initial step) = max (entryDepth initial) (entryDepth step)
+  where
+    entryDepth (CoreEntry _ _ _ morph) = depth morph
 
 runProgramScript :: Program -> [String] -> Either String (String, Natural)
 runProgramScript (Program stateTy initialU stepU initial step) inputs = do
@@ -54,7 +69,7 @@ runProgramScript (Program stateTy initialU stepU initial step) inputs = do
     go _ _ _ _ transcript total (Left ()) _ = Right (transcript, total)
     go rt it source core transcript total (Right state) (input : rest) = do
       let inputValue = (encode input, state)
-      (reply, spent) <- runCore rt core (toLift it inputValue)
+      (reply, spent) <- runCore rt core inputValue
       if not (equalU rt (evalU source inputValue) reply)
         then Left "surface/core evaluator disagreement"
         else do
@@ -86,8 +101,7 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
               if eof then finish spent else do
                 input <- getLine
                 let inputValue = (encode input, state)
-                result <- runInteractive replyTy remaining spent step
-                  (toLift (SUProd (SUList SUNat) stateTy) inputValue)
+                result <- runInteractive replyTy remaining spent step inputValue
                 case result of
                   Left err -> pure (Left err)
                   Right (reply, remaining', spent')
@@ -98,35 +112,37 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
       when report (hPutStrLn stderr ("core work: " <> show spent))
       pure (Right ())
 
-runCore :: SUTy b -> Morph a (Lift b) -> Val a -> Either String (UVal b, Natural)
-runCore resultTy morph input =
-  let value = evalV morph input
-      (spent, gradedValue) = evalG workAlg morph input
-  in case evalK morph input spent of
+runCore :: SUTy b -> CoreEntry a b -> UVal a -> Either String (UVal b, Natural)
+runCore _ (CoreEntry inputTy coreTy Refl morph) input =
+  let liftedInput = toLift inputTy input
+      value = evalV morph liftedInput
+      (spent, gradedValue) = evalG workAlg morph liftedInput
+  in case evalK morph liftedInput spent of
        Just (executed, 0)
-         | equalLift resultTy value gradedValue
-             && equalLift resultTy value executed ->
-             Right (fromLift resultTy value, spent)
+         | equalCore coreTy value gradedValue
+             && equalCore coreTy value executed ->
+             Right (fromCore coreTy value, spent)
        _ -> Left "core evaluator disagreement"
 
 runInteractive
   :: SUTy b
   -> Maybe Natural
   -> Natural
-  -> Morph a (Lift b)
-  -> Val a
+  -> CoreEntry a b
+  -> UVal a
   -> IO (Either String (UVal b, Maybe Natural, Natural))
-runInteractive resultTy limit already morph input = pure $ do
-  let value = evalV morph input
-      (needed, gradedValue) = evalG workAlg morph input
+runInteractive _ limit already (CoreEntry inputTy coreTy Refl morph) input = pure $ do
+  let liftedInput = toLift inputTy input
+      value = evalV morph liftedInput
+      (needed, gradedValue) = evalG workAlg morph liftedInput
       available = fromMaybe needed limit
   if available < needed
     then Left "core fuel exhausted"
-    else case evalK morph input available of
+    else case evalK morph liftedInput available of
       Just (executed, remaining)
-        | equalLift resultTy value gradedValue
-            && equalLift resultTy value executed ->
-            Right (fromLift resultTy value, fmap (const remaining) limit, already + needed)
+        | equalCore coreTy value gradedValue
+            && equalCore coreTy value executed ->
+            Right (fromCore coreTy value, fmap (const remaining) limit, already + needed)
       _ -> Left "core evaluator disagreement"
 
 equalU :: SUTy a -> UVal a -> UVal a -> Bool
@@ -138,32 +154,34 @@ equalU (SUSum _ b) (Right x) (Right y) = equalU b x y
 equalU (SUSum _ _) _ _ = False
 equalU (SUList a) xs ys = length xs == length ys && and (zipWith (equalU a) xs ys)
 
-equalLift :: SUTy a -> Val (Lift a) -> Val (Lift a) -> Bool
-equalLift SUUnit _ _ = True
-equalLift SUNat a b = a == b
-equalLift (SUProd a b) (x, y) (x', y') =
-  equalLift a x x' && equalLift b y y'
-equalLift (SUSum a _) (Left x) (Left y) = equalLift a x y
-equalLift (SUSum _ b) (Right x) (Right y) = equalLift b x y
-equalLift (SUSum _ _) _ _ = False
-equalLift (SUList a) xs ys =
-  length xs == length ys && and (zipWith (equalLift a) xs ys)
+equalCore :: STy a -> Val a -> Val a -> Bool
+equalCore SUnit _ _ = True
+equalCore SNat a b = a == b
+equalCore (SProd a b) (x, y) (x', y') =
+  equalCore a x x' && equalCore b y y'
+equalCore (SSum a _) (Left x) (Left y) = equalCore a x y
+equalCore (SSum _ b) (Right x) (Right y) = equalCore b x y
+equalCore (SSum _ _) _ _ = False
+equalCore (SList a) xs ys =
+  length xs == length ys && and (zipWith (equalCore a) xs ys)
+equalCore (SBang a) x y = equalCore a x y
 
 toLift :: SUTy a -> UVal a -> Val (Lift a)
-toLift SUUnit x = x
-toLift SUNat x = x
-toLift (SUProd a b) (x, y) = (toLift a x, toLift b y)
-toLift (SUSum a _) (Left x) = Left (toLift a x)
+toLift SUUnit x              = x
+toLift SUNat x               = x
+toLift (SUProd a b) (x, y)   = (toLift a x, toLift b y)
+toLift (SUSum a _) (Left x)  = Left (toLift a x)
 toLift (SUSum _ b) (Right x) = Right (toLift b x)
-toLift (SUList a) xs = fmap (toLift a) xs
+toLift (SUList a) xs         = fmap (toLift a) xs
 
-fromLift :: SUTy a -> Val (Lift a) -> UVal a
-fromLift SUUnit x = x
-fromLift SUNat x = x
-fromLift (SUProd a b) (x, y) = (fromLift a x, fromLift b y)
-fromLift (SUSum a _) (Left x) = Left (fromLift a x)
-fromLift (SUSum _ b) (Right x) = Right (fromLift b x)
-fromLift (SUList a) xs = fmap (fromLift a) xs
+fromCore :: STy a -> Val a -> UVal (Strip a)
+fromCore SUnit x              = x
+fromCore SNat x               = x
+fromCore (SProd a b) (x, y)   = (fromCore a x, fromCore b y)
+fromCore (SSum a _) (Left x)  = Left (fromCore a x)
+fromCore (SSum _ b) (Right x) = Right (fromCore b x)
+fromCore (SList a) xs         = fmap (fromCore a) xs
+fromCore (SBang a) x          = fromCore a x
 
 encode :: String -> [Natural]
 encode = fmap (fromIntegral . ord)
