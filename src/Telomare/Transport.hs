@@ -232,13 +232,13 @@ occurs :: Int -> IType -> Infer Bool
 occurs variable ty = do
   resolved <- prune ty
   case resolved of
-    IVar other   -> pure (variable == other)
-    IProd a b    -> (||) <$> occurs variable a <*> occurs variable b
-    ISum a b     -> (||) <$> occurs variable a <*> occurs variable b
-    IList a      -> occurs variable a
-    IBang a      -> occurs variable a
-    IUnit        -> pure False
-    INat         -> pure False
+    IVar other -> pure (variable == other)
+    IProd a b  -> (||) <$> occurs variable a <*> occurs variable b
+    ISum a b   -> (||) <$> occurs variable a <*> occurs variable b
+    IList a    -> occurs variable a
+    IBang a    -> occurs variable a
+    IUnit      -> pure False
+    INat       -> pure False
 
 unify :: String -> IType -> IType -> Infer ()
 unify context left right = do

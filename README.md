@@ -298,36 +298,9 @@ composition intermediates, modal inputs, and recursion bodies. It returns an
 opaque `ValidatedArtifact`; it intentionally does not reconstruct trusted
 `Morph` and uses no unchecked cast.
 
-`Telomare.Backend.Bend` consumes only that opaque `ValidatedArtifact` and emits
-inspectable first-order Bend with named node and recursion helpers. The existing
-runtime and interactive CLI remain unchanged; `telomare-bend` is a standalone
-transport-to-source command. Its checked `u24` value domain, encoded input/result
-protocol, exact loop conventions, box metadata treatment, timeout guidance, and
-value-only limitations are documented in `design/BEND_BACKEND.md`.
-
 ```sh
 cabal run telomare -- --emit-transport init test/programs/examples.tel2 \
   > init.transport
-cabal run telomare-bend -- init.transport > init.bend
-```
-
-The generated Bend module exposes `telomare_run`; a closed zero-argument Bend
-`main` supplies the encoded input. This avoids treating Bend's command-line ADT
-parser as part of the transport protocol.
-
-The Nix app performs the complete transport, emission, and execution pipeline.
-Its third argument is a closed Bend expression using the generated `Value`
-encoding:
-
-```sh
-nix run .#bend -- init test/programs/bend-smoke.tel2 'Value/Unit'
-```
-
-The same app runs the smoke program's runtime-bound iteration through Bend:
-
-```sh
-nix run .#bend -- step test/programs/bend-smoke.tel2 \
-  'Value/Prod(Value/Nil, Value/Nat(3))'
 ```
 
 ## Checks

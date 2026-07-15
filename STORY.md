@@ -98,7 +98,6 @@ Morph
   -> graded work/duplication interpretations
   -> fuel-state execution
   -> versioned transport artifact
-  -> experimental first-order Bend source
 ```
 
 Each arrow is a separate structural interpretation with its own preservation
@@ -120,14 +119,6 @@ discard and copying remain explicit operations, and copying requires a witness.
 Closed recursion uses the same `Telomare.Compiler.Closed` implementation as the
 textual frontend. This is a host notation, not a replacement for `.tel2`, and it
 does not expose `Bang` as a host source type.
-
-The Bend implementation is intentionally downstream of validation. Haskell
-still parses, checks affinity, places supported recursion, produces typed core,
-and serves as the semantic oracle. Bend receives only validated first-order
-transport and emits named functions, avoiding duplicated higher-order closures.
-The current prototype preserves values only over checked `u24` naturals; it
-does not claim to preserve formal grades, fuel, or EAL enforcement. Plain HVM2
-duplication is therefore not identified with Telomare contraction.
 
 ## Tic-Tac-Toe
 

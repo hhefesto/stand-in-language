@@ -7,7 +7,6 @@ import System.Exit (exitFailure)
 import Test.QuickCheck (quickCheckWithResult, stdArgs)
 import Test.QuickCheck.Test (Args (..), isSuccess)
 
-import BendVectors (bendVectors)
 import BudgetOracle (budgetVectors)
 import CertificateVectors (certificateVectors)
 import CompileFailVectors (compileFailVectors)
@@ -27,8 +26,7 @@ main = do
   telParity <- parityVectors
   tel2 <- tel2Vectors
   compileFails <- compileFailVectors
-  bend <- bendVectors
-  let vectors = specVectors <> surfaceVectors <> linearVectors <> compileFails <> copyVectors <> oracleVectors <> budgetVectors <> certificateVectors <> meterVectors <> telParity <> tel2 <> transportVectors <> bend
+  let vectors = specVectors <> surfaceVectors <> linearVectors <> compileFails <> copyVectors <> oracleVectors <> budgetVectors <> certificateVectors <> meterVectors <> telParity <> tel2 <> transportVectors
       props   = lawProps <> inferProps
       failedVectors = [n | (n, ok) <- vectors, not ok]
   forM_ vectors $ \(n, ok) ->
