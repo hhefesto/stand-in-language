@@ -69,6 +69,7 @@ evalV (DupS _) a            = (a, a)
 evalV (BoxS f) a            = evalV f a
 evalV (BoxValS f) a         = evalV f a
 evalV MergeS p              = p
+evalV (MapS f) xs           = fmap (evalV f) xs
 evalV (IterS f) (n, a)      = iterV n (evalV f) a
 evalV (FoldS f) (xs, b)     = foldV xs (evalV f) b
 evalV (WhileS _ t s) (n, a) = whileV n (evalV t) (evalV s) a
@@ -166,10 +167,18 @@ evalG alg (DupS sa) a          = (caDup alg (sizeVal (SBang sa) a), (a, a))
 evalG alg (BoxS f) a           = evalG alg f a
 evalG alg (BoxValS f) a        = evalG alg f a
 evalG alg MergeS p             = (caZero alg, p)
+evalG alg (MapS f) xs          = mapG alg (evalG alg f) xs
 evalG alg (IterS f) (n, a)     = iterG alg (evalG alg f) n a
 evalG alg (FoldS f) (xs, b)    = foldG alg (evalG alg f) xs b
 evalG alg (WhileS sa t s) (n, a) =
   whileG alg sa (evalG alg t) (evalG alg s) n a
+
+mapG :: CostAlgebra m -> (a -> (m, b)) -> [a] -> (m, [b])
+mapG alg _ [] = (caZero alg, [])
+mapG alg f (x : xs) =
+  let (m, y)  = f x
+      (r, ys) = mapG alg f xs
+  in (caSeq alg (caStep alg) (caSeq alg m r), y : ys)
 
 iterG :: CostAlgebra m -> (a -> (m, a)) -> Natural -> a -> (m, a)
 iterG alg _ 0 a = (caZero alg, a)
@@ -247,9 +256,20 @@ evalK (DupS _) a g               = Just ((a, a), g)
 evalK (BoxS f) a g               = evalK f a g
 evalK (BoxValS f) a g            = evalK f a g
 evalK MergeS p g                 = Just (p, g)
+evalK (MapS f) xs g              = mapK (evalK f) xs g
 evalK (IterS f) (n, a) g         = iterK (evalK f) n a g
 evalK (FoldS f) (xs, b) g        = foldK (evalK f) xs b g
 evalK (WhileS _ t s) (n, a) g    = whileK (evalK t) (evalK s) n a g
+
+mapK :: (a -> Natural -> Maybe (b, Natural)) -> [a] -> Natural
+     -> Maybe ([b], Natural)
+mapK _ [] g = Just ([], g)
+mapK f (x : xs) g = stepK action g
+  where
+    action fuel = do
+      (y, fuel') <- f x fuel
+      (ys, fuel'') <- mapK f xs fuel'
+      pure (y : ys, fuel'')
 
 stepK :: (Natural -> Maybe (a, Natural)) -> Natural -> Maybe (a, Natural)
 stepK _ 0 = Nothing

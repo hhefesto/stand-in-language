@@ -109,6 +109,7 @@ data Morph (a :: Ty) (b :: Ty) where
   BoxS     :: Morph a b -> Morph ('Bang a) ('Bang b)
   BoxValS  :: Morph 'Unit b -> Morph 'Unit ('Bang b)
   MergeS   :: Morph ('Bang a ':*: 'Bang b) ('Bang (a ':*: b))
+  MapS     :: Morph a b -> Morph ('ListT a) ('Bang ('ListT b))
   IterS    :: Morph a a -> Morph ('Nat ':*: 'Bang a) ('Bang a)
   FoldS    :: Morph (b ':*: a) b -> Morph ('ListT a ':*: 'Bang b) ('Bang b)
   WhileS   :: STy a -> Morph a ('Unit ':+: 'Unit) -> Morph a a
@@ -148,6 +149,7 @@ depth (DupS _)       = 0
 depth (BoxS f)       = 1 + depth f
 depth (BoxValS f)    = 1 + depth f
 depth MergeS         = 0
+depth (MapS f)       = 1 + depth f
 depth (IterS f)      = 1 + depth f
 depth (FoldS f)      = 1 + depth f
 depth (WhileS _ t s) = 1 + max (depth t) (depth s)

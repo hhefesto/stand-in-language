@@ -44,6 +44,7 @@ showM (DupS _)       = "DupS"
 showM (BoxS f)       = "BoxS (" <> showM f <> ")"
 showM (BoxValS f)    = "BoxValS (" <> showM f <> ")"
 showM MergeS         = "MergeS"
+showM (MapS f)       = "MapS (" <> showM f <> ")"
 showM (IterS f)      = "IterS (" <> showM f <> ")"
 showM (FoldS f)      = "FoldS (" <> showM f <> ")"
 showM (WhileS _ t s) = "WhileS (" <> showM t <> ") (" <> showM s <> ")"
@@ -150,6 +151,16 @@ prop_dup_functorial =
   forAll smallNat $ \n ->
     dupGrade (g :.: f) n == dupGrade f n + dupGrade g (evalV f n)
 
+prop_map_coherence_precision :: Property
+prop_map_coherence_precision =
+  forAll (listOf smallNat) $ \xs ->
+  forAllBlind affineLeaf $ \f ->
+    let mapped = MapS f
+    in snd (evalG workAlg mapped xs) == evalV mapped xs
+      && snd (evalG dupAlg mapped xs) == evalV mapped xs
+      && evalK mapped xs (work mapped xs) == Just (evalV mapped xs, 0)
+      && work mapped xs == fromIntegral (length xs) + sum (fmap (work f) xs)
+
 lawProps :: [(String, Property)]
 lawProps =
   [ ("prop_coherence (G-val)",       prop_coherence)
@@ -158,4 +169,5 @@ lawProps =
   , ("prop_affine_dup_zero",         prop_affine_dup_zero)
   , ("prop_work_functorial",         prop_work_functorial)
   , ("prop_dup_functorial",          prop_dup_functorial)
+  , ("prop_map_coherence_precision", prop_map_coherence_precision)
   ]

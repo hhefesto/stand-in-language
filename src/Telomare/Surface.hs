@@ -97,6 +97,7 @@ data UMorph (a :: UTy) (b :: UTy) where
   UConst   :: Natural -> UMorph a 'UNat
   UGuard   :: SUTy a -> UMorph a ('UUnit ':++: 'UUnit)
            -> UMorph a (a ':++: 'UUnit)
+  UMap     :: UMorph a b -> UMorph ('UList a) ('UList b)
   UIter    :: UMorph a a -> UMorph ('UNat ':**: a) a
   UFold    :: UMorph (b ':**: a) b -> UMorph ('UList a ':**: b) b
   UWhile   :: SUTy a -> UMorph a ('UUnit ':++: 'UUnit) -> UMorph a a
@@ -135,6 +136,7 @@ evalU USuc n                = n + 1
 evalU UAdd (a, b)           = a + b
 evalU (UConst k) _          = k
 evalU (UGuard _ t) a        = guardU a (evalU t a)
+evalU (UMap f) xs           = fmap (evalU f) xs
 evalU (UIter f) (n, a)      = iterU n (evalU f) a
 evalU (UFold f) (xs, b)     = foldU xs (evalU f) b
 evalU (UWhile _ t s) (n, a) = whileU n (evalU t) (evalU s) a
@@ -168,7 +170,7 @@ data UShape
   | ShSwap | ShAssoc | ShUnassoc | ShExl | ShExr | ShWeak | ShRunit | ShLunit
   | ShInl | ShInr | ShCase UShape UShape | ShDistl
   | ShNil | ShCons | ShUncons | ShNatOut | ShSuc | ShAdd | ShConst Natural
-  | ShGuard UShape | ShIter UShape | ShFold UShape | ShWhile UShape UShape
+  | ShGuard UShape | ShMap UShape | ShIter UShape | ShFold UShape | ShWhile UShape UShape
   deriving (Eq, Show)
 
 shapeU :: UMorph a b -> UShape
@@ -196,6 +198,7 @@ shapeU USuc           = ShSuc
 shapeU UAdd           = ShAdd
 shapeU (UConst k)     = ShConst k
 shapeU (UGuard _ t)   = ShGuard (shapeU t)
+shapeU (UMap f)       = ShMap (shapeU f)
 shapeU (UIter f)      = ShIter (shapeU f)
 shapeU (UFold f)      = ShFold (shapeU f)
 shapeU (UWhile _ t s) = ShWhile (shapeU t) (shapeU s)

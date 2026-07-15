@@ -78,7 +78,7 @@ CoreGuardOps = record { guard = C.guardS }
 CoreBoundedRecursionOps : BoundedRecursionOps CoreCategoryOps CoreTensorOps
   CoreAffineOps CoreSumOps CoreNatOps CoreListOps CoreBangOps
 CoreBoundedRecursionOps = record
-  { iterate = C.iterS; fold = C.foldS; while = C.whileS }
+  { map = C.mapS; iterate = C.iterS; fold = C.foldS; while = C.whileS }
 
 SurfaceCategoryOps : CategoryOps
 SurfaceCategoryOps = record
@@ -127,6 +127,7 @@ SurfaceCopyOps = record { copy = S.dupU }
 -- an instance of RestrictedBangOps.
 record SurfaceBoundedRecursion : Set₁ where
   field
+    map     : {X Y : UTy} → X S.⇨U Y → listᵤ X S.⇨U listᵤ Y
     iterate : {X : UTy} → X S.⇨U X → (natᵤ ⊗ᵤ X) S.⇨U X
     fold    : {X Y : UTy} → (Y ⊗ᵤ X) S.⇨U Y
             → (listᵤ X ⊗ᵤ Y) S.⇨U Y
@@ -135,7 +136,7 @@ record SurfaceBoundedRecursion : Set₁ where
 
 SurfaceBoundedRecursionOps : SurfaceBoundedRecursion
 SurfaceBoundedRecursionOps = record
-  { iterate = S.iterU; fold = S.foldU; while = S.whileU }
+  { map = S.mapU; iterate = S.iterU; fold = S.foldU; while = S.whileU }
 
 CoreValueInterpretationOps : InterpretationOps CoreCategoryOps
 CoreValueInterpretationOps = record { Carrier = ⟦_⟧T; interp = V.⟦_⟧V }

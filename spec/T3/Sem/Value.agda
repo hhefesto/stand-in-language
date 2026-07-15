@@ -32,6 +32,10 @@ foldV : {A B : Set} → List A → (B × A → B) → B → B
 foldV []       f b = b
 foldV (x ∷ xs) f b = foldV xs f (f (b , x))
 
+mapV : {A B : Set} → (A → B) → List A → List B
+mapV f []       = []
+mapV f (x ∷ xs) = f x ∷ mapV f xs
+
 -- guard output: pass the input through on inj₁, error on inj₂.
 guardOut : {A E : Set} → A → ⊤ ⊎ ⊤ → A ⊎ E → A ⊎ E
 guardOut a (inj₁ _) _ = inj₁ a
@@ -82,6 +86,7 @@ whileV (suc n) t s a = whileV-go n t s a (t a)
 ⟦ boxS f     ⟧V a = ⟦ f ⟧V a
 ⟦ boxValS f  ⟧V a = ⟦ f ⟧V a
 ⟦ mergeS     ⟧V p = p
+⟦ mapS f     ⟧V xs = mapV ⟦ f ⟧V xs
 ⟦ iterS f    ⟧V (n , a) = iterV n ⟦ f ⟧V a
 ⟦ foldS f    ⟧V (xs , b) = foldV xs ⟦ f ⟧V b
 ⟦ whileS t s ⟧V (n , a) = whileV n ⟦ t ⟧V ⟦ s ⟧V a

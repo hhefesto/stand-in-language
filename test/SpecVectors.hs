@@ -22,6 +22,9 @@ addTwice = AddS :.: DupNatS
 sumList :: Morph ('ListT 'Nat) ('Bang 'Nat)
 sumList = FoldS AddS :.: (IdS :***: BoxValS (ConstS 0)) :.: RunitS
 
+incrementAll :: Morph ('ListT 'Nat) ('Bang ('ListT 'Nat))
+incrementAll = MapS SucS
+
 egList :: [Natural']
 egList = [1, 2, 3]
 
@@ -58,6 +61,11 @@ specVectors =
   , ("double-adequate",    evalK double 5 5 == Just (10, 0))
   , ("addTwice-val",       evalV addTwice 5 == 10)
   , ("addTwice-dup",       dupGrade addTwice 5 == 1)
+  , ("map-val",            evalV incrementAll egList == [2, 3, 4])
+  , ("map-cost",           work incrementAll egList == 3)
+  , ("map-dup",            dupGrade incrementAll egList == 0)
+  , ("map-depth",          depth incrementAll == 1)
+  , ("map-adequate",       evalK incrementAll egList 3 == Just ([2, 3, 4], 0))
   , ("sumList-val",        evalV sumList egList == 6)
   , ("sumList-cost",       work sumList egList == 3)
   , ("sumList-dup",        dupGrade sumList egList == 0)

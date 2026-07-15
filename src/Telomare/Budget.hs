@@ -99,6 +99,7 @@ skelWith v = go
     go (GuardS _ t)   = go t
     go (BoxS f)       = go f
     go (BoxValS f)    = go f
+    go (MapS f)       = RecT v (go f)
     go (IterS f)      = RecT v (go f)
     go (FoldS f)      = RecT v (go f)
     go (WhileS _ t s) = RecT v (BinT (go t) (go s))
@@ -187,6 +188,7 @@ transferB (BoxValS f) s = let (b, r) = transferB f s in (b, BangSh r)
 transferB MergeS s =
   let (a, b) = splitP s
   in (TipT, BangSh (PairSh (unbangS a) (unbangS b)))
+transferB (MapS f) _ = (RecT Nothing (skelTop f), TopS)
 transferB (IterS f) s =
   let (fu, a0) = splitP s
   in case fu of

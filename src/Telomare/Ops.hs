@@ -105,6 +105,9 @@ class
   (TensorOps m, SumOps m, NatOps m, ListOps m, GuardOps m) =>
   BoundedRecursionOps (m :: k -> k -> Type) where
   type RecState m (a :: k) :: k
+  mapBoundedOp
+    :: m a b
+    -> m (ListObject m a) (RecState m (ListObject m b))
   iterateBoundedOp
     :: m a a
     -> m (Tensor m (NatObject m) (RecState m a)) (RecState m a)
@@ -167,6 +170,7 @@ instance NatCopyOps UMorph where
 
 instance BoundedRecursionOps UMorph where
   type RecState UMorph a = a
+  mapBoundedOp = UMap
   iterateBoundedOp = UIter
   foldBoundedOp = UFold
   whileBoundedOp = UWhile
@@ -230,6 +234,7 @@ instance BangCopyOps Morph where
 
 instance BoundedRecursionOps Morph where
   type RecState Morph a = 'Bang a
+  mapBoundedOp = MapS
   iterateBoundedOp = IterS
   foldBoundedOp = FoldS
   whileBoundedOp = WhileS

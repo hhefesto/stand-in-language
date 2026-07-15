@@ -43,3 +43,11 @@ def countListElement(values: Nat * Nat): Nat =
 
 def listLength(values: List Nat): Nat =
   fold values from 0 with countListElement;
+
+# First-order specializations of the historical higher-order list vocabulary.
+# The mapper and fold step are named source definitions, never runtime values.
+def mapIncrement(values: List Nat): List Nat =
+  map values with increment;
+
+def listSum(values: List Nat): Nat =
+  fold values from 0 with natAdd;

@@ -319,6 +319,7 @@ transfer (boxS f)     s = let (b , r) = transfer f (unbang s) in (b , bangS r)
 transfer (boxValS f)  s = let (b , r) = transfer f s in (b , bangS r)
 transfer mergeS       s =
   let (a , b) = splitP s in (tipB , bangS (pairS (unbang a) (unbang b)))
+transfer (mapS f)     s = (recB nothing (topBD _) , topS)
 transfer (iterS f)    s =
   let (fu , a0) = splitP s
   in loop (fuelOf fu) (unbang a0)
@@ -484,6 +485,7 @@ sound (boxValS f) s h = sound f s h
 sound mergeS topS {a , b} h = (tt , tt)
 sound mergeS (pairS topS sb) {a , b} (_ , hb) = (tt , unbang-γ sb hb)
 sound mergeS (pairS (bangS sa) sb) {a , b} (ha , hb) = (ha , unbang-γ sb hb)
+sound (mapS f) s h = tt
 sound (iterS f) topS {n , a} h = tt
 sound (iterS f) (pairS topS sa) {n , a} h = tt
 sound (iterS f) (pairS (natLE N) sa) {n , a} (hn , ha) =

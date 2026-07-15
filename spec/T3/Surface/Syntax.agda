@@ -52,6 +52,7 @@ data _⇨U_ : UTy → UTy → Set where
   -- refinement guard
   guardU   : {A : UTy} → A ⇨U (unitᵤ ⊕ᵤ unitᵤ) → A ⇨U (A ⊕ᵤ unitᵤ)
   -- fuel-carrying recursion, box-free typing
+  mapU     : {A B : UTy} → A ⇨U B → listᵤ A ⇨U listᵤ B
   iterU    : {A : UTy} → A ⇨U A → (natᵤ ⊗ᵤ A) ⇨U A
   foldU    : {A B : UTy} → (B ⊗ᵤ A) ⇨U B → (listᵤ A ⊗ᵤ B) ⇨U B
   whileU   : {A : UTy} → A ⇨U (unitᵤ ⊕ᵤ unitᵤ) → A ⇨U A → (natᵤ ⊗ᵤ A) ⇨U A

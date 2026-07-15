@@ -19,7 +19,7 @@ open import Data.Unit    using (⊤; tt)
 
 open import T3.Surface.Ty
 open import T3.Surface.Syntax
-open import T3.Sem.Value using (iterV; foldV; whileV; guardV)
+open import T3.Sem.Value using (mapV; iterV; foldV; whileV; guardV)
 
 ⟦_⟧VS : {A B : UTy} → A ⇨U B → ⟦ A ⟧U → ⟦ B ⟧U
 ⟦ idU        ⟧VS a = a
@@ -50,6 +50,7 @@ open import T3.Sem.Value using (iterV; foldV; whileV; guardV)
 ⟦ addU       ⟧VS (a , b) = a + b
 ⟦ constU k   ⟧VS _ = k
 ⟦ guardU t   ⟧VS a = guardV a (⟦ t ⟧VS a)
+⟦ mapU f     ⟧VS xs = mapV ⟦ f ⟧VS xs
 ⟦ iterU f    ⟧VS (n , a) = iterV n ⟦ f ⟧VS a
 ⟦ foldU f    ⟧VS (xs , b) = foldV xs ⟦ f ⟧VS b
 ⟦ whileU t s ⟧VS (n , a) = whileV n ⟦ t ⟧VS ⟦ s ⟧VS a

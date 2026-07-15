@@ -25,6 +25,8 @@ tel2Vectors = do
   missing <- rejectsFile "tel2 rejects missing modules" (base <> "test/programs/MissingImport.tel2") "cannot load module NotPresent"
   packagedPrelude <- acceptsFileBehavior "tel2 loads packaged Prelude"
     (base <> "test/programs/PreludeHelpers.tel2") ["check"] "true\n"
+  packagedMap <- acceptsFileBehavior "tel2 loads reusable packaged map specialization"
+    (base <> "test/programs/PreludeMap.tel2") ["ABC"] "mapped\n"
   cwdIndependent <- acceptsFileAwayFromWorkspace
     "tel2 packaged stdlib resolution is cwd-independent"
     (base <> "test/programs/PreludeHelpers.tel2") ["check"] "true\n"
@@ -65,10 +67,13 @@ tel2Vectors = do
           reusableRecursion =
             [ accepts "tel2 compiles reusable iteration helper" helperIterationSource
             , accepts "tel2 compiles reusable fold helper" helperFoldSource
+            , accepts "tel2 accepts affine list constructors" listConstructorSource
             , acceptsBehavior "tel2 runtime-bound iteration preserves surface behavior"
                 runtimeIterationSource ["go"] "two\n"
             , acceptsBehavior "tel2 runtime-list fold preserves surface behavior"
                 runtimeFoldSource ["ABC"] "sum\n"
+            , acceptsMapBehavior "tel2 runtime-list map emits MapS and preserves ordinary list order"
+                runtimeMapSource ["ABC"] "mapped\n"
             , acceptsBehavior "tel2 runtime-bound while preserves surface behavior"
                 runtimeWhileSource ["go"] "three\n"
             ]
@@ -89,11 +94,12 @@ tel2Vectors = do
             , rejectsWith "tel2 rejects nested closed recursion" nestedRecursionSource "cannot capture or contain recursion"
             , rejectsWith "tel2 rejects open recursive seed" openSeedSource "must be closed; open promotion is unavailable"
             , rejectsWith "tel2 rejects live context after recursion" residualContextSource "cannot remain live"
+            , rejects "tel2 rejects a map mapper with the wrong result type" wrongMapResultSource
             ]
           needsPrelude = ("tictactoe genuinely depends on imported Prelude",
             case compileTel2 (anonymous source) of Left _ -> True; Right _ -> False)
           mutation = sourceMutation (anonymous prelude <> anonymous source)
-      pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude
+      pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
         : importCycle : missing : recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
@@ -160,6 +166,7 @@ nodeTree node = node : case node of
   NGuard _ child      -> nodeTree child
   NBox child          -> nodeTree child
   NBoxVal child       -> nodeTree child
+  NMap child          -> nodeTree child
   NIter child         -> nodeTree child
   NFold child         -> nodeTree child
   NWhile _ test step  -> nodeTree test <> nodeTree step
@@ -183,6 +190,12 @@ programHasIter = programHasShape isIter
 programHasAdd :: Program -> Bool
 programHasAdd = programHasShape (== ShAdd)
 
+programHasMap :: Program -> Bool
+programHasMap = programHasShape isMap
+  where
+    isMap ShMap {} = True
+    isMap _        = False
+
 programHasFold :: Program -> Bool
 programHasFold = programHasShape isFold
   where
@@ -205,6 +218,7 @@ programHasShape predicate (Program _ _ _ initial step) =
       ShTensor x y -> go x || go y
       ShCase x y   -> go x || go y
       ShGuard x    -> go x
+      ShMap x      -> go x
       ShIter x     -> go x
       ShFold x     -> go x
       ShWhile x y  -> go x || go y
@@ -214,6 +228,13 @@ acceptsBehavior :: String -> String -> [String] -> String -> (String, Bool)
 acceptsBehavior name source inputs expected = (name, case compileTel2 source of
   Left _ -> False
   Right program -> case runProgramScript program inputs of
+    Right (output, _) -> output == expected
+    Left _            -> False)
+
+acceptsMapBehavior :: String -> String -> [String] -> String -> (String, Bool)
+acceptsMapBehavior name source inputs expected = (name, case compileTel2 source of
+  Left _ -> False
+  Right program -> programHasMap program && case runProgramScript program inputs of
     Right (output, _) -> output == expected
     Left _            -> False)
 
@@ -460,6 +481,31 @@ runtimeFoldSource = unlines
   , "def sumText(input: Text): Nat = fold input from 0 with sum;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
   , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Nat = sumText(input) in matchNat result of { 198 -> (\"sum\\n\",left ()); n -> (\"bad\\n\",left ()); };"
+  ]
+
+listConstructorSource :: String
+listConstructorSource = unlines
+  [ "type State = List Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right cons 1 onto cons 2 onto []);"
+  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let _: State = state in (\"\",left ());"
+  ]
+
+runtimeMapSource :: String
+runtimeMapSource = unlines
+  [ "type State = Unit;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def incrementText(input: Text): Text = map input with increment;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
+  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Text = incrementText(input) in matchText result of { \"BCD\" -> (\"mapped\\n\",left ()); other -> (\"bad\\n\",left ()); };"
+  ]
+
+wrongMapResultSource :: String
+wrongMapResultSource = unlines
+  [ "type State = Unit;"
+  , "def discardNat(n: Nat): Unit = let _: Nat = n in ();"
+  , "def bad(input: Text): Text = map input with discardNat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
+  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let _: State = state in (\"\",left ());"
   ]
 
 runtimeWhileSource :: String

@@ -65,6 +65,9 @@ data Expr
   | ECopy Expr
   | ESuc Expr
   | EAdd Expr
+  | ENil
+  | ECons Expr Expr
+  | EMap Expr String
   | EIter Expr Expr String
   | EFold Expr Expr String
   | EWhile Expr Expr String String
@@ -140,12 +143,14 @@ exprParser = choice
   , try matchTextExpr
   , try matchNatExpr
   , try caseExpr
+  , try mapExpr
   , try iterExpr
   , try foldExpr
   , try whileExpr
   , try copyExpr
   , try sucExpr
   , try addExpr
+  , try consExpr
   , try prependExpr
   , try leftExpr
   , try rightExpr
@@ -199,6 +204,11 @@ exprParser = choice
       body <- exprParser
       void (optional (symbol ";"))
       pure (con, body)
+    mapExpr = do
+      reserved "map"
+      input <- exprParser
+      reserved "with"
+      EMap input <$> identifier
     iterExpr = do
       reserved "iterate"
       count <- exprParser
@@ -225,11 +235,17 @@ exprParser = choice
     copyExpr = reserved "copy" *> (ECopy <$> exprParser)
     sucExpr = reserved "suc" *> (ESuc <$> exprParser)
     addExpr = reserved "add" *> (EAdd <$> exprParser)
+    consExpr = do
+      reserved "cons"
+      value <- exprParser
+      reserved "onto"
+      ECons value <$> exprParser
     prependExpr = reserved "prepend" *> (EPrepend <$> stringLiteral <*> exprParser)
     leftExpr = reserved "left" *> (ELeft <$> exprParser)
     rightExpr = reserved "right" *> (ERight <$> exprParser)
     atomExpr = choice
       [ try (symbol "()" $> EUnit)
+      , try (symbol "[]" $> ENil)
       , between (symbol "(") (symbol ")") (try pairExpr <|> exprParser)
       , EText <$> stringLiteral
       , ENat <$> natural
@@ -540,6 +556,17 @@ compileAffineLoop
   -> Expr
   -> Either CompileError (SomePlacedLoop c)
 compileAffineLoop tables env resultTy expression = case expression of
+  EMap input mapperName -> do
+    SomeDef mapperIn mapperOut mapperU <- lookupDef tables mapperName
+    case resultTy of
+      SUList resultElement -> do
+        Refl <- requireSame resultElement mapperOut
+        Elab inputTy rest inputU <- elaborate tables env (SUList mapperIn) input
+        Refl <- requireSame (SUList mapperIn) inputTy
+        core <- fromDirect
+          (Closed.affineMapValueFrom (finish rest inputU) mapperU)
+        pure (SomePlacedLoop resultTy core)
+      _ -> bad "map result must be a list"
   EIter count seed stepName -> do
     requirePromotable "iteration seed" seed
     SomeDef stepIn stepOut stepU <- lookupDef tables stepName
@@ -609,6 +636,7 @@ isClosedLoop :: Expr -> Bool
 isClosedLoop EIter {}  = True
 isClosedLoop EFold {}  = True
 isClosedLoop EWhile {} = True
+isClosedLoop EMap {}   = True
 isClosedLoop _         = False
 
 data SomeClosedLoop where
@@ -621,6 +649,16 @@ compileClosedLoop :: Tables -> Type -> Expr -> Either CompileError SomeClosedLoo
 compileClosedLoop tables annotation expression = do
   SomeTy resultTy <- resolveType tables annotation
   case expression of
+    EMap input mapperName -> do
+      requireClosed "map input" input
+      SomeDef mapperIn mapperOut mapperU <- lookupDef tables mapperName
+      case resultTy of
+        SUList resultElement -> do
+          Refl <- requireSame resultElement mapperOut
+          inputU <- elaborateClosed tables (SUList mapperIn) input
+          loopCore <- fromDirect (Closed.closedMapValue inputU mapperU)
+          pure (SomeClosedLoop resultTy loopCore)
+        _ -> bad "map result must be a list"
     EIter count seed stepName -> do
       requireClosed "iteration bound" count
       requireClosed "iteration seed" seed
@@ -764,6 +802,8 @@ exprCalls (ELet _ _ value body) = exprCalls value `Set.union` exprCalls body
 exprCalls (ECopy value) = exprCalls value
 exprCalls (ESuc value) = exprCalls value
 exprCalls (EAdd value) = exprCalls value
+exprCalls (ECons value rest) = exprCalls value `Set.union` exprCalls rest
+exprCalls (EMap input mapper) = Set.insert mapper (exprCalls input)
 exprCalls (EIter count seed step) =
   Set.insert step (exprCalls count `Set.union` exprCalls seed)
 exprCalls (EFold input seed step) =
@@ -798,6 +838,8 @@ iterSteps (ECall _ argument) = iterSteps argument
 iterSteps (ECopy value) = iterSteps value
 iterSteps (ESuc value) = iterSteps value
 iterSteps (EAdd value) = iterSteps value
+iterSteps (ECons value rest) = iterSteps value `Set.union` iterSteps rest
+iterSteps (EMap input mapper) = Set.insert mapper (iterSteps input)
 iterSteps (EPrepend _ value) = iterSteps value
 iterSteps (ELeft value) = iterSteps value
 iterSteps (ERight value) = iterSteps value
@@ -820,6 +862,8 @@ freeVars (ECall _ argument) = freeVars argument
 freeVars (ECopy value) = freeVars value
 freeVars (ESuc value) = freeVars value
 freeVars (EAdd value) = freeVars value
+freeVars (ECons value rest) = freeVars value `Set.union` freeVars rest
+freeVars (EMap input _) = freeVars input
 freeVars (EIter count seed _) = freeVars count `Set.union` freeVars seed
 freeVars (EFold input seed _) = freeVars input `Set.union` freeVars seed
 freeVars (EWhile limit seed _ _) = freeVars limit `Set.union` freeVars seed
@@ -913,6 +957,19 @@ elaborate tables env SUNat (EAdd value) = do
   Elab actual rest input <- elaborate tables env pairTy value
   Refl <- requireSame pairTy actual
   pure (Elab SUNat rest ((UAdd :****: UId) :..: input))
+elaborate _ env expected@(SUList _) ENil =
+  pure (constant env expected UNil)
+elaborate tables env expected@(SUList element) (ECons value rest) = do
+  Elab actual remaining pair <- elaborate tables env
+    (SUProd element expected) (EPair value rest)
+  Refl <- requireSame (SUProd element expected) actual
+  pure (Elab expected remaining ((UCons :****: UId) :..: pair))
+elaborate tables env expected@(SUList resultElement) (EMap input mapperName) = do
+  SomeDef mapperIn mapperOut mapper <- lookupDef tables mapperName
+  Refl <- requireSame resultElement mapperOut
+  Elab actual rest inputU <- elaborate tables env (SUList mapperIn) input
+  Refl <- requireSame (SUList mapperIn) actual
+  pure (Elab expected rest ((UMap mapper :****: UId) :..: inputU))
 elaborate tables env expected (EIter count seed stepName) = do
   SomeDef stepIn stepOut step <- lookupDef tables stepName
   Refl <- requireSame expected stepIn

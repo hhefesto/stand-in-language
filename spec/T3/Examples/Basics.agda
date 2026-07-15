@@ -65,6 +65,24 @@ sumList = foldS addS ∘S (idS ⊗S boxValS (constS 0)) ∘S runitS
 egList : ⟦ listT nat ⟧T
 egList = 1 ∷ 2 ∷ 3 ∷ []
 
+incrementAll : listT nat ⇨ ! (listT nat)
+incrementAll = mapS sucS
+
+map-val : ⟦ incrementAll ⟧V egList ≡ 2 ∷ 3 ∷ 4 ∷ []
+map-val = refl
+
+map-cost : work incrementAll egList ≡ 3
+map-cost = refl
+
+map-dup : dupGrade incrementAll egList ≡ 0
+map-dup = refl
+
+map-depth : depth incrementAll ≡ 1
+map-depth = refl
+
+map-adequate : ⟦ incrementAll ⟧K egList 3 ≡ just (2 ∷ 3 ∷ 4 ∷ [] , 0)
+map-adequate = adequateV incrementAll egList
+
 sumList-val : ⟦ sumList ⟧V egList ≡ 6
 sumList-val = refl
 

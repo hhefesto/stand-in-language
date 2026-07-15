@@ -82,6 +82,7 @@ data _⇨_ : Ty → Ty → Set where
   mergeS   : {A B : Ty} → (! A ⊗ ! B) ⇨ ! (A ⊗ B)
   -- fuel-carrying recursion: the output lives ONE LEVEL DEEPER than the
   -- orchestration (design doc §7).  Fuel is data; totality is manifest.
+  mapS     : {A B : Ty} → A ⇨ B → listT A ⇨ ! (listT B)
   iterS    : {A : Ty} → A ⇨ A → (nat ⊗ ! A) ⇨ ! A
   foldS    : {A B : Ty} → (B ⊗ A) ⇨ B → (listT A ⊗ ! B) ⇨ ! B
   whileS   : {A : Ty} → A ⇨ (unit ⊕ unit) → A ⇨ A → (nat ⊗ ! A) ⇨ ! A
@@ -120,6 +121,7 @@ depth dupS          = 0
 depth (boxS f)      = suc (depth f)
 depth (boxValS f)   = suc (depth f)
 depth mergeS        = 0
+depth (mapS f)      = suc (depth f)
 depth (iterS f)     = suc (depth f)
 depth (foldS f)     = suc (depth f)
 depth (whileS t s)  = suc (depth t ⊔ depth s)

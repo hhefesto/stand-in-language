@@ -161,6 +161,7 @@ record BoundedRecursionOps (C : CategoryOps) (T : TensorOps C)
   open ListOps L
   open RestrictedBangOps B
   field
+    map     : {X Y : Obj} → Hom X Y → Hom (listObj X) (bang (listObj Y))
     iterate : {X : Obj} → Hom X X → Hom (tensorObj natObj (bang X)) (bang X)
     fold    : {X Y : Obj} → Hom (tensorObj Y X) Y
             → Hom (tensorObj (listObj X) (bang Y)) (bang Y)

@@ -38,7 +38,7 @@ import Telomare.Surface (liftSTy)
 
 -- | Stable schema version.  A validator accepts exactly this version.
 transportVersion :: Int
-transportVersion = 1
+transportVersion = 2
 
 -- | Runtime representation of every core object, including the exponential.
 data TyCode
@@ -80,6 +80,7 @@ data Node
   | NBox Node
   | NBoxVal Node
   | NMerge
+  | NMap Node
   | NIter Node
   | NFold Node
   | NWhile TyCode Node Node
@@ -166,6 +167,7 @@ exportNode (DupS a)       = NDup (styCode a)
 exportNode (BoxS f)       = NBox (exportNode f)
 exportNode (BoxValS f)    = NBoxVal (exportNode f)
 exportNode MergeS         = NMerge
+exportNode (MapS f)       = NMap (exportNode f)
 exportNode (IterS f)      = NIter (exportNode f)
 exportNode (FoldS f)      = NFold (exportNode f)
 exportNode (WhileS a t s) = NWhile (styCode a) (exportNode t) (exportNode s)
@@ -316,6 +318,9 @@ inferNode node = case node of
     unify "box-val input" input IUnit
     pure (IUnit, IBang output)
   NMerge -> do a <- fresh; b <- fresh; pure (IProd (IBang a) (IBang b), IBang (IProd a b))
+  NMap body -> do
+    (input, output) <- inferNode body
+    pure (IList input, IBang (IList output))
   NIter body -> do
     (input, output) <- inferNode body
     unify "iter body" input output
@@ -361,7 +366,8 @@ renderNode node = case node of
   NSuc -> atom "suc"; NAdd -> atom "add"; NConst n -> list ["const", show n]
   NDupNat -> atom "dup-nat"; NGuard ty test -> list ["guard", renderType ty, renderNode test]
   NDup ty -> list ["dup", renderType ty]; NBox body -> unary "box" body
-  NBoxVal body -> unary "box-val" body; NMerge -> atom "merge"; NIter body -> unary "iter" body
+  NBoxVal body -> unary "box-val" body; NMerge -> atom "merge"; NMap body -> unary "map" body
+  NIter body -> unary "iter" body
   NFold body -> unary "fold" body
   NWhile ty test step -> list ["while", renderType ty, renderNode test, renderNode step]
   where
@@ -405,7 +411,7 @@ nodeP = parens $ choice
   , symbol "const" >> NConst <$> naturalP, nullary "dup-nat" NDupNat
   , symbol "guard" >> NGuard <$> typeP <*> nodeP, symbol "dup" >> NDup <$> typeP
   , unary "box" NBox, unary "box-val" NBoxVal, nullary "merge" NMerge
-  , unary "iter" NIter, unary "fold" NFold
+  , unary "map" NMap, unary "iter" NIter, unary "fold" NFold
   , symbol "while" >> NWhile <$> typeP <*> nodeP <*> nodeP
   ]
   where

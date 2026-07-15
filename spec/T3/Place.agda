@@ -95,6 +95,7 @@ open import T3.Surface.Sem
 ε (boxS f)     = ε f           -- boxes erase
 ε (boxValS f)  = ε f
 ε mergeS       = idU
+ε (mapS f)     = mapU (ε f)
 ε (iterS f)    = iterU (ε f)
 ε (foldS f)    = foldU (ε f)
 ε (whileS t s) = whileU (ε t) (ε s)
@@ -104,6 +105,16 @@ private
               → stripV (A ⊕ unit) (guardV a r) ≡ guardV (stripV A a) r
   guard-strip A a (inj₁ tt) = refl
   guard-strip A a (inj₂ tt) = refl
+
+  map-strip : (A B : Ty) (xs : List ⟦ A ⟧T)
+              (fv : ⟦ A ⟧T → ⟦ B ⟧T)
+              (fu : ⟦ strip A ⟧U → ⟦ strip B ⟧U)
+            → (∀ x → stripV B (fv x) ≡ fu (stripV A x))
+            → stripV (listT B) (mapV fv xs)
+              ≡ mapV fu (stripV (listT A) xs)
+  map-strip A B []       fv fu h = refl
+  map-strip A B (x ∷ xs) fv fu h =
+    cong₂ _∷_ (h x) (map-strip A B xs fv fu h)
 
   iter-strip : (A : Ty) (n : ℕ)
                (fv : ⟦ A ⟧T → ⟦ A ⟧T) (fu : ⟦ strip A ⟧U → ⟦ strip A ⟧U)
@@ -188,6 +199,8 @@ private
 ε-factor (boxS f) a = ε-factor f a
 ε-factor (boxValS f) a = ε-factor f a
 ε-factor mergeS (a , b) = refl
+ε-factor (mapS {A} {B} f) xs =
+  map-strip A B xs ⟦ f ⟧V ⟦ ε f ⟧VS (ε-factor f)
 ε-factor (iterS {A} f) (n , a) =
   iter-strip A n ⟦ f ⟧V ⟦ ε f ⟧VS (ε-factor f) a
 ε-factor (foldS {A} {B} f) (xs , b) =
@@ -328,6 +341,7 @@ skelOf sucU         = tip
 skelOf addU         = tip
 skelOf (constU _)   = tip
 skelOf (guardU t)   = skelOf t
+skelOf (mapU f)     = rec (skelOf f)
 skelOf (iterU f)    = rec (skelOf f)
 skelOf (foldU f)    = rec (skelOf f)
 skelOf (whileU t s) = rec (bin (skelOf t) (skelOf s))
@@ -366,6 +380,7 @@ skelOfCore dupS         d = tipD
 skelOfCore (boxS f)     d = skelOfCore f (suc d)
 skelOfCore (boxValS f)  d = skelOfCore f (suc d)
 skelOfCore mergeS       d = tipD
+skelOfCore (mapS f)     d = recD d (skelOfCore f (suc d))
 skelOfCore (iterS f)    d = recD d (skelOfCore f (suc d))
 skelOfCore (foldS f)    d = recD d (skelOfCore f (suc d))
 skelOfCore (whileS t s) d =
@@ -403,6 +418,7 @@ core-solves (boxS f)     d =
 core-solves (boxValS f)  d =
   solves-anti (skelOfCore f (suc d)) (n≤1+n d) (core-solves f (suc d))
 core-solves mergeS       d = tt
+core-solves (mapS f)     d = (≤-refl , core-solves f (suc d))
 core-solves (iterS f)    d = (≤-refl , core-solves f (suc d))
 core-solves (foldS f)    d = (≤-refl , core-solves f (suc d))
 core-solves (whileS t s) d =

@@ -24,17 +24,19 @@ order is not semantically significant. Anonymous import-free snippets
 retain a pure compilation path. The language has named product/sum aliases,
 nullary finite data, variables, tuples, `let`, constructor cases, exact Nat/Text
 matching, literals, primitive Nat successor/addition, finite text prefixing,
-named definitions, and explicit `copy`. `README.md` is the normative grammar.
+affine list constructors, first-order map/fold, named definitions, and explicit
+`copy`. `README.md` is the normative grammar.
 
 The recursive source slice is intentionally narrower than the surface syntax. A
-whole `init` or `step` body may start with independent closed iteration, fold,
-and literal-capped while bindings. Their steps/tests are non-recursive direct
-morphisms; fold inputs and all seeds are closed. Each binding translates to
-`BoxValS` plus an actual `IterS`, `FoldS`, or `WhileS`. The compiler combines
+whole `init` or `step` body may start with independent closed map, iteration,
+fold, and literal-capped while bindings. Their mappers/steps/tests are
+non-recursive direct morphisms; recursive inputs and all seeds are closed. Each
+binding translates to an actual `MapS`, `IterS`, `FoldS`, or `WhileS`, with
+`BoxValS` supplying loop seeds. The compiler combines
 their boxed results with `MergeS` and promotes one final continuation with
 `BoxS`. Capturing the entry input would require open promotion, so it is
-rejected; dependent/nested loops and loops in helpers remain rejected pending a
-real placement compiler.
+rejected; dependent/nested loops and live unboxed context after a recursive
+result remain rejected pending a real placement compiler.
 
 The elaborator carries an ordered typed context. A variable projection returns
 the variable and the context with that binding removed. Pairing elaborates the
@@ -75,8 +77,9 @@ constructors before `compileDirect`; no host arithmetic callback, unproved
 surface constructor, or runtime equality callback is introduced.
 
 The packaged `stdlib/Prelude.tel2` provides finite Bool operations, Nat
-predicates/conversions, addition, successor, explicit Nat doubling, and a
-reusable first-order `listLength` placed over an affine runtime list.
+predicates/conversions, addition, successor, explicit Nat doubling, reusable
+first-order `listLength`/`listSum` folds, and an order-preserving
+`mapIncrement` specialization placed over an affine runtime list.
 `stdlib/LegacyPrelude.tel2` contains only six honest monomorphic or modernized
 aliases. `design/PRELUDE_MIGRATION.md` accounts for all 50 historical Prelude
 names; Church encodings, higher-order combinators, partial abort, and unsupported
@@ -108,8 +111,8 @@ formal work to exact successful fuel. The raw syntax itself is not silently
 normalized by those equations, because a value-preserving rewrite may change a
 resource grade.
 
-`Telomare.Transport` retains every core constructor and `Bang` in a stable
-S-expression. An
+`Telomare.Transport` schema version 2 retains every core constructor, including
+`MapS`, and every `Bang` in a stable S-expression. An
 independent unification pass validates untrusted artifacts but deliberately does
 not reconstruct a trusted GADT with a cast.
 
@@ -129,6 +132,10 @@ Nine Nat values form a named `Board` product and one Nat is the turn. Definition
 implement line classification, eight winning projections, tie detection, fixed-width
 rendering, legal and occupied moves, invalid input, turn changes, and replies.
 The repeated board uses are visibly enabled by `copy`.
+The fixed winner/full scans remain direct because a fold result is boxed and the
+game must retain its unboxed state for rendering and the next turn. Current
+placement rejects that live context rather than inserting open promotion or a
+game-specific escape hatch.
 
 Changing source strings changes denotation, and all win/quit/invalid/tie golden
 transcripts pass through both `UMorph` and `Morph`. The removed frontend no
@@ -139,8 +146,8 @@ declaration.
 
 The Agda core proves adequacy and graded laws. The Agda direct relation proves
 erasure and semantic preservation for successful surface-to-core elaboration.
-`T3.Compiler.ClosedRecursion` constructs closed and affine-controller iterate,
-fold, and while core terms from directly compiled components and proves exact
+`T3.Compiler.ClosedRecursion` constructs closed and affine-controller map,
+iterate, fold, and while core terms from directly compiled components and proves exact
 erasure plus value preservation via `ε-factor`. Open fuel/list controllers stay
 at orchestration level while only empty-context seeds are promoted. The module
 also covers pairwise `MergeS` of independent boxed closed results, which
@@ -168,7 +175,7 @@ The implemented source is intentionally small: modules currently form one
 unqualified namespace with sibling-first, packaged-stdlib fallback, and there is
 no polymorphism, general recursion, higher-order values, arbitrary records,
 general append, or general multi-level modal placement. Independent closed
-whole-entry loops and reusable first-order helpers with affine runtime fuel/list
+whole-entry loops and reusable first-order map/fold/loop helpers with affine runtime fuel/list
 controllers are accepted. Seeds remain closed; live unboxed context after a
 loop, dependent/nested recursion, and captured loop bodies are rejected. Named
 product aliases and tuple patterns provide record-like finite state. Enums are nullary

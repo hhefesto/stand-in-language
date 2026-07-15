@@ -61,6 +61,13 @@ module Interp (R : CostAlgebra) where
   open CostAlgebra R
 
   private
+    mapG : {A B : Set} → (List B → ℳ) → List A → (A → ℳ × B) → ℳ × List B
+    mapG base []       f = (base [] , [])
+    mapG base (x ∷ xs) f =
+      let (m , y)  = f x
+          (r , ys) = mapG base xs f
+      in (chargeStep ⋄ (m ⋄ r) , y ∷ ys)
+
     iterG : {A : Set} → (A → ℳ) → ℕ → (A → ℳ × A) → A → ℳ × A
     iterG base zero    f a = (base a , a)
     iterG base (suc n) f a =
@@ -144,6 +151,7 @@ module Interp (R : CostAlgebra) where
   ⟦ boxS f ⟧G a = ⟦ f ⟧G a
   ⟦ boxValS f ⟧G a = ⟦ f ⟧G a
   ⟦ mergeS {A} {B} ⟧G p = (chargePrim (! A ⊗ ! B) (! (A ⊗ B)) mergeT p p , p)
+  ⟦ mapS {A} {B} f ⟧G xs = mapG (chargeBase (! (listT B))) xs ⟦ f ⟧G
   ⟦ iterS {A} f ⟧G (n , a) = iterG (chargeBase (! A)) n ⟦ f ⟧G a
   ⟦ foldS {A} {B} f ⟧G (xs , b) = foldG (chargeBase (! B)) xs ⟦ f ⟧G b
   ⟦ whileS {A} t s ⟧G (n , a) = whileG A n ⟦ t ⟧G ⟦ s ⟧G a
@@ -151,6 +159,14 @@ module Interp (R : CostAlgebra) where
   -- Value coherence, proved once for every algebra: the graded semantics
   -- computes the specification's value.
   private
+    mapG-val : {A B : Set} (base : List B → ℳ) (xs : List A)
+               (fg : A → ℳ × B) (fv : A → B)
+             → (∀ x → proj₂ (fg x) ≡ fv x)
+             → proj₂ (mapG base xs fg) ≡ mapV fv xs
+    mapG-val base []       fg fv h = refl
+    mapG-val base (x ∷ xs) fg fv h =
+      cong₂ _∷_ (h x) (mapG-val base xs fg fv h)
+
     iterG-val : {A : Set} (base : A → ℳ) (n : ℕ)
                 (fg : A → ℳ × A) (fv : A → A)
               → (∀ x → proj₂ (fg x) ≡ fv x)
@@ -226,6 +242,7 @@ module Interp (R : CostAlgebra) where
   G-val (boxS f) a = G-val f a
   G-val (boxValS f) a = G-val f a
   G-val mergeS p = refl
+  G-val (mapS f) xs = mapG-val _ xs ⟦ f ⟧G ⟦ f ⟧V (G-val f)
   G-val (iterS f) (n , a) =
     iterG-val _ n ⟦ f ⟧G ⟦ f ⟧V (G-val f) a
   G-val (foldS f) (xs , b) =

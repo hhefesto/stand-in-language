@@ -23,6 +23,50 @@ open import T3.Surface.Sem
 open import T3.Place using (ε; ε-factor)
 open import T3.Compiler.Direct using (Direct; direct-erases)
 
+-- Order-preserving first-order map over an affine runtime list. The mapper is
+-- direct and the output lives one level deeper, like every recursive result.
+affineMapS : {X A B C : Ty}
+           → (X ⇨ listT A) → (A ⇨ B) → (listT B ⇨ C) → (X ⇨ ! C)
+affineMapS input body cont = boxS cont ∘S mapS body ∘S input
+
+affineMapU : {X A B C : Ty}
+           → (strip X ⇨U listᵤ (strip A))
+           → (strip A ⇨U strip B)
+           → (listᵤ (strip B) ⇨U strip C)
+           → (strip X ⇨U strip C)
+affineMapU input body cont = cont ∘U mapU body ∘U input
+
+affineMap-erases
+  : {X A B C : Ty}
+    {inputU : strip X ⇨U listᵤ (strip A)}
+    {bodyU : strip A ⇨U strip B}
+    {contU : listᵤ (strip B) ⇨U strip C}
+    {inputS : X ⇨ listT A} {bodyS : A ⇨ B} {contS : listT B ⇨ C}
+  → Direct inputU inputS → Direct bodyU bodyS → Direct contU contS
+  → ε (affineMapS {X} {A} {B} {C} inputS bodyS contS)
+    ≡ affineMapU {X} {A} {B} {C} inputU bodyU contU
+affineMap-erases {X} {A} {B} {C} dinput dbody dcont
+  rewrite direct-erases {A = X} {B = listT A} dinput
+        | direct-erases {A = A} {B = B} dbody
+        | direct-erases {A = listT B} {B = C} dcont = refl
+
+affineMap-factor
+  : {X A B C : Ty}
+    {inputU : strip X ⇨U listᵤ (strip A)}
+    {bodyU : strip A ⇨U strip B}
+    {contU : listᵤ (strip B) ⇨U strip C}
+    {inputS : X ⇨ listT A} {bodyS : A ⇨ B} {contS : listT B ⇨ C}
+  → (dinput : Direct inputU inputS) (dbody : Direct bodyU bodyS)
+  → (dcont : Direct contU contS) (x : ⟦ X ⟧T)
+  → stripV (! C) (⟦ affineMapS {X} {A} {B} {C} inputS bodyS contS ⟧V x)
+    ≡ ⟦ affineMapU {X} {A} {B} {C} inputU bodyU contU ⟧VS
+        (stripV X x)
+affineMap-factor {X} {A} {B} {C} {inputS = inputS} {bodyS} {contS}
+                 dinput dbody dcont x =
+  trans (ε-factor (affineMapS {X} {A} {B} {C} inputS bodyS contS) x)
+    (cong (λ h → ⟦ h ⟧VS (stripV X x))
+      (affineMap-erases {X} {A} {B} {C} dinput dbody dcont))
+
 -- An affine controller may remain at orchestration level while the recursive
 -- seed is promoted only from the empty context.
 affineIterS : {X A C : Ty}

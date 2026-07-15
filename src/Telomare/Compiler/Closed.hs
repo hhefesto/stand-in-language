@@ -9,10 +9,12 @@
 -- by the direct compiler before the modal structure is assembled.
 module Telomare.Compiler.Closed
   ( closedValue
+  , affineMapValueFrom
   , affineIterValueFrom
   , affineFoldValueFrom
   , affineWhileValueFrom
   , closedIterValue
+  , closedMapValue
   , closedIterValueFrom
   , closedFoldValue
   , closedWhileValue
@@ -36,6 +38,16 @@ closedValue
   :: UMorph 'UUnit a
   -> Either DirectError (Morph 'Unit ('Bang (Lift a)))
 closedValue value = BoxValS <$> compileDirect value
+
+-- | Mapping an affine runtime list with a directly compiled body.
+affineMapValueFrom
+  :: UMorph x ('UList a)
+  -> UMorph a b
+  -> Either DirectError (Morph (Lift x) ('Bang ('ListT (Lift b))))
+affineMapValueFrom input body = do
+  inputCore <- compileDirect input
+  bodyCore <- compileDirect body
+  pure (MapS bodyCore :.: inputCore)
 
 -- | Iteration with an affine runtime controller and a closed seed.
 affineIterValueFrom
@@ -76,6 +88,13 @@ affineWhileValueFrom stateTy limit seed test step = do
   stepCore <- compileDirect step
   pure (WhileS (liftSTy stateTy) testCore stepCore
     :.: (limitCore :***: seedCore) :.: RunitS)
+
+-- | Closed-input specialization of 'affineMapValueFrom'.
+closedMapValue
+  :: UMorph 'UUnit ('UList a)
+  -> UMorph a b
+  -> Either DirectError (Morph 'Unit ('Bang ('ListT (Lift b))))
+closedMapValue = affineMapValueFrom
 
 -- | The loop portion of @closedIterS@, before its final continuation.
 closedIterValue

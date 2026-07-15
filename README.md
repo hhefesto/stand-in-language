@@ -48,8 +48,8 @@ String escapes are Haskell-style. Module files begin with a header; imports
 precede declarations. Definitions are first-order, monomorphic, and take exactly
 one argument. They may refer to definitions or type aliases declared later.
 Definition bodies are compiled in dependency order; dependency cycles are
-rejected. A restricted bounded iteration is the only source recursion currently
-accepted.
+rejected. Source recursion is restricted to first-order, manifestly bounded map,
+iteration, fold, and while operations.
 
 ```text
 program   ::= ("module" ID ";")? ("import" ID ";")* declaration*
@@ -64,12 +64,14 @@ atom      ::= "Unit" | "Nat" | "Text" | ID
            |  "List" atom | "Reply" atom | "(" type ")"
 
 expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
+           |  "[]" | "cons" expr "onto" expr
            |  "(" expr "," expr ("," expr)* ")"
            |  ID "(" expr ")"
            |  "let" pattern ":" type "=" expr "in" expr
            |  "copy" expr
            |  "suc" expr
            |  "add" expr
+           |  "map" expr "with" ID
            |  "iterate" expr "from" expr "with" ID
            |  "fold" expr "from" expr "with" ID
            |  "while" expr "from" expr "testing" ID "stepping" ID
@@ -101,6 +103,7 @@ Closed recursion is accepted as a prefix of whole-entry bindings:
 ```text
 def init(u: Unit): Reply State =
   let i: T = iterate N from closedSeed with iterStep in
+  let m: List B = map closedList with mapper in
   let f: A = fold closedList from closedAccumulator with foldStep in
   let w: W = while N from closedSeed testing test stepping whileStep in
   closedResultUsingOnlyIAndFAndW;
@@ -108,8 +111,9 @@ def init(u: Unit): Reply State =
 
 Any nonempty subset and order of these bindings is allowed for `init` or `step`,
 but the entry input must be weakened. Every bound and input expression is closed.
-The bound is a `Nat` expression, while iteration and while steps are directly compilable
-non-recursive `T -> T` definitions. A fold step has type
+The bound is a `Nat` expression, while map/iteration/while steps are directly
+compilable non-recursive named definitions. A mapper has type `A -> B`; map
+preserves ordinary list order. A fold step has type
 `Accumulator * Element -> Accumulator`; the closed input has type `List Element`.
 The current useful list literal is `Text`, or `List Nat`, so
 `fold "ABC" from 0 with natAdd` is representative. A while test has type
@@ -121,6 +125,8 @@ remains live after the loop:
 
 ```text
 def repeat(n: Nat): Nat = iterate n from 0 with increment;
+def mapIncrement(values: List Nat): List Nat =
+  map values with increment;
 def listLength(values: List Nat): Nat =
   fold values from 0 with countListElement;
 ```
@@ -132,12 +138,12 @@ post-loop continuation runs under `BoxS`. Open seeds and attempts to combine a
 boxed result with a surviving unboxed value are rejected; nested recursion and
 general multi-level placement remain unavailable.
 
-Compilation emits `BoxValS` for every seed, actual `IterS`, `FoldS`, or `WhileS`
+Compilation emits actual `MapS`, `IterS`, `FoldS`, or `WhileS`
 nodes, combines independent boxed results with `MergeS`, and applies one `BoxS`
 to the closed final continuation. It never unboxes a loop result. Captured
-inputs/seeds, captured entry arguments, nested recursion, recursion in helpers,
-and recursive definition cycles are rejected rather than promoted from an open
-context.
+inputs/seeds, captured entry arguments, nested recursion, recursive
+mapper/step/test bodies, and definition cycles are rejected rather than promoted
+from an open context.
 
 Compiled entries carry an existential decorated core result, its `STy`, and an
 explicit proof that `Strip` equals the source result type. The runner converts
@@ -154,7 +160,7 @@ core is not advertised as cartesian, closed, or a comonad.
 `Telomare.Compiler.Closed` is the shared typed implementation of the formulas in
 `T3.Compiler.ClosedRecursion`. It directly compiles each closed seed, fold input,
 step, test, and continuation, then constructs the real `BoxValS`, `IterS`,
-`FoldS`, `WhileS`, `MergeS`, and `BoxS` nodes. It does not route recursive
+`MapS`, `FoldS`, `WhileS`, `MergeS`, and `BoxS` nodes. It does not route recursive
 `UMorph` through `compileDirect`, promote an open context, or insert dereliction.
 Its affine-controller variants accept an open fuel or list morphism while still
 requiring a closed seed. `Telomare.Tel2` supplies the checked components.
@@ -206,10 +212,11 @@ structural morphisms, so `compileDirect` reaches `DupNatS`; it does not invoke
 general `UDup` or implicit host copying. Failed literal matches reconstruct the
 consumed value and pass it to the next arm.
 
-`stdlib/Prelude.tel2` is an ordinary packaged non-recursive importable module, not
+`stdlib/Prelude.tel2` is an ordinary packaged importable module, not
 compiler policy. It defines finite `Bool`, total boolean combinators, Bool/Nat
 conversions and predicates, primitive-backed Nat addition, successor, doubling,
-and small application helpers. `stdlib/LegacyPrelude.tel2` exposes only
+reusable `listLength`/`listSum` folds, and the order-preserving `mapIncrement`
+specialization. `stdlib/LegacyPrelude.tel2` exposes only
 six honest monomorphic/modernized historical names. The complete 50-binding
 historical inventory and rationale is `design/PRELUDE_MIGRATION.md`.
 
@@ -218,6 +225,9 @@ historical inventory and rationale is `design/PRELUDE_MIGRATION.md`.
 Move selection, occupancy, eight line checks,
 tie detection, turn changes, rendering, invalid input, and termination are all
 named `.tel2` definitions. The compiler has no corresponding built-ins.
+The fixed product scans remain direct: replacing them with a recursive fold
+would require retaining an unboxed state copy after the boxed fold result, which
+the current placement boundary intentionally rejects.
 
 `test/programs/examples.tel2` imports both Prelude modules and independently runs
 closed iteration, text folding, and bounded while. It explicitly copies the
@@ -234,7 +244,7 @@ and preserves value semantics. `T3.Categorical.Vocabulary` separates operation
 capabilities from law records; `T3.Categorical.Interpretation` bundles the raw
 syntaxes without quotient claims and proves category laws only under explicit
 value-extensional hom equality. `T3.Compiler.ClosedRecursion` defines the closed
-`BoxValS`/`IterS`/`FoldS`/`WhileS`/`BoxS` translations from direct-compiled
+`BoxValS`/`MapS`/`IterS`/`FoldS`/`WhileS`/`BoxS` translations from direct-compiled
 components, proves that each erases to its corresponding surface composite, and
 derives value preservation through `ε-factor`. It also proves the erasure and
 value theorem for one `MergeS` combining two independent boxed results; repeated
@@ -249,8 +259,9 @@ The closed-recursion theorem assumes direct compilation evidence for every
 seed, input, body/test, and continuation; it does not claim that Megaparsec or
 the Haskell validator produces that evidence. Tests cover parser, type, affine and
 copy errors, forward references, definition and import cycles, missing modules,
-Prelude dependency, Bool helpers, reusable runtime-list `listLength`, exact primitive addition, accepted
-`IterS`/`FoldS`/`WhileS` behavior, exact modal shape, depth and work,
+Prelude dependency, Bool helpers, reusable runtime-list map/fold specializations,
+exact primitive addition, accepted `MapS`/`IterS`/`FoldS`/`WhileS` behavior,
+exact modal shape, depth and work,
 linear/Tel2 closed-loop value and erasure parity, actual `AddS` emission,
 illegal captures/placement, source mutation, old grammar rejection, all game
 transcripts, and runtime `UMorph`/core parity. These are regression evidence, not
@@ -267,8 +278,9 @@ a parser proof.
   recursive helper chains, and general multi-level placement are not implemented.
 - Nullary finite enums only; records are represented by named product aliases
   and tuple patterns.
-- Products, sums, Nat, Text, and List types are present, but this syntax slice
-  has no general list recursion or arbitrary text append.
+- Products, sums, Nat, Text, and List types are present, with affine `[]`/`cons`,
+  first-order map and left fold, but no general structural recursion or arbitrary
+  text append.
 - Enum cases check constructor coverage, but nominal enum separation is not yet
   retained after enums erase to Nat during elaboration.
 - General sum/list copying and modal placement remain unavailable.
@@ -281,7 +293,7 @@ a parser proof.
 
 ## Core transport
 
-`Telomare.Transport` defines schema version 1, a backend-neutral first-order
+`Telomare.Transport` defines schema version 2, a backend-neutral first-order
 tree with an explicit `TyCode` (including `Bang`) and one tag per current
 `Morph` constructor. `exportMorph` requires endpoint singletons because a bare
 polymorphic GADT value does not retain them; `CoreEntry` and `Program` already
@@ -290,7 +302,7 @@ transport contains the state type and compiled initial/step entries, not the
 surface evaluator terms.
 
 The stable wire form is the explicit S-expression produced by
-`renderArtifact`, for example `(morph 1 nat nat (suc))`; derived `Show` is not a
+`renderArtifact`, for example `(morph 2 nat nat (suc))`; derived `Show` is not a
 wire protocol. Parsed or externally constructed values are untrusted until
 `validateArtifact` succeeds. Validation independently infers and unifies the
 untyped tree's constructor types, including polymorphic structural nodes,

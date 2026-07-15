@@ -34,26 +34,26 @@ name a current compatibility definition.
 | `c2d` | obsolete | Primitive `Nat` replaces the Church/data conversion boundary. |
 | `dPlus` | modernized | `LegacyPrelude.dPlus : Nat * Nat -> Nat`, implemented by `add`/`AddS`. |
 | `plus` | obsolete | Church-numeral composition is higher-order; use `natAdd`. |
-| `dTimes` | deferred | Needs multiplication primitive or sound dynamic iteration/placement. |
+| `dTimes` | deferred | Runtime-bounded iteration exists, but multiplication still needs an affine state design that retains the multiplicand without promoting an open seed. |
 | `times` | obsolete | Church multiplication is higher-order. |
 | `dPow` | deferred | Needs multiplication plus sound dynamic/nested iteration. |
 | `pow` | obsolete | Church exponentiation is higher-order. |
-| `dMinus` | deferred | Total truncated subtraction needs dynamic iteration or a primitive core morphism. |
+| `dMinus` | deferred | Runtime-bounded iteration exists, but truncated subtraction still needs predecessor/state support without promoting an open seed. |
 | `minus` | obsolete | Church-facing subtraction wrapper has no modern interface. |
-| `range` | deferred | Requires source list construction and dynamic recursion. |
-| `map` | impossible | The historical general combinator requires higher-order values and polymorphism. Specialized maps may be added separately. |
-| `foldr` | deferred | Closed whole-entry `FoldS` is available, but the historical reusable higher-order polymorphic API is not. |
-| `foldl` | deferred | Requires a separately checked fold orientation and a reusable first-order interface. |
+| `range` | deferred | Source list construction and runtime bounds exist, but range still needs affine state that carries an open endpoint/index through iteration. |
+| `map` | specialized | Source `map input with mapper` is reusable, first-order, monomorphic, order-preserving, and backed by `MapS`; `Prelude.mapIncrement : List Nat -> List Nat` is concrete. The historical function-valued polymorphic interface remains impossible. |
+| `foldr` | specialized | `listLength` is an orientation-insensitive specialization. The current `FoldS` is a reusable named-step left fold, so historical right-associative higher-order `foldr` is not exposed. |
+| `foldl` | specialized | Source `fold input from seed with step` is a reusable first-order left fold; `Prelude.listLength` and `Prelude.listSum` are concrete `List Nat` instances. Runtime function arguments and polymorphism remain unavailable. |
 | `zipWith` | deferred | Requires synchronized list recursion and a specialized first-order operator interface. |
 | `filter` | deferred | Requires list fold/recursion and an explicit first-order predicate interface. |
 | `dEqual` | deferred | General Nat equality needs dynamic structural recursion or a primitive. |
 | `dDiv` | deferred | Requires comparison, subtraction, dynamic recursion, and an explicit total zero-divisor result. |
 | `listLength` | modernized | `Prelude.listLength : List Nat -> Nat`; reusable first-order `FoldS` placement over an affine runtime list. |
 | `listEqual` | deferred | Requires list recursion and Nat equality. |
-| `listPlus` | deferred | Needs a reusable fold over an open list argument; closed entry folding is insufficient. |
+| `listPlus` | deferred | Reusable folding exists, but order-preserving append needs a right fold or additional affine list-state support for the open second list. |
 | `flip` | impossible | General function arguments and returned functions are outside first-order `.tel2`. |
 | `con` | impossible | General function composition is higher-order. |
-| `concat` | deferred | Needs nested-list syntax and reusable/dependent fold placement beyond independent closed entry folding. |
+| `concat` | deferred | Needs nested-list syntax plus order-preserving append; sequencing dependent recursive results remains outside current placement. |
 | `drop` | deferred | Needs modern Nat-bounded list recursion; the historical Church interface is obsolete. |
 | `take` | deferred | Needs modern Nat-bounded list recursion. |
 | `factorial` | deferred | Requires range/fold/multiplication and corresponding placement. |

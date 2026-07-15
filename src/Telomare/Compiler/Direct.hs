@@ -20,7 +20,7 @@ module Telomare.Compiler.Direct
 import Telomare.Core
 import Telomare.Surface
 
-data RecursionKind = Iteration | Fold | While
+data RecursionKind = Mapping | Iteration | Fold | While
   deriving (Eq, Show)
 
 data DirectError
@@ -72,6 +72,7 @@ compileDirect USuc           = Right SucS
 compileDirect UAdd           = Right AddS
 compileDirect (UConst k)     = Right (ConstS k)
 compileDirect (UGuard sa t)  = GuardS (liftSTy sa) <$> compileDirect t
+compileDirect (UMap _)       = Left (RecursionRequiresPlacement Mapping)
 compileDirect (UIter _)      = Left (RecursionRequiresPlacement Iteration)
 compileDirect (UFold _)      = Left (RecursionRequiresPlacement Fold)
 compileDirect (UWhile _ _ _) = Left (RecursionRequiresPlacement While)
@@ -106,6 +107,7 @@ eraseMorph (DupS sa)      = UDup (stripSTy sa)
 eraseMorph (BoxS f)       = eraseMorph f
 eraseMorph (BoxValS f)    = eraseMorph f
 eraseMorph MergeS         = UId
+eraseMorph (MapS f)       = UMap (eraseMorph f)
 eraseMorph (IterS f)      = UIter (eraseMorph f)
 eraseMorph (FoldS f)      = UFold (eraseMorph f)
 eraseMorph (WhileS sa t s) =

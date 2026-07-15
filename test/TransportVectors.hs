@@ -43,6 +43,7 @@ constructorNodes =
   , exportMorph (SBang SNat) (SBang SNat) (BoxS SucS)
   , exportMorph SUnit (SBang SNat) (BoxValS (ConstS 1))
   , exportMorph (SProd (SBang SNat) (SBang SUnit)) (SBang (SProd SNat SUnit)) MergeS
+  , exportMorph (SList SNat) (SBang (SList SNat)) (MapS SucS)
   , exportMorph (SProd SNat (SBang SNat)) (SBang SNat) (IterS SucS)
   , exportMorph (SProd (SList SNat) (SBang SNat)) (SBang SNat) (FoldS AddS)
   , exportMorph (SProd SNat (SBang SNat)) (SBang SNat) allConstructors
@@ -52,15 +53,16 @@ transportVectors :: [(String, Bool)]
 transportVectors =
   [ ("transport-constructor-coverage", all (isRight . validateArtifact) constructorNodes)
   , ("transport-round-trip", all roundTrips constructorNodes)
-  , ("transport-version-rejected", isLeft (validateArtifact (Artifact 2 TNat TNat NId)))
-  , ("transport-top-endpoint-rejected", isLeft (validateArtifact (Artifact 1 TUnit TNat NSuc)))
-  , ("transport-compose-intermediate-rejected", isLeft (validateArtifact (Artifact 1 TNat TNat (NCompose NSuc NNil))))
-  , ("transport-box-val-unit-rejected", isLeft (validateArtifact (Artifact 1 TUnit (TBang TNat) (NBoxVal NSuc))))
-  , ("transport-dup-bang-rejected", isLeft (validateArtifact (Artifact 1 TNat (TProd TNat TNat) (NDup TNat))))
-  , ("transport-merge-shape-rejected", isLeft (validateArtifact (Artifact 1 (TProd TNat TNat) (TBang (TProd TNat TNat)) NMerge)))
-  , ("transport-iter-body-rejected", isLeft (validateArtifact (Artifact 1 (TProd TNat (TBang TNat)) (TBang TNat) (NIter NNatOut))))
-  , ("transport-fold-body-rejected", isLeft (validateArtifact (Artifact 1 (TProd (TList TNat) (TBang TNat)) (TBang TNat) (NFold NSuc))))
-  , ("transport-while-body-rejected", isLeft (validateArtifact (Artifact 1 (TProd TNat (TBang TNat)) (TBang TNat) (NWhile TNat NSuc NSuc))))
+  , ("transport-version-rejected", isLeft (validateArtifact (Artifact (transportVersion + 1) TNat TNat NId)))
+  , ("transport-top-endpoint-rejected", isLeft (validateArtifact (Artifact transportVersion TUnit TNat NSuc)))
+  , ("transport-compose-intermediate-rejected", isLeft (validateArtifact (Artifact transportVersion TNat TNat (NCompose NSuc NNil))))
+  , ("transport-box-val-unit-rejected", isLeft (validateArtifact (Artifact transportVersion TUnit (TBang TNat) (NBoxVal NSuc))))
+  , ("transport-dup-bang-rejected", isLeft (validateArtifact (Artifact transportVersion TNat (TProd TNat TNat) (NDup TNat))))
+  , ("transport-merge-shape-rejected", isLeft (validateArtifact (Artifact transportVersion (TProd TNat TNat) (TBang (TProd TNat TNat)) NMerge)))
+  , ("transport-map-shape-rejected", isLeft (validateArtifact (Artifact transportVersion (TList TNat) (TList TNat) (NMap NSuc))))
+  , ("transport-iter-body-rejected", isLeft (validateArtifact (Artifact transportVersion (TProd TNat (TBang TNat)) (TBang TNat) (NIter NNatOut))))
+  , ("transport-fold-body-rejected", isLeft (validateArtifact (Artifact transportVersion (TProd (TList TNat) (TBang TNat)) (TBang TNat) (NFold NSuc))))
+  , ("transport-while-body-rejected", isLeft (validateArtifact (Artifact transportVersion (TProd TNat (TBang TNat)) (TBang TNat) (NWhile TNat NSuc NSuc))))
   , ("transport-parser-rejects-show", isLeft (parseArtifact (show (head constructorNodes))))
   ]
   where

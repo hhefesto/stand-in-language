@@ -95,6 +95,26 @@ precise dupS        a       extra = refl
 precise (boxS f)    a extra = precise f a extra
 precise (boxValS f) a extra = precise f a extra
 precise mergeS      p       extra = refl
+precise (mapS f)    xs extra = map-prec xs extra
+  where
+    map-prec : ∀ xs extra →
+      mapT xs ⟦ f ⟧K (proj₁ (⟦ mapS f ⟧C xs) + extra)
+      ≡ just (proj₂ (⟦ mapS f ⟧C xs) , extra)
+    map-prec []       extra = refl
+    map-prec (x ∷ xs) extra =
+      let cf  = proj₁ (⟦ f ⟧C x)
+          vf  = proj₂ (⟦ f ⟧C x)
+          cr  = proj₁ (⟦ mapS f ⟧C xs)
+          pf  = precise f x (cr + extra)
+          pf' = subst (λ tel → ⟦ f ⟧K x tel ≡ just (vf , cr + extra))
+                      (sym (+-assoc cf cr extra)) pf
+          ih  = map-prec xs extra
+      in trans
+           (cong (λ mx → mx >>= λ { (y , t') →
+             mapT xs ⟦ f ⟧K t' >>= λ { (ys , t'') →
+               just (y ∷ ys , t'') } }) pf')
+           (cong (λ mx → mx >>= λ { (ys , t'') →
+             just (vf ∷ ys , t'') }) ih)
 precise (iterS f)   (n , a) extra = iter-prec n a extra
   where
     iter-prec : ∀ n a extra →

@@ -57,6 +57,13 @@ foldT : {A B : Set} → List A → ((B × A) →K B) → B →K B
 foldT []       _ b = return-tel b
 foldT (x ∷ xs) f b = step-tel (bind-tel (f (b , x)) (foldT xs f))
 
+mapT : {A B : Set} → List A → (A →K B) → TelM (List B)
+mapT []       _ = return-tel []
+mapT (x ∷ xs) f = step-tel
+  (bind-tel (f x) λ y →
+   bind-tel (mapT xs f) λ ys →
+   return-tel (y ∷ ys))
+
 whileGoT : {A : Set} → ℕ → (A →K (⊤ ⊎ ⊤)) → (A →K A) → A → ⊤ ⊎ ⊤ → TelM A
 whileT   : {A : Set} → ℕ → (A →K (⊤ ⊎ ⊤)) → (A →K A) → A →K A
 
@@ -101,6 +108,7 @@ whileT (suc n) t s a = bind-tel (t a) (whileGoT n t s a)
 ⟦ boxS f     ⟧K a = ⟦ f ⟧K a
 ⟦ boxValS f  ⟧K a = ⟦ f ⟧K a
 ⟦ mergeS     ⟧K p = return-tel p
+⟦ mapS f     ⟧K xs = mapT xs ⟦ f ⟧K
 ⟦ iterS f    ⟧K (n , a) = iterT n ⟦ f ⟧K a
 ⟦ foldS f    ⟧K (xs , b) = foldT xs ⟦ f ⟧K b
 ⟦ whileS t s ⟧K (n , a) = whileT n ⟦ t ⟧K ⟦ s ⟧K a

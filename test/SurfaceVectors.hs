@@ -120,6 +120,8 @@ surfaceVectors =
       SUNat (SUSum SUNat SUUnit) positiveU 0)
   , ("surface-reject-general-dup",
       directError (UDup (SUProd SUNat SUNat)) == Just GeneralDuplication)
+  , ("surface-reject-map",
+      directError (UMap USuc) == Just (RecursionRequiresPlacement Mapping))
   , ("surface-reject-iter",
       directError (UIter USuc) == Just (RecursionRequiresPlacement Iteration))
   , ("surface-reject-fold",
@@ -128,6 +130,7 @@ surfaceVectors =
       directError (UWhile SUNat isZeroU predU)
         == Just (RecursionRequiresPlacement While))
   , ("surface-iter-semantics", evalU (UIter USuc) (3, 2) == 5)
+  , ("surface-map-semantics", evalU (UMap USuc) [1, 2, 3] == [2, 3, 4])
   , ("surface-fold-semantics", evalU (UFold UAdd) ([1, 2, 3], 0) == 6)
   , ("surface-while-semantics",
       evalU (UWhile SUNat isZeroU predU) (5, 3) == 0)
