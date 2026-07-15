@@ -8,6 +8,7 @@ import Telomare.Compiler.Direct (eraseMorph, erasureMatches)
 import Telomare.Machine
 import Telomare.Surface (UShape (..), shapeU)
 import Telomare.Tel2
+import Telomare.Transport
 
 baseDir :: IO FilePath
 baseDir = do
@@ -59,6 +60,18 @@ tel2Vectors = do
           explicit = accepts "tel2 accepts explicit copy" copySource
           namedData = accepts "tel2 accepts named finite data and case" dataSource
           forward = accepts "tel2 compiles forward definition references" forwardReferenceSource
+          closedBounds = accepts "tel2 accepts closed Nat expressions as recursion bounds"
+            closedBoundExpressionSource
+          reusableRecursion =
+            [ accepts "tel2 compiles reusable iteration helper" helperIterationSource
+            , accepts "tel2 compiles reusable fold helper" helperFoldSource
+            , acceptsBehavior "tel2 runtime-bound iteration preserves surface behavior"
+                runtimeIterationSource ["go"] "two\n"
+            , acceptsBehavior "tel2 runtime-list fold preserves surface behavior"
+                runtimeFoldSource ["ABC"] "sum\n"
+            , acceptsBehavior "tel2 runtime-bound while preserves surface behavior"
+                runtimeWhileSource ["go"] "three\n"
+            ]
           recursion = recursionVectors exampleResult
           addition = acceptsBehavior "tel2 primitive addition is exact"
             additionSource ["check"] "eleven\n"
@@ -67,22 +80,23 @@ tel2Vectors = do
               Left _  -> True
               Right _ -> False)
           illegalRecursion =
-            [ rejectsWith "tel2 rejects captured iteration seed" capturedSeedSource "seed cannot capture"
+             [ rejectsWith "tel2 rejects captured iteration seed" capturedSeedSource "seed cannot capture"
+            , rejectsWith "tel2 rejects captured iteration bound" capturedBoundSource "bound cannot capture"
             , rejectsWith "tel2 rejects captured iteration continuation" capturedContinuationSource "continuation cannot capture"
-            , rejectsWith "tel2 rejects recursion requiring general placement" helperIterationSource "whole entry-level"
             , rejectsWith "tel2 rejects captured fold input" capturedFoldInputSource "fold input cannot capture"
             , rejectsWith "tel2 rejects captured fold seed" capturedFoldSeedSource "fold seed cannot capture"
             , rejectsWith "tel2 rejects captured while seed" capturedWhileSeedSource "while seed cannot capture"
-            , rejectsWith "tel2 rejects nested closed recursion" nestedRecursionSource "whole entry-level"
-            , rejectsWith "tel2 rejects helper fold requiring placement" helperFoldSource "whole entry-level"
+            , rejectsWith "tel2 rejects nested closed recursion" nestedRecursionSource "cannot capture or contain recursion"
+            , rejectsWith "tel2 rejects open recursive seed" openSeedSource "must be closed; open promotion is unavailable"
+            , rejectsWith "tel2 rejects live context after recursion" residualContextSource "cannot remain live"
             ]
           needsPrelude = ("tictactoe genuinely depends on imported Prelude",
             case compileTel2 (anonymous source) of Left _ -> True; Right _ -> False)
           mutation = sourceMutation (anonymous prelude <> anonymous source)
-      pure (compiled : explicit : namedData : forward : addition : packagedPrelude
+      pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : recursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -98,17 +112,67 @@ recursionVectors (Right program) =
   , ("tel2 recursion emits FoldS", programHasFold program)
   , ("tel2 recursion emits WhileS", programHasWhile program)
   , ("tel2 primitive addition emits AddS", programHasAdd program)
-  , ("tel2 recursion emits nonzero core depth", programDepth program > 0)
+  , ("tel2 closed recursion has exact core depth", programDepth program == 1)
+  , ("tel2 closed recursion has exact modal shape", modalShape program)
   , ("tel2 recursion has exact surface/core behavior",
       case runProgramScript program ["show"] of
         Right (output, spent) -> output ==
-          "IterS=5; FoldS=198; WhileS=3; AddS=15.\nAll recursive and arithmetic results are exact.\n"
+          exampleIntroduction <> "Verified: all four typed-core results are exact.\n"
           && spent >= 5
         Left _ -> False)
   , ("tel2 closed recursion has exact formal work",
       runProgramScript program [] == Right
-        ("IterS=5; FoldS=198; WhileS=3; AddS=15.\n", 21))
+        (exampleIntroduction, 21))
   ]
+
+modalShape :: Program -> Bool
+modalShape program =
+  count isBoxVal == 4
+    && count isIter == 1
+    && count isFold == 1
+    && count isWhile == 1
+    && count isMerge == 3
+    && count isBox == 1
+    && count isDup == 0
+  where
+    initial = artifactNode (programArtifactInitial (exportProgram program))
+    count predicate = length (filter predicate (nodeTree initial))
+    isBoxVal NBoxVal {} = True
+    isBoxVal _          = False
+    isIter NIter {} = True
+    isIter _        = False
+    isFold NFold {} = True
+    isFold _        = False
+    isWhile NWhile {} = True
+    isWhile _         = False
+    isMerge NMerge = True
+    isMerge _      = False
+    isBox NBox {} = True
+    isBox _       = False
+    isDup NDup {} = True
+    isDup _       = False
+
+nodeTree :: Node -> [Node]
+nodeTree node = node : case node of
+  NCompose left right -> nodeTree left <> nodeTree right
+  NProduct left right -> nodeTree left <> nodeTree right
+  NCase left right    -> nodeTree left <> nodeTree right
+  NGuard _ child      -> nodeTree child
+  NBox child          -> nodeTree child
+  NBoxVal child       -> nodeTree child
+  NIter child         -> nodeTree child
+  NFold child         -> nodeTree child
+  NWhile _ test step  -> nodeTree test <> nodeTree step
+  _                   -> []
+
+exampleIntroduction :: String
+exampleIntroduction =
+  "Telomare typed-core tour:\n"
+  <> "- iterate: increment 0 five times = 5\n"
+  <> "- fold: sum the code points in ABC = 198\n"
+  <> "- while: increment until 3, with fuel 10 = 3\n"
+  <> "- add: explicitly copy 5, then add 10 = 15\n"
+  <> "Enter anything to verify the stored results, or q to stop.\n"
 
 programHasIter :: Program -> Bool
 programHasIter = programHasShape isIter
@@ -297,6 +361,14 @@ capturedSeedSource = unlines
   , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
+capturedBoundSource :: String
+capturedBoundSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def init(u: Unit): Reply State = let n: Nat = iterate let z: Unit = u in 1 from 0 with increment in (\"\",right n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
 capturedContinuationSource :: String
 capturedContinuationSource = unlines
   [ "type State = Nat;"
@@ -309,8 +381,8 @@ helperIterationSource :: String
 helperIterationSource = unlines
   [ "type State = Nat;"
   , "def increment(n: Nat): Nat = suc n;"
-  , "def count(u: Unit): Nat = let n: Nat = iterate 2 from 0 with increment in n;"
-  , "def init(u: Unit): Reply State = (\"\",right count(u));"
+  , "def count(u: Unit): Reply State = let n: Nat = iterate 2 from 0 with increment in (\"\",right n);"
+  , "def init(u: Unit): Reply State = count(u);"
   , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
@@ -352,8 +424,8 @@ helperFoldSource :: String
 helperFoldSource = unlines
   [ "type State = Nat;"
   , "def sum(p: Nat * Nat): Nat = add p;"
-  , "def folded(u: Unit): Nat = let n: Nat = fold \"A\" from 0 with sum in n;"
-  , "def init(u: Unit): Reply State = (\"\",right folded(u));"
+  , "def folded(u: Unit): Reply State = let n: Nat = fold \"A\" from 0 with sum in (\"\",right n);"
+  , "def init(u: Unit): Reply State = folded(u);"
   , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
@@ -362,4 +434,58 @@ additionSource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = (\"\",right add (4,7));"
   , "def step(x: Text * State): Reply State = let (input,state): Text * State = x in matchNat state of { 11 -> (\"eleven\\n\",left ()); n -> (\"wrong\\n\",left ()) };"
+  ]
+
+closedBoundExpressionSource :: String
+closedBoundExpressionSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def init(u: Unit): Reply State = let n: Nat = iterate add (2,3) from 0 with increment in (\"\",right n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+runtimeIterationSource :: String
+runtimeIterationSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def repeat(n: Nat): Nat = iterate n from 0 with increment;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 2);"
+  , "def step(request: Text * State): Reply State = let (input,fuel): Text * State = request in let _: Text = input in let result: Nat = repeat(fuel) in matchNat result of { 2 -> (\"two\\n\",left ()); n -> (\"bad\\n\",left ()); };"
+  ]
+
+runtimeFoldSource :: String
+runtimeFoldSource = unlines
+  [ "type State = Unit;"
+  , "def sum(pair: Nat * Nat): Nat = add pair;"
+  , "def sumText(input: Text): Nat = fold input from 0 with sum;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
+  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Nat = sumText(input) in matchNat result of { 198 -> (\"sum\\n\",left ()); n -> (\"bad\\n\",left ()); };"
+  ]
+
+runtimeWhileSource :: String
+runtimeWhileSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def reachedThree(n: Nat): Unit + Unit = matchNat n of { 3 -> left (); n -> right (); };"
+  , "def capped(fuel: Nat): Nat = while fuel from 0 testing reachedThree stepping increment;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 10);"
+  , "def step(request: Text * State): Reply State = let (input,fuel): Text * State = request in let _: Text = input in let result: Nat = capped(fuel) in matchNat result of { 3 -> (\"three\\n\",left ()); n -> (\"bad\\n\",left ()); };"
+  ]
+
+openSeedSource :: String
+openSeedSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def bad(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let (fuel,seed): Nat * Nat = copy state in let result: Nat = iterate fuel from seed with increment in (\"\",right result);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = bad(request);"
+  ]
+
+residualContextSource :: String
+residualContextSource = unlines
+  [ "type State = Nat;"
+  , "def increment(n: Nat): Nat = suc n;"
+  , "def bad(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let (fuel,extra): Nat * Nat = copy state in let result: Nat = iterate fuel from 0 with increment in (\"\",right add (result,extra));"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = bad(request);"
   ]

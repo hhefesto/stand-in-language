@@ -15,6 +15,7 @@ module Everything where
 import T3.Core.Ty
 import T3.Core.Syntax
 import T3.Core.Copyable
+import T3.Categorical.Vocabulary
 import T3.Sem.Value
 import T3.Sem.Graded
 import T3.Sem.Exec
@@ -31,3 +32,4 @@ import T3.Source.Affine
 import T3.Abstract
 import T3.Examples.Budgets
 import T3.Sem.Length
+import T3.Categorical.Interpretation

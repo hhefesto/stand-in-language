@@ -48,7 +48,7 @@ name a current compatibility definition.
 | `filter` | deferred | Requires list fold/recursion and an explicit first-order predicate interface. |
 | `dEqual` | deferred | General Nat equality needs dynamic structural recursion or a primitive. |
 | `dDiv` | deferred | Requires comparison, subtraction, dynamic recursion, and an explicit total zero-divisor result. |
-| `listLength` | deferred | Expressible inside a closed entry fold, but not yet as a reusable helper over an open list argument. |
+| `listLength` | modernized | `Prelude.listLength : List Nat -> Nat`; reusable first-order `FoldS` placement over an affine runtime list. |
 | `listEqual` | deferred | Requires list recursion and Nat equality. |
 | `listPlus` | deferred | Needs a reusable fold over an open list argument; closed entry folding is insufficient. |
 | `flip` | impossible | General function arguments and returned functions are outside first-order `.tel2`. |

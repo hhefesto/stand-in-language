@@ -23,6 +23,167 @@ open import T3.Surface.Sem
 open import T3.Place using (ε; ε-factor)
 open import T3.Compiler.Direct using (Direct; direct-erases)
 
+-- An affine controller may remain at orchestration level while the recursive
+-- seed is promoted only from the empty context.
+affineIterS : {X A C : Ty}
+            → (X ⇨ nat) → (unit ⇨ A) → (A ⇨ A) → (A ⇨ C) → (X ⇨ ! C)
+affineIterS {X} {A} {C} count seed step cont =
+  boxS {A} {C} cont ∘S iterS {A} step
+    ∘S (count ⊗S boxValS {A} seed) ∘S runitS
+
+affineIterU : {X A C : Ty}
+            → (strip X ⇨U natᵤ)
+            → (unitᵤ ⇨U strip A)
+            → (strip A ⇨U strip A)
+            → (strip A ⇨U strip C)
+            → (strip X ⇨U strip C)
+affineIterU {X} {A} count seed step cont =
+  cont ∘U iterU {strip A} step
+    ∘U (count ⊗U seed) ∘U runitU
+
+affineIter-erases
+  : {X A C : Ty}
+    {countU : strip X ⇨U natᵤ}
+    {seedU : unitᵤ ⇨U strip A} {stepU : strip A ⇨U strip A}
+    {contU : strip A ⇨U strip C}
+    {countS : X ⇨ nat}
+    {seedS : unit ⇨ A} {stepS : A ⇨ A} {contS : A ⇨ C}
+  → Direct countU countS → Direct seedU seedS
+  → Direct stepU stepS → Direct contU contS
+  → ε (affineIterS {X} {A} {C} countS seedS stepS contS)
+    ≡ affineIterU {X} {A} {C} countU seedU stepU contU
+affineIter-erases {X} {A} {C} dcount dseed dstep dcont
+  rewrite direct-erases {A = X} {B = nat} dcount
+        | direct-erases {A = unit} {B = A} dseed
+        | direct-erases {A = A} {B = A} dstep
+        | direct-erases {A = A} {B = C} dcont = refl
+
+affineIter-factor
+  : {X A C : Ty}
+    {countU : strip X ⇨U natᵤ}
+    {seedU : unitᵤ ⇨U strip A} {stepU : strip A ⇨U strip A}
+    {contU : strip A ⇨U strip C}
+    {countS : X ⇨ nat}
+    {seedS : unit ⇨ A} {stepS : A ⇨ A} {contS : A ⇨ C}
+  → (dcount : Direct countU countS) (dseed : Direct seedU seedS)
+  → (dstep : Direct stepU stepS) (dcont : Direct contU contS)
+  → (x : ⟦ X ⟧T)
+  → stripV (! C) (⟦ affineIterS {X} {A} {C} countS seedS stepS contS ⟧V x)
+    ≡ ⟦ affineIterU {X} {A} {C} countU seedU stepU contU ⟧VS
+        (stripV X x)
+affineIter-factor {X} {A} {C} {countS = countS} {seedS} {stepS} {contS}
+                  dcount dseed dstep dcont x =
+  trans (ε-factor (affineIterS {X} {A} {C} countS seedS stepS contS) x)
+    (cong (λ h → ⟦ h ⟧VS (stripV X x))
+      (affineIter-erases {X} {A} {C} dcount dseed dstep dcont))
+
+affineFoldS : {X A B C : Ty}
+            → (X ⇨ listT A) → (unit ⇨ B)
+            → ((B ⊗ A) ⇨ B) → (B ⇨ C) → (X ⇨ ! C)
+affineFoldS {X} {A} {B} {C} input seed step cont =
+  boxS {B} {C} cont ∘S foldS {A} {B} step
+    ∘S (input ⊗S boxValS {B} seed) ∘S runitS
+
+affineFoldU : {X A B C : Ty}
+            → (strip X ⇨U listᵤ (strip A))
+            → (unitᵤ ⇨U strip B)
+            → ((strip B ⊗ᵤ strip A) ⇨U strip B)
+            → (strip B ⇨U strip C)
+            → (strip X ⇨U strip C)
+affineFoldU {X} {A} {B} input seed step cont =
+  cont ∘U foldU {strip A} {strip B} step
+    ∘U (input ⊗U seed) ∘U runitU
+
+affineFold-erases
+  : {X A B C : Ty}
+    {inputU : strip X ⇨U listᵤ (strip A)} {seedU : unitᵤ ⇨U strip B}
+    {stepU : (strip B ⊗ᵤ strip A) ⇨U strip B}
+    {contU : strip B ⇨U strip C}
+    {inputS : X ⇨ listT A} {seedS : unit ⇨ B}
+    {stepS : (B ⊗ A) ⇨ B} {contS : B ⇨ C}
+  → Direct inputU inputS → Direct seedU seedS
+  → Direct stepU stepS → Direct contU contS
+  → ε (affineFoldS {X} {A} {B} {C} inputS seedS stepS contS)
+    ≡ affineFoldU {X} {A} {B} {C} inputU seedU stepU contU
+affineFold-erases {X} {A} {B} {C} dinput dseed dstep dcont
+  rewrite direct-erases {A = X} {B = listT A} dinput
+        | direct-erases {A = unit} {B = B} dseed
+        | direct-erases {A = B ⊗ A} {B = B} dstep
+        | direct-erases {A = B} {B = C} dcont = refl
+
+affineFold-factor
+  : {X A B C : Ty}
+    {inputU : strip X ⇨U listᵤ (strip A)} {seedU : unitᵤ ⇨U strip B}
+    {stepU : (strip B ⊗ᵤ strip A) ⇨U strip B}
+    {contU : strip B ⇨U strip C}
+    {inputS : X ⇨ listT A} {seedS : unit ⇨ B}
+    {stepS : (B ⊗ A) ⇨ B} {contS : B ⇨ C}
+  → (dinput : Direct inputU inputS) (dseed : Direct seedU seedS)
+  → (dstep : Direct stepU stepS) (dcont : Direct contU contS)
+  → (x : ⟦ X ⟧T)
+  → stripV (! C) (⟦ affineFoldS {X} {A} {B} {C} inputS seedS stepS contS ⟧V x)
+    ≡ ⟦ affineFoldU {X} {A} {B} {C} inputU seedU stepU contU ⟧VS
+        (stripV X x)
+affineFold-factor {X} {A} {B} {C} {inputS = inputS} {seedS} {stepS} {contS}
+                  dinput dseed dstep dcont x =
+  trans (ε-factor (affineFoldS {X} {A} {B} {C} inputS seedS stepS contS) x)
+    (cong (λ h → ⟦ h ⟧VS (stripV X x))
+      (affineFold-erases {X} {A} {B} {C} dinput dseed dstep dcont))
+
+affineWhileS : {X A C : Ty}
+             → (X ⇨ nat) → (unit ⇨ A) → (A ⇨ (unit ⊕ unit))
+             → (A ⇨ A) → (A ⇨ C) → (X ⇨ ! C)
+affineWhileS {X} {A} {C} limit seed test step cont =
+  boxS {A} {C} cont ∘S whileS {A} test step
+    ∘S (limit ⊗S boxValS {A} seed) ∘S runitS
+
+affineWhileU : {X A C : Ty}
+             → (strip X ⇨U natᵤ) → (unitᵤ ⇨U strip A)
+             → (strip A ⇨U (unitᵤ ⊕ᵤ unitᵤ))
+             → (strip A ⇨U strip A) → (strip A ⇨U strip C)
+             → (strip X ⇨U strip C)
+affineWhileU {X} {A} limit seed test step cont =
+  cont ∘U whileU {strip A} test step
+    ∘U (limit ⊗U seed) ∘U runitU
+
+affineWhile-erases
+  : {X A C : Ty}
+    {limitU : strip X ⇨U natᵤ} {seedU : unitᵤ ⇨U strip A}
+    {testU : strip A ⇨U (unitᵤ ⊕ᵤ unitᵤ)}
+    {stepU : strip A ⇨U strip A} {contU : strip A ⇨U strip C}
+    {limitS : X ⇨ nat} {seedS : unit ⇨ A}
+    {testS : A ⇨ (unit ⊕ unit)} {stepS : A ⇨ A} {contS : A ⇨ C}
+  → Direct limitU limitS → Direct seedU seedS → Direct testU testS
+  → Direct stepU stepS → Direct contU contS
+  → ε (affineWhileS {X} {A} {C} limitS seedS testS stepS contS)
+    ≡ affineWhileU {X} {A} {C} limitU seedU testU stepU contU
+affineWhile-erases {X} {A} {C} dlimit dseed dtest dstep dcont
+  rewrite direct-erases {A = X} {B = nat} dlimit
+        | direct-erases {A = unit} {B = A} dseed
+        | direct-erases {A = A} {B = unit ⊕ unit} dtest
+        | direct-erases {A = A} {B = A} dstep
+        | direct-erases {A = A} {B = C} dcont = refl
+
+affineWhile-factor
+  : {X A C : Ty}
+    {limitU : strip X ⇨U natᵤ} {seedU : unitᵤ ⇨U strip A}
+    {testU : strip A ⇨U (unitᵤ ⊕ᵤ unitᵤ)}
+    {stepU : strip A ⇨U strip A} {contU : strip A ⇨U strip C}
+    {limitS : X ⇨ nat} {seedS : unit ⇨ A}
+    {testS : A ⇨ (unit ⊕ unit)} {stepS : A ⇨ A} {contS : A ⇨ C}
+  → (dlimit : Direct limitU limitS) (dseed : Direct seedU seedS)
+  → (dtest : Direct testU testS) (dstep : Direct stepU stepS)
+  → (dcont : Direct contU contS) (x : ⟦ X ⟧T)
+  → stripV (! C)
+      (⟦ affineWhileS {X} {A} {C} limitS seedS testS stepS contS ⟧V x)
+    ≡ ⟦ affineWhileU {X} {A} {C} limitU seedU testU stepU contU ⟧VS
+        (stripV X x)
+affineWhile-factor {X} {A} {C} {limitS = limitS} {seedS} {testS} {stepS} {contS}
+                   dlimit dseed dtest dstep dcont x =
+  trans (ε-factor (affineWhileS {X} {A} {C} limitS seedS testS stepS contS) x)
+    (cong (λ h → ⟦ h ⟧VS (stripV X x))
+      (affineWhile-erases {X} {A} {C} dlimit dseed dtest dstep dcont))
+
 -- Literal-bounded iteration from an empty-context seed, followed by a
 -- continuation promoted functorially over the boxed result.
 closedIterS : {A C : Ty}

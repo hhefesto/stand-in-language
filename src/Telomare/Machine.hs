@@ -9,6 +9,7 @@ module Telomare.Machine
   , ReplyU
   , CoreEntry (..)
   , Program (..)
+  , programCertificateSummary
   , programDepth
   , runProgramScript
   , runProgramIO
@@ -49,6 +50,10 @@ data Program where
     -> CoreEntry 'UUnit (ReplyU s)
     -> CoreEntry (TextU ':**: s) (ReplyU s)
     -> Program
+
+programCertificateSummary :: Program -> String
+programCertificateSummary program =
+  "typed affine program: core depth " <> show (programDepth program)
 
 programDepth :: Program -> Natural
 programDepth (Program _ _ _ initial step) = max (entryDepth initial) (entryDepth step)

@@ -6,4 +6,6 @@ def init(u: Unit): Reply State =
   ("",right boolToNat(boolAnd((True,boolNot(False)))));
 def step(x: Text * State): Reply State =
   let (input,state): Text * State = x in
-  matchNat state of { 1 -> ("true\n",left ()); n -> ("false\n",left ()) };
+  let _: State = state in
+  let length: Nat = listLength(input) in
+  matchNat length of { 5 -> ("true\n",left ()); n -> ("false\n",left ()) };

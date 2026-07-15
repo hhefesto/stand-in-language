@@ -11,8 +11,11 @@ nix run . -- test/programs/tictactoe.tel2
 cabal run telomare -- test/programs/tictactoe.tel2
 ```
 
-`--certificate` prints core depth, `--meter` prints accumulated formal core
-work, and `--max-work N` bounds that work. The executable accepts `.tel2` only.
+`--certificate` prints the program-level core summary, `--meter` prints
+accumulated formal core work, and `--max-work N` bounds that work. The executable
+accepts `.tel2` only.
+`--emit-transport init|step` prints one backend-neutral core entry and exits,
+providing the explicit handoff to experimental runtimes.
 
 ## Active Pipeline
 
@@ -22,7 +25,7 @@ entry .tel2 module + filesystem imports
   -> module graph + definition dependency ordering
   -> name/type checking + affine context elaboration
   -> existentially typed UMorph init and step
-  -> compileDirect
+  -> compileDirect or closed-recursion placement
   -> typed Morph init and step
   -> evalV / evalG / evalK agreement
   -> terminal text codec and I/O
@@ -67,9 +70,9 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "copy" expr
            |  "suc" expr
            |  "add" expr
-           |  "iterate" NAT "from" expr "with" ID
+           |  "iterate" expr "from" expr "with" ID
            |  "fold" expr "from" expr "with" ID
-           |  "while" NAT "from" expr "testing" ID "stepping" ID
+           |  "while" expr "from" expr "testing" ID "stepping" ID
            |  "prepend" STRING expr
            |  "left" expr | "right" expr
            |  "matchNat" expr "of" "{" natArm* pattern "->" expr ";"? "}"
@@ -93,7 +96,7 @@ stdlib resolution is independent of the process working directory.
 small tests; `compileTel2File` is the module-aware IO entrypoint used by the CLI.
 Imported declarations currently share one unqualified namespace.
 
-Closed recursion is accepted only as a prefix of whole-entry bindings:
+Closed recursion is accepted as a prefix of whole-entry bindings:
 
 ```text
 def init(u: Unit): Reply State =
@@ -104,14 +107,30 @@ def init(u: Unit): Reply State =
 ```
 
 Any nonempty subset and order of these bindings is allowed for `init` or `step`,
-but the entry input must be weakened. Every bound and input expression is closed;
-`N` is a literal. Iteration and while steps are directly compilable
+but the entry input must be weakened. Every bound and input expression is closed.
+The bound is a `Nat` expression, while iteration and while steps are directly compilable
 non-recursive `T -> T` definitions. A fold step has type
 `Accumulator * Element -> Accumulator`; the closed input has type `List Element`.
 The current useful list literal is `Text`, or `List Nat`, so
 `fold "ABC" from 0 with natAdd` is representative. A while test has type
-`T -> Unit + Unit`: `left ()` stops and `right ()` takes a step, up to the literal
-cap.
+`T -> Unit + Unit`: `left ()` stops and `right ()` takes a step, up to the bound.
+
+The first reusable affine-recursion slice also accepts a named helper whose
+fuel or list input is open, provided its seed is closed and no unboxed context
+remains live after the loop:
+
+```text
+def repeat(n: Nat): Nat = iterate n from 0 with increment;
+def listLength(values: List Nat): Nat =
+  fold values from 0 with countListElement;
+```
+
+Calls are retained at source level until these helpers are placed as
+`Lift Input -> Bang (Lift Output)`. The controller remains affine at
+orchestration level, the seed is introduced only by `BoxValS`, and the
+post-loop continuation runs under `BoxS`. Open seeds and attempts to combine a
+boxed result with a surviving unboxed value are rejected; nested recursion and
+general multi-level placement remain unavailable.
 
 Compilation emits `BoxValS` for every seed, actual `IterS`, `FoldS`, or `WhileS`
 nodes, combines independent boxed results with `MergeS`, and applies one `BoxS`
@@ -125,6 +144,41 @@ explicit proof that `Strip` equals the source result type. The runner converts
 and compares values structurally through that singleton; value equality is not
 used as a type coercion. Surface/core and value/grade/fuel parity checks remain
 active for recursive entries.
+
+`Telomare.Ops` provides equation-free `*Ops` capability classes for category,
+tensor, affine, sums, distributivity, Nat, List, guard, restricted Bang,
+exceptional Nat/Bang copying, and bounded recursion operations. Instances expose
+only constructors actually supported by `UMorph` or `Morph`; in particular the
+core is not advertised as cartesian, closed, or a comonad.
+
+`Telomare.Compiler.Closed` is the shared typed implementation of the formulas in
+`T3.Compiler.ClosedRecursion`. It directly compiles each closed seed, fold input,
+step, test, and continuation, then constructs the real `BoxValS`, `IterS`,
+`FoldS`, `WhileS`, `MergeS`, and `BoxS` nodes. It does not route recursive
+`UMorph` through `compileDirect`, promote an open context, or insert dereliction.
+Its affine-controller variants accept an open fuel or list morphism while still
+requiring a closed seed. `Telomare.Tel2` supplies the checked components.
+
+`Telomare.Linear` is a smaller Haskell `LinearTypes` frontend. Its closed `Host`
+family represents `()`, `Natural`, products, `Either`, and lists. Abstract
+`Wire s a b` circuits are reified only through a rank-2 `Circuit a b`; no host
+value, wire constructor, `Bang` source type, or unsafe coercion is exposed.
+Composition, tensor, affine discard, sums, and Nat/List primitives map directly
+to `UMorph` and ordinary `compile` remains the placement-free `compileDirect`
+path.
+`branch` accepts separately rank-2 branches, preventing either branch from
+capturing a wire in the caller's live scope. Copying requires an explicit
+`Copy` witness, available only for unit, Nat, and products of copyable values;
+product copying expands to structural wiring and primitive Nat duplication.
+
+This API enforces exactly-once use only for variables bound with a `%1` arrow.
+GHC still permits unrestricted top-level circuit definitions to be referenced
+multiple times, so the frontend does not claim that `LinearTypes` turns Haskell
+itself into an affine language. It is intentionally point-free. Its separate
+`closedIter`, `closedFold`, and `closedWhile` API takes only rank-2 closed
+`Circuit` descriptions and returns an abstract, typed `Closed` decorated core
+result. `HostType` supplies while's size witness without adding `Bang` to
+`Host`; `closedCore` permits typed core inspection.
 
 `*` and `+` associate to the right. `Text` is `List Nat`; `Reply S` is
 `Text * (Unit + S)`. A `data` declaration is a finite nullary enum represented
@@ -176,7 +230,10 @@ work units. Its compiled entry has nonzero depth and contains `IterS`, `FoldS`,
 
 `spec/Everything.agda` checks under `--safe` with no postulates. The formal
 surface/core bridge proves successful direct elaboration erases to its source
-and preserves value semantics. `T3.Compiler.ClosedRecursion` defines the closed
+and preserves value semantics. `T3.Categorical.Vocabulary` separates operation
+capabilities from law records; `T3.Categorical.Interpretation` bundles the raw
+syntaxes without quotient claims and proves category laws only under explicit
+value-extensional hom equality. `T3.Compiler.ClosedRecursion` defines the closed
 `BoxValS`/`IterS`/`FoldS`/`WhileS`/`BoxS` translations from direct-compiled
 components, proves that each erases to its corresponding surface composite, and
 derives value preservation through `ε-factor`. It also proves the erasure and
@@ -192,8 +249,9 @@ The closed-recursion theorem assumes direct compilation evidence for every
 seed, input, body/test, and continuation; it does not claim that Megaparsec or
 the Haskell validator produces that evidence. Tests cover parser, type, affine and
 copy errors, forward references, definition and import cycles, missing modules,
-Prelude dependency, Bool helpers, exact primitive addition, accepted
-`IterS`/`FoldS`/`WhileS` behavior, shape, depth and work, actual `AddS` emission,
+Prelude dependency, Bool helpers, reusable runtime-list `listLength`, exact primitive addition, accepted
+`IterS`/`FoldS`/`WhileS` behavior, exact modal shape, depth and work,
+linear/Tel2 closed-loop value and erasure parity, actual `AddS` emission,
 illegal captures/placement, source mutation, old grammar rejection, all game
 transcripts, and runtime `UMorph`/core parity. These are regression evidence, not
 a parser proof.
@@ -203,9 +261,10 @@ a parser proof.
 - Modules expose an unqualified global namespace; there are no selective,
   qualified, or package imports.
 - No polymorphism, inference, general recursion, or functions as values.
-- Source recursion is limited to independent closed whole-entry iteration, fold,
-  and literal-capped while bindings. Dynamic bounds, nested/dependent loops,
-  recursive helpers, and general modal placement are not implemented.
+- Source recursion supports independent closed whole-entry loops and reusable
+  first-order helpers with an affine runtime fuel/list controller and closed
+  seed. Open seeds, live unboxed values after a loop, nested/dependent loops,
+  recursive helper chains, and general multi-level placement are not implemented.
 - Nullary finite enums only; records are represented by named product aliases
   and tuple patterns.
 - Products, sums, Nat, Text, and List types are present, but this syntax slice
@@ -213,9 +272,63 @@ a parser proof.
 - Enum cases check constructor coverage, but nominal enum separation is not yet
   retained after enums erase to Nat during elaboration.
 - General sum/list copying and modal placement remain unavailable.
+- The linear Haskell frontend is point-free; it has no host-value escape or
+  general linear lambda elaborator, and GHC top-level bindings remain
+  unrestricted.
 - The core, direct-compiler, and closed-recursion categorical proofs apply to
   generated `Morph`; the parser, closure checks, and complete source elaborator
   remain at the explicit proof boundary above.
+
+## Core transport
+
+`Telomare.Transport` defines schema version 1, a backend-neutral first-order
+tree with an explicit `TyCode` (including `Bang`) and one tag per current
+`Morph` constructor. `exportMorph` requires endpoint singletons because a bare
+polymorphic GADT value does not retain them; `CoreEntry` and `Program` already
+retain enough existential witnesses and can be exported directly. Program
+transport contains the state type and compiled initial/step entries, not the
+surface evaluator terms.
+
+The stable wire form is the explicit S-expression produced by
+`renderArtifact`, for example `(morph 1 nat nat (suc))`; derived `Show` is not a
+wire protocol. Parsed or externally constructed values are untrusted until
+`validateArtifact` succeeds. Validation independently infers and unifies the
+untyped tree's constructor types, including polymorphic structural nodes,
+composition intermediates, modal inputs, and recursion bodies. It returns an
+opaque `ValidatedArtifact`; it intentionally does not reconstruct trusted
+`Morph` and uses no unchecked cast.
+
+`Telomare.Backend.Bend` consumes only that opaque `ValidatedArtifact` and emits
+inspectable first-order Bend with named node and recursion helpers. The existing
+runtime and interactive CLI remain unchanged; `telomare-bend` is a standalone
+transport-to-source command. Its checked `u24` value domain, encoded input/result
+protocol, exact loop conventions, box metadata treatment, timeout guidance, and
+value-only limitations are documented in `design/BEND_BACKEND.md`.
+
+```sh
+cabal run telomare -- --emit-transport init test/programs/examples.tel2 \
+  > init.transport
+cabal run telomare-bend -- init.transport > init.bend
+```
+
+The generated Bend module exposes `telomare_run`; a closed zero-argument Bend
+`main` supplies the encoded input. This avoids treating Bend's command-line ADT
+parser as part of the transport protocol.
+
+The Nix app performs the complete transport, emission, and execution pipeline.
+Its third argument is a closed Bend expression using the generated `Value`
+encoding:
+
+```sh
+nix run .#bend -- init test/programs/bend-smoke.tel2 'Value/Unit'
+```
+
+The same app runs the smoke program's runtime-bound iteration through Bend:
+
+```sh
+nix run .#bend -- step test/programs/bend-smoke.tel2 \
+  'Value/Prod(Value/Nil, Value/Nat(3))'
+```
 
 ## Checks
 

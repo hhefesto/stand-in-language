@@ -30,6 +30,7 @@ import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
 import Paths_telomare (getDataFileName)
+import qualified Telomare.Compiler.Closed as Closed
 import Telomare.Compiler.Direct
 import Telomare.Core (Morph (..), STy (..), Ty (..))
 import Telomare.Machine
@@ -64,9 +65,9 @@ data Expr
   | ECopy Expr
   | ESuc Expr
   | EAdd Expr
-  | EIter Natural Expr String
+  | EIter Expr Expr String
   | EFold Expr Expr String
-  | EWhile Natural Expr String String
+  | EWhile Expr Expr String String
   | EPrepend String Expr
   | ELeft Expr
   | ERight Expr
@@ -200,7 +201,7 @@ exprParser = choice
       pure (con, body)
     iterExpr = do
       reserved "iterate"
-      count <- natural
+      count <- exprParser
       reserved "from"
       seed <- exprParser
       reserved "with"
@@ -214,7 +215,7 @@ exprParser = choice
       EFold input seed <$> identifier
     whileExpr = do
       reserved "while"
-      limit <- natural
+      limit <- exprParser
       reserved "from"
       seed <- exprParser
       reserved "testing"
@@ -385,7 +386,6 @@ parseSource name = either (bad . errorBundlePretty) Right . parse sourceParser n
 
 compileDecls :: [Decl] -> Either CompileError Program
 compileDecls decls = do
-  validateRecursion decls
   tablesWithTypes <- foldM addTypeDecl emptyTables decls
   orderedDefs <- orderDefinitions decls
   tables <- foldM addDef tablesWithTypes orderedDefs
@@ -427,16 +427,173 @@ compileEntry tables decls name inputTy outputTy source =
       Elab result continuationRest continuationU <- elaborate tables
         bindingEnv outputTy continuation
       Refl <- requireSame outputTy result
-      continuationCore <- direct (finish continuationRest continuationU)
-      let core = BoxS continuationCore :.: bindingCore :.: WeakS
+      core <- fromDirect (Closed.closedContinueFrom
+        (finish continuationRest continuationU) WeakS bindingCore)
       pure (CoreEntry inputTy (SBang (liftSTy outputTy))
         (stripLift outputTy) core)
-    _ -> do
-      core <- direct source
-      pure (CoreEntry inputTy (liftSTy outputTy) (stripLift outputTy) core)
+    [body] -> case compileDirect source of
+      Right core ->
+        pure (CoreEntry inputTy (liftSTy outputTy) (stripLift outputTy) core)
+      Left (RecursionRequiresPlacement _) -> do
+        argument <- case [arg | DDef current arg _ _ _ <- decls, current == name] of
+          [arg] -> Right arg
+          _     -> bad ("missing entry definition " <> name)
+        placed <- compilePlacedBody tables decls (Bind argument inputTy Empty) outputTy body
+        pure (CoreEntry inputTy (SBang (liftSTy outputTy))
+          (stripLift outputTy) (placed :.: RunitS))
+      Left err -> fromDirect (Left err)
+    _ -> bad ("missing entry definition " <> name)
+
+data SomePlacedDef where
+  SomePlacedDef
+    :: SUTy a
+    -> SUTy b
+    -> Morph (Lift a) ('Bang (Lift b))
+    -> SomePlacedDef
+
+compilePlacedDef :: Tables -> [Decl] -> String -> Either CompileError SomePlacedDef
+compilePlacedDef tables decls name = case
+    [decl | decl@(DDef current _ _ _ _) <- decls, current == name] of
+  [DDef _ argument input output body] -> do
+    if containsIter body || callsRecursiveDef decls body
+      then Right ()
+      else bad ("definition " <> name <> " does not require placement")
+    SomeTy inputTy <- resolveType tables input
+    SomeTy outputTy <- resolveType tables output
+    core <- compilePlacedBody tables decls (Bind argument inputTy Empty) outputTy body
+    pure (SomePlacedDef inputTy outputTy (core :.: RunitS))
+  _ -> bad ("unknown definition " <> name)
+
+compilePlacedBody
+  :: Tables
+  -> [Decl]
+  -> Env c
+  -> SUTy output
+  -> Expr
+  -> Either CompileError (Morph (Lift c) ('Bang (Lift output)))
+compilePlacedBody tables decls env output expression = case expression of
+  ELet (PVar binder) annotation loop body | isClosedLoop loop -> do
+    SomeTy resultTy <- resolveType tables annotation
+    SomePlacedLoop actualTy loopCore <- compileAffineLoop tables env resultTy loop
+    Refl <- requireSame resultTy actualTy
+    compilePlacedContinuation tables binder resultTy output body loopCore
+  ELet (PVar binder) annotation (ECall name argument) body
+    | definitionRequiresPlacement decls name -> do
+        SomeTy resultTy <- resolveType tables annotation
+        SomePlacedDef inputTy actualTy callee <- compilePlacedDef tables decls name
+        Refl <- requireSame resultTy actualTy
+        Elab argumentTy rest argumentU <- elaborate tables env inputTy argument
+        Refl <- requireSame inputTy argumentTy
+        argumentCore <- fromDirect (compileDirect (finish rest argumentU))
+        compilePlacedContinuation tables binder resultTy output body
+          (callee :.: argumentCore)
+  ELet pat annotation value body
+    | not (containsIter value || callsRecursiveDef decls value) -> do
+        SomeTy valueTy <- resolveType tables annotation
+        Elab actual rest valueU <- elaborate tables env valueTy value
+        Refl <- requireSame valueTy actual
+        Bound boundEnv reshape <- bindPattern pat valueTy rest
+        prefix <- fromDirect (compileDirect (reshape :..: valueU))
+        suffix <- compilePlacedBody tables decls boundEnv output body
+        pure (suffix :.: prefix)
+  ECall name argument | definitionRequiresPlacement decls name -> do
+    SomePlacedDef inputTy resultTy callee <- compilePlacedDef tables decls name
+    Refl <- requireSame output resultTy
+    Elab argumentTy rest argumentU <- elaborate tables env inputTy argument
+    Refl <- requireSame inputTy argumentTy
+    argumentCore <- fromDirect (compileDirect (finish rest argumentU))
+    pure (callee :.: argumentCore)
+  loop | isClosedLoop loop -> do
+    SomePlacedLoop resultTy loopCore <- compileAffineLoop tables env output loop
+    Refl <- requireSame output resultTy
+    pure loopCore
+  _ -> bad "recursion placement requires an affine controller, a closed seed, and no live context after the loop"
+
+compilePlacedContinuation
+  :: Tables
+  -> String
+  -> SUTy result
+  -> SUTy output
+  -> Expr
+  -> Morph x ('Bang (Lift result))
+  -> Either CompileError (Morph x ('Bang (Lift output)))
+compilePlacedContinuation tables binder resultTy output body value = do
+  if freeVars body `Set.isSubsetOf` Set.singleton binder
+    then Right ()
+    else bad "unboxed context cannot remain live after recursion"
+  Elab actual rest continuation <- elaborate tables (Bind binder resultTy Empty) output body
+  Refl <- requireSame output actual
+  continuationCore <- fromDirect
+    (compileDirect (finish rest continuation :..: URunit))
+  pure (BoxS continuationCore :.: value)
+
+data SomePlacedLoop c where
+  SomePlacedLoop
+    :: SUTy a
+    -> Morph (Lift c) ('Bang (Lift a))
+    -> SomePlacedLoop c
+
+compileAffineLoop
+  :: Tables
+  -> Env c
+  -> SUTy result
+  -> Expr
+  -> Either CompileError (SomePlacedLoop c)
+compileAffineLoop tables env resultTy expression = case expression of
+  EIter count seed stepName -> do
+    requirePromotable "iteration seed" seed
+    SomeDef stepIn stepOut stepU <- lookupDef tables stepName
+    Refl <- requireSame resultTy stepIn
+    Refl <- requireSame resultTy stepOut
+    Elab countTy rest countU <- elaborate tables env SUNat count
+    Refl <- requireSame SUNat countTy
+    seedU <- elaborateClosed tables resultTy seed
+    core <- fromDirect
+      (Closed.affineIterValueFrom (finish rest countU) seedU stepU)
+    pure (SomePlacedLoop resultTy core)
+  EFold input seed stepName -> do
+    requirePromotable "fold seed" seed
+    SomeDef stepIn stepOut stepU <- lookupDef tables stepName
+    case stepIn of
+      SUProd accumulator element -> do
+        Refl <- requireSame resultTy accumulator
+        Refl <- requireSame resultTy stepOut
+        Elab inputTy rest inputU <- elaborate tables env (SUList element) input
+        Refl <- requireSame (SUList element) inputTy
+        seedU <- elaborateClosed tables accumulator seed
+        core <- fromDirect
+          (Closed.affineFoldValueFrom (finish rest inputU) seedU stepU)
+        pure (SomePlacedLoop accumulator core)
+      _ -> bad "fold step must accept accumulator * element"
+  EWhile limit seed testName stepName -> do
+    requirePromotable "while seed" seed
+    SomeDef testIn testOut testU <- lookupDef tables testName
+    SomeDef stepIn stepOut stepU <- lookupDef tables stepName
+    Refl <- requireSame resultTy testIn
+    Refl <- requireSame resultTy stepIn
+    Refl <- requireSame resultTy stepOut
+    Refl <- requireSame testOut (SUSum SUUnit SUUnit)
+    Elab limitTy rest limitU <- elaborate tables env SUNat limit
+    Refl <- requireSame SUNat limitTy
+    seedU <- elaborateClosed tables resultTy seed
+    core <- fromDirect (Closed.affineWhileValueFrom resultTy
+      (finish rest limitU) seedU testU stepU)
+    pure (SomePlacedLoop resultTy core)
+  _ -> bad "expected recursion with an affine controller"
   where
-    direct morph = either (bad . ("direct compilation failed: " <>) . show) Right
-      (compileDirect morph)
+    requirePromotable description value
+      | Set.null (freeVars value) && not (containsIter value) = Right ()
+      | otherwise = bad (description <> " must be closed; open promotion is unavailable")
+
+definitionRequiresPlacement :: [Decl] -> String -> Bool
+definitionRequiresPlacement decls name = case
+  [body | DDef current _ _ _ body <- decls, current == name] of
+  [body] -> containsIter body || callsRecursiveDef decls body
+  _      -> False
+
+callsRecursiveDef :: [Decl] -> Expr -> Bool
+callsRecursiveDef decls expression = any (definitionRequiresPlacement decls)
+  (Set.toList (exprCalls expression))
 
 data BindingSpec = BindingSpec String Type Expr
 
@@ -465,14 +622,15 @@ compileClosedLoop tables annotation expression = do
   SomeTy resultTy <- resolveType tables annotation
   case expression of
     EIter count seed stepName -> do
+      requireClosed "iteration bound" count
       requireClosed "iteration seed" seed
       SomeDef stepIn stepOut stepU <- lookupDef tables stepName
       Refl <- requireSame resultTy stepIn
       Refl <- requireSame resultTy stepOut
-      seedCore <- compileClosed tables resultTy seed
-      stepCore <- directCompile stepU
-      pure (SomeClosedLoop resultTy
-        (IterS stepCore :.: (ConstS count :***: BoxValS seedCore) :.: RunitS))
+      countU <- elaborateClosed tables SUNat count
+      seedU <- elaborateClosed tables resultTy seed
+      loopCore <- fromDirect (Closed.closedIterValueFrom countU seedU stepU)
+      pure (SomeClosedLoop resultTy loopCore)
     EFold input seed stepName -> do
       requireClosed "fold input" input
       requireClosed "fold seed" seed
@@ -481,13 +639,13 @@ compileClosedLoop tables annotation expression = do
         SUProd accumulator element -> do
           Refl <- requireSame resultTy accumulator
           Refl <- requireSame resultTy stepOut
-          inputCore <- compileClosed tables (SUList element) input
-          seedCore <- compileClosed tables accumulator seed
-          stepCore <- directCompile stepU
-          pure (SomeClosedLoop accumulator
-            (FoldS stepCore :.: (inputCore :***: BoxValS seedCore) :.: RunitS))
+          inputU <- elaborateClosed tables (SUList element) input
+          seedU <- elaborateClosed tables accumulator seed
+          loopCore <- fromDirect (Closed.closedFoldValue inputU seedU stepU)
+          pure (SomeClosedLoop accumulator loopCore)
         _ -> bad "fold step must accept accumulator * element"
     EWhile limit seed testName stepName -> do
+      requireClosed "while bound" limit
       requireClosed "while seed" seed
       SomeDef testIn testOut testU <- lookupDef tables testName
       SomeDef stepIn stepOut stepU <- lookupDef tables stepName
@@ -495,31 +653,26 @@ compileClosedLoop tables annotation expression = do
       Refl <- requireSame resultTy stepIn
       Refl <- requireSame resultTy stepOut
       Refl <- requireSame testOut (SUSum SUUnit SUUnit)
-      seedCore <- compileClosed tables resultTy seed
-      testCore <- directCompile testU
-      stepCore <- directCompile stepU
-      pure (SomeClosedLoop resultTy
-        (WhileS (liftSTy resultTy) testCore stepCore
-          :.: (ConstS limit :***: BoxValS seedCore) :.: RunitS))
+      limitU <- elaborateClosed tables SUNat limit
+      seedU <- elaborateClosed tables resultTy seed
+      loopCore <- fromDirect
+        (Closed.closedWhileValueFrom resultTy limitU seedU testU stepU)
+      pure (SomeClosedLoop resultTy loopCore)
     _ -> bad "expected a closed recursive binding"
   where
     requireClosed description value
       | Set.null (freeVars value) && not (containsIter value) = Right ()
       | otherwise = bad (description <> " cannot capture or contain recursion")
 
-compileClosed
+elaborateClosed
   :: Tables
   -> SUTy a
   -> Expr
-  -> Either CompileError (Morph 'Unit (Lift a))
-compileClosed tables ty value = do
+  -> Either CompileError (UMorph 'UUnit a)
+elaborateClosed tables ty value = do
   Elab actual rest source <- elaborate tables Empty ty value
   Refl <- requireSame ty actual
-  directCompile (finish rest source)
-
-directCompile :: UMorph a b -> Either CompileError (Morph (Lift a) (Lift b))
-directCompile morph = either
-  (bad . ("direct compilation failed: " <>) . show) Right (compileDirect morph)
+  pure (finish rest source)
 
 data CompiledBindings where
   CompiledBindings
@@ -529,7 +682,9 @@ data CompiledBindings where
     -> CompiledBindings
 
 compileBindings :: Tables -> [BindingSpec] -> Either CompileError CompiledBindings
-compileBindings _ [] = Right (CompiledBindings Empty SUnit (BoxValS IdS))
+compileBindings _ [] = do
+  core <- fromDirect (Closed.closedValue UId)
+  pure (CompiledBindings Empty SUnit core)
 compileBindings tables (BindingSpec name annotation expression : rest) = do
   SomeTy declaredTy <- resolveType tables annotation
   SomeClosedLoop actualTy loopCore <- compileClosedLoop tables annotation expression
@@ -539,7 +694,7 @@ compileBindings tables (BindingSpec name annotation expression : rest) = do
     then bad ("duplicate recursive binder " <> name)
     else pure (CompiledBindings (Bind name declaredTy env)
       (SProd (liftSTy declaredTy) envTy)
-      (MergeS :.: (loopCore :***: restCore) :.: RunitS))
+      (Closed.closedMerge loopCore restCore))
 
 stripLift :: SUTy a -> Strip (Lift a) :~: a
 stripLift SUUnit = Refl
@@ -549,23 +704,6 @@ stripLift (SUProd a b) = case (stripLift a, stripLift b) of
 stripLift (SUSum a b) = case (stripLift a, stripLift b) of
   (Refl, Refl) -> Refl
 stripLift (SUList a) = case stripLift a of Refl -> Refl
-
-validateRecursion :: [Decl] -> Either CompileError ()
-validateRecursion = traverse_ validate
-  where
-    validate (DDef name _ _ _ body)
-      | not (containsIter body) = Right ()
-      | name `elem` ["init", "step"]
-      , Just (bindings, continuation) <- closedEntry body
-      , not (containsIter continuation)
-      , all validBinding bindings = Right ()
-      | otherwise = bad "recursion requires whole entry-level closed bindings"
-    validate _ = Right ()
-    validBinding (BindingSpec _ _ expression) = case expression of
-      EIter _ seed _     -> not (containsIter seed)
-      EFold input seed _ -> not (containsIter input || containsIter seed)
-      EWhile _ seed _ _  -> not (containsIter seed)
-      _                  -> False
 
 addTypeDecl :: Tables -> Decl -> Either CompileError Tables
 addTypeDecl tables (DType name ty)
@@ -626,11 +764,12 @@ exprCalls (ELet _ _ value body) = exprCalls value `Set.union` exprCalls body
 exprCalls (ECopy value) = exprCalls value
 exprCalls (ESuc value) = exprCalls value
 exprCalls (EAdd value) = exprCalls value
-exprCalls (EIter _ seed step) = Set.insert step (exprCalls seed)
+exprCalls (EIter count seed step) =
+  Set.insert step (exprCalls count `Set.union` exprCalls seed)
 exprCalls (EFold input seed step) =
   Set.insert step (exprCalls input `Set.union` exprCalls seed)
-exprCalls (EWhile _ seed test step) =
-  Set.insert test (Set.insert step (exprCalls seed))
+exprCalls (EWhile limit seed test step) =
+  Set.insert test (Set.insert step (exprCalls limit `Set.union` exprCalls seed))
 exprCalls (EPrepend _ value) = exprCalls value
 exprCalls (ELeft value) = exprCalls value
 exprCalls (ERight value) = exprCalls value
@@ -647,11 +786,12 @@ containsIter :: Expr -> Bool
 containsIter = not . Set.null . iterSteps
 
 iterSteps :: Expr -> Set.Set String
-iterSteps (EIter _ seed step) = Set.insert step (iterSteps seed)
+iterSteps (EIter count seed step) =
+  Set.insert step (iterSteps count `Set.union` iterSteps seed)
 iterSteps (EFold input seed step) =
   Set.insert step (iterSteps input `Set.union` iterSteps seed)
-iterSteps (EWhile _ seed test step) =
-  Set.insert test (Set.insert step (iterSteps seed))
+iterSteps (EWhile limit seed test step) =
+  Set.insert test (Set.insert step (iterSteps limit `Set.union` iterSteps seed))
 iterSteps (EPair x y) = iterSteps x `Set.union` iterSteps y
 iterSteps (ELet _ _ value body) = iterSteps value `Set.union` iterSteps body
 iterSteps (ECall _ argument) = iterSteps argument
@@ -680,9 +820,9 @@ freeVars (ECall _ argument) = freeVars argument
 freeVars (ECopy value) = freeVars value
 freeVars (ESuc value) = freeVars value
 freeVars (EAdd value) = freeVars value
-freeVars (EIter _ seed _) = freeVars seed
+freeVars (EIter count seed _) = freeVars count `Set.union` freeVars seed
 freeVars (EFold input seed _) = freeVars input `Set.union` freeVars seed
-freeVars (EWhile _ seed _ _) = freeVars seed
+freeVars (EWhile limit seed _ _) = freeVars limit `Set.union` freeVars seed
 freeVars (EPrepend _ value) = freeVars value
 freeVars (ELeft value) = freeVars value
 freeVars (ERight value) = freeVars value
@@ -777,12 +917,10 @@ elaborate tables env expected (EIter count seed stepName) = do
   SomeDef stepIn stepOut step <- lookupDef tables stepName
   Refl <- requireSame expected stepIn
   Refl <- requireSame expected stepOut
-  Elab actual rest input <- elaborate tables env expected seed
-  Refl <- requireSame expected actual
-  pure (Elab expected rest
-    ((UIter step :****: UId)
-      :..: ((UConst count :****: UId) :****: UId)
-      :..: (ULunit :****: UId) :..: input))
+  Elab pairActual rest pair <- elaborate tables env
+    (SUProd SUNat expected) (EPair count seed)
+  Refl <- requireSame (SUProd SUNat expected) pairActual
+  pure (Elab expected rest ((UIter step :****: UId) :..: pair))
 elaborate tables env expected (EFold input seed stepName) = do
   SomeDef stepIn stepOut step <- lookupDef tables stepName
   case stepIn of
@@ -803,7 +941,7 @@ elaborate tables env expected (EWhile limit seed testName stepName) = do
   Refl <- requireSame expected stepOut
   Refl <- requireSame testOut (SUSum SUUnit SUUnit)
   Elab pairActual rest pair <- elaborate tables env
-    (SUProd SUNat expected) (EPair (ENat limit) seed)
+    (SUProd SUNat expected) (EPair limit seed)
   Refl <- requireSame (SUProd SUNat expected) pairActual
   pure (Elab expected rest ((UWhile expected test step :****: UId) :..: pair))
 elaborate tables env (SUList SUNat) (EPrepend prefix suffix) = do
@@ -991,3 +1129,7 @@ foldrM f z = foldM (flip f) z . reverse
 
 bad :: String -> Either CompileError a
 bad = Left . CompileError
+
+fromDirect :: Either DirectError a -> Either CompileError a
+fromDirect = either
+  (bad . ("direct compilation failed: " <>) . show) Right

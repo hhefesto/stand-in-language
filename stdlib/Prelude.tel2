@@ -1,6 +1,6 @@
 module Prelude;
 
-# A monomorphic, total foundation over the current direct core fragment.
+# A monomorphic, total foundation over the direct and affine-recursion fragments.
 data Bool = False | True;
 
 def natIdentity(n: Nat): Nat = n;
@@ -35,3 +35,11 @@ def otherPlayer(player: Nat): Nat = matchNat player of { 1 -> 2; _ -> 1 };
 def increment(n: Nat): Nat = suc n;
 def natDouble(n: Nat): Nat =
   let pair: Nat * Nat = copy n in natAdd(pair);
+
+def countListElement(values: Nat * Nat): Nat =
+  let (count,value): Nat * Nat = values in
+  let _: Nat = value in
+  increment(count);
+
+def listLength(values: List Nat): Nat =
+  fold values from 0 with countListElement;

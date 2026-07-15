@@ -1,0 +1,18 @@
+module BendSmoke;
+
+type State = Nat;
+
+def increment(n : Nat) : Nat = suc n;
+
+def repeat(fuel : Nat) : Nat =
+  iterate fuel from 0 with increment;
+
+def init(input : Unit) : Reply State =
+  let _ : Unit = input in
+  ("bend", right 3);
+
+def step(request : Text * State) : Reply State =
+  let (input,fuel) : Text * State = request in
+  let _ : Text = input in
+  let result : Nat = repeat(fuel) in
+  ("done", right result);

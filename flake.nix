@@ -55,6 +55,10 @@
               free
               QuickCheck
             ];
+            testToolDepends = [ pkgs.bend ];
+            preCheck = ''
+              export TELOMARE_BEND=${pkgs.bend}/bin/bend
+            '';
             doCheck = true;
             homepage = "https://github.com/hhefesto/stand-in-language";
             description = "Total language runtime with knowable bounds";
@@ -72,6 +76,7 @@
               agdaWithStdlib
               hp.cabal-install
               hp.haskell-language-server
+              pkgs.bend
             ];
           };
 
@@ -79,6 +84,44 @@
             type = "app";
             program = self'.packages.telomare + "/bin/telomare";
             meta.description = "Compile and run a typed affine .tel2 program";
+          };
+
+          apps.bend = {
+            type = "app";
+            program = "${pkgs.writeShellApplication {
+              name = "telomare-bend-run";
+              runtimeInputs = [
+                pkgs.bend
+                pkgs.coreutils
+                self'.packages.telomare
+              ];
+              text = ''
+                if [ "$#" -ne 3 ]; then
+                  printf 'usage: telomare-bend-run init|step PROGRAM.tel2 BEND_INPUT\n' >&2
+                  exit 2
+                fi
+
+                entry="$1"
+                program="$2"
+                input="$3"
+                case "$entry" in
+                  init|step) ;;
+                  *)
+                    printf 'entry must be init or step\n' >&2
+                    exit 2
+                    ;;
+                esac
+
+                tmp_dir="$(mktemp -d)"
+                trap 'rm -rf "$tmp_dir"' EXIT
+
+                telomare --emit-transport "$entry" "$program" > "$tmp_dir/program.transport"
+                telomare-bend "$tmp_dir/program.transport" > "$tmp_dir/program.bend"
+                printf '\ndef main():\n  return telomare_run(%s)\n' "$input" >> "$tmp_dir/program.bend"
+                timeout 30s bend run-c "$tmp_dir/program.bend"
+              '';
+            }}/bin/telomare-bend-run";
+            meta.description = "Compile and run a .tel2 entry with the Bend backend";
           };
 
           apps.format-lint = {
