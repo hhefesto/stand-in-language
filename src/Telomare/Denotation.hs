@@ -64,6 +64,7 @@ evalV SucS n                = n + 1
 evalV AddS (a, b)           = a + b
 evalV (ConstS k) _          = k
 evalV DupNatS n             = (n, n)
+evalV (CopyS _) a           = (a, a)
 evalV (GuardS _ t) a        = guardOut a (evalV t a)
 evalV (DupS _) a            = (a, a)
 evalV (BoxS f) a            = evalV f a
@@ -115,8 +116,9 @@ workAlg = CostAlgebra
   , caDup = const 0, caDupNat = 0, caStep = 1, caProbe = const 0
   }
 
--- | Dup grade (spec: @T3.Sem.Graded.dupAlg@): sizeT at dupS, 1 at the
--- atom exemption, sizeT per probe (a test reads what it does not consume).
+-- | Dup grade (spec: @T3.Sem.Graded.dupAlg@): sizeT at dupS and at the
+-- costed data copy 'CopyS' (both through 'caDup'), 1 at the atom
+-- exemption, sizeT per probe (a test reads what it does not consume).
 dupAlg :: CostAlgebra Natural
 dupAlg = CostAlgebra
   { caSeq = (+), caPar = (+), caZero = 0, caNatOut = 0
@@ -160,6 +162,7 @@ evalG alg SucS n               = (caZero alg, n + 1)
 evalG alg AddS (a, b)          = (caZero alg, a + b)
 evalG alg (ConstS k) _         = (caZero alg, k)
 evalG alg DupNatS n            = (caDupNat alg, (n, n))
+evalG alg (CopyS w) a          = (caDup alg (sizeVal (copyableSTy w) a), (a, a))
 evalG alg (GuardS sa t) a =
   let (mt, r) = evalG alg t a
   in (caSeq alg (caProbe alg (sizeVal sa a)) mt, guardOut a r)
@@ -250,6 +253,7 @@ evalK SucS n g                   = Just (n + 1, g)
 evalK AddS (a, b) g              = Just (a + b, g)
 evalK (ConstS k) _ g             = Just (k, g)
 evalK DupNatS n g                = Just ((n, n), g)
+evalK (CopyS _) a g              = Just ((a, a), g)
 evalK (GuardS _ t) a g           =
   evalK t a g >>= \(r, g') -> Just (guardOut a r, g')
 evalK (DupS _) a g               = Just ((a, a), g)

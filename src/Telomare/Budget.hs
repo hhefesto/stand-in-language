@@ -179,6 +179,7 @@ transferB AddS s =
        _                  -> TopS)
 transferB (ConstS k) _ = (TipT, NatLE k)
 transferB DupNatS s = (TipT, PairSh s s)
+transferB (CopyS _) s = (TipT, PairSh s s)
 transferB (GuardS _ t) s =
   let (bt, _) = transferB t s
   in (bt, SumSh (Just s) (Just UnitS))

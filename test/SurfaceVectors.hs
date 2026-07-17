@@ -118,8 +118,15 @@ surfaceVectors =
       SUNat (SUSum SUNat SUUnit) positiveU 4)
   , ("surface-guard-fail", directParity
       SUNat (SUSum SUNat SUUnit) positiveU 0)
-  , ("surface-reject-general-dup",
-      directError (UDup (SUProd SUNat SUNat)) == Just GeneralDuplication)
+  , ("surface-accept-pair-dup", directParity
+      (SUProd SUNat SUNat) (SUProd (SUProd SUNat SUNat) (SUProd SUNat SUNat))
+      (UDup (SUProd SUNat SUNat)) (3, 5))
+  , ("surface-accept-list-dup", directParity
+      (SUList SUNat) (SUProd (SUList SUNat) (SUList SUNat))
+      (UDup (SUList SUNat)) [1, 2])
+  , ("surface-accept-sum-dup", directParity
+      (SUSum SUUnit SUNat) (SUProd (SUSum SUUnit SUNat) (SUSum SUUnit SUNat))
+      (UDup (SUSum SUUnit SUNat)) (Right 4))
   , ("surface-reject-map",
       directError (UMap USuc) == Just (RecursionRequiresPlacement Mapping))
   , ("surface-reject-iter",

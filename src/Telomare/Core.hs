@@ -17,6 +17,8 @@ module Telomare.Core
   , Val
   , STy (..)
   , sizeVal
+  , Copyable (..)
+  , copyableSTy
   , Morph (..)
   , depth
   , towerHeight
@@ -73,13 +75,37 @@ sizeVal (SList _)   []        = 1
 sizeVal (SList s)   (x : xs)  = 1 + sizeVal s x + sizeVal (SList s) xs
 sizeVal (SBang s)   a         = sizeVal s a
 
+-- | Structural copy evidence (spec: @T3.Core.Ty.Copyable@): which types
+-- admit the costed data copy 'CopyS', charged 'sizeVal' by the dup grade.
+-- Every first-order data type is copyable — deliberately.  The witness
+-- stays evidence-indexed (rather than collapsing into 'STy') because
+-- future non-data objects (closures) must NOT be copyable: duplicating
+-- suspended computation goes through the 'Bang' modality, never 'CopyS'.
+data Copyable a where
+  CopyUnit :: Copyable 'Unit
+  CopyNat  :: Copyable 'Nat
+  CopyProd :: Copyable a -> Copyable b -> Copyable (a ':*: b)
+  CopySum  :: Copyable a -> Copyable b -> Copyable (a ':+: b)
+  CopyList :: Copyable a -> Copyable ('ListT a)
+  CopyBang :: STy a -> Copyable ('Bang a)
+
+-- | The singleton a witness copies at (grading needs it for 'sizeVal').
+copyableSTy :: Copyable a -> STy a
+copyableSTy CopyUnit       = SUnit
+copyableSTy CopyNat        = SNat
+copyableSTy (CopyProd a b) = SProd (copyableSTy a) (copyableSTy b)
+copyableSTy (CopySum a b)  = SSum (copyableSTy a) (copyableSTy b)
+copyableSTy (CopyList a)   = SList (copyableSTy a)
+copyableSTy (CopyBang a)   = SBang a
+
 -- | Morphisms (spec: @T3.Core.Syntax._⇨_@), same constructor set and
--- typing discipline: affine (free weakening, no fork/dup on ordinary
--- objects), EAL exponential = 'DupS'\/'BoxS'\/'BoxValS'\/'MergeS' and
--- nothing else (no dereliction, no digging), recursion only as
--- fuel-carrying 'IterS'\/'FoldS'\/'WhileS' whose output lives one box
--- level deeper.  'BoxValS' is empty-context promotion only (the
--- formal soundness discovery).
+-- typing discipline: affinity is the default costing discipline, not a
+-- prohibition — contraction of first-order data is legal wherever it is
+-- priced ('CopyS', charged 'sizeVal' by the dup grade); EAL exponential =
+-- 'DupS'\/'BoxS'\/'BoxValS'\/'MergeS' and nothing else (no dereliction,
+-- no digging), recursion only as fuel-carrying 'IterS'\/'FoldS'\/'WhileS'
+-- whose output lives one box level deeper.  'BoxValS' is empty-context
+-- promotion only (the formal soundness discovery).
 data Morph (a :: Ty) (b :: Ty) where
   IdS      :: Morph a a
   (:.:)    :: Morph b c -> Morph a b -> Morph a c
@@ -104,6 +130,7 @@ data Morph (a :: Ty) (b :: Ty) where
   AddS     :: Morph ('Nat ':*: 'Nat) 'Nat
   ConstS   :: Natural -> Morph a 'Nat
   DupNatS  :: Morph 'Nat ('Nat ':*: 'Nat)
+  CopyS    :: Copyable a -> Morph a (a ':*: a)
   GuardS   :: STy a -> Morph a ('Unit ':+: 'Unit) -> Morph a (a ':+: 'Unit)
   DupS     :: STy a -> Morph ('Bang a) ('Bang a ':*: 'Bang a)
   BoxS     :: Morph a b -> Morph ('Bang a) ('Bang b)
@@ -144,6 +171,7 @@ depth SucS           = 0
 depth AddS           = 0
 depth (ConstS _)     = 0
 depth DupNatS        = 0
+depth (CopyS _)      = 0
 depth (GuardS _ t)   = depth t
 depth (DupS _)       = 0
 depth (BoxS f)       = 1 + depth f

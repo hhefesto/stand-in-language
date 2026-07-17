@@ -38,6 +38,10 @@ constructorNodes =
   , exportMorph (SProd SNat SNat) SNat AddS
   , exportMorph SUnit SNat (ConstS 7)
   , exportMorph SNat (SProd SNat SNat) DupNatS
+  , exportMorph (SList SNat) (SProd (SList SNat) (SList SNat))
+      (CopyS (CopyList CopyNat))
+  , exportMorph (SSum SUnit SNat) (SProd (SSum SUnit SNat) (SSum SUnit SNat))
+      (CopyS (CopySum CopyUnit CopyNat))
   , exportMorph SNat (SSum SNat SUnit) (GuardS SNat (CaseS InlS (InrS :.: WeakS) :.: NatOutS))
   , exportMorph (SBang SNat) (SProd (SBang SNat) (SBang SNat)) (DupS SNat)
   , exportMorph (SBang SNat) (SBang SNat) (BoxS SucS)
@@ -58,6 +62,8 @@ transportVectors =
   , ("transport-compose-intermediate-rejected", isLeft (validateArtifact (Artifact transportVersion TNat TNat (NCompose NSuc NNil))))
   , ("transport-box-val-unit-rejected", isLeft (validateArtifact (Artifact transportVersion TUnit (TBang TNat) (NBoxVal NSuc))))
   , ("transport-dup-bang-rejected", isLeft (validateArtifact (Artifact transportVersion TNat (TProd TNat TNat) (NDup TNat))))
+  , ("transport-copy-endpoint-rejected", isLeft (validateArtifact (Artifact transportVersion (TList TNat) (TList TNat) (NCopy (TList TNat)))))
+  , ("transport-copy-mismatch-rejected", isLeft (validateArtifact (Artifact transportVersion TNat (TProd TNat TNat) (NCopy (TList TNat)))))
   , ("transport-merge-shape-rejected", isLeft (validateArtifact (Artifact transportVersion (TProd TNat TNat) (TBang (TProd TNat TNat)) NMerge)))
   , ("transport-map-shape-rejected", isLeft (validateArtifact (Artifact transportVersion (TList TNat) (TList TNat) (NMap NSuc))))
   , ("transport-iter-body-rejected", isLeft (validateArtifact (Artifact transportVersion (TProd TNat (TBang TNat)) (TBang TNat) (NIter NNatOut))))

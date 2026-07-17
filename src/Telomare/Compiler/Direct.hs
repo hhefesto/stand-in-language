@@ -6,13 +6,19 @@
 -- | Direct elaboration of the bang-free affine surface fragment.
 --
 -- This first compiler slice accepts every structural/data constructor,
--- guards, and the natural atom duplication exemption.  General contraction
--- and recursion require modal placement and are rejected explicitly.
+-- guards, and costed duplication at every copyable (first-order data)
+-- type — 'UDup' compiles to the priced 'CopyS', with 'DupNatS' retained
+-- as the historical atom exemption at 'SUNat'.  Recursion requires modal
+-- placement and is rejected explicitly.  'GeneralDuplication' is
+-- currently unreachable; it returns when non-copyable objects (arrows)
+-- enter the surface.
 module Telomare.Compiler.Direct
   ( DirectError (..)
   , RecursionKind (..)
   , Strip
   , compileDirect
+  , copyableLift
+  , stripCopyable
   , eraseMorph
   , erasureMatches
   ) where
@@ -45,13 +51,33 @@ stripSTy (SSum a b)  = SUSum (stripSTy a) (stripSTy b)
 stripSTy (SList a)   = SUList (stripSTy a)
 stripSTy (SBang a)   = stripSTy a
 
+-- | Every first-order surface type lifts to a copyable core type.
+-- 'Maybe' so a future non-copyable surface object (arrows) is a clean
+-- 'Nothing' rather than a partial match.
+copyableLift :: SUTy a -> Maybe (Copyable (Lift a))
+copyableLift SUUnit       = Just CopyUnit
+copyableLift SUNat        = Just CopyNat
+copyableLift (SUProd a b) = CopyProd <$> copyableLift a <*> copyableLift b
+copyableLift (SUSum a b)  = CopySum <$> copyableLift a <*> copyableLift b
+copyableLift (SUList a)   = CopyList <$> copyableLift a
+
+-- | The surface singleton a copy witness erases to.
+stripCopyable :: Copyable a -> SUTy (Strip a)
+stripCopyable CopyUnit       = SUUnit
+stripCopyable CopyNat        = SUNat
+stripCopyable (CopyProd a b) = SUProd (stripCopyable a) (stripCopyable b)
+stripCopyable (CopySum a b)  = SUSum (stripCopyable a) (stripCopyable b)
+stripCopyable (CopyList a)   = SUList (stripCopyable a)
+stripCopyable (CopyBang s)   = stripSTy s
+
 -- | Compile the directly affine fragment into canonically lifted core types.
 compileDirect :: UMorph a b -> Either DirectError (Morph (Lift a) (Lift b))
 compileDirect UId            = Right IdS
 compileDirect (g :..: f)     = (:.:) <$> compileDirect g <*> compileDirect f
 compileDirect (f :****: g)   = (:***:) <$> compileDirect f <*> compileDirect g
 compileDirect (UDup SUNat)   = Right DupNatS
-compileDirect (UDup _)       = Left GeneralDuplication
+compileDirect (UDup sa)      =
+  maybe (Left GeneralDuplication) (Right . CopyS) (copyableLift sa)
 compileDirect USwap          = Right SwapS
 compileDirect UAssoc         = Right AssocS
 compileDirect UUnassoc       = Right UnassocS
@@ -102,6 +128,7 @@ eraseMorph SucS           = USuc
 eraseMorph AddS           = UAdd
 eraseMorph (ConstS k)     = UConst k
 eraseMorph DupNatS        = UDup SUNat
+eraseMorph (CopyS w)      = UDup (stripCopyable w)
 eraseMorph (GuardS sa t)  = UGuard (stripSTy sa) (eraseMorph t)
 eraseMorph (DupS sa)      = UDup (stripSTy sa)
 eraseMorph (BoxS f)       = eraseMorph f

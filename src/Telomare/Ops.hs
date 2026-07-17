@@ -21,6 +21,7 @@ module Telomare.Ops
   , BangOps (..)
   , NatCopyOps (..)
   , BangCopyOps (..)
+  , DataCopyOps (..)
   , BoundedRecursionOps (..)
   ) where
 
@@ -101,6 +102,13 @@ class (TensorOps m, BangOps m) => BangCopyOps (m :: k -> k -> Type) where
     :: ObjectWitness m a
     -> m (BangObject m a) (Tensor m (BangObject m a) (BangObject m a))
 
+-- | Witnessed costed copy of data: copy exists exactly where a witness
+-- does.  The core instantiates the witness with 'Copyable' — total on
+-- first-order data, absent on future non-data objects (closures).
+class TensorOps m => DataCopyOps (m :: k -> k -> Type) where
+  type CopyWitness m (a :: k) :: Type
+  copyOp :: CopyWitness m a -> m a (Tensor m a a)
+
 class
   (TensorOps m, SumOps m, NatOps m, ListOps m, GuardOps m) =>
   BoundedRecursionOps (m :: k -> k -> Type) where
@@ -168,6 +176,10 @@ instance GuardOps UMorph where
 instance NatCopyOps UMorph where
   copyNatOp = UDup SUNat
 
+instance DataCopyOps UMorph where
+  type CopyWitness UMorph a = SUTy a
+  copyOp = UDup
+
 instance BoundedRecursionOps UMorph where
   type RecState UMorph a = a
   mapBoundedOp = UMap
@@ -231,6 +243,10 @@ instance NatCopyOps Morph where
 
 instance BangCopyOps Morph where
   copyBangOp = DupS
+
+instance DataCopyOps Morph where
+  type CopyWitness Morph a = Copyable a
+  copyOp = CopyS
 
 instance BoundedRecursionOps Morph where
   type RecState Morph a = 'Bang a

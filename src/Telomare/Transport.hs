@@ -37,8 +37,9 @@ import Telomare.Machine (CoreEntry (..), Program (..))
 import Telomare.Surface (liftSTy)
 
 -- | Stable schema version.  A validator accepts exactly this version.
+-- Version 3 added the costed data copy node 'NCopy'.
 transportVersion :: Int
-transportVersion = 2
+transportVersion = 3
 
 -- | Runtime representation of every core object, including the exponential.
 data TyCode
@@ -75,6 +76,7 @@ data Node
   | NAdd
   | NConst Natural
   | NDupNat
+  | NCopy TyCode
   | NGuard TyCode Node
   | NDup TyCode
   | NBox Node
@@ -162,6 +164,7 @@ exportNode SucS           = NSuc
 exportNode AddS           = NAdd
 exportNode (ConstS n)     = NConst n
 exportNode DupNatS        = NDupNat
+exportNode (CopyS w)      = NCopy (styCode (copyableSTy w))
 exportNode (GuardS a t)   = NGuard (styCode a) (exportNode t)
 exportNode (DupS a)       = NDup (styCode a)
 exportNode (BoxS f)       = NBox (exportNode f)
@@ -303,6 +306,7 @@ inferNode node = case node of
   NAdd -> pure (IProd INat INat, INat)
   NConst _ -> do a <- fresh; pure (a, INat)
   NDupNat -> pure (INat, IProd INat INat)
+  NCopy witness -> let a = fromCode witness in pure (a, IProd a a)
   NGuard witness test -> do
     let a = fromCode witness
     (ti, to) <- inferNode test
@@ -364,7 +368,8 @@ renderNode node = case node of
   NCase l r -> pair "case" l r; NDistl -> atom "distl"; NNil -> atom "nil"
   NCons -> atom "cons"; NUncons -> atom "uncons"; NNatOut -> atom "nat-out"
   NSuc -> atom "suc"; NAdd -> atom "add"; NConst n -> list ["const", show n]
-  NDupNat -> atom "dup-nat"; NGuard ty test -> list ["guard", renderType ty, renderNode test]
+  NDupNat -> atom "dup-nat"; NCopy ty -> list ["copy", renderType ty]
+  NGuard ty test -> list ["guard", renderType ty, renderNode test]
   NDup ty -> list ["dup", renderType ty]; NBox body -> unary "box" body
   NBoxVal body -> unary "box-val" body; NMerge -> atom "merge"; NMap body -> unary "map" body
   NIter body -> unary "iter" body
@@ -409,6 +414,7 @@ nodeP = parens $ choice
   , nullary "nil" NNil, nullary "cons" NCons, nullary "uncons" NUncons
   , nullary "nat-out" NNatOut, nullary "suc" NSuc, nullary "add" NAdd
   , symbol "const" >> NConst <$> naturalP, nullary "dup-nat" NDupNat
+  , symbol "copy" >> NCopy <$> typeP
   , symbol "guard" >> NGuard <$> typeP <*> nodeP, symbol "dup" >> NDup <$> typeP
   , unary "box" NBox, unary "box-val" NBoxVal, nullary "merge" NMerge
   , unary "map" NMap, unary "iter" NIter, unary "fold" NFold

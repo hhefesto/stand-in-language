@@ -33,6 +33,12 @@ type Natural' = Val 'Nat
 sumTwice :: Morph ('ListT 'Nat) ('Bang 'Nat)
 sumTwice = BoxS AddS :.: MergeS :.: DupS SNat :.: sumList
 
+copyList :: Morph ('ListT 'Nat) ('ListT 'Nat ':*: 'ListT 'Nat)
+copyList = CopyS (CopyList CopyNat)
+
+sumBoth :: Morph ('ListT 'Nat) ('Bang 'Nat ':*: 'Bang 'Nat)
+sumBoth = (sumList :***: sumList) :.: CopyS (CopyList CopyNat)
+
 twoLevels :: Morph 'Unit ('Bang ('Bang 'Nat))
 twoLevels = BoxValS (BoxValS (ConstS 7))
 
@@ -71,6 +77,14 @@ specVectors =
   , ("sumList-dup",        dupGrade sumList egList == 0)
   , ("sumTwice-val",       evalV sumTwice egList == 12)
   , ("sumTwice-dup",       dupGrade sumTwice egList == 1)
+  , ("copyList-val",       evalV copyList egList == (egList, egList))
+  , ("copyList-cost",      work copyList egList == 0)
+  , ("copyList-dup",       dupGrade copyList egList == 7)
+  , ("copyList-depth",     depth copyList == 0)
+  , ("sumBoth-val",        evalV sumBoth egList == (6, 6))
+  , ("sumBoth-cost",       work sumBoth egList == 6)
+  , ("sumBoth-dup",        dupGrade sumBoth egList == 7)
+  , ("sumBoth-adequate",   evalK sumBoth egList 6 == Just ((6, 6), 0))
   , ("twoLevels-depth",    towerHeight twoLevels == 2)
   , ("countDown-val",      evalV countDown 5 == 0)
   , ("countDown-cost",     work countDown 5 == 10)

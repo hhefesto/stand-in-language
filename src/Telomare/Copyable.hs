@@ -2,9 +2,13 @@
 {-# LANGUAGE GADTs         #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | Explicitly witnessed core copying, mirroring @T3.Core.Copyable@.
--- There is deliberately no catch-all witness: copying remains an operation
--- supplied by the type's algebra, not ambient variable reuse.
+-- | Costed core copying, mirroring @T3.Core.Copyable@.  The 'Copyable'
+-- evidence lives in "Telomare.Core" (total on first-order data; future
+-- non-data objects will have no witness) and 'copyS' is the primitive
+-- 'CopyS' — a structural list copy is not derivable at level 0, which is
+-- why the primitive exists.  The dup grade charges its full 'sizeVal'.
+-- The surface-to-core witness 'copyableLift' lives in
+-- "Telomare.Compiler.Direct" beside the 'Lift' family it produces.
 module Telomare.Copyable
   ( Copyable (..)
   , copyS
@@ -12,23 +16,5 @@ module Telomare.Copyable
 
 import Telomare.Core
 
-data Copyable a where
-  CopyUnit :: Copyable 'Unit
-  CopyNat  :: Copyable 'Nat
-  CopyProd :: Copyable a -> Copyable b -> Copyable (a ':*: b)
-  CopyBang :: STy a -> Copyable ('Bang a)
-
 copyS :: Copyable a -> Morph a (a ':*: a)
-copyS CopyUnit       = LunitS
-copyS CopyNat        = DupNatS
-copyS (CopyProd a b) = shuffle :.: (copyS a :***: copyS b)
-copyS (CopyBang a)   = DupS a
-
-shuffle :: Morph ((a ':*: a) ':*: (b ':*: b))
-                 ((a ':*: b) ':*: (a ':*: b))
-shuffle = AssocS
-  :.: (UnassocS :***: IdS)
-  :.: ((IdS :***: SwapS) :***: IdS)
-  :.: UnassocS
-  :.: (IdS :***: UnassocS)
-  :.: AssocS
+copyS = CopyS

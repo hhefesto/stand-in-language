@@ -39,6 +39,7 @@ showM SucS           = "SucS"
 showM AddS           = "AddS"
 showM (ConstS k)     = "ConstS " <> show k
 showM DupNatS        = "DupNatS"
+showM (CopyS _)      = "CopyS"
 showM (GuardS _ t)   = "GuardS (" <> showM t <> ")"
 showM (DupS _)       = "DupS"
 showM (BoxS f)       = "BoxS (" <> showM f <> ")"
@@ -63,9 +64,14 @@ smallNat = fromIntegral <$> chooseInt (0, 6)
 affineLeaf :: Gen (Morph 'Nat 'Nat)
 affineLeaf = elements [IdS, SucS, predS, ConstS 3, ConstS 7]
 
--- General pieces add the atom exemption (dupNatS).
+-- General pieces add the atom exemption (dupNatS) and the costed data
+-- copy (CopyS at Nat).
 anyLeaf :: Gen (Morph 'Nat 'Nat)
-anyLeaf = frequency [(3, affineLeaf), (1, pure (AddS :.: DupNatS))]
+anyLeaf = frequency
+  [ (3, affineLeaf)
+  , (1, pure (AddS :.: DupNatS))
+  , (1, pure (AddS :.: CopyS CopyNat))
+  ]
 
 pipe :: Gen (Morph 'Nat 'Nat) -> Int -> Gen (Morph 'Nat 'Nat)
 pipe l 0 = l
@@ -151,6 +157,20 @@ prop_dup_functorial =
   forAll smallNat $ \n ->
     dupGrade (g :.: f) n == dupGrade f n + dupGrade g (evalV f n)
 
+-- CopyS charge exactness (Agda: dupAlg.chargeD copyT = sizeT): the dup
+-- grade of a lone copy is exactly the copied value's size, and the copy
+-- is free work.
+prop_copy_charge_exact :: Property
+prop_copy_charge_exact =
+  forAll (listOf smallNat) $ \xs ->
+  forAll smallNat $ \n ->
+    let listCopy = CopyS (CopyList CopyNat)
+        pairCopy = CopyS (CopyProd CopyNat CopyNat)
+    in dupGrade listCopy xs == sizeVal (SList SNat) xs
+      && work listCopy xs == 0
+      && dupGrade pairCopy (n, n) == 2
+      && evalV listCopy xs == (xs, xs)
+
 prop_map_coherence_precision :: Property
 prop_map_coherence_precision =
   forAll (listOf smallNat) $ \xs ->
@@ -169,5 +189,6 @@ lawProps =
   , ("prop_affine_dup_zero",         prop_affine_dup_zero)
   , ("prop_work_functorial",         prop_work_functorial)
   , ("prop_dup_functorial",          prop_dup_functorial)
+  , ("prop_copy_charge_exact",       prop_copy_charge_exact)
   , ("prop_map_coherence_precision", prop_map_coherence_precision)
   ]
