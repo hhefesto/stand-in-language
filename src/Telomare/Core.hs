@@ -15,7 +15,9 @@
 module Telomare.Core
   ( Ty (..)
   , Val
+  , Closure (..)
   , STy (..)
+  , sameSTy
   , sizeVal
   , Copyable (..)
   , copyableSTy
@@ -25,6 +27,7 @@ module Telomare.Core
   , telomareVersion
   ) where
 
+import Data.Type.Equality ((:~:) (Refl))
 import Numeric.Natural (Natural)
 
 -- | Version string reported by the @telomare@ executable.
@@ -40,29 +43,65 @@ data Ty
   | Ty :+: Ty
   | ListT Ty
   | Bang Ty
+  | Lolly Ty Ty
 
 infixl 5 :*:
 infixl 4 :+:
 
 -- | Value denotation (spec: @T3.Core.Ty.⟦_⟧T@).  Values do not see boxes:
 -- @Val ('Bang' a) = Val a@ — the load-bearing clause.
+--
+-- Deviation from the spec, deliberate and central: Agda denotes
+-- @A ⊸ B@ by the semantic function space; the Haskell mirror
+-- DEFUNCTIONALIZES it as a structural 'Closure' — code identity plus a
+-- typed environment — because closures must serialize through transport,
+-- compare structurally in the evaluator-agreement checks, and validate
+-- independently.  One structural closure serves all three evaluators
+-- (value, graded, fuel) by re-running its carried syntax.
 type family Val (a :: Ty) where
-  Val 'Unit      = ()
-  Val 'Nat       = Natural
-  Val (a ':*: b) = (Val a, Val b)
-  Val (a ':+: b) = Either (Val a) (Val b)
-  Val ('ListT a) = [Val a]
-  Val ('Bang a)  = Val a
+  Val 'Unit        = ()
+  Val 'Nat         = Natural
+  Val (a ':*: b)   = (Val a, Val b)
+  Val (a ':+: b)   = Either (Val a) (Val b)
+  Val ('ListT a)   = [Val a]
+  Val ('Bang a)    = Val a
+  Val ('Lolly a b) = Closure a b
+
+-- | A first-class closure value: environment witness, body syntax, and
+-- the captured environment.  Never an opaque Haskell function.
+data Closure (a :: Ty) (b :: Ty) where
+  Closure :: STy c -> Morph (c ':*: a) b -> Val c -> Closure a b
 
 -- | Type singleton: Agda pattern-matches on types directly ('sizeT');
 -- Haskell needs the runtime witness.
 data STy (a :: Ty) where
-  SUnit :: STy 'Unit
-  SNat  :: STy 'Nat
-  SProd :: STy a -> STy b -> STy (a ':*: b)
-  SSum  :: STy a -> STy b -> STy (a ':+: b)
-  SList :: STy a -> STy ('ListT a)
-  SBang :: STy a -> STy ('Bang a)
+  SUnit  :: STy 'Unit
+  SNat   :: STy 'Nat
+  SProd  :: STy a -> STy b -> STy (a ':*: b)
+  SSum   :: STy a -> STy b -> STy (a ':+: b)
+  SList  :: STy a -> STy ('ListT a)
+  SBang  :: STy a -> STy ('Bang a)
+  SLolly :: STy a -> STy b -> STy ('Lolly a b)
+
+-- | Runtime type equality on core witnesses.
+sameSTy :: STy a -> STy b -> Maybe (a :~: b)
+sameSTy SUnit SUnit = Just Refl
+sameSTy SNat SNat = Just Refl
+sameSTy (SProd a b) (SProd c d) = do
+  Refl <- sameSTy a c
+  Refl <- sameSTy b d
+  pure Refl
+sameSTy (SSum a b) (SSum c d) = do
+  Refl <- sameSTy a c
+  Refl <- sameSTy b d
+  pure Refl
+sameSTy (SList a) (SList b) = do Refl <- sameSTy a b; pure Refl
+sameSTy (SBang a) (SBang b) = do Refl <- sameSTy a b; pure Refl
+sameSTy (SLolly a b) (SLolly c d) = do
+  Refl <- sameSTy a c
+  Refl <- sameSTy b d
+  pure Refl
+sameSTy _ _ = Nothing
 
 -- | Word model of value size (spec: @T3.Core.Ty.sizeT@).
 sizeVal :: STy a -> Val a -> Natural
@@ -74,6 +113,10 @@ sizeVal (SSum _ t)  (Right b) = 1 + sizeVal t b
 sizeVal (SList _)   []        = 1
 sizeVal (SList s)   (x : xs)  = 1 + sizeVal s x + sizeVal (SList s) xs
 sizeVal (SBang s)   a         = sizeVal s a
+sizeVal (SLolly _ _) _        = 1
+  -- Pointer model.  Exact where duplication is actually possible: only
+  -- CLOSED closures are promotable/duplicable, and a closed-closure
+  -- duplicate is one code pointer (design/CLOSURES.md; revisit at R3).
 
 -- | Structural copy evidence (spec: @T3.Core.Ty.Copyable@): which types
 -- admit the costed data copy 'CopyS', charged 'sizeVal' by the dup grade.
@@ -131,6 +174,16 @@ data Morph (a :: Ty) (b :: Ty) where
   ConstS   :: Natural -> Morph a 'Nat
   DupNatS  :: Morph 'Nat ('Nat ':*: 'Nat)
   CopyS    :: Copyable a -> Morph a (a ':*: a)
+  -- closures: affine first-class functions.  A bare @Lolly a b@ is
+  -- applied at most once; a REUSABLE closure is @Bang (Lolly a b)@,
+  -- formed only by 'BoxValS' empty-context promotion of a closed closure
+  -- and duplicated only by 'DupS'.  'MapCS' applies one reusable closure
+  -- per element, one level down.  'CurryS' carries the environment
+  -- witness because closure values compare structurally and export
+  -- through transport.
+  CurryS   :: STy c -> Morph (c ':*: a) b -> Morph c ('Lolly a b)
+  ApplyS   :: Morph ('Lolly a b ':*: a) b
+  MapCS    :: Morph ('Bang ('Lolly a b) ':*: 'ListT a) ('Bang ('ListT b))
   GuardS   :: STy a -> Morph a ('Unit ':+: 'Unit) -> Morph a (a ':+: 'Unit)
   DupS     :: STy a -> Morph ('Bang a) ('Bang a ':*: 'Bang a)
   BoxS     :: Morph a b -> Morph ('Bang a) ('Bang b)
@@ -172,6 +225,12 @@ depth AddS           = 0
 depth (ConstS _)     = 0
 depth DupNatS        = 0
 depth (CopyS _)      = 0
+depth (CurryS _ f)   = depth f
+  -- level-preserving: the body runs at the apply site's level, and
+  -- linearity keeps that at the curry site's level
+depth ApplyS         = 0
+depth MapCS          = 1
+  -- the closure body runs one level down, like every recursion body
 depth (GuardS _ t)   = depth t
 depth (DupS _)       = 0
 depth (BoxS f)       = 1 + depth f

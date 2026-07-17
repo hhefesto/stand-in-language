@@ -19,6 +19,7 @@ module Telomare.Compiler.Direct
   , compileDirect
   , copyableLift
   , stripCopyable
+  , stripSTy
   , eraseMorph
   , erasureMatches
   ) where
@@ -26,7 +27,7 @@ module Telomare.Compiler.Direct
 import Telomare.Core
 import Telomare.Surface
 
-data RecursionKind = Mapping | Iteration | Fold | While
+data RecursionKind = Mapping | Iteration | Fold | While | MappingClosure
   deriving (Eq, Show)
 
 data DirectError
@@ -36,30 +37,34 @@ data DirectError
 
 -- | Type-level erasure of core boxes.
 type family Strip (a :: Ty) :: UTy where
-  Strip 'Unit      = 'UUnit
-  Strip 'Nat       = 'UNat
-  Strip (a ':*: b) = Strip a ':**: Strip b
-  Strip (a ':+: b) = Strip a ':++: Strip b
-  Strip ('ListT a) = 'UList (Strip a)
-  Strip ('Bang a)  = Strip a
+  Strip 'Unit        = 'UUnit
+  Strip 'Nat         = 'UNat
+  Strip (a ':*: b)   = Strip a ':**: Strip b
+  Strip (a ':+: b)   = Strip a ':++: Strip b
+  Strip ('ListT a)   = 'UList (Strip a)
+  Strip ('Bang a)    = Strip a
+  Strip ('Lolly a b) = 'ULolly (Strip a) (Strip b)
 
 stripSTy :: STy a -> SUTy (Strip a)
-stripSTy SUnit       = SUUnit
-stripSTy SNat        = SUNat
-stripSTy (SProd a b) = SUProd (stripSTy a) (stripSTy b)
-stripSTy (SSum a b)  = SUSum (stripSTy a) (stripSTy b)
-stripSTy (SList a)   = SUList (stripSTy a)
-stripSTy (SBang a)   = stripSTy a
+stripSTy SUnit        = SUUnit
+stripSTy SNat         = SUNat
+stripSTy (SProd a b)  = SUProd (stripSTy a) (stripSTy b)
+stripSTy (SSum a b)   = SUSum (stripSTy a) (stripSTy b)
+stripSTy (SList a)    = SUList (stripSTy a)
+stripSTy (SBang a)    = stripSTy a
+stripSTy (SLolly a b) = SULolly (stripSTy a) (stripSTy b)
 
 -- | Every first-order surface type lifts to a copyable core type.
 -- 'Maybe' so a future non-copyable surface object (arrows) is a clean
 -- 'Nothing' rather than a partial match.
 copyableLift :: SUTy a -> Maybe (Copyable (Lift a))
-copyableLift SUUnit       = Just CopyUnit
-copyableLift SUNat        = Just CopyNat
-copyableLift (SUProd a b) = CopyProd <$> copyableLift a <*> copyableLift b
-copyableLift (SUSum a b)  = CopySum <$> copyableLift a <*> copyableLift b
-copyableLift (SUList a)   = CopyList <$> copyableLift a
+copyableLift SUUnit        = Just CopyUnit
+copyableLift SUNat         = Just CopyNat
+copyableLift (SUProd a b)  = CopyProd <$> copyableLift a <*> copyableLift b
+copyableLift (SUSum a b)   = CopySum <$> copyableLift a <*> copyableLift b
+copyableLift (SUList a)    = CopyList <$> copyableLift a
+copyableLift (SULolly _ _) = Nothing
+  -- a closure is code; its duplication goes through Bang, never CopyS
 
 -- | The surface singleton a copy witness erases to.
 stripCopyable :: Copyable a -> SUTy (Strip a)
@@ -97,6 +102,9 @@ compileDirect UNatOut        = Right NatOutS
 compileDirect USuc           = Right SucS
 compileDirect UAdd           = Right AddS
 compileDirect (UConst k)     = Right (ConstS k)
+compileDirect (UCurry sc f)  = CurryS (liftSTy sc) <$> compileDirect f
+compileDirect UApply         = Right ApplyS
+compileDirect UMapC          = Left (RecursionRequiresPlacement MappingClosure)
 compileDirect (UGuard sa t)  = GuardS (liftSTy sa) <$> compileDirect t
 compileDirect (UMap _)       = Left (RecursionRequiresPlacement Mapping)
 compileDirect (UIter _)      = Left (RecursionRequiresPlacement Iteration)
@@ -129,6 +137,9 @@ eraseMorph AddS           = UAdd
 eraseMorph (ConstS k)     = UConst k
 eraseMorph DupNatS        = UDup SUNat
 eraseMorph (CopyS w)      = UDup (stripCopyable w)
+eraseMorph (CurryS sc f)  = UCurry (stripSTy sc) (eraseMorph f)
+eraseMorph ApplyS         = UApply
+eraseMorph MapCS          = UMapC
 eraseMorph (GuardS sa t)  = UGuard (stripSTy sa) (eraseMorph t)
 eraseMorph (DupS sa)      = UDup (stripSTy sa)
 eraseMorph (BoxS f)       = eraseMorph f

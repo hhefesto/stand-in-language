@@ -37,9 +37,11 @@ import Telomare.Machine (CoreEntry (..), Program (..))
 import Telomare.Surface (liftSTy)
 
 -- | Stable schema version.  A validator accepts exactly this version.
--- Version 3 added the costed data copy node 'NCopy'.
+-- Version 3 added the costed data copy node 'NCopy'; version 4 added
+-- closures ('TLolly', 'NCurry', 'NApply', 'NMapC').  Closure VALUES are
+-- never transported — only morphisms are.
 transportVersion :: Int
-transportVersion = 3
+transportVersion = 4
 
 -- | Runtime representation of every core object, including the exponential.
 data TyCode
@@ -49,6 +51,7 @@ data TyCode
   | TSum TyCode TyCode
   | TList TyCode
   | TBang TyCode
+  | TLolly TyCode TyCode
   deriving (Eq, Ord, Show)
 
 -- | One first-order node for each current 'Morph' constructor.
@@ -77,6 +80,9 @@ data Node
   | NConst Natural
   | NDupNat
   | NCopy TyCode
+  | NCurry TyCode Node
+  | NApply
+  | NMapC
   | NGuard TyCode Node
   | NDup TyCode
   | NBox Node
@@ -115,12 +121,13 @@ data ProgramArtifact = ProgramArtifact
   deriving (Eq, Show)
 
 styCode :: STy a -> TyCode
-styCode SUnit       = TUnit
-styCode SNat        = TNat
-styCode (SProd a b) = TProd (styCode a) (styCode b)
-styCode (SSum a b)  = TSum (styCode a) (styCode b)
-styCode (SList a)   = TList (styCode a)
-styCode (SBang a)   = TBang (styCode a)
+styCode SUnit        = TUnit
+styCode SNat         = TNat
+styCode (SProd a b)  = TProd (styCode a) (styCode b)
+styCode (SSum a b)   = TSum (styCode a) (styCode b)
+styCode (SList a)    = TList (styCode a)
+styCode (SBang a)    = TBang (styCode a)
+styCode (SLolly a b) = TLolly (styCode a) (styCode b)
 
 -- | Export a typed morph when its endpoint witnesses are available.  A bare
 -- polymorphic 'Morph' does not retain enough evidence to recover these types.
@@ -165,6 +172,9 @@ exportNode AddS           = NAdd
 exportNode (ConstS n)     = NConst n
 exportNode DupNatS        = NDupNat
 exportNode (CopyS w)      = NCopy (styCode (copyableSTy w))
+exportNode (CurryS sc f)  = NCurry (styCode sc) (exportNode f)
+exportNode ApplyS         = NApply
+exportNode MapCS          = NMapC
 exportNode (GuardS a t)   = NGuard (styCode a) (exportNode t)
 exportNode (DupS a)       = NDup (styCode a)
 exportNode (BoxS f)       = NBox (exportNode f)
@@ -183,6 +193,7 @@ data IType
   | ISum IType IType
   | IList IType
   | IBang IType
+  | ILolly IType IType
   deriving (Eq, Show)
 
 data InferState = InferState
@@ -214,12 +225,13 @@ fresh = do
   pure (IVar (inferNext state))
 
 fromCode :: TyCode -> IType
-fromCode TUnit       = IUnit
-fromCode TNat        = INat
-fromCode (TProd a b) = IProd (fromCode a) (fromCode b)
-fromCode (TSum a b)  = ISum (fromCode a) (fromCode b)
-fromCode (TList a)   = IList (fromCode a)
-fromCode (TBang a)   = IBang (fromCode a)
+fromCode TUnit        = IUnit
+fromCode TNat         = INat
+fromCode (TProd a b)  = IProd (fromCode a) (fromCode b)
+fromCode (TSum a b)   = ISum (fromCode a) (fromCode b)
+fromCode (TList a)    = IList (fromCode a)
+fromCode (TBang a)    = IBang (fromCode a)
+fromCode (TLolly a b) = ILolly (fromCode a) (fromCode b)
 
 prune :: IType -> Infer IType
 prune ty@(IVar variable) = do
@@ -242,6 +254,7 @@ occurs variable ty = do
     ISum a b   -> (||) <$> occurs variable a <*> occurs variable b
     IList a    -> occurs variable a
     IBang a    -> occurs variable a
+    ILolly a b -> (||) <$> occurs variable a <*> occurs variable b
     IUnit      -> pure False
     INat       -> pure False
 
@@ -259,6 +272,7 @@ unify context left right = do
     (ISum a1 a2, ISum b1 b2) -> unify context a1 b1 >> unify context a2 b2
     (IList x, IList y) -> unify context x y
     (IBang x, IBang y) -> unify context x y
+    (ILolly a1 b1, ILolly a2 b2) -> unify context a1 a2 >> unify context b1 b2
     _ -> failValidation (context <> ": cannot unify " <> show a <> " with " <> show b)
   where
     bind variable ty = do
@@ -307,6 +321,20 @@ inferNode node = case node of
   NConst _ -> do a <- fresh; pure (a, INat)
   NDupNat -> pure (INat, IProd INat INat)
   NCopy witness -> let a = fromCode witness in pure (a, IProd a a)
+  NCurry envCode body -> do
+    let c = fromCode envCode
+    a <- fresh
+    (bi, bo) <- inferNode body
+    unify "curry body input" bi (IProd c a)
+    pure (c, ILolly a bo)
+  NApply -> do
+    a <- fresh
+    b <- fresh
+    pure (IProd (ILolly a b) a, b)
+  NMapC -> do
+    a <- fresh
+    b <- fresh
+    pure (IProd (IBang (ILolly a b)) (IList a), IBang (IList b))
   NGuard witness test -> do
     let a = fromCode witness
     (ti, to) <- inferNode test
@@ -352,12 +380,13 @@ renderArtifact (Artifact version input output node) =
   list ["morph", show version, renderType input, renderType output, renderNode node]
 
 renderType :: TyCode -> String
-renderType TUnit       = "unit"
-renderType TNat        = "nat"
-renderType (TProd a b) = list ["prod", renderType a, renderType b]
-renderType (TSum a b)  = list ["sum", renderType a, renderType b]
-renderType (TList a)   = list ["list", renderType a]
-renderType (TBang a)   = list ["bang", renderType a]
+renderType TUnit        = "unit"
+renderType TNat         = "nat"
+renderType (TProd a b)  = list ["prod", renderType a, renderType b]
+renderType (TSum a b)   = list ["sum", renderType a, renderType b]
+renderType (TList a)    = list ["list", renderType a]
+renderType (TBang a)    = list ["bang", renderType a]
+renderType (TLolly a b) = list ["lolly", renderType a, renderType b]
 
 renderNode :: Node -> String
 renderNode node = case node of
@@ -369,6 +398,8 @@ renderNode node = case node of
   NCons -> atom "cons"; NUncons -> atom "uncons"; NNatOut -> atom "nat-out"
   NSuc -> atom "suc"; NAdd -> atom "add"; NConst n -> list ["const", show n]
   NDupNat -> atom "dup-nat"; NCopy ty -> list ["copy", renderType ty]
+  NCurry ty body -> list ["curry", renderType ty, renderNode body]
+  NApply -> atom "apply"; NMapC -> atom "map-clo"
   NGuard ty test -> list ["guard", renderType ty, renderNode test]
   NDup ty -> list ["dup", renderType ty]; NBox body -> unary "box" body
   NBoxVal body -> unary "box-val" body; NMerge -> atom "merge"; NMap body -> unary "map" body
@@ -402,7 +433,8 @@ typeP =
   +++ parens ((symbol "prod" >> TProd <$> typeP <*> typeP)
           +++ (symbol "sum" >> TSum <$> typeP <*> typeP)
           +++ (symbol "list" >> TList <$> typeP)
-          +++ (symbol "bang" >> TBang <$> typeP))
+          +++ (symbol "bang" >> TBang <$> typeP)
+          +++ (symbol "lolly" >> TLolly <$> typeP <*> typeP))
 
 nodeP :: ReadP Node
 nodeP = parens $ choice
@@ -415,6 +447,8 @@ nodeP = parens $ choice
   , nullary "nat-out" NNatOut, nullary "suc" NSuc, nullary "add" NAdd
   , symbol "const" >> NConst <$> naturalP, nullary "dup-nat" NDupNat
   , symbol "copy" >> NCopy <$> typeP
+  , symbol "curry" >> NCurry <$> typeP <*> nodeP
+  , nullary "apply" NApply, nullary "map-clo" NMapC
   , symbol "guard" >> NGuard <$> typeP <*> nodeP, symbol "dup" >> NDup <$> typeP
   , unary "box" NBox, unary "box-val" NBoxVal, nullary "merge" NMerge
   , unary "map" NMap, unary "iter" NIter, unary "fold" NFold

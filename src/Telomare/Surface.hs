@@ -12,7 +12,9 @@
 module Telomare.Surface
   ( UTy (..)
   , UVal
+  , UClosure (..)
   , SUTy (..)
+  , sameSUTy
   , Lift
   , liftSTy
   , UMorph (..)
@@ -21,51 +23,82 @@ module Telomare.Surface
   , shapeU
   ) where
 
+import Data.Type.Equality ((:~:) (Refl))
+
 import Numeric.Natural (Natural)
 
 import Telomare.Core (STy (..), Ty (..))
 
--- | Surface objects contain no exponential.
+-- | Surface objects contain no exponential.  Arrows appear box-free:
+-- the core's reusable-closure bang erases.
 data UTy
   = UUnit
   | UNat
   | UTy :**: UTy
   | UTy :++: UTy
   | UList UTy
+  | ULolly UTy UTy
 
 infixl 5 :**:
 infixl 4 :++:
 
--- | Surface value denotation.
+-- | Surface value denotation.  Closures are structural (code + typed
+-- environment), mirroring the core's defunctionalized representation.
 type family UVal (a :: UTy) where
-  UVal 'UUnit       = ()
-  UVal 'UNat        = Natural
-  UVal (a ':**: b)  = (UVal a, UVal b)
-  UVal (a ':++: b)  = Either (UVal a) (UVal b)
-  UVal ('UList a)   = [UVal a]
+  UVal 'UUnit        = ()
+  UVal 'UNat         = Natural
+  UVal (a ':**: b)   = (UVal a, UVal b)
+  UVal (a ':++: b)   = Either (UVal a) (UVal b)
+  UVal ('UList a)    = [UVal a]
+  UVal ('ULolly a b) = UClosure a b
+
+data UClosure (a :: UTy) (b :: UTy) where
+  UClosure :: SUTy c -> UMorph (c ':**: a) b -> UVal c -> UClosure a b
 
 -- | Runtime witness for a surface object.
 data SUTy (a :: UTy) where
-  SUUnit :: SUTy 'UUnit
-  SUNat  :: SUTy 'UNat
-  SUProd :: SUTy a -> SUTy b -> SUTy (a ':**: b)
-  SUSum  :: SUTy a -> SUTy b -> SUTy (a ':++: b)
-  SUList :: SUTy a -> SUTy ('UList a)
+  SUUnit  :: SUTy 'UUnit
+  SUNat   :: SUTy 'UNat
+  SUProd  :: SUTy a -> SUTy b -> SUTy (a ':**: b)
+  SUSum   :: SUTy a -> SUTy b -> SUTy (a ':++: b)
+  SUList  :: SUTy a -> SUTy ('UList a)
+  SULolly :: SUTy a -> SUTy b -> SUTy ('ULolly a b)
+
+-- | Runtime type equality on surface witnesses.
+sameSUTy :: SUTy a -> SUTy b -> Maybe (a :~: b)
+sameSUTy SUUnit SUUnit = Just Refl
+sameSUTy SUNat SUNat = Just Refl
+sameSUTy (SUProd a b) (SUProd c d) = do
+  Refl <- sameSUTy a c
+  Refl <- sameSUTy b d
+  pure Refl
+sameSUTy (SUSum a b) (SUSum c d) = do
+  Refl <- sameSUTy a c
+  Refl <- sameSUTy b d
+  pure Refl
+sameSUTy (SUList a) (SUList b) = do Refl <- sameSUTy a b; pure Refl
+sameSUTy (SULolly a b) (SULolly c d) = do
+  Refl <- sameSUTy a c
+  Refl <- sameSUTy b d
+  pure Refl
+sameSUTy _ _ = Nothing
 
 -- | Canonical bang-free embedding of surface objects into the core.
 type family Lift (a :: UTy) :: Ty where
-  Lift 'UUnit       = 'Unit
-  Lift 'UNat        = 'Nat
-  Lift (a ':**: b)  = Lift a ':*: Lift b
-  Lift (a ':++: b)  = Lift a ':+: Lift b
-  Lift ('UList a)   = 'ListT (Lift a)
+  Lift 'UUnit        = 'Unit
+  Lift 'UNat         = 'Nat
+  Lift (a ':**: b)   = Lift a ':*: Lift b
+  Lift (a ':++: b)   = Lift a ':+: Lift b
+  Lift ('UList a)    = 'ListT (Lift a)
+  Lift ('ULolly a b) = 'Lolly (Lift a) (Lift b)
 
 liftSTy :: SUTy a -> STy (Lift a)
-liftSTy SUUnit       = SUnit
-liftSTy SUNat        = SNat
-liftSTy (SUProd a b) = SProd (liftSTy a) (liftSTy b)
-liftSTy (SUSum a b)  = SSum (liftSTy a) (liftSTy b)
-liftSTy (SUList a)   = SList (liftSTy a)
+liftSTy SUUnit        = SUnit
+liftSTy SUNat         = SNat
+liftSTy (SUProd a b)  = SProd (liftSTy a) (liftSTy b)
+liftSTy (SUSum a b)   = SSum (liftSTy a) (liftSTy b)
+liftSTy (SUList a)    = SList (liftSTy a)
+liftSTy (SULolly a b) = SLolly (liftSTy a) (liftSTy b)
 
 -- | Surface morphisms, constructor-for-constructor with
 -- @T3.Surface.Syntax._⇨U_@.
@@ -95,6 +128,10 @@ data UMorph (a :: UTy) (b :: UTy) where
   USuc     :: UMorph 'UNat 'UNat
   UAdd     :: UMorph ('UNat ':**: 'UNat) 'UNat
   UConst   :: Natural -> UMorph a 'UNat
+  -- closures (box-free typing: the core's reusable-closure bang erases)
+  UCurry   :: SUTy c -> UMorph (c ':**: a) b -> UMorph c ('ULolly a b)
+  UApply   :: UMorph ('ULolly a b ':**: a) b
+  UMapC    :: UMorph ('ULolly a b ':**: 'UList a) ('UList b)
   UGuard   :: SUTy a -> UMorph a ('UUnit ':++: 'UUnit)
            -> UMorph a (a ':++: 'UUnit)
   UMap     :: UMorph a b -> UMorph ('UList a) ('UList b)
@@ -108,38 +145,41 @@ infixr 3 :****:
 
 -- | Plain total surface semantics.
 evalU :: UMorph a b -> UVal a -> UVal b
-evalU UId a                 = a
-evalU (g :..: f) a          = evalU g (evalU f a)
-evalU (f :****: g) (a, c)   = (evalU f a, evalU g c)
-evalU (UDup _) a            = (a, a)
-evalU USwap (a, b)          = (b, a)
-evalU UAssoc ((a, b), c)    = (a, (b, c))
-evalU UUnassoc (a, (b, c))  = ((a, b), c)
-evalU UExl (a, _)           = a
-evalU UExr (_, b)           = b
-evalU UWeak _               = ()
-evalU URunit a              = (a, ())
-evalU ULunit a              = ((), a)
-evalU UInl a                = Left a
-evalU UInr b                = Right b
-evalU (UCase l _) (Left a)  = evalU l a
-evalU (UCase _ r) (Right b) = evalU r b
-evalU UDistl (a, Left b)    = Left (a, b)
-evalU UDistl (a, Right c)   = Right (a, c)
-evalU UNil _                = []
-evalU UCons (x, xs)         = x : xs
-evalU UUncons []            = Left ()
-evalU UUncons (x : xs)      = Right (x, xs)
-evalU UNatOut 0             = Left ()
-evalU UNatOut n             = Right (n - 1)
-evalU USuc n                = n + 1
-evalU UAdd (a, b)           = a + b
-evalU (UConst k) _          = k
-evalU (UGuard _ t) a        = guardU a (evalU t a)
-evalU (UMap f) xs           = fmap (evalU f) xs
-evalU (UIter f) (n, a)      = iterU n (evalU f) a
-evalU (UFold f) (xs, b)     = foldU xs (evalU f) b
-evalU (UWhile _ t s) (n, a) = whileU n (evalU t) (evalU s) a
+evalU UId a                           = a
+evalU (g :..: f) a                    = evalU g (evalU f a)
+evalU (f :****: g) (a, c)             = (evalU f a, evalU g c)
+evalU (UDup _) a                      = (a, a)
+evalU USwap (a, b)                    = (b, a)
+evalU UAssoc ((a, b), c)              = (a, (b, c))
+evalU UUnassoc (a, (b, c))            = ((a, b), c)
+evalU UExl (a, _)                     = a
+evalU UExr (_, b)                     = b
+evalU UWeak _                         = ()
+evalU URunit a                        = (a, ())
+evalU ULunit a                        = ((), a)
+evalU UInl a                          = Left a
+evalU UInr b                          = Right b
+evalU (UCase l _) (Left a)            = evalU l a
+evalU (UCase _ r) (Right b)           = evalU r b
+evalU UDistl (a, Left b)              = Left (a, b)
+evalU UDistl (a, Right c)             = Right (a, c)
+evalU UNil _                          = []
+evalU UCons (x, xs)                   = x : xs
+evalU UUncons []                      = Left ()
+evalU UUncons (x : xs)                = Right (x, xs)
+evalU UNatOut 0                       = Left ()
+evalU UNatOut n                       = Right (n - 1)
+evalU USuc n                          = n + 1
+evalU UAdd (a, b)                     = a + b
+evalU (UConst k) _                    = k
+evalU (UCurry sc f) c                 = UClosure sc f c
+evalU UApply (UClosure _ body env, a) = evalU body (env, a)
+evalU UMapC (UClosure _ body env, xs) = fmap (\x -> evalU body (env, x)) xs
+evalU (UGuard _ t) a                  = guardU a (evalU t a)
+evalU (UMap f) xs                     = fmap (evalU f) xs
+evalU (UIter f) (n, a)                = iterU n (evalU f) a
+evalU (UFold f) (xs, b)               = foldU xs (evalU f) b
+evalU (UWhile _ t s) (n, a)           = whileU n (evalU t) (evalU s) a
 
 guardU :: a -> Either () () -> Either a ()
 guardU a (Left ())  = Left a
@@ -171,6 +211,7 @@ data UShape
   | ShInl | ShInr | ShCase UShape UShape | ShDistl
   | ShNil | ShCons | ShUncons | ShNatOut | ShSuc | ShAdd | ShConst Natural
   | ShGuard UShape | ShMap UShape | ShIter UShape | ShFold UShape | ShWhile UShape UShape
+  | ShCurry UShape | ShApply | ShMapC
   deriving (Eq, Show)
 
 shapeU :: UMorph a b -> UShape
@@ -197,6 +238,9 @@ shapeU UNatOut        = ShNatOut
 shapeU USuc           = ShSuc
 shapeU UAdd           = ShAdd
 shapeU (UConst k)     = ShConst k
+shapeU (UCurry _ f)   = ShCurry (shapeU f)
+shapeU UApply         = ShApply
+shapeU UMapC          = ShMapC
 shapeU (UGuard _ t)   = ShGuard (shapeU t)
 shapeU (UMap f)       = ShMap (shapeU f)
 shapeU (UIter f)      = ShIter (shapeU f)

@@ -22,6 +22,8 @@ module Telomare.Ops
   , NatCopyOps (..)
   , BangCopyOps (..)
   , DataCopyOps (..)
+  , ClosureOps (..)
+  , ClosureRecursionOps (..)
   , BoundedRecursionOps (..)
   ) where
 
@@ -109,6 +111,22 @@ class TensorOps m => DataCopyOps (m :: k -> k -> Type) where
   type CopyWitness m (a :: k) :: Type
   copyOp :: CopyWitness m a -> m a (Tensor m a a)
 
+-- | First-class closures: affine arrows with linear application.  Reuse
+-- lives behind the bang (see 'ClosureRecursionOps'), never here.
+class TensorOps m => ClosureOps (m :: k -> k -> Type) where
+  type LollyObject m (a :: k) (b :: k) :: k
+  curryOp :: ObjectWitness m c -> m (Tensor m c a) b
+          -> m c (LollyObject m a b)
+  applyOp :: m (Tensor m (LollyObject m a b) a) b
+
+-- | Higher-order bounded recursion: one reusable (banged) closure applied
+-- per element, output one level deeper.
+class (ClosureOps m, ListOps m, BangOps m)
+  => ClosureRecursionOps (m :: k -> k -> Type) where
+  mapClosureOp
+    :: m (Tensor m (BangObject m (LollyObject m a b)) (ListObject m a))
+         (BangObject m (ListObject m b))
+
 class
   (TensorOps m, SumOps m, NatOps m, ListOps m, GuardOps m) =>
   BoundedRecursionOps (m :: k -> k -> Type) where
@@ -180,6 +198,11 @@ instance DataCopyOps UMorph where
   type CopyWitness UMorph a = SUTy a
   copyOp = UDup
 
+instance ClosureOps UMorph where
+  type LollyObject UMorph a b = 'ULolly a b
+  curryOp = UCurry
+  applyOp = UApply
+
 instance BoundedRecursionOps UMorph where
   type RecState UMorph a = a
   mapBoundedOp = UMap
@@ -247,6 +270,14 @@ instance BangCopyOps Morph where
 instance DataCopyOps Morph where
   type CopyWitness Morph a = Copyable a
   copyOp = CopyS
+
+instance ClosureOps Morph where
+  type LollyObject Morph a b = 'Lolly a b
+  curryOp = CurryS
+  applyOp = ApplyS
+
+instance ClosureRecursionOps Morph where
+  mapClosureOp = MapCS
 
 instance BoundedRecursionOps Morph where
   type RecState Morph a = 'Bang a

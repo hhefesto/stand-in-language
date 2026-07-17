@@ -38,42 +38,45 @@ import Telomare.Core
 
 -- | Value denotation (spec: @T3.Sem.Value.⟦_⟧V@) — the specification.
 evalV :: Morph a b -> Val a -> Val b
-evalV IdS a                 = a
-evalV (g :.: f) a           = evalV g (evalV f a)
-evalV (f :***: g) (a, c)    = (evalV f a, evalV g c)
-evalV SwapS (a, b)          = (b, a)
-evalV AssocS ((a, b), c)    = (a, (b, c))
-evalV UnassocS (a, (b, c))  = ((a, b), c)
-evalV ExlS (a, _)           = a
-evalV ExrS (_, b)           = b
-evalV WeakS _               = ()
-evalV RunitS a              = (a, ())
-evalV LunitS a              = ((), a)
-evalV InlS a                = Left a
-evalV InrS b                = Right b
-evalV (CaseS l r) e         = either (evalV l) (evalV r) e
-evalV DistlS (a, Left b)    = Left (a, b)
-evalV DistlS (a, Right c)   = Right (a, c)
-evalV NilS _                = []
-evalV ConsS (x, xs)         = x : xs
-evalV UnconsS []            = Left ()
-evalV UnconsS (x : xs)      = Right (x, xs)
-evalV NatOutS 0             = Left ()
-evalV NatOutS n             = Right (n - 1)
-evalV SucS n                = n + 1
-evalV AddS (a, b)           = a + b
-evalV (ConstS k) _          = k
-evalV DupNatS n             = (n, n)
-evalV (CopyS _) a           = (a, a)
-evalV (GuardS _ t) a        = guardOut a (evalV t a)
-evalV (DupS _) a            = (a, a)
-evalV (BoxS f) a            = evalV f a
-evalV (BoxValS f) a         = evalV f a
-evalV MergeS p              = p
-evalV (MapS f) xs           = fmap (evalV f) xs
-evalV (IterS f) (n, a)      = iterV n (evalV f) a
-evalV (FoldS f) (xs, b)     = foldV xs (evalV f) b
-evalV (WhileS _ t s) (n, a) = whileV n (evalV t) (evalV s) a
+evalV IdS a                          = a
+evalV (g :.: f) a                    = evalV g (evalV f a)
+evalV (f :***: g) (a, c)             = (evalV f a, evalV g c)
+evalV SwapS (a, b)                   = (b, a)
+evalV AssocS ((a, b), c)             = (a, (b, c))
+evalV UnassocS (a, (b, c))           = ((a, b), c)
+evalV ExlS (a, _)                    = a
+evalV ExrS (_, b)                    = b
+evalV WeakS _                        = ()
+evalV RunitS a                       = (a, ())
+evalV LunitS a                       = ((), a)
+evalV InlS a                         = Left a
+evalV InrS b                         = Right b
+evalV (CaseS l r) e                  = either (evalV l) (evalV r) e
+evalV DistlS (a, Left b)             = Left (a, b)
+evalV DistlS (a, Right c)            = Right (a, c)
+evalV NilS _                         = []
+evalV ConsS (x, xs)                  = x : xs
+evalV UnconsS []                     = Left ()
+evalV UnconsS (x : xs)               = Right (x, xs)
+evalV NatOutS 0                      = Left ()
+evalV NatOutS n                      = Right (n - 1)
+evalV SucS n                         = n + 1
+evalV AddS (a, b)                    = a + b
+evalV (ConstS k) _                   = k
+evalV DupNatS n                      = (n, n)
+evalV (CopyS _) a                    = (a, a)
+evalV (CurryS sc f) c                = Closure sc f c
+evalV ApplyS (Closure _ body env, a) = evalV body (env, a)
+evalV MapCS (Closure _ body env, xs) = fmap (\x -> evalV body (env, x)) xs
+evalV (GuardS _ t) a                 = guardOut a (evalV t a)
+evalV (DupS _) a                     = (a, a)
+evalV (BoxS f) a                     = evalV f a
+evalV (BoxValS f) a                  = evalV f a
+evalV MergeS p                       = p
+evalV (MapS f) xs                    = fmap (evalV f) xs
+evalV (IterS f) (n, a)               = iterV n (evalV f) a
+evalV (FoldS f) (xs, b)              = foldV xs (evalV f) b
+evalV (WhileS _ t s) (n, a)          = whileV n (evalV t) (evalV s) a
 
 iterV :: Natural -> (a -> a) -> a -> a
 iterV 0 _ a = a
@@ -104,6 +107,8 @@ data CostAlgebra m = CostAlgebra
   , caNatOut :: m                    -- ^ chargePrim natOutT
   , caDup    :: Natural -> m         -- ^ chargePrim dupT, given sizeVal
   , caDupNat :: m                    -- ^ chargePrim dupNatT
+  , caApply  :: m                    -- ^ chargePrim applyT (before the
+                                     --   body's dynamic grade)
   , caStep   :: m                    -- ^ per taken loop step
   , caProbe  :: Natural -> m         -- ^ guard\/while probe, given sizeVal
   }
@@ -113,7 +118,8 @@ data CostAlgebra m = CostAlgebra
 workAlg :: CostAlgebra Natural
 workAlg = CostAlgebra
   { caSeq = (+), caPar = (+), caZero = 0, caNatOut = 1
-  , caDup = const 0, caDupNat = 0, caStep = 1, caProbe = const 0
+  , caDup = const 0, caDupNat = 0, caApply = 1, caStep = 1
+  , caProbe = const 0
   }
 
 -- | Dup grade (spec: @T3.Sem.Graded.dupAlg@): sizeT at dupS and at the
@@ -122,7 +128,7 @@ workAlg = CostAlgebra
 dupAlg :: CostAlgebra Natural
 dupAlg = CostAlgebra
   { caSeq = (+), caPar = (+), caZero = 0, caNatOut = 0
-  , caDup = id, caDupNat = 1, caStep = 0, caProbe = id
+  , caDup = id, caDupNat = 1, caApply = 0, caStep = 0, caProbe = id
   }
 
 -- | Graded interpretation (spec: @T3.Sem.Graded.Interp.⟦_⟧G@).  Its value
@@ -163,6 +169,12 @@ evalG alg AddS (a, b)          = (caZero alg, a + b)
 evalG alg (ConstS k) _         = (caZero alg, k)
 evalG alg DupNatS n            = (caDupNat alg, (n, n))
 evalG alg (CopyS w) a          = (caDup alg (sizeVal (copyableSTy w) a), (a, a))
+evalG alg (CurryS sc f) c      = (caZero alg, Closure sc f c)
+evalG alg ApplyS (Closure _ body env, a) =
+  let (m, b) = evalG alg body (env, a)
+  in (caSeq alg (caApply alg) m, b)
+evalG alg MapCS (Closure _ body env, xs) =
+  mapG alg (\x -> evalG alg body (env, x)) xs
 evalG alg (GuardS sa t) a =
   let (mt, r) = evalG alg t a
   in (caSeq alg (caProbe alg (sizeVal sa a)) mt, guardOut a r)
@@ -254,6 +266,10 @@ evalK AddS (a, b) g              = Just (a + b, g)
 evalK (ConstS k) _ g             = Just (k, g)
 evalK DupNatS n g                = Just ((n, n), g)
 evalK (CopyS _) a g              = Just ((a, a), g)
+evalK (CurryS sc f) c g          = Just (Closure sc f c, g)
+evalK ApplyS (Closure _ body env, a) g = stepK (evalK body (env, a)) g
+evalK MapCS (Closure _ body env, xs) g =
+  mapK (\x -> evalK body (env, x)) xs g
 evalK (GuardS _ t) a g           =
   evalK t a g >>= \(r, g') -> Just (guardOut a r, g')
 evalK (DupS _) a g               = Just ((a, a), g)

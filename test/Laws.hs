@@ -40,6 +40,9 @@ showM AddS           = "AddS"
 showM (ConstS k)     = "ConstS " <> show k
 showM DupNatS        = "DupNatS"
 showM (CopyS _)      = "CopyS"
+showM (CurryS _ f)   = "CurryS (" <> showM f <> ")"
+showM ApplyS         = "ApplyS"
+showM MapCS          = "MapCS"
 showM (GuardS _ t)   = "GuardS (" <> showM t <> ")"
 showM (DupS _)       = "DupS"
 showM (BoxS f)       = "BoxS (" <> showM f <> ")"
@@ -157,6 +160,34 @@ prop_dup_functorial =
   forAll smallNat $ \n ->
     dupGrade (g :.: f) n == dupGrade f n + dupGrade g (evalV f n)
 
+-- Closure laws: applying a curried body once agrees with the body on
+-- values across all three evaluators, work(apply) = 1 + work(body), and
+-- forming a closure is free.
+prop_closure_beta :: Property
+prop_closure_beta =
+  forAll genNN $ \(NN f) ->
+  forAll smallNat $ \n ->
+    let applied = ApplyS :.: (CurryS SUnit (f :.: ExrS) :***: IdS) :.: LunitS
+    in evalV applied n == evalV f n
+      && snd (evalG workAlg applied n) == evalV f n
+      && snd (evalG dupAlg applied n) == evalV f n
+      && work applied n == 1 + work f n
+      && dupGrade applied n == dupGrade f n
+      && evalK applied n (work applied n) == Just (evalV f n, 0)
+
+-- Higher-order map: a promoted closed closure applied per element equals
+-- plain list map.  MapCS charges 1 step per element plus the body's own
+-- grade (no separate apply tag), mirroring MapS.
+prop_mapc_coherence :: Property
+prop_mapc_coherence =
+  forAll (listOf smallNat) $ \xs ->
+  forAllBlind affineLeaf $ \f ->
+    let clo = BoxValS (CurryS SUnit (f :.: ExrS))
+        prog = MapCS :.: (clo :***: IdS) :.: LunitS
+    in evalV prog xs == fmap (evalV f) xs
+      && work prog xs == fromIntegral (length xs) + sum (fmap (work f) xs)
+      && evalK prog xs (work prog xs) == Just (fmap (evalV f) xs, 0)
+
 -- CopyS charge exactness (Agda: dupAlg.chargeD copyT = sizeT): the dup
 -- grade of a lone copy is exactly the copied value's size, and the copy
 -- is free work.
@@ -190,5 +221,7 @@ lawProps =
   , ("prop_work_functorial",         prop_work_functorial)
   , ("prop_dup_functorial",          prop_dup_functorial)
   , ("prop_copy_charge_exact",       prop_copy_charge_exact)
+  , ("prop_closure_beta",            prop_closure_beta)
+  , ("prop_mapc_coherence",          prop_mapc_coherence)
   , ("prop_map_coherence_precision", prop_map_coherence_precision)
   ]

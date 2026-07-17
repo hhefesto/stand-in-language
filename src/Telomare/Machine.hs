@@ -22,7 +22,7 @@ import Data.Type.Equality ((:~:) (Refl))
 import Numeric.Natural (Natural)
 import System.IO (hFlush, hPutStrLn, isEOF, stderr, stdout)
 
-import Telomare.Compiler.Direct (Strip)
+import Telomare.Compiler.Direct (Strip, eraseMorph, stripSTy)
 import Telomare.Core
 import Telomare.Denotation
 import Telomare.Surface
@@ -158,6 +158,12 @@ equalU (SUSum a _) (Left x) (Left y) = equalU a x y
 equalU (SUSum _ b) (Right x) (Right y) = equalU b x y
 equalU (SUSum _ _) _ _ = False
 equalU (SUList a) xs ys = length xs == length ys && and (zipWith (equalU a) xs ys)
+equalU (SULolly _ _) (UClosure sc1 b1 e1) (UClosure sc2 b2 e2) =
+  -- conservative structural closure equality: same environment type,
+  -- same body shape, equal environments
+  case sameSUTy sc1 sc2 of
+    Just Refl -> shapeU b1 == shapeU b2 && equalU sc1 e1 e2
+    Nothing   -> False
 
 equalCore :: STy a -> Val a -> Val a -> Bool
 equalCore SUnit _ _ = True
@@ -170,6 +176,11 @@ equalCore (SSum _ _) _ _ = False
 equalCore (SList a) xs ys =
   length xs == length ys && and (zipWith (equalCore a) xs ys)
 equalCore (SBang a) x y = equalCore a x y
+equalCore (SLolly _ _) (Closure sc1 b1 e1) (Closure sc2 b2 e2) =
+  case sameSTy sc1 sc2 of
+    Just Refl -> shapeU (eraseMorph b1) == shapeU (eraseMorph b2)
+                   && equalCore sc1 e1 e2
+    Nothing   -> False
 
 toLift :: SUTy a -> UVal a -> Val (Lift a)
 toLift SUUnit x              = x
@@ -178,6 +189,10 @@ toLift (SUProd a b) (x, y)   = (toLift a x, toLift b y)
 toLift (SUSum a _) (Left x)  = Left (toLift a x)
 toLift (SUSum _ b) (Right x) = Right (toLift b x)
 toLift (SUList a) xs         = fmap (toLift a) xs
+toLift (SULolly _ _) _       =
+  -- machine State/Reply are checked first-order at compile time
+  -- (Telomare.Tel2), so this branch is unreachable from any program
+  error "toLift: closures cannot cross the machine boundary"
 
 fromCore :: STy a -> Val a -> UVal (Strip a)
 fromCore SUnit x              = x
@@ -187,6 +202,8 @@ fromCore (SSum a _) (Left x)  = Left (fromCore a x)
 fromCore (SSum _ b) (Right x) = Right (fromCore b x)
 fromCore (SList a) xs         = fmap (fromCore a) xs
 fromCore (SBang a) x          = fromCore a x
+fromCore (SLolly _ _) (Closure sc body env) =
+  UClosure (stripSTy sc) (eraseMorph body) (fromCore sc env)
 
 encode :: String -> [Natural]
 encode = fmap (fromIntegral . ord)

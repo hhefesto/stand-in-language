@@ -45,6 +45,27 @@ twoLevels = BoxValS (BoxValS (ConstS 7))
 isZero :: Morph 'Nat ('Unit ':+: 'Unit)
 isZero = CaseS InlS (InrS :.: WeakS) :.: NatOutS
 
+incLolly :: Morph 'Unit ('Lolly 'Nat 'Nat)
+incLolly = CurryS SUnit (SucS :.: ExrS)
+
+applyInc :: Morph 'Nat 'Nat
+applyInc = ApplyS :.: (incLolly :***: IdS) :.: LunitS
+
+chooseOp :: Morph ('Unit ':+: 'Unit) ('Bang ('Lolly 'Nat 'Nat))
+chooseOp = CaseS (BoxValS incLolly) (BoxValS (CurryS SUnit (predS :.: ExrS)))
+
+applyChosen :: Morph ('Unit ':+: 'Unit) ('Bang 'Nat)
+applyChosen =
+  BoxS ApplyS :.: MergeS :.: (chooseOp :***: BoxValS (ConstS 3)) :.: RunitS
+
+egListS :: Morph 'Unit ('ListT 'Nat)
+egListS =
+  ConsS :.: (ConstS 1 :***: (ConsS :.: (ConstS 2 :***: NilS) :.: LunitS))
+    :.: LunitS
+
+mapChosen :: Morph ('Unit ':+: 'Unit) ('Bang ('ListT 'Nat))
+mapChosen = MapCS :.: (chooseOp :***: egListS) :.: RunitS
+
 predS :: Morph 'Nat 'Nat
 predS = CaseS (ConstS 0) IdS :.: NatOutS
 
@@ -97,4 +118,17 @@ specVectors =
   , ("positive-cost",      work positive 5 == 1)
   , ("positive-dup",       dupGrade positive 5 == 1)
   , ("positive-adequate",  evalK positive 5 1 == Just (Left 5, 0))
+  , ("applyInc-val",       evalV applyInc 5 == 6)
+  , ("applyInc-cost",      work applyInc 5 == 1)
+  , ("applyInc-dup",       dupGrade applyInc 5 == 0)
+  , ("applyInc-depth",     depth applyInc == 0)
+  , ("applyInc-adequate",  evalK applyInc 5 1 == Just (6, 0))
+  , ("applyChosen-left",   evalV applyChosen (Left ()) == 4)
+  , ("applyChosen-right",  evalV applyChosen (Right ()) == 2)
+  , ("applyChosen-depth",  depth applyChosen == 1)
+  , ("mapChosen-left",     evalV mapChosen (Left ()) == [2, 3])
+  , ("mapChosen-right",    evalV mapChosen (Right ()) == [0, 1])
+  , ("mapChosen-cost-left",  work mapChosen (Left ()) == 2)
+  , ("mapChosen-cost-right", work mapChosen (Right ()) == 4)
+  , ("mapChosen-depth",    depth mapChosen == 1)
   ]
