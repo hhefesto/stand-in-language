@@ -151,6 +151,33 @@ record RestrictedBangOps (C : CategoryOps) (T : TensorOps C)
     mergeBang  : {X Y : Obj}
                → Hom (tensorObj (bang X) (bang Y)) (bang (tensorObj X Y))
 
+-- First-class closures: affine arrows with linear application.  Reuse
+-- lives behind the bang (see ClosureRecursionOps), never here.
+record ClosureOps (C : CategoryOps) (T : TensorOps C) : Set₁ where
+  open CategoryOps C
+  open TensorOps T
+  field
+    lolly : Obj → Obj → Obj
+    curry : {X A B : Obj} → Hom (tensorObj X A) B → Hom X (lolly A B)
+    apply : {A B : Obj} → Hom (tensorObj (lolly A B) A) B
+
+-- Higher-order bounded recursion: one reusable (banged) closure applied
+-- per element, output one level deeper.
+record ClosureRecursionOps (C : CategoryOps) (T : TensorOps C)
+                           (A : AffineOps C T) (S : SumOps C)
+                           (L : ListOps C T A S)
+                           (B : RestrictedBangOps C T A)
+                           (K : ClosureOps C T) : Set₁ where
+  open CategoryOps C
+  open TensorOps T
+  open ListOps L
+  open RestrictedBangOps B
+  open ClosureOps K
+  field
+    mapClosure : {X Y : Obj}
+               → Hom (tensorObj (bang (lolly X Y)) (listObj X))
+                     (bang (listObj Y))
+
 record GuardOps (C : CategoryOps) (T : TensorOps C) (A : AffineOps C T)
                 (S : SumOps C) : Set₁ where
   open CategoryOps C

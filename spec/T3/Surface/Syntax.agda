@@ -49,6 +49,10 @@ data _⇨U_ : UTy → UTy → Set where
   sucU     : natᵤ ⇨U natᵤ
   addU     : (natᵤ ⊗ᵤ natᵤ) ⇨U natᵤ
   constU   : {A : UTy} → ℕ → A ⇨U natᵤ
+  -- closures (box-free typing: the core's reusable-closure bang erases)
+  curryU   : {C A B : UTy} → (C ⊗ᵤ A) ⇨U B → C ⇨U (A ⊸ᵤ B)
+  applyU   : {A B : UTy} → ((A ⊸ᵤ B) ⊗ᵤ A) ⇨U B
+  mapCU    : {A B : UTy} → ((A ⊸ᵤ B) ⊗ᵤ listᵤ A) ⇨U listᵤ B
   -- refinement guard
   guardU   : {A : UTy} → A ⇨U (unitᵤ ⊕ᵤ unitᵤ) → A ⇨U (A ⊕ᵤ unitᵤ)
   -- fuel-carrying recursion, box-free typing

@@ -1,30 +1,40 @@
 ------------------------------------------------------------------------
 -- T3.Adequacy — precision ⇒ adequacy, against the work instance.
 --
--- Restated over the consolidated graded semantics: ⟦_⟧C below
--- is Interp workAlg (T3.Sem.Graded), so this single proof is the adequacy
--- statement for the whole CostAlgebra family's execution mirror.
+-- CLOSURES make precision a Kripke logical relation: machine values
+-- (KVal) and work-graded values (GVal ℕ) differ at arrows, where the
+-- former is fuel-monadic and the latter carries its grade.  ≈P relates
+-- them — structural equality below arrows; at A ⊸ B, related arguments
+-- yield PRECISE computations: run the machine closure with the graded
+-- closure's budget plus any slack and it returns a related value with
+-- exactly the slack left (PreciseAt).  The fundamental lemma `precise`
+-- extends the old propositional statement — which is recovered
+-- definitionally at concrete first-order types, where KVal, GVal ℕ and
+-- ⟦_⟧T coincide and ≈P collapses to structural equality (the Examples'
+-- adequacy facts are refl).
 --
--- PRECISION: running with the computed work budget plus any slack returns
--- the graded value with exactly the slack left.  ADEQUACY (extra = 0):
--- run with the computed budget ⇒ always finishes, with 0 fuel left.
--- adequateV restates the result against the specification ⟦_⟧V via the
--- generic value-coherence lemma C-val.
+-- ADEQUACY (extra = 0): run with the computed budget ⇒ always finishes,
+-- with 0 fuel left, at a related value.  adequateV further connects the
+-- output to the specification ⟦_⟧V via the graded relation ≈G.
 --
--- Nontrivial cases: assocS/unassocS/lunitS (refl), guardS
--- (one cong through the test), whileS (the iter-prec pattern doubled: one
--- assoc-subst for the test, one for the step, case split on the test's
--- verdict).
+-- The loop lemmas are parametric in the (machine, graded) function pair
+-- and its relation evidence, so one lemma serves both the syntax-bodied
+-- loops (mapS/iterS/foldS/whileS, instantiated with `precise` of the
+-- body) and the closure-bodied mapCS (instantiated with the relation
+-- carried by the closure value itself).
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
 module T3.Adequacy where
 
+open import Data.Empty           using (⊥; ⊥-elim)
 open import Data.Nat             using (ℕ; zero; suc; _+_)
 open import Data.Maybe           using (Maybe; just; nothing; _>>=_)
-open import Data.Product         using (_×_; _,_; proj₁; proj₂)
+open import Data.Product         using (Σ; _×_; _,_; proj₁; proj₂)
 open import Data.Sum             using (_⊎_; inj₁; inj₂)
 open import Data.List            using (List; []; _∷_)
+open import Data.List.Relation.Binary.Pointwise
+                                 using (Pointwise; []; _∷_)
 open import Data.Unit            using (⊤; tt)
 open import Relation.Binary.PropositionalEquality
                                  using (_≡_; refl; sym; trans; cong; subst)
@@ -36,160 +46,283 @@ open import T3.Sem.Value
 open import T3.Sem.Graded
 open import T3.Sem.Exec
 
+-- ── The machine/graded logical relation ─────────────────────────────────────
+
+≈P        : (A : Ty) → KVal A → GVal ℕ A → Set
+PreciseAt : (B : Ty) → TelM (KVal B) → ℕ × GVal ℕ B → Set
+
+≈P unit      _         _         = ⊤
+≈P nat       m         n         = m ≡ n
+≈P (A ⊗ B)   (ka , kb) (ga , gb) = ≈P A ka ga × ≈P B kb gb
+≈P (A ⊕ B)   (inj₁ ka) (inj₁ ga) = ≈P A ka ga
+≈P (A ⊕ B)   (inj₂ kb) (inj₂ gb) = ≈P B kb gb
+≈P (A ⊕ B)   (inj₁ _)  (inj₂ _)  = ⊥
+≈P (A ⊕ B)   (inj₂ _)  (inj₁ _)  = ⊥
+≈P (listT A) kxs       gxs       = Pointwise (≈P A) kxs gxs
+≈P (! A)     ka        ga        = ≈P A ka ga
+≈P (A ⊸ B)   kf        gf        =
+  ∀ ka ga → ≈P A ka ga → PreciseAt B (kf ka) (gf ga)
+
+PreciseAt B m (n , gb) = ∀ extra →
+  Σ (KVal B) λ kb → (m (n + extra) ≡ just (kb , extra)) × ≈P B kb gb
+
+-- The relational precision property (successor of the old propositional
+-- `Precise`; that statement is definitionally recovered at concrete
+-- first-order endpoints).
 Precise : {A B : Ty} → A ⇨ B → Set
-Precise {A} {B} f = ∀ (a : ⟦ A ⟧T) (extra : ℕ) →
-  ⟦ f ⟧K a (proj₁ (⟦ f ⟧C a) + extra) ≡ just (proj₂ (⟦ f ⟧C a) , extra)
+Precise {A} {B} f = ∀ (ka : KVal A) (ga : GVal ℕ A)
+                  → ≈P A ka ga → PreciseAt B (⟦ f ⟧K ka) (⟦ f ⟧C ga)
 
-precise : {A B : Ty} → (f : A ⇨ B) → Precise f
-precise idS         a extra = refl
-precise (g ∘S f)    a extra =
-  let n   = proj₁ (⟦ f ⟧C a)
-      vf  = proj₂ (⟦ f ⟧C a)
-      m   = proj₁ (⟦ g ⟧C vf)
-      pf  = precise f a (m + extra)
-      pf' = subst (λ tel → ⟦ f ⟧K a tel ≡ just (vf , m + extra))
-                  (sym (+-assoc n m extra)) pf
-      pg  = precise g vf extra
-  in trans (cong (λ mx → mx >>= λ { (v , t') → ⟦ g ⟧K v t' }) pf') pg
-precise (f ⊗S g) (a , c) extra =
-  let n   = proj₁ (⟦ f ⟧C a)
-      vf  = proj₂ (⟦ f ⟧C a)
-      m   = proj₁ (⟦ g ⟧C c)
-      vg  = proj₂ (⟦ g ⟧C c)
-      pf  = precise f a (m + extra)
-      pf' = subst (λ tel → ⟦ f ⟧K a tel ≡ just (vf , m + extra))
-                  (sym (+-assoc n m extra)) pf
-      pg  = precise g c extra
-  in trans
-       (cong (λ mx → mx >>= λ { (b , t') →
-           ⟦ g ⟧K c t' >>= λ { (d , t'') → just ((b , d) , t'') } }) pf')
-       (cong (λ mx → mx >>= λ { (d , t'') → just ((vf , d) , t'') }) pg)
-precise swapS       (a , b) extra = refl
-precise assocS      ((a , b) , c) extra = refl
-precise unassocS    (a , (b , c)) extra = refl
-precise exlS        (a , _) extra = refl
-precise exrS        (_ , b) extra = refl
-precise weakS       _       extra = refl
-precise runitS      a       extra = refl
-precise lunitS      a       extra = refl
-precise inlS        a       extra = refl
-precise inrS        b       extra = refl
-precise (caseS l r) (inj₁ a) extra = precise l a extra
-precise (caseS l r) (inj₂ b) extra = precise r b extra
-precise distlS      (a , inj₁ b) extra = refl
-precise distlS      (a , inj₂ c) extra = refl
-precise nilS        _       extra = refl
-precise consS       (x , xs) extra = refl
-precise unconsS     []      extra = refl
-precise unconsS     (x ∷ xs) extra = refl
-precise natOutS     zero    extra = refl
-precise natOutS     (suc n) extra = refl
-precise sucS        n       extra = refl
-precise addS        (a , b) extra = refl
-precise (constS _)  _       extra = refl
-precise dupNatS     n       extra = refl
-precise (copyS _)   a       extra = refl
-precise (guardS t)  a extra =
-  cong (λ mx → mx >>= λ { (r , t') → just (guardV a r , t') })
-       (precise t a extra)
-precise dupS        a       extra = refl
-precise (boxS f)    a extra = precise f a extra
-precise (boxValS f) a extra = precise f a extra
-precise mergeS      p       extra = refl
-precise (mapS f)    xs extra = map-prec xs extra
-  where
-    map-prec : ∀ xs extra →
-      mapT xs ⟦ f ⟧K (proj₁ (⟦ mapS f ⟧C xs) + extra)
-      ≡ just (proj₂ (⟦ mapS f ⟧C xs) , extra)
-    map-prec []       extra = refl
-    map-prec (x ∷ xs) extra =
-      let cf  = proj₁ (⟦ f ⟧C x)
-          vf  = proj₂ (⟦ f ⟧C x)
-          cr  = proj₁ (⟦ mapS f ⟧C xs)
-          pf  = precise f x (cr + extra)
-          pf' = subst (λ tel → ⟦ f ⟧K x tel ≡ just (vf , cr + extra))
-                      (sym (+-assoc cf cr extra)) pf
-          ih  = map-prec xs extra
-      in trans
-           (cong (λ mx → mx >>= λ { (y , t') →
-             mapT xs ⟦ f ⟧K t' >>= λ { (ys , t'') →
-               just (y ∷ ys , t'') } }) pf')
-           (cong (λ mx → mx >>= λ { (ys , t'') →
-             just (vf ∷ ys , t'') }) ih)
-precise (iterS f)   (n , a) extra = iter-prec n a extra
-  where
-    iter-prec : ∀ n a extra →
-      iterT n ⟦ f ⟧K a (proj₁ (⟦ iterS f ⟧C (n , a)) + extra)
-      ≡ just (proj₂ (⟦ iterS f ⟧C (n , a)) , extra)
-    iter-prec zero    a extra = refl
-    iter-prec (suc k) a extra =
-      let cf  = proj₁ (⟦ f ⟧C a)
-          vf  = proj₂ (⟦ f ⟧C a)
-          cr  = proj₁ (⟦ iterS f ⟧C (k , vf))
-          pf  = precise f a (cr + extra)
-          pf' = subst (λ tel → ⟦ f ⟧K a tel ≡ just (vf , cr + extra))
-                      (sym (+-assoc cf cr extra)) pf
-          ih  = iter-prec k vf extra
-      in trans (cong (λ mx → mx >>= λ { (v , t') → iterT k ⟦ f ⟧K v t' }) pf')
-               ih
-precise (foldS f)   (xs , b) extra = fold-prec xs b extra
-  where
-    fold-prec : ∀ xs b extra →
-      foldT xs ⟦ f ⟧K b (proj₁ (⟦ foldS f ⟧C (xs , b)) + extra)
-      ≡ just (proj₂ (⟦ foldS f ⟧C (xs , b)) , extra)
-    fold-prec []       b extra = refl
-    fold-prec (x ∷ xs) b extra =
-      let cf  = proj₁ (⟦ f ⟧C (b , x))
-          vf  = proj₂ (⟦ f ⟧C (b , x))
-          cr  = proj₁ (⟦ foldS f ⟧C (xs , vf))
-          pf  = precise f (b , x) (cr + extra)
-          pf' = subst (λ tel → ⟦ f ⟧K (b , x) tel ≡ just (vf , cr + extra))
-                      (sym (+-assoc cf cr extra)) pf
-          ih  = fold-prec xs vf extra
-      in trans (cong (λ mx → mx >>= λ { (v , t') → foldT xs ⟦ f ⟧K v t' }) pf')
-               ih
-precise (whileS t s) (n , a) extra = while-prec n a extra
-  where
-    while-prec : ∀ n a extra →
-      whileT n ⟦ t ⟧K ⟦ s ⟧K a (proj₁ (⟦ whileS t s ⟧C (n , a)) + extra)
-      ≡ just (proj₂ (⟦ whileS t s ⟧C (n , a)) , extra)
-    while-prec zero    a extra = refl
-    while-prec (suc k) a extra
-      with proj₂ (⟦ t ⟧C a)
-         | precise t a extra
-         | precise t a (suc (proj₁ (⟦ s ⟧C a) +
-                             proj₁ (⟦ whileS t s ⟧C (k , proj₂ (⟦ s ⟧C a))))
-                        + extra)
-    ... | inj₁ x | pf | _ =
-      cong (λ mx → mx >>= λ { (r , t') → whileGoT k ⟦ t ⟧K ⟦ s ⟧K a r t' }) pf
-    ... | inj₂ x | _ | pf =
-      let mt   = proj₁ (⟦ t ⟧C a)
-          ms   = proj₁ (⟦ s ⟧C a)
-          b    = proj₂ (⟦ s ⟧C a)
-          mr   = proj₁ (⟦ whileS t s ⟧C (k , b))
-          pf'  = subst (λ tel → ⟦ t ⟧K a tel
-                                ≡ just (inj₂ x , suc (ms + mr) + extra))
-                       (sym (+-assoc mt (suc (ms + mr)) extra)) pf
-          pfs  = precise s a (mr + extra)
-          pfs' = subst (λ tel → ⟦ s ⟧K a tel ≡ just (b , mr + extra))
-                       (sym (+-assoc ms mr extra)) pfs
-          ih   = while-prec k b extra
-      in trans (cong (λ mx → mx >>= λ { (r , t') →
-                        whileGoT k ⟦ t ⟧K ⟦ s ⟧K a r t' }) pf')
-         (trans (cong (λ mx → mx >>= λ { (v , t') →
-                        whileT k ⟦ t ⟧K ⟦ s ⟧K v t' }) pfs')
-                ih)
+-- ── Parametric loop lemmas ──────────────────────────────────────────────────
 
--- ADEQUACY: run with the computed budget ⇒ always finishes, with 0 left.
-adequate : {A B : Ty} → (f : A ⇨ B) → ∀ a →
-  ⟦ f ⟧K a (work f a) ≡ just (proj₂ (⟦ f ⟧C a) , 0)
-adequate f a =
-  subst (λ tel → ⟦ f ⟧K a tel ≡ just (proj₂ (⟦ f ⟧C a) , 0))
-        (+-identityʳ (proj₁ (⟦ f ⟧C a)))
-        (precise f a 0)
+private
+  map-prec : (A B : Ty)
+             (kh : KVal A →K KVal B) (gh : GVal ℕ A → ℕ × GVal ℕ B)
+           → (∀ kx gx → ≈P A kx gx → PreciseAt B (kh kx) (gh gx))
+           → ∀ kxs gxs → Pointwise (≈P A) kxs gxs
+           → PreciseAt (! (listT B)) (mapT kxs kh) (mapGW (λ _ → 0) gxs gh)
+  map-prec A B kh gh h [] [] [] extra = ([] , refl , [])
+  map-prec A B kh gh h (kx ∷ kxs) (gx ∷ gxs) (rx ∷ rxs) extra =
+    let m    = proj₁ (gh gx)
+        r    = proj₁ (mapGW (λ _ → 0) gxs gh)
+        resh = h kx gx rx (r + extra)
+        ky   = proj₁ resh
+        eqh  = subst (λ tel → kh kx tel ≡ just (ky , r + extra))
+                     (sym (+-assoc m r extra)) (proj₁ (proj₂ resh))
+        relY = proj₂ (proj₂ resh)
+        resr = map-prec A B kh gh h kxs gxs rxs extra
+        kys  = proj₁ resr
+        eqr  = proj₁ (proj₂ resr)
+        relYs = proj₂ (proj₂ resr)
+    in ( ky ∷ kys
+       , trans
+           (cong (λ (mx : Maybe (KVal B × Tel)) → mx >>= λ { (y , t') →
+                    mapT kxs kh t' >>= λ { (ys , t'') →
+                      just (y ∷ ys , t'') } }) eqh)
+           (cong (λ (mx : Maybe (List (KVal B) × Tel)) → mx >>= λ { (ys , t'') →
+                    just (ky ∷ ys , t'') }) eqr)
+       , relY ∷ relYs)
 
--- The same, phrased against the specification ⟦_⟧V (via value coherence).
-adequateV : {A B : Ty} → (f : A ⇨ B) → ∀ a →
-  ⟦ f ⟧K a (work f a) ≡ just (⟦ f ⟧V a , 0)
-adequateV f a =
-  trans (adequate f a) (cong (λ v → just (v , 0)) (C-val f a))
+  iter-prec : (A : Ty)
+              (kh : KVal A →K KVal A) (gh : GVal ℕ A → ℕ × GVal ℕ A)
+            → (∀ kx gx → ≈P A kx gx → PreciseAt A (kh kx) (gh gx))
+            → ∀ n ka ga → ≈P A ka ga
+            → PreciseAt (! A) (iterT n kh ka) (iterGW (λ _ → 0) n gh ga)
+  iter-prec A kh gh h zero    ka ga rel extra = (ka , refl , rel)
+  iter-prec A kh gh h (suc n) ka ga rel extra =
+    let m    = proj₁ (gh ga)
+        gb   = proj₂ (gh ga)
+        r    = proj₁ (iterGW (λ _ → 0) n gh gb)
+        resh = h ka ga rel (r + extra)
+        kb   = proj₁ resh
+        eqh  = subst (λ tel → kh ka tel ≡ just (kb , r + extra))
+                     (sym (+-assoc m r extra)) (proj₁ (proj₂ resh))
+        relB = proj₂ (proj₂ resh)
+        resr = iter-prec A kh gh h n kb gb relB extra
+    in ( proj₁ resr
+       , trans (cong (λ (mx : Maybe (KVal A × Tel)) → mx >>= λ { (v , t') → iterT n kh v t' }) eqh)
+               (proj₁ (proj₂ resr))
+       , proj₂ (proj₂ resr))
+
+  fold-prec : (A B : Ty)
+              (kh : (KVal B × KVal A) →K KVal B)
+              (gh : (GVal ℕ B × GVal ℕ A) → ℕ × GVal ℕ B)
+            → (∀ kp gp → ≈P (B ⊗ A) kp gp → PreciseAt B (kh kp) (gh gp))
+            → ∀ kxs gxs → Pointwise (≈P A) kxs gxs
+            → ∀ kb gb → ≈P B kb gb
+            → PreciseAt (! B) (foldT kxs kh kb) (foldGW (λ _ → 0) gxs gh gb)
+  fold-prec A B kh gh h [] [] [] kb gb relB extra = (kb , refl , relB)
+  fold-prec A B kh gh h (kx ∷ kxs) (gx ∷ gxs) (rx ∷ rxs) kb gb relB extra =
+    let m    = proj₁ (gh (gb , gx))
+        gb'  = proj₂ (gh (gb , gx))
+        r    = proj₁ (foldGW (λ _ → 0) gxs gh gb')
+        resh = h (kb , kx) (gb , gx) (relB , rx) (r + extra)
+        kb'  = proj₁ resh
+        eqh  = subst (λ tel → kh (kb , kx) tel ≡ just (kb' , r + extra))
+                     (sym (+-assoc m r extra)) (proj₁ (proj₂ resh))
+        relB' = proj₂ (proj₂ resh)
+        resr = fold-prec A B kh gh h kxs gxs rxs kb' gb' relB' extra
+    in ( proj₁ resr
+       , trans (cong (λ (mx : Maybe (KVal B × Tel)) → mx >>= λ { (v , t') → foldT kxs kh v t' }) eqh)
+               (proj₁ (proj₂ resr))
+       , proj₂ (proj₂ resr))
+
+  while-prec : (A : Ty)
+               (kt : KVal A →K (⊤ ⊎ ⊤)) (gt : GVal ℕ A → ℕ × (⊤ ⊎ ⊤))
+               (ks : KVal A →K KVal A)  (gs : GVal ℕ A → ℕ × GVal ℕ A)
+             → (∀ kx gx → ≈P A kx gx
+                → PreciseAt (unit ⊕ unit) (kt kx) (gt gx))
+             → (∀ kx gx → ≈P A kx gx → PreciseAt A (ks kx) (gs gx))
+             → ∀ n ka ga → ≈P A ka ga
+             → PreciseAt (! A) (whileT n kt ks ka) (whileGW A n gt gs ga)
+  while-prec A kt gt ks gs ht hs zero    ka ga rel extra = (ka , refl , rel)
+  while-prec A kt gt ks gs ht hs (suc n) ka ga rel extra
+    with proj₂ (gt ga)
+       | ht ka ga rel extra
+       | ht ka ga rel
+           (suc (proj₁ (gs ga)
+                 + proj₁ (whileGW A n gt gs (proj₂ (gs ga)))) + extra)
+  ... | inj₁ _ | (inj₁ _ , eqt , _) | _ =
+    ( ka
+    , cong (λ (mx : Maybe ((⊤ ⊎ ⊤) × Tel)) → mx >>= λ { (r , t') → whileGoT n kt ks ka r t' }) eqt
+    , rel)
+  ... | inj₁ _ | (inj₂ _ , _ , ()) | _
+  ... | inj₂ _ | _ | (inj₁ _ , _ , ())
+  ... | inj₂ _ | _ | (inj₂ _ , eqt , _) =
+    let mt   = proj₁ (gt ga)
+        ms   = proj₁ (gs ga)
+        gb   = proj₂ (gs ga)
+        mr   = proj₁ (whileGW A n gt gs gb)
+        eqt' = subst (λ tel → kt ka tel
+                              ≡ just (inj₂ _ , suc (ms + mr) + extra))
+                     (sym (+-assoc mt (suc (ms + mr)) extra)) eqt
+        ress = hs ka ga rel (mr + extra)
+        kb   = proj₁ ress
+        eqs  = subst (λ tel → ks ka tel ≡ just (kb , mr + extra))
+                     (sym (+-assoc ms mr extra)) (proj₁ (proj₂ ress))
+        relB = proj₂ (proj₂ ress)
+        resr = while-prec A kt gt ks gs ht hs n kb gb relB extra
+    in ( proj₁ resr
+       , trans (cong (λ (mx : Maybe ((⊤ ⊎ ⊤) × Tel)) → mx >>= λ { (r , t') →
+                        whileGoT n kt ks ka r t' }) eqt')
+         (trans (cong (λ (mx : Maybe (KVal A × Tel)) → mx >>= λ { (v , t') →
+                        whileT n kt ks v t' }) eqs)
+                (proj₁ (proj₂ resr)))
+       , proj₂ (proj₂ resr))
+
+-- ── The fundamental lemma ───────────────────────────────────────────────────
+
+precise : {A B : Ty} (f : A ⇨ B) → Precise f
+precise idS ka ga rel extra = (ka , refl , rel)
+precise (_∘S_ {A} {B} {C} g f) ka ga rel extra =
+  let m    = proj₁ (⟦ f ⟧C ga)
+      gb   = proj₂ (⟦ f ⟧C ga)
+      r    = proj₁ (⟦ g ⟧C gb)
+      resf = precise f ka ga rel (r + extra)
+      kb   = proj₁ resf
+      eqf  = subst (λ tel → ⟦ f ⟧K ka tel ≡ just (kb , r + extra))
+                   (sym (+-assoc m r extra)) (proj₁ (proj₂ resf))
+      relB = proj₂ (proj₂ resf)
+      resg = precise g kb gb relB extra
+  in ( proj₁ resg
+     , trans (cong (λ (mx : Maybe (KVal B × Tel)) → mx >>= λ { (v , t') → ⟦ g ⟧K v t' }) eqf)
+             (proj₁ (proj₂ resg))
+     , proj₂ (proj₂ resg))
+precise (_⊗S_ {A} {B} {C} {D} f g) (ka , kc) (ga , gc) (ra , rc) extra =
+  let m    = proj₁ (⟦ f ⟧C ga)
+      r    = proj₁ (⟦ g ⟧C gc)
+      resf = precise f ka ga ra (r + extra)
+      kb   = proj₁ resf
+      eqf  = subst (λ tel → ⟦ f ⟧K ka tel ≡ just (kb , r + extra))
+                   (sym (+-assoc m r extra)) (proj₁ (proj₂ resf))
+      resg = precise g kc gc rc extra
+      kd   = proj₁ resg
+      eqg  = proj₁ (proj₂ resg)
+  in ( (kb , kd)
+     , trans
+         (cong (λ (mx : Maybe (KVal B × Tel)) → mx >>= λ { (b , t') →
+             ⟦ g ⟧K kc t' >>= λ { (d , t'') → just ((b , d) , t'') } }) eqf)
+         (cong (λ (mx : Maybe (KVal D × Tel)) → mx >>= λ { (d , t'') → just ((kb , d) , t'') }) eqg)
+     , (proj₂ (proj₂ resf) , proj₂ (proj₂ resg)))
+precise swapS (ka , kb) (ga , gb) (ra , rb) extra =
+  ((kb , ka) , refl , (rb , ra))
+precise assocS ((ka , kb) , kc) ((ga , gb) , gc) ((ra , rb) , rc) extra =
+  ((ka , (kb , kc)) , refl , (ra , (rb , rc)))
+precise unassocS (ka , (kb , kc)) (ga , (gb , gc)) (ra , (rb , rc)) extra =
+  (((ka , kb) , kc) , refl , ((ra , rb) , rc))
+precise exlS (ka , _) (ga , _) (ra , _) extra = (ka , refl , ra)
+precise exrS (_ , kb) (_ , gb) (_ , rb) extra = (kb , refl , rb)
+precise weakS _ _ _ extra = (tt , refl , tt)
+precise runitS ka ga rel extra = ((ka , tt) , refl , (rel , tt))
+precise lunitS ka ga rel extra = ((tt , ka) , refl , (tt , rel))
+precise inlS ka ga rel extra = (inj₁ ka , refl , rel)
+precise inrS kb gb rel extra = (inj₂ kb , refl , rel)
+precise (caseS l r) (inj₁ ka) (inj₁ ga) rel extra = precise l ka ga rel extra
+precise (caseS l r) (inj₂ kb) (inj₂ gb) rel extra = precise r kb gb rel extra
+precise (caseS l r) (inj₁ _) (inj₂ _) ()
+precise (caseS l r) (inj₂ _) (inj₁ _) ()
+precise distlS (ka , inj₁ kb) (ga , inj₁ gb) (ra , rb) extra =
+  (inj₁ (ka , kb) , refl , (ra , rb))
+precise distlS (ka , inj₂ kc) (ga , inj₂ gc) (ra , rc) extra =
+  (inj₂ (ka , kc) , refl , (ra , rc))
+precise distlS (ka , inj₁ kb) (ga , inj₂ gc) (ra , ())
+precise distlS (ka , inj₂ kc) (ga , inj₁ gb) (ra , ())
+precise nilS _ _ _ extra = ([] , refl , [])
+precise consS (kx , kxs) (gx , gxs) (rx , rxs) extra =
+  (kx ∷ kxs , refl , rx ∷ rxs)
+precise unconsS [] [] [] extra = (inj₁ tt , refl , tt)
+precise unconsS (kx ∷ kxs) (gx ∷ gxs) (rx ∷ rxs) extra =
+  (inj₂ (kx , kxs) , refl , (rx , rxs))
+precise natOutS zero .zero refl extra = (inj₁ tt , refl , tt)
+precise natOutS (suc k) .(suc k) refl extra = (inj₂ k , refl , refl)
+precise sucS n .n refl extra = (suc n , refl , refl)
+precise addS (a , b) (.a , .b) (refl , refl) extra = (a + b , refl , refl)
+precise (constS k) _ _ _ extra = (k , refl , refl)
+precise dupNatS n .n refl extra = ((n , n) , refl , (refl , refl))
+precise (copyS _) ka ga rel extra = ((ka , ka) , refl , (rel , rel))
+precise (guardS t) ka ga rel extra
+  with proj₂ (⟦ t ⟧C ga) | precise t ka ga rel extra
+... | inj₁ _ | (inj₁ _ , eqt , _) =
+  ( inj₁ ka
+  , cong (λ (mx : Maybe ((⊤ ⊎ ⊤) × Tel)) → mx >>= λ { (r , t') → just (guardV ka r , t') }) eqt
+  , rel)
+... | inj₁ _ | (inj₂ _ , _ , ())
+... | inj₂ _ | (inj₂ _ , eqt , _) =
+  ( inj₂ tt
+  , cong (λ (mx : Maybe ((⊤ ⊎ ⊤) × Tel)) → mx >>= λ { (r , t') → just (guardV ka r , t') }) eqt
+  , tt)
+... | inj₂ _ | (inj₁ _ , _ , ())
+precise (curryS f) kc gc rel extra =
+  ( (λ ka → ⟦ f ⟧K (kc , ka))
+  , refl
+  , λ ka ga relA → precise f (kc , ka) (gc , ga) (rel , relA))
+precise applyS (kf , ka) (gf , ga) (relF , relA) extra =
+  relF ka ga relA extra
+precise (mapCS {A} {B}) (kf , kxs) (gf , gxs) (relF , relXs) extra =
+  map-prec A B kf gf relF kxs gxs relXs extra
+precise dupS ka ga rel extra = ((ka , ka) , refl , (rel , rel))
+precise (boxS f) ka ga rel extra = precise f ka ga rel extra
+precise (boxValS f) ka ga rel extra = precise f ka ga rel extra
+precise mergeS kp gp rel extra = (kp , refl , rel)
+precise (mapS {A} {B} f) kxs gxs relXs extra =
+  map-prec A B ⟦ f ⟧K ⟦ f ⟧C (λ kx gx rx → precise f kx gx rx)
+    kxs gxs relXs extra
+precise (iterS {A} f) (kn , ka) (.kn , ga) (refl , relA) extra =
+  iter-prec A ⟦ f ⟧K ⟦ f ⟧C (λ kx gx rx → precise f kx gx rx)
+    kn ka ga relA extra
+precise (foldS {A} {B} f) (kxs , kb) (gxs , gb) (relXs , relB) extra =
+  fold-prec A B ⟦ f ⟧K ⟦ f ⟧C (λ kp gp rp → precise f kp gp rp)
+    kxs gxs relXs kb gb relB extra
+precise (whileS {A} t s) (kn , ka) (.kn , ga) (refl , relA) extra =
+  while-prec A ⟦ t ⟧K ⟦ t ⟧C ⟦ s ⟧K ⟦ s ⟧C
+    (λ kx gx rx → precise t kx gx rx)
+    (λ kx gx rx → precise s kx gx rx)
+    kn ka ga relA extra
+
+-- ── ADEQUACY: run with the computed budget ⇒ finish with 0 left ────────────
+
+adequate : {A B : Ty} (f : A ⇨ B) (ka : KVal A) (ga : GVal ℕ A)
+         → ≈P A ka ga
+         → Σ (KVal B) λ kb
+           → (⟦ f ⟧K ka (work f ga) ≡ just (kb , 0))
+             × ≈P B kb (proj₂ (⟦ f ⟧C ga))
+adequate f ka ga rel =
+  let res = precise f ka ga rel 0
+  in ( proj₁ res
+     , subst (λ tel → ⟦ f ⟧K ka tel ≡ just (proj₁ res , 0))
+             (+-identityʳ (proj₁ (⟦ f ⟧C ga))) (proj₁ (proj₂ res))
+     , proj₂ (proj₂ res))
+
+-- The same, connected to the specification ⟦_⟧V via the graded relation:
+-- the machine output relates to a graded output that relates to the
+-- specification's value.
+adequateV : {A B : Ty} (f : A ⇨ B)
+            (ka : KVal A) (ga : GVal ℕ A) (a : ⟦ A ⟧T)
+          → ≈P A ka ga → ≈G ℕ A ga a
+          → Σ (KVal B) λ kb
+            → (⟦ f ⟧K ka (work f ga) ≡ just (kb , 0))
+              × ≈P B kb (proj₂ (⟦ f ⟧C ga))
+              × ≈G ℕ B (proj₂ (⟦ f ⟧C ga)) (⟦ f ⟧V a)
+adequateV f ka ga a relP relG =
+  let res = adequate f ka ga relP
+  in (proj₁ res , proj₁ (proj₂ res) , proj₂ (proj₂ res) , C-val f relG)

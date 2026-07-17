@@ -6,12 +6,20 @@
 -- free-variable checking, module loading, or the Haskell implementation.
 -- Seeds, fold inputs, loop bodies/tests, and final continuations arrive with
 -- Direct evidence; consequently every promotion below has empty context.
+--
+-- Closures: the factorization conclusions are propositional stripV
+-- equalities, which (since arrows entered Ty) require first-order (fo)
+-- evidence on the endpoint type parameters; every -factor lemma below
+-- therefore carries fo hypotheses.  At the concrete first-order types the
+-- Haskell compiler instantiates, the evidence is a literal tt-tuple.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
 module T3.Compiler.ClosedRecursion where
 
 open import Data.Nat using (ℕ)
+open import Data.Product using (_,_)
+open import Data.Unit using (⊤; tt)
 open import Relation.Binary.PropositionalEquality using (_≡_; refl; cong; trans)
 
 open import T3.Core.Ty
@@ -20,7 +28,7 @@ open import T3.Sem.Value
 open import T3.Surface.Ty
 open import T3.Surface.Syntax
 open import T3.Surface.Sem
-open import T3.Place using (ε; ε-factor)
+open import T3.Place using (ε; fo; ε-factor)
 open import T3.Compiler.Direct using (Direct; direct-erases)
 
 -- Order-preserving first-order map over an affine runtime list. The mapper is
@@ -57,13 +65,13 @@ affineMap-factor
     {contU : listᵤ (strip B) ⇨U strip C}
     {inputS : X ⇨ listT A} {bodyS : A ⇨ B} {contS : listT B ⇨ C}
   → (dinput : Direct inputU inputS) (dbody : Direct bodyU bodyS)
-  → (dcont : Direct contU contS) (x : ⟦ X ⟧T)
+  → (dcont : Direct contU contS) → fo X → fo C → (x : ⟦ X ⟧T)
   → stripV (! C) (⟦ affineMapS {X} {A} {B} {C} inputS bodyS contS ⟧V x)
     ≡ ⟦ affineMapU {X} {A} {B} {C} inputU bodyU contU ⟧VS
         (stripV X x)
 affineMap-factor {X} {A} {B} {C} {inputS = inputS} {bodyS} {contS}
-                 dinput dbody dcont x =
-  trans (ε-factor (affineMapS {X} {A} {B} {C} inputS bodyS contS) x)
+                 dinput dbody dcont foX foC x =
+  trans (ε-factor foX foC (affineMapS {X} {A} {B} {C} inputS bodyS contS) x)
     (cong (λ h → ⟦ h ⟧VS (stripV X x))
       (affineMap-erases {X} {A} {B} {C} dinput dbody dcont))
 
@@ -111,13 +119,13 @@ affineIter-factor
     {seedS : unit ⇨ A} {stepS : A ⇨ A} {contS : A ⇨ C}
   → (dcount : Direct countU countS) (dseed : Direct seedU seedS)
   → (dstep : Direct stepU stepS) (dcont : Direct contU contS)
-  → (x : ⟦ X ⟧T)
+  → fo X → fo C → (x : ⟦ X ⟧T)
   → stripV (! C) (⟦ affineIterS {X} {A} {C} countS seedS stepS contS ⟧V x)
     ≡ ⟦ affineIterU {X} {A} {C} countU seedU stepU contU ⟧VS
         (stripV X x)
 affineIter-factor {X} {A} {C} {countS = countS} {seedS} {stepS} {contS}
-                  dcount dseed dstep dcont x =
-  trans (ε-factor (affineIterS {X} {A} {C} countS seedS stepS contS) x)
+                  dcount dseed dstep dcont foX foC x =
+  trans (ε-factor foX foC (affineIterS {X} {A} {C} countS seedS stepS contS) x)
     (cong (λ h → ⟦ h ⟧VS (stripV X x))
       (affineIter-erases {X} {A} {C} dcount dseed dstep dcont))
 
@@ -164,13 +172,14 @@ affineFold-factor
     {stepS : (B ⊗ A) ⇨ B} {contS : B ⇨ C}
   → (dinput : Direct inputU inputS) (dseed : Direct seedU seedS)
   → (dstep : Direct stepU stepS) (dcont : Direct contU contS)
-  → (x : ⟦ X ⟧T)
+  → fo X → fo C → (x : ⟦ X ⟧T)
   → stripV (! C) (⟦ affineFoldS {X} {A} {B} {C} inputS seedS stepS contS ⟧V x)
     ≡ ⟦ affineFoldU {X} {A} {B} {C} inputU seedU stepU contU ⟧VS
         (stripV X x)
 affineFold-factor {X} {A} {B} {C} {inputS = inputS} {seedS} {stepS} {contS}
-                  dinput dseed dstep dcont x =
-  trans (ε-factor (affineFoldS {X} {A} {B} {C} inputS seedS stepS contS) x)
+                  dinput dseed dstep dcont foX foC x =
+  trans (ε-factor foX foC
+          (affineFoldS {X} {A} {B} {C} inputS seedS stepS contS) x)
     (cong (λ h → ⟦ h ⟧VS (stripV X x))
       (affineFold-erases {X} {A} {B} {C} dinput dseed dstep dcont))
 
@@ -217,14 +226,15 @@ affineWhile-factor
     {testS : A ⇨ (unit ⊕ unit)} {stepS : A ⇨ A} {contS : A ⇨ C}
   → (dlimit : Direct limitU limitS) (dseed : Direct seedU seedS)
   → (dtest : Direct testU testS) (dstep : Direct stepU stepS)
-  → (dcont : Direct contU contS) (x : ⟦ X ⟧T)
+  → (dcont : Direct contU contS) → fo X → fo C → (x : ⟦ X ⟧T)
   → stripV (! C)
       (⟦ affineWhileS {X} {A} {C} limitS seedS testS stepS contS ⟧V x)
     ≡ ⟦ affineWhileU {X} {A} {C} limitU seedU testU stepU contU ⟧VS
         (stripV X x)
 affineWhile-factor {X} {A} {C} {limitS = limitS} {seedS} {testS} {stepS} {contS}
-                   dlimit dseed dtest dstep dcont x =
-  trans (ε-factor (affineWhileS {X} {A} {C} limitS seedS testS stepS contS) x)
+                   dlimit dseed dtest dstep dcont foX foC x =
+  trans (ε-factor foX foC
+          (affineWhileS {X} {A} {C} limitS seedS testS stepS contS) x)
     (cong (λ h → ⟦ h ⟧VS (stripV X x))
       (affineWhile-erases {X} {A} {C} dlimit dseed dtest dstep dcont))
 
@@ -265,12 +275,12 @@ closedIter-factor
     {contU : strip A ⇨U strip C}
     {seedS : unit ⇨ A} {stepS : A ⇨ A} {contS : A ⇨ C}
   → (dseed : Direct seedU seedS) (dstep : Direct stepU stepS)
-  → (dcont : Direct contU contS) → (u : ⟦ unit ⟧T)
+  → (dcont : Direct contU contS) → fo C → (u : ⟦ unit ⟧T)
   → stripV (! C) (⟦ closedIterS {A} {C} n seedS stepS contS ⟧V u)
     ≡ ⟦ closedIterU {A} {C} n seedU stepU contU ⟧VS (stripV unit u)
 closedIter-factor {A} {C} n {seedS = seedS} {stepS} {contS}
-                  dseed dstep dcont u =
-  trans (ε-factor (closedIterS {A} {C} n seedS stepS contS) u)
+                  dseed dstep dcont foC u =
+  trans (ε-factor tt foC (closedIterS {A} {C} n seedS stepS contS) u)
     (cong (λ h → ⟦ h ⟧VS (stripV unit u))
       (closedIter-erases {A} {C} n dseed dstep dcont))
 
@@ -317,14 +327,14 @@ closedFold-factor
     {stepS : (B ⊗ A) ⇨ B} {contS : B ⇨ C}
   → (dinput : Direct inputU inputS) (dseed : Direct seedU seedS)
   → (dstep : Direct stepU stepS) (dcont : Direct contU contS)
-  → (u : ⟦ unit ⟧T)
+  → fo C → (u : ⟦ unit ⟧T)
   → stripV (! C)
       (⟦ closedFoldS {A} {B} {C} inputS seedS stepS contS ⟧V u)
     ≡ ⟦ closedFoldU {A} {B} {C} inputU seedU stepU contU ⟧VS
       (stripV unit u)
 closedFold-factor {A} {B} {C} {inputS = inputS} {seedS} {stepS} {contS}
-                  dinput dseed dstep dcont u =
-  trans (ε-factor (closedFoldS {A} {B} {C} inputS seedS stepS contS) u)
+                  dinput dseed dstep dcont foC u =
+  trans (ε-factor tt foC (closedFoldS {A} {B} {C} inputS seedS stepS contS) u)
     (cong (λ h → ⟦ h ⟧VS (stripV unit u))
       (closedFold-erases {A} {B} {C} dinput dseed dstep dcont))
 
@@ -372,14 +382,14 @@ closedWhile-factor
     {stepS : A ⇨ A} {contS : A ⇨ C}
   → (dseed : Direct seedU seedS) (dtest : Direct testU testS)
   → (dstep : Direct stepU stepS) (dcont : Direct contU contS)
-  → (u : ⟦ unit ⟧T)
+  → fo C → (u : ⟦ unit ⟧T)
   → stripV (! C)
       (⟦ closedWhileS {A} {C} n seedS testS stepS contS ⟧V u)
     ≡ ⟦ closedWhileU {A} {C} n seedU testU stepU contU ⟧VS
       (stripV unit u)
 closedWhile-factor {A} {C} n {seedS = seedS} {testS} {stepS} {contS}
-                   dseed dtest dstep dcont u =
-  trans (ε-factor (closedWhileS {A} {C} n seedS testS stepS contS) u)
+                   dseed dtest dstep dcont foC u =
+  trans (ε-factor tt foC (closedWhileS {A} {C} n seedS testS stepS contS) u)
     (cong (λ h → ⟦ h ⟧VS (stripV unit u))
       (closedWhile-erases {A} {C} n dseed dtest dstep dcont))
 
@@ -410,11 +420,12 @@ closedMerge-factor
     {leftS : unit ⇨ ! A} {rightS : unit ⇨ ! B}
     {leftU : unitᵤ ⇨U strip A} {rightU : unitᵤ ⇨U strip B}
   → (hl : ε leftS ≡ leftU) (hr : ε rightS ≡ rightU)
-  → (u : ⟦ unit ⟧T)
+  → fo A → fo B → (u : ⟦ unit ⟧T)
   → stripV (! (A ⊗ B)) (⟦ closedMergeS {A} {B} leftS rightS ⟧V u)
     ≡ ⟦ closedMergeU {A} {B} leftU rightU ⟧VS (stripV unit u)
-closedMerge-factor {A} {B} {leftS = leftS} {rightS} {leftU} {rightU} hl hr u =
-  trans (ε-factor (closedMergeS {A} {B} leftS rightS) u)
+closedMerge-factor {A} {B} {leftS = leftS} {rightS} {leftU} {rightU}
+                   hl hr foA foB u =
+  trans (ε-factor tt (foA , foB) (closedMergeS {A} {B} leftS rightS) u)
     (cong (λ h → ⟦ h ⟧VS (stripV unit u))
       (closedMerge-erases {A} {B} {leftS = leftS} {rightS = rightS}
         {leftU = leftU} {rightU = rightU} hl hr))

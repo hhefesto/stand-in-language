@@ -27,9 +27,11 @@ data UTy : Set where
   _⊗ᵤ_  : UTy → UTy → UTy
   _⊕ᵤ_  : UTy → UTy → UTy
   listᵤ : UTy → UTy
+  _⊸ᵤ_  : UTy → UTy → UTy
 
 infixl 5 _⊗ᵤ_
 infixl 4 _⊕ᵤ_
+infixr 3 _⊸ᵤ_
 
 ⟦_⟧U : UTy → Set
 ⟦ unitᵤ   ⟧U = ⊤
@@ -37,6 +39,7 @@ infixl 4 _⊕ᵤ_
 ⟦ A ⊗ᵤ B  ⟧U = ⟦ A ⟧U × ⟦ B ⟧U
 ⟦ A ⊕ᵤ B  ⟧U = ⟦ A ⟧U ⊎ ⟦ B ⟧U
 ⟦ listᵤ A ⟧U = List ⟦ A ⟧U
+⟦ A ⊸ᵤ B  ⟧U = ⟦ A ⟧U → ⟦ B ⟧U
 
 -- Type-level erasure: forget the boxes.
 strip : Ty → UTy
@@ -46,10 +49,15 @@ strip (A ⊗ B)   = strip A ⊗ᵤ strip B
 strip (A ⊕ B)   = strip A ⊕ᵤ strip B
 strip (listT A) = listᵤ (strip A)
 strip (! A)     = strip A
+strip (A ⊸ B)   = strip A ⊸ᵤ strip B
 
 -- Value-level erasure: the identity in disguise (Agda cannot see
 -- ⟦ A ⟧T ≡ ⟦ strip A ⟧U definitionally, so we transport structurally).
-stripV : (A : Ty) → ⟦ A ⟧T → ⟦ strip A ⟧U
+-- At arrows the transport needs the mutual inverse unstripV; the pair is
+-- an identity re-indexing at every first-order layer.
+stripV   : (A : Ty) → ⟦ A ⟧T → ⟦ strip A ⟧U
+unstripV : (A : Ty) → ⟦ strip A ⟧U → ⟦ A ⟧T
+
 stripV unit      tt       = tt
 stripV nat       n        = n
 stripV (A ⊗ B)   (a , b)  = (stripV A a , stripV B b)
@@ -58,6 +66,17 @@ stripV (A ⊕ B)   (inj₂ b) = inj₂ (stripV B b)
 stripV (listT A) []       = []
 stripV (listT A) (x ∷ xs) = stripV A x ∷ stripV (listT A) xs
 stripV (! A)     a        = stripV A a
+stripV (A ⊸ B)   f        = λ u → stripV B (f (unstripV A u))
+
+unstripV unit      tt       = tt
+unstripV nat       n        = n
+unstripV (A ⊗ B)   (a , b)  = (unstripV A a , unstripV B b)
+unstripV (A ⊕ B)   (inj₁ a) = inj₁ (unstripV A a)
+unstripV (A ⊕ B)   (inj₂ b) = inj₂ (unstripV B b)
+unstripV (listT A) []       = []
+unstripV (listT A) (x ∷ xs) = unstripV A x ∷ unstripV (listT A) xs
+unstripV (! A)     a        = unstripV A a
+unstripV (A ⊸ B)   g        = λ a → unstripV B (g (stripV A a))
 
 -- On the verdict type of tests, erasure is literally the identity.
 strip2 : (r : ⊤ ⊎ ⊤) → stripV (unit ⊕ unit) r ≡ r

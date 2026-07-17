@@ -49,6 +49,9 @@ open import T3.Sem.Value using (mapV; iterV; foldV; whileV; guardV)
 ⟦ sucU       ⟧VS n = suc n
 ⟦ addU       ⟧VS (a , b) = a + b
 ⟦ constU k   ⟧VS _ = k
+⟦ curryU f   ⟧VS c = λ a → ⟦ f ⟧VS (c , a)
+⟦ applyU     ⟧VS (f , a) = f a
+⟦ mapCU      ⟧VS (f , xs) = mapV f xs
 ⟦ guardU t   ⟧VS a = guardV a (⟦ t ⟧VS a)
 ⟦ mapU f     ⟧VS xs = mapV ⟦ f ⟧VS xs
 ⟦ iterU f    ⟧VS (n , a) = iterV n ⟦ f ⟧VS a

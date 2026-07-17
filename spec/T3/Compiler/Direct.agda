@@ -12,7 +12,7 @@
 module T3.Compiler.Direct where
 
 open import Data.Nat using (ℕ)
-open import Relation.Binary.PropositionalEquality using (_≡_; refl; cong; cong₂; trans)
+open import Relation.Binary.PropositionalEquality using (_≡_; refl; sym; cong; cong₂; trans)
 
 open import T3.Core.Ty
 open import T3.Core.Syntax
@@ -20,7 +20,7 @@ open import T3.Sem.Value
 open import T3.Surface.Ty
 open import T3.Surface.Syntax
 open import T3.Surface.Sem
-open import T3.Place using (ε; ε-factor)
+open import T3.Place using (ε; ε-rel; ≈ε; fo; ε-factor)
 
 -- Canonical bang-free embedding used by the Haskell compiler endpoints.
 liftU : UTy → Ty
@@ -29,6 +29,7 @@ liftU natᵤ       = nat
 liftU (A ⊗ᵤ B)   = liftU A ⊗ liftU B
 liftU (A ⊕ᵤ B)   = liftU A ⊕ liftU B
 liftU (listᵤ A)  = listT (liftU A)
+liftU (A ⊸ᵤ B)   = liftU A ⊸ liftU B
 
 -- Successful direct elaboration evidence.  Indexing the source by the
 -- erasure of the core endpoints makes the erasure law intrinsic.
@@ -42,6 +43,9 @@ data Direct : {A B : Ty} → strip A ⇨U strip B → A ⇨ B → Set where
             → Direct f f′ → Direct g g′ → Direct (f ⊗U g) (f′ ⊗S g′)
   d-dupNat  : Direct dupU dupNatS
   d-copy    : {A : Ty} (p : Copyable A) → Direct dupU (copyS p)
+  d-curry   : {C A B : Ty} {f : strip (C ⊗ A) ⇨U strip B} {f′ : (C ⊗ A) ⇨ B}
+            → Direct f f′ → Direct (curryU f) (curryS f′)
+  d-apply   : {A B : Ty} → Direct applyU (applyS {A} {B})
   d-swap    : {A B : Ty} → Direct swapU (swapS {A} {B})
   d-assoc   : {A B C : Ty} → Direct assocU (assocS {A} {B} {C})
   d-unassoc : {A B C : Ty} → Direct unassocU (unassocS {A} {B} {C})
@@ -75,6 +79,8 @@ direct-erases (d-comp dg df)   = cong₂ _∘U_ (direct-erases dg) (direct-erase
 direct-erases (d-tensor df dg) = cong₂ _⊗U_ (direct-erases df) (direct-erases dg)
 direct-erases d-dupNat         = refl
 direct-erases (d-copy _)       = refl
+direct-erases (d-curry df)     = cong curryU (direct-erases df)
+direct-erases d-apply          = refl
 direct-erases d-swap           = refl
 direct-erases d-assoc          = refl
 direct-erases d-unassoc        = refl
@@ -96,12 +102,21 @@ direct-erases d-add            = refl
 direct-erases (d-const _)      = refl
 direct-erases (d-guard dt)     = cong guardU (direct-erases dt)
 
--- The direct compiler inherits semantic preservation from core erasure.
-direct-factor : {A B : Ty} {f : strip A ⇨U strip B} {g : A ⇨ B}
+-- The direct compiler inherits semantic preservation from core erasure:
+-- relationally in general (closures), propositionally at first-order
+-- endpoints.
+direct-rel : {A B : Ty} {f : strip A ⇨U strip B} {g : A ⇨ B}
+           → Direct f g → {a : ⟦ A ⟧T} {u : ⟦ strip A ⟧U}
+           → ≈ε A a u → ≈ε B (⟦ g ⟧V a) (⟦ f ⟧VS u)
+direct-rel {A} {B} {f = f} {g = g} d {a} {u} rel
+  rewrite sym (direct-erases d) = ε-rel g rel
+
+direct-factor : {A B : Ty} → fo A → fo B
+              → {f : strip A ⇨U strip B} {g : A ⇨ B}
               → Direct f g → (a : ⟦ A ⟧T)
               → stripV B (⟦ g ⟧V a) ≡ ⟦ f ⟧VS (stripV A a)
-direct-factor {A} {f = f} {g = g} d a =
-  trans (ε-factor g a)
+direct-factor {A} {B} foA foB {f = f} {g = g} d a =
+  trans (ε-factor foA foB g a)
         (cong (λ h → ⟦ h ⟧VS (stripV A a)) (direct-erases d))
 
 direct-addTwice : Direct (addU ∘U dupU) (addS ∘S dupNatS)

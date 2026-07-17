@@ -47,10 +47,13 @@ open import Data.Nat             using (ℕ; zero; suc; _+_; _⊓_; _≤_; s≤s
 open import Data.Nat.Properties  using (≤-refl; ≤-trans; +-monoˡ-≤; ⊓-glb;
                                         ⊓-mono-≤; ⊓-idem; m⊓n≤m; m⊓n≤n;
                                         n≤1+n; 1+n≰n)
+open import Data.Empty           using (⊥; ⊥-elim)
 open import Data.Product         using (_×_; _,_)
 open import Data.Sum             using (_⊎_; inj₁; inj₂)
 open import Data.Unit            using (⊤; tt)
 open import Data.List            using (List; []; _∷_)
+open import Data.List.Relation.Binary.Pointwise
+                                 using (Pointwise; []; _∷_)
 open import Relation.Nullary     using (¬_)
 open import Relation.Binary.PropositionalEquality
                                  using (_≡_; refl; sym; trans; cong; cong₂; subst)
@@ -91,6 +94,9 @@ open import T3.Surface.Sem
 ε (constS k)   = constU k
 ε dupNatS      = dupU          -- the atom exemption erases to free dup
 ε (copyS _)    = dupU          -- costed data copy erases to free dup
+ε (curryS f)   = curryU (ε f)
+ε applyS       = applyU
+ε mapCS        = mapCU
 ε (guardS t)   = guardU (ε t)
 ε dupS         = dupU          -- contraction erases to free dup
 ε (boxS f)     = ε f           -- boxes erase
@@ -101,116 +107,195 @@ open import T3.Surface.Sem
 ε (foldS f)    = foldU (ε f)
 ε (whileS t s) = whileU (ε t) (ε s)
 
+-- First-order (arrow-free) types: where erasure is a value identity and
+-- the factorization theorem is propositional.  Recursive ⊤/⊥ so concrete
+-- instantiations are literal tt-tuples.
+fo : Ty → Set
+fo unit      = ⊤
+fo nat       = ⊤
+fo (A ⊗ B)   = fo A × fo B
+fo (A ⊕ B)   = fo A × fo B
+fo (listT A) = fo A
+fo (! A)     = fo A
+fo (A ⊸ B)   = ⊥
+
+-- The erasure logical relation: structural equality below arrows,
+-- pointwise at arrows.  Closures made the propositional factorization
+-- unavailable at arrow types (function equality needs funext); ε-rel
+-- below is its strongest --safe form, and the fo-gated ε-factor at the
+-- bottom recovers the original propositional statement at first-order
+-- endpoints.
+≈ε : (A : Ty) → ⟦ A ⟧T → ⟦ strip A ⟧U → Set
+≈ε unit      _        _        = ⊤
+≈ε nat       n        u        = n ≡ u
+≈ε (A ⊗ B)   (a , b)  (ua , ub) = ≈ε A a ua × ≈ε B b ub
+≈ε (A ⊕ B)   (inj₁ a) (inj₁ u) = ≈ε A a u
+≈ε (A ⊕ B)   (inj₂ b) (inj₂ u) = ≈ε B b u
+≈ε (A ⊕ B)   (inj₁ _) (inj₂ _) = ⊥
+≈ε (A ⊕ B)   (inj₂ _) (inj₁ _) = ⊥
+≈ε (listT A) xs       us       = Pointwise (≈ε A) xs us
+≈ε (! A)     a        u        = ≈ε A a u
+≈ε (A ⊸ B)   f        g        = ∀ a u → ≈ε A a u → ≈ε B (f a) (g u)
+
 private
-  guard-strip : (A : Ty) (a : ⟦ A ⟧T) (r : ⊤ ⊎ ⊤)
-              → stripV (A ⊕ unit) (guardV a r) ≡ guardV (stripV A a) r
-  guard-strip A a (inj₁ tt) = refl
-  guard-strip A a (inj₂ tt) = refl
+  ≈ε-verdict : (v : ⟦ unit ⊕ unit ⟧T) (u : ⟦ strip (unit ⊕ unit) ⟧U)
+             → ≈ε (unit ⊕ unit) v u → v ≡ u
+  ≈ε-verdict (inj₁ tt) (inj₁ tt) _ = refl
+  ≈ε-verdict (inj₂ tt) (inj₂ tt) _ = refl
+  ≈ε-verdict (inj₁ tt) (inj₂ tt) ()
+  ≈ε-verdict (inj₂ tt) (inj₁ tt) ()
 
-  map-strip : (A B : Ty) (xs : List ⟦ A ⟧T)
-              (fv : ⟦ A ⟧T → ⟦ B ⟧T)
-              (fu : ⟦ strip A ⟧U → ⟦ strip B ⟧U)
-            → (∀ x → stripV B (fv x) ≡ fu (stripV A x))
-            → stripV (listT B) (mapV fv xs)
-              ≡ mapV fu (stripV (listT A) xs)
-  map-strip A B []       fv fu h = refl
-  map-strip A B (x ∷ xs) fv fu h =
-    cong₂ _∷_ (h x) (map-strip A B xs fv fu h)
+  map-rel : (A B : Ty)
+            (fv : ⟦ A ⟧T → ⟦ B ⟧T) (fu : ⟦ strip A ⟧U → ⟦ strip B ⟧U)
+          → (∀ x u → ≈ε A x u → ≈ε B (fv x) (fu u))
+          → ∀ xs us → Pointwise (≈ε A) xs us
+          → Pointwise (≈ε B) (mapV fv xs) (mapV fu us)
+  map-rel A B fv fu h [] [] [] = []
+  map-rel A B fv fu h (x ∷ xs) (u ∷ us) (r ∷ rs) =
+    h x u r ∷ map-rel A B fv fu h xs us rs
 
-  iter-strip : (A : Ty) (n : ℕ)
-               (fv : ⟦ A ⟧T → ⟦ A ⟧T) (fu : ⟦ strip A ⟧U → ⟦ strip A ⟧U)
-             → (∀ x → stripV A (fv x) ≡ fu (stripV A x))
-             → ∀ a → stripV A (iterV n fv a) ≡ iterV n fu (stripV A a)
-  iter-strip A zero    fv fu h a = refl
-  iter-strip A (suc n) fv fu h a =
-    trans (iter-strip A n fv fu h (fv a)) (cong (iterV n fu) (h a))
+  iter-rel : (A : Ty) (n : ℕ)
+             (fv : ⟦ A ⟧T → ⟦ A ⟧T) (fu : ⟦ strip A ⟧U → ⟦ strip A ⟧U)
+           → (∀ x u → ≈ε A x u → ≈ε A (fv x) (fu u))
+           → ∀ a u → ≈ε A a u → ≈ε A (iterV n fv a) (iterV n fu u)
+  iter-rel A zero    fv fu h a u r = r
+  iter-rel A (suc n) fv fu h a u r =
+    iter-rel A n fv fu h (fv a) (fu u) (h a u r)
 
-  fold-strip : (A B : Ty) (xs : List ⟦ A ⟧T)
-               (fv : ⟦ B ⟧T × ⟦ A ⟧T → ⟦ B ⟧T)
-               (fu : ⟦ strip B ⟧U × ⟦ strip A ⟧U → ⟦ strip B ⟧U)
-             → (∀ b x → stripV B (fv (b , x)) ≡ fu (stripV B b , stripV A x))
-             → ∀ b → stripV B (foldV xs fv b)
-                     ≡ foldV (stripV (listT A) xs) fu (stripV B b)
-  fold-strip A B []       fv fu h b = refl
-  fold-strip A B (x ∷ xs) fv fu h b =
-    trans (fold-strip A B xs fv fu h (fv (b , x)))
-          (cong (foldV (stripV (listT A) xs) fu) (h b x))
+  fold-rel : (A B : Ty)
+             (fv : ⟦ B ⟧T × ⟦ A ⟧T → ⟦ B ⟧T)
+             (fu : ⟦ strip B ⟧U × ⟦ strip A ⟧U → ⟦ strip B ⟧U)
+           → (∀ b ub x ux → ≈ε B b ub → ≈ε A x ux
+              → ≈ε B (fv (b , x)) (fu (ub , ux)))
+           → ∀ xs us → Pointwise (≈ε A) xs us
+           → ∀ b ub → ≈ε B b ub
+           → ≈ε B (foldV xs fv b) (foldV us fu ub)
+  fold-rel A B fv fu h [] [] [] b ub rb = rb
+  fold-rel A B fv fu h (x ∷ xs) (u ∷ us) (r ∷ rs) b ub rb =
+    fold-rel A B fv fu h xs us rs (fv (b , x)) (fu (ub , u)) (h b ub x u rb r)
 
-  whileGo-strip : (A : Ty) (n : ℕ)
-                  (tv : ⟦ A ⟧T → ⊤ ⊎ ⊤) (tu : ⟦ strip A ⟧U → ⊤ ⊎ ⊤)
-                  (sv : ⟦ A ⟧T → ⟦ A ⟧T) (su : ⟦ strip A ⟧U → ⟦ strip A ⟧U)
-                → (∀ x → tv x ≡ tu (stripV A x))
-                → (∀ x → stripV A (sv x) ≡ su (stripV A x))
-                → ∀ a r → stripV A (whileV-go n tv sv a r)
-                          ≡ whileV-go n tu su (stripV A a) r
-  while-strip   : (A : Ty) (n : ℕ)
-                  (tv : ⟦ A ⟧T → ⊤ ⊎ ⊤) (tu : ⟦ strip A ⟧U → ⊤ ⊎ ⊤)
-                  (sv : ⟦ A ⟧T → ⟦ A ⟧T) (su : ⟦ strip A ⟧U → ⟦ strip A ⟧U)
-                → (∀ x → tv x ≡ tu (stripV A x))
-                → (∀ x → stripV A (sv x) ≡ su (stripV A x))
-                → ∀ a → stripV A (whileV n tv sv a)
-                        ≡ whileV n tu su (stripV A a)
+  whileGo-rel : (A : Ty) (n : ℕ)
+                (tv : ⟦ A ⟧T → ⊤ ⊎ ⊤) (tu : ⟦ strip A ⟧U → ⊤ ⊎ ⊤)
+                (sv : ⟦ A ⟧T → ⟦ A ⟧T) (su : ⟦ strip A ⟧U → ⟦ strip A ⟧U)
+              → (∀ x u → ≈ε A x u → tv x ≡ tu u)
+              → (∀ x u → ≈ε A x u → ≈ε A (sv x) (su u))
+              → ∀ a u → ≈ε A a u → (r : ⊤ ⊎ ⊤)
+              → ≈ε A (whileV-go n tv sv a r) (whileV-go n tu su u r)
+  while-rel   : (A : Ty) (n : ℕ)
+                (tv : ⟦ A ⟧T → ⊤ ⊎ ⊤) (tu : ⟦ strip A ⟧U → ⊤ ⊎ ⊤)
+                (sv : ⟦ A ⟧T → ⟦ A ⟧T) (su : ⟦ strip A ⟧U → ⟦ strip A ⟧U)
+              → (∀ x u → ≈ε A x u → tv x ≡ tu u)
+              → (∀ x u → ≈ε A x u → ≈ε A (sv x) (su u))
+              → ∀ a u → ≈ε A a u
+              → ≈ε A (whileV n tv sv a) (whileV n tu su u)
 
-  whileGo-strip A n tv tu sv su ht hs a (inj₁ _) = refl
-  whileGo-strip A n tv tu sv su ht hs a (inj₂ _) =
-    trans (while-strip A n tv tu sv su ht hs (sv a))
-          (cong (whileV n tu su) (hs a))
+  whileGo-rel A n tv tu sv su ht hs a u rel (inj₁ _) = rel
+  whileGo-rel A n tv tu sv su ht hs a u rel (inj₂ _) =
+    while-rel A n tv tu sv su ht hs (sv a) (su u) (hs a u rel)
 
-  while-strip A zero    tv tu sv su ht hs a = refl
-  while-strip A (suc n) tv tu sv su ht hs a =
-    trans (whileGo-strip A n tv tu sv su ht hs a (tv a))
-          (cong (whileV-go n tu su (stripV A a)) (ht a))
+  while-rel A zero    tv tu sv su ht hs a u rel = rel
+  while-rel A (suc n) tv tu sv su ht hs a u rel
+    with tv a | tu u | ht a u rel
+  ... | inj₁ _ | .(inj₁ _) | refl = rel
+  ... | inj₂ _ | .(inj₂ _) | refl =
+    while-rel A n tv tu sv su ht hs (sv a) (su u) (hs a u rel)
 
--- FACTORIZATION: the value semantics factors through erasure.
-ε-factor : {A B : Ty} (f : A ⇨ B) (a : ⟦ A ⟧T)
+-- FACTORIZATION, fundamental lemma: the value semantics respects erasure
+-- up to the relation.
+ε-rel : {A B : Ty} (f : A ⇨ B) {a : ⟦ A ⟧T} {u : ⟦ strip A ⟧U}
+      → ≈ε A a u → ≈ε B (⟦ f ⟧V a) (⟦ ε f ⟧VS u)
+ε-rel idS rel = rel
+ε-rel (g ∘S f) rel = ε-rel g (ε-rel f rel)
+ε-rel (f ⊗S g) (ra , rc) = (ε-rel f ra , ε-rel g rc)
+ε-rel swapS (ra , rb) = (rb , ra)
+ε-rel assocS ((ra , rb) , rc) = (ra , (rb , rc))
+ε-rel unassocS (ra , (rb , rc)) = ((ra , rb) , rc)
+ε-rel exlS (ra , _) = ra
+ε-rel exrS (_ , rb) = rb
+ε-rel weakS _ = tt
+ε-rel runitS rel = (rel , tt)
+ε-rel lunitS rel = (tt , rel)
+ε-rel inlS rel = rel
+ε-rel inrS rel = rel
+ε-rel (caseS l r) {inj₁ _} {inj₁ _} rel = ε-rel l rel
+ε-rel (caseS l r) {inj₂ _} {inj₂ _} rel = ε-rel r rel
+ε-rel (caseS l r) {inj₁ _} {inj₂ _} ()
+ε-rel (caseS l r) {inj₂ _} {inj₁ _} ()
+ε-rel distlS {_ , inj₁ _} {_ , inj₁ _} (ra , rb) = (ra , rb)
+ε-rel distlS {_ , inj₂ _} {_ , inj₂ _} (ra , rc) = (ra , rc)
+ε-rel distlS {_ , inj₁ _} {_ , inj₂ _} (ra , ())
+ε-rel distlS {_ , inj₂ _} {_ , inj₁ _} (ra , ())
+ε-rel nilS _ = []
+ε-rel consS (rx , rxs) = rx ∷ rxs
+ε-rel unconsS {[]} {[]} [] = tt
+ε-rel unconsS {x ∷ xs} {u ∷ us} (r ∷ rs) = (r , rs)
+ε-rel unconsS {[]} {_ ∷ _} ()
+ε-rel unconsS {_ ∷ _} {[]} ()
+ε-rel natOutS {zero}  refl = tt
+ε-rel natOutS {suc k} refl = refl
+ε-rel sucS refl = refl
+ε-rel addS (refl , refl) = refl
+ε-rel (constS k) _ = refl
+ε-rel dupNatS refl = (refl , refl)
+ε-rel (copyS _) rel = (rel , rel)
+ε-rel (guardS {A} t) {a} {u} rel
+  with ⟦ t ⟧V a | ⟦ ε t ⟧VS u
+     | ≈ε-verdict (⟦ t ⟧V a) (⟦ ε t ⟧VS u) (ε-rel t rel)
+... | inj₁ _ | .(inj₁ _) | refl = rel
+... | inj₂ _ | .(inj₂ _) | refl = tt
+ε-rel (curryS f) rel = λ a u relA → ε-rel f (rel , relA)
+ε-rel applyS {gf , ga} {uf , ua} (relF , relA) = relF ga ua relA
+ε-rel (mapCS {A} {B}) {f , xs} {uf , us} (relF , relXs) =
+  map-rel A B f uf relF xs us relXs
+ε-rel dupS rel = (rel , rel)
+ε-rel (boxS f) rel = ε-rel f rel
+ε-rel (boxValS f) rel = ε-rel f rel
+ε-rel mergeS rel = rel
+ε-rel (mapS {A} {B} f) {xs} {us} relXs =
+  map-rel A B ⟦ f ⟧V ⟦ ε f ⟧VS (λ x u r → ε-rel f {x} {u} r) xs us relXs
+ε-rel (iterS {A} f) {n , a} {un , ua} (refl , relA) =
+  iter-rel A n ⟦ f ⟧V ⟦ ε f ⟧VS (λ x u r → ε-rel f {x} {u} r) a ua relA
+ε-rel (foldS {A} {B} f) {xs , b} {us , ub} (relXs , relB) =
+  fold-rel A B ⟦ f ⟧V ⟦ ε f ⟧VS
+    (λ b' ub' x ux rb rx → ε-rel f {b' , x} {ub' , ux} (rb , rx))
+    xs us relXs b ub relB
+ε-rel (whileS {A} t s) {n , a} {un , ua} (refl , relA) =
+  while-rel A n ⟦ t ⟧V ⟦ ε t ⟧VS ⟦ s ⟧V ⟦ ε s ⟧VS
+    (λ x u r → ≈ε-verdict (⟦ t ⟧V x) (⟦ ε t ⟧VS u) (ε-rel t {x} {u} r))
+    (λ x u r → ε-rel s {x} {u} r)
+    a ua relA
+
+-- First-order recovery: stripping IS the relation at arrow-free types.
+≈ε-strip : (A : Ty) → fo A → (a : ⟦ A ⟧T) → ≈ε A a (stripV A a)
+≈ε-strip unit      _          _        = tt
+≈ε-strip nat       _          _        = refl
+≈ε-strip (A ⊗ B)   (fa , fb)  (a , b)  = (≈ε-strip A fa a , ≈ε-strip B fb b)
+≈ε-strip (A ⊕ B)   (fa , _)   (inj₁ a) = ≈ε-strip A fa a
+≈ε-strip (A ⊕ B)   (_ , fb)   (inj₂ b) = ≈ε-strip B fb b
+≈ε-strip (listT A) fa         []       = []
+≈ε-strip (listT A) fa         (x ∷ xs) =
+  ≈ε-strip A fa x ∷ ≈ε-strip (listT A) fa xs
+≈ε-strip (! A)     fa         a        = ≈ε-strip A fa a
+
+≈ε-eq : (A : Ty) → fo A → {a : ⟦ A ⟧T} {u : ⟦ strip A ⟧U}
+      → ≈ε A a u → stripV A a ≡ u
+≈ε-eq unit      _         {tt}     {tt}     _   = refl
+≈ε-eq nat       _         rel = rel
+≈ε-eq (A ⊗ B)   (fa , fb) (ra , rb) = cong₂ _,_ (≈ε-eq A fa ra) (≈ε-eq B fb rb)
+≈ε-eq (A ⊕ B)   (fa , _)  {inj₁ _} {inj₁ _} r = cong inj₁ (≈ε-eq A fa r)
+≈ε-eq (A ⊕ B)   (_ , fb)  {inj₂ _} {inj₂ _} r = cong inj₂ (≈ε-eq B fb r)
+≈ε-eq (A ⊕ B)   _         {inj₁ _} {inj₂ _} ()
+≈ε-eq (A ⊕ B)   _         {inj₂ _} {inj₁ _} ()
+≈ε-eq (listT A) fa        {[]}     {[]}     [] = refl
+≈ε-eq (listT A) fa        {_ ∷ _}  {_ ∷ _}  (r ∷ rs) =
+  cong₂ _∷_ (≈ε-eq A fa r) (≈ε-eq (listT A) fa rs)
+≈ε-eq (! A)     fa        rel = ≈ε-eq A fa rel
+
+-- FACTORIZATION at first-order endpoints: the original propositional
+-- statement, now gated by fo evidence (tt-tuples at concrete types).
+ε-factor : {A B : Ty} → fo A → fo B → (f : A ⇨ B) (a : ⟦ A ⟧T)
          → stripV B (⟦ f ⟧V a) ≡ ⟦ ε f ⟧VS (stripV A a)
-ε-factor idS a = refl
-ε-factor (_∘S_ {A} {B} {C} g f) a =
-  trans (ε-factor g (⟦ f ⟧V a)) (cong ⟦ ε g ⟧VS (ε-factor f a))
-ε-factor (f ⊗S g) (a , c) = cong₂ _,_ (ε-factor f a) (ε-factor g c)
-ε-factor swapS (a , b) = refl
-ε-factor assocS ((a , b) , c) = refl
-ε-factor unassocS (a , (b , c)) = refl
-ε-factor exlS (a , _) = refl
-ε-factor exrS (_ , b) = refl
-ε-factor weakS a = refl
-ε-factor runitS a = refl
-ε-factor lunitS a = refl
-ε-factor inlS a = refl
-ε-factor inrS b = refl
-ε-factor (caseS l r) (inj₁ a) = ε-factor l a
-ε-factor (caseS l r) (inj₂ b) = ε-factor r b
-ε-factor distlS (a , inj₁ b) = refl
-ε-factor distlS (a , inj₂ c) = refl
-ε-factor nilS a = refl
-ε-factor consS (x , xs) = refl
-ε-factor unconsS [] = refl
-ε-factor unconsS (x ∷ xs) = refl
-ε-factor natOutS zero = refl
-ε-factor natOutS (suc n) = refl
-ε-factor sucS n = refl
-ε-factor addS (a , b) = refl
-ε-factor (constS k) a = refl
-ε-factor dupNatS n = refl
-ε-factor (copyS _) a = refl
-ε-factor (guardS {A} t) a =
-  trans (guard-strip A a (⟦ t ⟧V a))
-        (cong (guardV (stripV A a))
-              (trans (sym (strip2 (⟦ t ⟧V a))) (ε-factor t a)))
-ε-factor dupS a = refl
-ε-factor (boxS f) a = ε-factor f a
-ε-factor (boxValS f) a = ε-factor f a
-ε-factor mergeS (a , b) = refl
-ε-factor (mapS {A} {B} f) xs =
-  map-strip A B xs ⟦ f ⟧V ⟦ ε f ⟧VS (ε-factor f)
-ε-factor (iterS {A} f) (n , a) =
-  iter-strip A n ⟦ f ⟧V ⟦ ε f ⟧VS (ε-factor f) a
-ε-factor (foldS {A} {B} f) (xs , b) =
-  fold-strip A B xs ⟦ f ⟧V ⟦ ε f ⟧VS (λ x y → ε-factor f (x , y)) b
-ε-factor (whileS {A} t s) (n , a) =
-  while-strip A n ⟦ t ⟧V ⟦ ε t ⟧VS ⟦ s ⟧V ⟦ ε s ⟧VS
-    (λ x → trans (sym (strip2 (⟦ t ⟧V x))) (ε-factor t x))
-    (ε-factor s) a
+ε-factor {A} {B} foA foB f a = ≈ε-eq B foB (ε-rel f (≈ε-strip A foA a))
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- § 2  Placement: skeletons, decorations, the least solution
@@ -342,6 +427,9 @@ skelOf natOutU      = tip
 skelOf sucU         = tip
 skelOf addU         = tip
 skelOf (constU _)   = tip
+skelOf (curryU f)   = skelOf f
+skelOf applyU       = tip
+skelOf mapCU        = rec tip
 skelOf (guardU t)   = skelOf t
 skelOf (mapU f)     = rec (skelOf f)
 skelOf (iterU f)    = rec (skelOf f)
@@ -378,6 +466,9 @@ skelOfCore addS         d = tipD
 skelOfCore (constS _)   d = tipD
 skelOfCore dupNatS      d = tipD
 skelOfCore (copyS _)    d = tipD
+skelOfCore (curryS f)   d = skelOfCore f d
+skelOfCore applyS       d = tipD
+skelOfCore mapCS        d = recD d tipD
 skelOfCore (guardS t)   d = skelOfCore t d
 skelOfCore dupS         d = tipD
 skelOfCore (boxS f)     d = skelOfCore f (suc d)
@@ -415,6 +506,9 @@ core-solves addS         d = tt
 core-solves (constS _)   d = tt
 core-solves dupNatS      d = tt
 core-solves (copyS _)    d = tt
+core-solves (curryS f)   d = core-solves f d
+core-solves applyS       d = tt
+core-solves mapCS        d = (≤-refl , tt)
 core-solves (guardS t)   d = core-solves t d
 core-solves dupS         d = tt
 core-solves (boxS f)     d =

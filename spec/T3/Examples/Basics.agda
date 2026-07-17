@@ -21,7 +21,7 @@ open import T3.Core.Syntax
 open import T3.Sem.Value
 open import T3.Sem.Graded
 open import T3.Sem.Exec
-open import T3.Adequacy
+open import T3.Adequacy using ()
 
 -- ── core examples through ⟦_⟧G ──────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ double-depth : depth double ≡ 1                  -- result one level down
 double-depth = refl
 
 double-adequate : ⟦ double ⟧K 5 5 ≡ just (10 , 0)
-double-adequate = adequateV double 5
+double-adequate = refl
 
 -- The atom exemption: n + n duplicates a machine scalar (free on HVM2,
 -- charged 1 word by the grade).
@@ -81,7 +81,7 @@ map-depth : depth incrementAll ≡ 1
 map-depth = refl
 
 map-adequate : ⟦ incrementAll ⟧K egList 3 ≡ just (2 ∷ 3 ∷ 4 ∷ [] , 0)
-map-adequate = adequateV incrementAll egList
+map-adequate = refl
 
 sumList-val : ⟦ sumList ⟧V egList ≡ 6
 sumList-val = refl
@@ -124,7 +124,7 @@ sumBoth-dup : dupGrade sumBoth egList ≡ 7        -- exactly the one copy
 sumBoth-dup = refl
 
 sumBoth-adequate : ⟦ sumBoth ⟧K egList 6 ≡ just ((6 , 6) , 0)
-sumBoth-adequate = adequateV sumBoth egList
+sumBoth-adequate = refl
 
 -- Sharing a computed value is priced. The sum comes
 -- back boxed; dupS copies the box; with no dereliction the copies are
@@ -178,7 +178,7 @@ countDown-depth : depth countDown ≡ 1
 countDown-depth = refl
 
 countDown-adequate : ⟦ countDown ⟧K 5 10 ≡ just (0 , 0)
-countDown-adequate = adequateV countDown 5
+countDown-adequate = refl
 
 -- Fuel exhaustion is well-defined (returns the state reached), and cheaper:
 -- with fuel 2, two taken steps, no stopping probe.
@@ -208,4 +208,74 @@ positive-dup : dupGrade positive 5 ≡ 1           -- the probe's copy
 positive-dup = refl
 
 positive-adequate : ⟦ positive ⟧K 5 1 ≡ just (inj₁ 5 , 0)
-positive-adequate = adequateV positive 5
+positive-adequate = refl
+
+-- ── closures ────────────────────────────────────────────────────────────────
+
+-- A closed closure: no captured environment beyond unit.
+inc⊸ : unit ⇨ (nat ⊸ nat)
+inc⊸ = curryS (sucS ∘S exrS)
+
+-- Linear application: form the closure, apply it once.  Work 1 = the
+-- apply tag (the body is free); no duplication; depth 0 — curry/apply
+-- are level-preserving.
+applyInc : nat ⇨ nat
+applyInc = applyS ∘S (inc⊸ ⊗S idS) ∘S lunitS
+
+applyInc-val : ⟦ applyInc ⟧V 5 ≡ 6
+applyInc-val = refl
+
+applyInc-cost : work applyInc 5 ≡ 1
+applyInc-cost = refl
+
+applyInc-dup : dupGrade applyInc 5 ≡ 0
+applyInc-dup = refl
+
+applyInc-depth : depth applyInc ≡ 0
+applyInc-depth = refl
+
+applyInc-adequate : ⟦ applyInc ⟧K 5 1 ≡ just (6 , 0)
+applyInc-adequate = refl
+
+-- Runtime selection between two REUSABLE closed closures: each branch
+-- promotes a closed closure via boxValS (the only way to make code
+-- reusable), and the chosen one is applied one level down.
+chooseOp : (unit ⊕ unit) ⇨ ! (nat ⊸ nat)
+chooseOp = caseS (boxValS inc⊸) (boxValS (curryS (predS ∘S exrS)))
+
+applyChosen : (unit ⊕ unit) ⇨ ! nat
+applyChosen =
+  boxS applyS ∘S mergeS ∘S (chooseOp ⊗S boxValS (constS 3)) ∘S runitS
+
+applyChosen-left : ⟦ applyChosen ⟧V (inj₁ tt) ≡ 4
+applyChosen-left = refl
+
+applyChosen-right : ⟦ applyChosen ⟧V (inj₂ tt) ≡ 2
+applyChosen-right = refl
+
+applyChosen-depth : depth applyChosen ≡ 1
+applyChosen-depth = refl
+
+-- Higher-order map: a runtime-selected reusable mapper over a closed
+-- list.  Work per element = 1 step + the selected body's own cost.
+egListS : unit ⇨ listT nat
+egListS =
+  consS ∘S (constS 1 ⊗S (consS ∘S (constS 2 ⊗S nilS) ∘S lunitS)) ∘S lunitS
+
+mapChosen : (unit ⊕ unit) ⇨ ! (listT nat)
+mapChosen = mapCS ∘S (chooseOp ⊗S egListS) ∘S runitS
+
+mapChosen-left : ⟦ mapChosen ⟧V (inj₁ tt) ≡ 2 ∷ 3 ∷ []
+mapChosen-left = refl
+
+mapChosen-right : ⟦ mapChosen ⟧V (inj₂ tt) ≡ 0 ∷ 1 ∷ []
+mapChosen-right = refl
+
+mapChosen-cost-left : work mapChosen (inj₁ tt) ≡ 2
+mapChosen-cost-left = refl                        -- suc body is free
+
+mapChosen-cost-right : work mapChosen (inj₂ tt) ≡ 4
+mapChosen-cost-right = refl                       -- pred pays a natOut look
+
+mapChosen-depth : depth mapChosen ≡ 1
+mapChosen-depth = refl

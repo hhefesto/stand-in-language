@@ -31,12 +31,17 @@ data Ty : Set where
   _⊕_   : Ty → Ty → Ty
   listT : Ty → Ty
   !_    : Ty → Ty            -- the EAL exponential
+  _⊸_   : Ty → Ty → Ty       -- affine closures: applied at most once
 
 infixl 5 _⊗_
 infixl 4 _⊕_
 infixr 6 !_
+infixr 3 _⊸_
 
--- Values do not see boxes: ⟦!A⟧ = ⟦A⟧.
+-- Values do not see boxes: ⟦!A⟧ = ⟦A⟧.  Closures denote the semantic
+-- function space — totality of closure evaluation is definitional.  The
+-- Haskell mirror defunctionalizes (code + typed environment); agreement
+-- is re-checked pointwise by its tests.
 ⟦_⟧T : Ty → Set
 ⟦ unit    ⟧T = ⊤
 ⟦ nat     ⟧T = ℕ
@@ -44,6 +49,7 @@ infixr 6 !_
 ⟦ A ⊕ B   ⟧T = ⟦ A ⟧T ⊎ ⟦ B ⟧T
 ⟦ listT A ⟧T = List ⟦ A ⟧T
 ⟦ ! A     ⟧T = ⟦ A ⟧T
+⟦ A ⊸ B   ⟧T = ⟦ A ⟧T → ⟦ B ⟧T
 
 -- Word model of value size (space and the dup grade charge in these units).
 -- NB ⟦_⟧T is non-injective (⟦!A⟧T = ⟦A⟧T), so helpers over ⟦_⟧T need their
@@ -57,14 +63,19 @@ sizeT (A ⊕ B)   (inj₂ b) = suc (sizeT B b)
 sizeT (listT A) []       = 1
 sizeT (listT A) (x ∷ xs) = suc (sizeT A x + sizeT (listT A) xs)
 sizeT (! A)     a        = sizeT A a
+sizeT (A ⊸ B)   _        = 1
+  -- Pointer model.  Exact where duplication is actually possible: only
+  -- CLOSED closures are promotable/duplicable, and a closed-closure
+  -- duplicate is one code pointer.  Documented undercount for probes on
+  -- linear closures with environments (design/CLOSURES.md; revisit at R3).
 
 -- Structural copy evidence: which types admit a costed data copy (the
 -- copyS primitive in T3.Core.Syntax, charged sizeT by the dup grade).
 -- Every first-order data type is copyable — deliberately: duplication of
--- DATA is legal wherever it is priced.  The witness stays evidence-indexed
--- (rather than collapsing into Ty) because future non-data objects
--- (closures) must NOT be copyable: duplicating suspended computation goes
--- through the ! modality, never through copyS.
+-- DATA is legal wherever it is priced.  There is NO arrow case: a
+-- closure is suspended computation, and duplicating computation goes
+-- through the ! modality (dupS on ! (A ⊸ B)), never through copyS.
+-- That absence is the modal rule.
 data Copyable : Ty → Set where
   copy-unit : Copyable unit
   copy-nat  : Copyable nat

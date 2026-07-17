@@ -75,6 +75,13 @@ CoreBangOps = record
   ; promoteVal = C.boxValS; mergeBang = C.mergeS
   }
 
+CoreClosureOps : ClosureOps CoreCategoryOps CoreTensorOps
+CoreClosureOps = record { lolly = _⊸_; curry = C.curryS; apply = C.applyS }
+
+CoreClosureRecursionOps : ClosureRecursionOps CoreCategoryOps CoreTensorOps
+  CoreAffineOps CoreSumOps CoreListOps CoreBangOps CoreClosureOps
+CoreClosureRecursionOps = record { mapClosure = C.mapCS }
+
 CoreGuardOps : GuardOps CoreCategoryOps CoreTensorOps CoreAffineOps CoreSumOps
 CoreGuardOps = record { guard = C.guardS }
 
@@ -125,6 +132,9 @@ SurfaceListOps = record
 
 SurfaceCopyOps : CopyOps SurfaceCategoryOps SurfaceTensorOps
 SurfaceCopyOps = record { copy = S.dupU }
+
+SurfaceClosureOps : ClosureOps SurfaceCategoryOps SurfaceTensorOps
+SurfaceClosureOps = record { lolly = _⊸ᵤ_; curry = S.curryU; apply = S.applyU }
 
 -- Surface recursion is box-free, so it is exposed explicitly rather than as
 -- an instance of RestrictedBangOps.
@@ -242,8 +252,15 @@ erasure-then-hom : {X Y Z : Ty} (f : X C.⇨ Y) (g : Y C.⇨ Z)
                  → P.ε (g C.∘S f) ≡ (P.ε g S.∘U P.ε f)
 erasure-then-hom f g = refl
 
--- The interpretation square for erasure is the existing factorization proof.
-erasure-value-commutes : {X Y : Ty} (f : X C.⇨ Y) (x : ⟦ X ⟧T)
+-- The interpretation square for erasure: relational in general
+-- (closures), propositional at first-order endpoints.
+erasure-value-relates : {X Y : Ty} (f : X C.⇨ Y)
+  {x : ⟦ X ⟧T} {u : ⟦ strip X ⟧U}
+  → P.≈ε X x u → P.≈ε Y (V.⟦ f ⟧V x) (SV.⟦ P.ε f ⟧VS u)
+erasure-value-relates = P.ε-rel
+
+erasure-value-commutes : {X Y : Ty} → P.fo X → P.fo Y
+  → (f : X C.⇨ Y) (x : ⟦ X ⟧T)
   → stripV Y (V.⟦ f ⟧V x) ≡ SV.⟦ P.ε f ⟧VS (stripV X x)
 erasure-value-commutes = P.ε-factor
 
@@ -252,14 +269,18 @@ direct-erasure-section : {X Y : Ty} {f : strip X S.⇨U strip Y} {g : X C.⇨ Y}
   → D.Direct f g → P.ε g ≡ f
 direct-erasure-section = D.direct-erases
 
-direct-value-square : {X Y : Ty} {f : strip X S.⇨U strip Y} {g : X C.⇨ Y}
+direct-value-square : {X Y : Ty} → P.fo X → P.fo Y
+  → {f : strip X S.⇨U strip Y} {g : X C.⇨ Y}
   → D.Direct f g → (x : ⟦ X ⟧T)
   → stripV Y (V.⟦ g ⟧V x) ≡ SV.⟦ f ⟧VS (stripV X x)
 direct-value-square = D.direct-factor
 
--- Every graded interpretation projects homomorphically to value semantics.
-graded-value-square : (R : G.CostAlgebra) {X Y : Ty} (f : X C.⇨ Y) (x : ⟦ X ⟧T)
-  → proj₂ (G.Interp.⟦_⟧G R f x) ≡ V.⟦ f ⟧V x
+-- Every graded interpretation projects homomorphically to value
+-- semantics, up to the graded logical relation (equality below arrows).
+graded-value-square : (R : G.CostAlgebra) {X Y : Ty} (f : X C.⇨ Y)
+  {gx : G.GVal (G.CostAlgebra.ℳ R) X} {x : ⟦ X ⟧T}
+  → G.≈G (G.CostAlgebra.ℳ R) X gx x
+  → G.≈G (G.CostAlgebra.ℳ R) Y (proj₂ (G.Interp.⟦_⟧G R f gx)) (V.⟦ f ⟧V x)
 graded-value-square R = G.Interp.G-val R
 
 -- Fuel precision: bounded while is exactly an iterate using no more fuel.

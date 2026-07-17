@@ -82,6 +82,14 @@ data _⇨_ : Ty → Ty → Set where
   -- refinement guard (⊕-error primitive; implicit probe copy, priced)
   guardS   : {A : Ty} → A ⇨ (unit ⊕ unit) → A ⇨ (A ⊕ unit)
     -- test convention: inj₁ = pass, inj₂ = fail.
+  -- closures: affine first-class functions.  A bare A ⊸ B is applied at
+  -- most once (applyS consumes it); a REUSABLE closure is ! (A ⊸ B),
+  -- formed only by boxValS empty-context promotion of a closed closure
+  -- and duplicated only by dupS.  mapCS applies one reusable closure per
+  -- element, one level down — its output is one box deeper, like mapS.
+  curryS   : {C A B : Ty} → (C ⊗ A) ⇨ B → C ⇨ (A ⊸ B)
+  applyS   : {A B : Ty} → ((A ⊸ B) ⊗ A) ⇨ B
+  mapCS    : {A B : Ty} → (! (A ⊸ B) ⊗ listT A) ⇨ ! (listT B)
   -- EAL exponential — the ENTIRE duplication interface
   dupS     : {A : Ty} → ! A ⇨ (! A ⊗ ! A)      -- contraction, only at !
   boxS     : {A B : Ty} → A ⇨ B → (! A ⇨ ! B)  -- promotion (functoriality)
@@ -126,6 +134,12 @@ depth (constS _)    = 0
 depth dupNatS       = 0
 depth (copyS _)     = 0
 depth (guardS t)    = depth t
+depth (curryS f)    = depth f
+  -- level-preserving: the body runs at the apply site's level, and
+  -- linearity keeps that at the curry site's level
+depth applyS        = 0
+depth mapCS         = 1
+  -- the closure body runs one level down, like every recursion body
 depth dupS          = 0
 depth (boxS f)      = suc (depth f)
 depth (boxValS f)   = suc (depth f)

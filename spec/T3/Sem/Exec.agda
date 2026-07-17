@@ -6,10 +6,16 @@
 -- instance of the graded semantics: run with the computed budget and you
 -- finish with exactly 0 fuel left.
 --
+-- CLOSURES: the machine value of A ⊸ B is a fuel-monadic function —
+-- KVal (A ⊸ B) = KVal A → TelM (KVal B) — so a closure body's fuel is
+-- consumed at each apply.  applyS consumes ONE step-tel of its own,
+-- mirroring workAlg's applyT = 1, then runs the body.
+--
 -- Consistency discipline: ⟦_⟧K consumes a step-tel exactly where workAlg
--- charges (natOut looks, taken loop steps) and nowhere else — guardS and
--- whileS probes charge 0 work, so they consume no fuel of their own (the
--- probe's dup-grade cost is a different algebra's business).
+-- charges (natOut looks, applies, taken loop steps) and nowhere else —
+-- guardS and whileS probes charge 0 work, so they consume no fuel of
+-- their own (the probe's dup-grade cost is a different algebra's
+-- business).
 --
 -- The loop helpers are public: T3.Adequacy's proofs name them.
 ------------------------------------------------------------------------
@@ -73,7 +79,17 @@ whileGoT n t s a (inj₂ _) = step-tel (bind-tel (s a) (whileT n t s))
 whileT zero    t s a = return-tel a
 whileT (suc n) t s a = bind-tel (t a) (whileGoT n t s a)
 
-⟦_⟧K : {A B : Ty} → A ⇨ B → ⟦ A ⟧T →K ⟦ B ⟧T
+-- Machine values: fuel-monadic at arrows, structural elsewhere.
+KVal : Ty → Set
+KVal unit      = ⊤
+KVal nat       = ℕ
+KVal (A ⊗ B)   = KVal A × KVal B
+KVal (A ⊕ B)   = KVal A ⊎ KVal B
+KVal (listT A) = List (KVal A)
+KVal (! A)     = KVal A
+KVal (A ⊸ B)   = KVal A → TelM (KVal B)
+
+⟦_⟧K : {A B : Ty} → A ⇨ B → KVal A →K KVal B
 ⟦ idS        ⟧K a = return-tel a
 ⟦ g ∘S f     ⟧K a = bind-tel (⟦ f ⟧K a) ⟦ g ⟧K
 ⟦ f ⊗S g     ⟧K (a , c) = bind-tel (⟦ f ⟧K a) λ b →
@@ -105,6 +121,9 @@ whileT (suc n) t s a = bind-tel (t a) (whileGoT n t s a)
 ⟦ dupNatS    ⟧K n = return-tel (n , n)
 ⟦ copyS _    ⟧K a = return-tel (a , a)
 ⟦ guardS t   ⟧K a = bind-tel (⟦ t ⟧K a) λ r → return-tel (guardV a r)
+⟦ curryS f   ⟧K c = return-tel (λ a → ⟦ f ⟧K (c , a))
+⟦ applyS     ⟧K (f , a) = step-tel (f a)
+⟦ mapCS      ⟧K (f , xs) = mapT xs f
 ⟦ dupS       ⟧K a = return-tel (a , a)
 ⟦ boxS f     ⟧K a = ⟦ f ⟧K a
 ⟦ boxValS f  ⟧K a = ⟦ f ⟧K a

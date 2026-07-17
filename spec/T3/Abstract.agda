@@ -312,6 +312,12 @@ transfer addS         s =
 transfer (constS k)   s = (tipB , natLE k)
 transfer dupNatS      s = (tipB , pairS s s)
 transfer (copyS _)    s = (tipB , pairS s s)
+transfer (curryS f)   s =
+  -- run the body abstractly at ⊤ to produce a budget of the right
+  -- skeleton index; the closure value itself is unanalyzed (topS)
+  (proj₁ (transfer f topS) , topS)
+transfer applyS       s = (tipB , topS)
+transfer mapCS        s = (recB nothing (topBD tip) , topS)
 transfer (guardS t)   s =
   let (bt , _) = transfer t s
   in (bt , sumS (just s) (just unitS))
@@ -477,6 +483,9 @@ sound addS (pairS (natLE n) (natLE m)) (ha , hb) = +-mono-≤′ ha hb
 sound (constS k) s h = ≤-refl
 sound dupNatS s h = (h , h)
 sound (copyS _) s h = (h , h)
+sound (curryS f) s h = tt
+sound applyS s h = tt
+sound mapCS s h = tt
 sound (guardS t) s {a} h with ⟦ t ⟧V a
 ... | inj₁ _ = h
 ... | inj₂ _ = tt
