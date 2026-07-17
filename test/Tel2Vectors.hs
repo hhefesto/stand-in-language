@@ -59,6 +59,20 @@ tel2Vectors = do
             , rejects "tel2 rejects cyclic definitions" cyclicDefinitionSource
             ]
           explicit = accepts "tel2 accepts explicit copy" copySource
+          closures =
+            [ acceptsBehavior "tel2 lambda with capture applies once"
+                makeAdderSource ["go"] "twelve\n"
+            , acceptsBehavior "tel2 runtime-selected closure applies"
+                chooseOperationSource ["go", "go"] "six\nsix\n"
+            , acceptsBehavior "tel2 composed closures apply inside a closure"
+                composeSource ["go"] "nine\n"
+            , rejectsWith "tel2 rejects implicit closure copy"
+                closureReuseSource "cannot be implicitly copied"
+            , rejectsWith "tel2 rejects explicit closure copy"
+                closureCopySource "cannot copy a function"
+            , rejectsWith "tel2 rejects closures in machine state"
+                closureStateSource "must be first-order"
+            ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
             , accepts "tel2 accepts implicit duplication of a list" implicitListReuseSource
@@ -109,7 +123,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : closures <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -342,6 +356,50 @@ implicitNatReuseSource = unlines
   , "def double(n: Nat): Nat = add (n,n);"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
   , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double(n) of { 10 -> (\"ten\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+makeAdderSource :: String
+makeAdderSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
+  , "def step(request: Text * State): Reply State = let (input,amount): Text * State = request in let _: Text = input in let adder: Nat -o Nat = \\value -> add (amount,value) in matchNat apply(adder, 7) of { 12 -> (\"twelve\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+chooseOperationSource :: String
+chooseOperationSource = unlines
+  [ "type State = Nat;"
+  , "def pick(flag: Nat): Nat -o Nat = matchNat flag of { 0 -> \\n -> suc n; _ -> \\n -> add (n,n) };"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = pick(n) in matchNat apply(f, n) of { 6 -> (\"six\\n\",right n); m -> (\"bad\\n\",left ()); };"
+  ]
+
+composeSource :: String
+composeSource = unlines
+  [ "type State = Nat;"
+  , "def compose(fs: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat = let (first,second): (Nat -o Nat) * (Nat -o Nat) = fs in \\value -> apply(second, apply(first, value));"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = compose((\\a -> suc a, \\b -> suc b)) in matchNat apply(f, n) of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+closureReuseSource :: String
+closureReuseSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in (\"\",right add (apply(f, 1), apply(f, 2)));"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+closureCopySource :: String
+closureCopySource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in let (g,h): (Nat -o Nat) * (Nat -o Nat) = copy f in (\"\",right add (apply(g, 1), apply(h, 2)));"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+closureStateSource :: String
+closureStateSource = unlines
+  [ "type State = Nat -o Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right \\n -> suc n);"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
 scrutineeReuseSource :: String

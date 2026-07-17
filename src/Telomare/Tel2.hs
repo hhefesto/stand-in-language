@@ -47,6 +47,7 @@ data Type
   | TList Type
   | TProd Type Type
   | TSum Type Type
+  | TArrow Type Type
   | TReply Type
   deriving (Eq, Show)
 
@@ -77,6 +78,8 @@ data Expr
   | EMatchText Expr [(String, Expr)] Pattern Expr
   | EMatchNat Expr [(Natural, Expr)] Pattern Expr
   | ECase Expr [(String, Expr)]
+  | ELam Pattern Expr
+  | EApply Expr Expr
   deriving (Eq, Show)
 
 data Decl
@@ -115,8 +118,9 @@ natural :: Parser Natural
 natural = lexeme L.decimal
 
 typeParser :: Parser Type
-typeParser = makeSum
+typeParser = makeArrow
   where
+    makeArrow = chainRight makeSum "-o" TArrow
     makeSum = chainRight makeProd "+" TSum
     makeProd = chainRight atom "*" TProd
     atom = between (symbol "(") (symbol ")") typeParser
@@ -139,7 +143,9 @@ patternParser = (symbol "_" $> PWild) <|> try pairPattern <|> (PVar <$> identifi
 
 exprParser :: Parser Expr
 exprParser = choice
-  [ try letExpr
+  [ try lamExpr
+  , try applyExpr
+  , try letExpr
   , try matchTextExpr
   , try matchNatExpr
   , try caseExpr
@@ -232,6 +238,19 @@ exprParser = choice
       test <- identifier
       reserved "stepping"
       EWhile limit seed test <$> identifier
+    lamExpr = do
+      void (symbol "\\")
+      pat <- patternParser
+      void (symbol "->")
+      ELam pat <$> exprParser
+    applyExpr = do
+      reserved "apply"
+      void (symbol "(")
+      function <- exprParser
+      void (symbol ",")
+      argument <- exprParser
+      void (symbol ")")
+      pure (EApply function argument)
     copyExpr = reserved "copy" *> (ECopy <$> exprParser)
     sucExpr = reserved "suc" *> (ESuc <$> exprParser)
     addExpr = reserved "add" *> (EAdd <$> exprParser)
@@ -406,6 +425,9 @@ compileDecls decls = do
   orderedDefs <- orderDefinitions decls
   tables <- foldM addDef tablesWithTypes orderedDefs
   SomeTy stateTy <- resolveType tables (TName "State")
+  if firstOrderTy stateTy
+    then Right ()
+    else bad "machine state must be first-order; closures cannot cross the machine boundary"
   SomeDef initIn initOut initU <- lookupDef tables "init"
   SomeDef stepIn stepOut stepU <- lookupDef tables "step"
   case (sameTy initIn SUUnit, sameTy initOut (replyTy stateTy),
@@ -816,6 +838,9 @@ exprCalls (ERight value) = exprCalls value
 exprCalls (EMatchText value arms _ fallback) = branchCalls value arms fallback
 exprCalls (EMatchNat value arms _ fallback) = branchCalls value arms fallback
 exprCalls (ECase value arms) = exprCalls value `Set.union` Set.unions (fmap (exprCalls . snd) arms)
+exprCalls (ELam _ body) = exprCalls body
+exprCalls (EApply function argument) =
+  exprCalls function `Set.union` exprCalls argument
 exprCalls _ = Set.empty
 
 branchCalls :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -847,6 +872,9 @@ iterSteps (EMatchText value arms _ fallback) = branchIters value arms fallback
 iterSteps (EMatchNat value arms _ fallback) = branchIters value arms fallback
 iterSteps (ECase value arms) =
   iterSteps value `Set.union` Set.unions (fmap (iterSteps . snd) arms)
+iterSteps (ELam _ body) = iterSteps body
+iterSteps (EApply function argument) =
+  iterSteps function `Set.union` iterSteps argument
 iterSteps _ = Set.empty
 
 branchIters :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -874,6 +902,9 @@ freeVars (EMatchText value arms pat fallback) = branchVars value arms pat fallba
 freeVars (EMatchNat value arms pat fallback) = branchVars value arms pat fallback
 freeVars (ECase value arms) =
   freeVars value `Set.union` Set.unions (fmap (freeVars . snd) arms)
+freeVars (ELam pat body) = freeVars body Set.\\ patternNames pat
+freeVars (EApply function argument) =
+  freeVars function `Set.union` freeVars argument
 freeVars _ = Set.empty
 
 branchVars :: Expr -> [(a, Expr)] -> Pattern -> Expr -> Set.Set String
@@ -900,6 +931,10 @@ resolveType tables = go []
       SomeTy a <- go seen x
       SomeTy b <- go seen y
       pure (SomeTy (SUSum a b))
+    go seen (TArrow x y) = do
+      SomeTy a <- go seen x
+      SomeTy b <- go seen y
+      pure (SomeTy (SULolly a b))
     go seen (TReply state) = go seen (TProd TText (TSum TUnit state))
     go seen (TName name)
       | name `elem` seen = bad ("cyclic type alias involving " <> name)
@@ -917,6 +952,11 @@ elaborate :: Tables -> Env c -> Set.Set String -> SUTy expected -> Expr -> Eithe
 elaborate _ env demand expected (EVar name) = do
   Taken actual rest morph <-
     if name `Set.member` demand then peekVar name env else takeVar name env
+  case actual of
+    SULolly _ _ | name `Set.member` demand ->
+      bad ("function " <> name
+        <> " cannot be implicitly copied; a closure is applied at most once")
+    _ -> Right ()
   Refl <- requireSame expected actual
   pure (Elab expected rest morph)
 elaborate _ env _ SUUnit EUnit = pure (constant env SUUnit UId)
@@ -953,6 +993,9 @@ elaborate tables env demand expected (ECall name argument) = do
   pure (Elab output rest ((function :****: UId) :..: arg))
 elaborate tables env demand (SUProd a b) (ECopy value) = do
   Refl <- requireSame a b
+  case a of
+    SULolly _ _ -> bad "cannot copy a function; closure reuse is not permitted"
+    _           -> Right ()
   Elab actual rest input <- elaborate tables env demand a value
   Refl <- requireSame a actual
   pure (Elab (SUProd a a) rest ((copyMorph a :****: UId) :..: input))
@@ -1047,7 +1090,59 @@ elaborate tables env demand expected (ECase value arms) = do
     resolveArm (name, body) = case Map.lookup name (constructors tables) of
       Nothing              -> bad ("unknown constructor " <> name)
       Just (typeName, tag) -> Right (typeName, tag, body)
+elaborate tables env demand (SULolly a b) (ELam pat body) = do
+  let captureNames = Set.toList (freeVars body Set.\\ patternNames pat)
+  captures <- traverse (\name -> (,) name <$> envTypeOf name env) captureNames
+  SomeCaps capsTy capsEnv capsExpr <- pure (buildCaps captures)
+  Elab capsActual rest capsU <- elaborate tables env demand capsTy capsExpr
+  Refl <- requireSame capsTy capsActual
+  Bound innerEnv reshape <- bindPattern pat a capsEnv
+  Elab bodyActual leftover bodyU <- elaborate tables innerEnv Set.empty b body
+  Refl <- requireSame b bodyActual
+  let bodyCore = finish leftover bodyU :..: reshape :..: USwap
+  pure (Elab (SULolly a b) rest ((UCurry capsTy bodyCore :****: UId) :..: capsU))
+elaborate _ _ _ _ (ELam _ _) =
+  bad "a lambda needs a function type; annotate the enclosing binding with -o"
+elaborate tables env demand expected (EApply function argument) = do
+  SomeTy funTy <- synthType tables env function
+  case funTy of
+    SULolly argTy resTy -> do
+      Refl <- requireSame expected resTy
+      let pairTy = SUProd (SULolly argTy resTy) argTy
+      Elab pairActual rest pair <- elaborate tables env demand pairTy
+        (EPair function argument)
+      Refl <- requireSame pairTy pairActual
+      pure (Elab expected rest ((UApply :****: UId) :..: pair))
+    _ -> bad "apply expects a function; bind one with an annotated let first"
 elaborate _ _ _ _ expression = bad ("type mismatch in expression " <> show expression)
+
+-- Closure capture environment: the lambda's free variables are consumed
+-- (or implicitly copied, if demanded later) from the ambient context into
+-- one right-nested product that becomes the closure's environment.
+data SomeCaps where
+  SomeCaps :: SUTy c -> Env c -> Expr -> SomeCaps
+
+buildCaps :: [(String, SomeTy)] -> SomeCaps
+buildCaps [] = SomeCaps SUUnit Empty EUnit
+buildCaps ((name, SomeTy ty) : rest) = case buildCaps rest of
+  SomeCaps restTy restEnv restExpr ->
+    SomeCaps (SUProd ty restTy) (Bind name ty restEnv)
+      (EPair (EVar name) restExpr)
+
+-- Minimal type synthesis for apply heads: variables and definition calls.
+synthType :: Tables -> Env c -> Expr -> Either CompileError SomeTy
+synthType _ env (EVar name) = envTypeOf name env
+synthType tables _ (ECall name _) = do
+  SomeDef _ output _ <- lookupDef tables name
+  pure (SomeTy output)
+synthType _ _ _ =
+  bad "cannot infer the function here; bind it with an annotated let and apply the variable"
+
+envTypeOf :: String -> Env c -> Either CompileError SomeTy
+envTypeOf name Empty = bad ("unknown variable " <> name)
+envTypeOf name (Bind current ty rest)
+  | name == current = Right (SomeTy ty)
+  | otherwise = envTypeOf name rest
 
 -- Exact matching consumes the scrutinee once. Failed partitions reconstruct it
 -- before trying the next arm; every selected branch may weaken its own context.
@@ -1175,12 +1270,24 @@ partitionTextU (c : cs) = UCase emptyList nonempty :..: UUncons
     matching = UCase (UInl :..: UCons) (UInr :..: UCons)
       :..: UDistl :..: (UId :****: partitionTextU cs)
 
+firstOrderTy :: SUTy a -> Bool
+firstOrderTy SUUnit        = True
+firstOrderTy SUNat         = True
+firstOrderTy (SUProd a b)  = firstOrderTy a && firstOrderTy b
+firstOrderTy (SUSum a b)   = firstOrderTy a && firstOrderTy b
+firstOrderTy (SUList a)    = firstOrderTy a
+firstOrderTy (SULolly _ _) = False
+
 sameTy :: SUTy a -> SUTy b -> Maybe (a :~: b)
 sameTy SUUnit SUUnit = Just Refl
 sameTy SUNat SUNat = Just Refl
 sameTy (SUProd a b) (SUProd c d) = do Refl <- sameTy a c; Refl <- sameTy b d; pure Refl
 sameTy (SUSum a b) (SUSum c d) = do Refl <- sameTy a c; Refl <- sameTy b d; pure Refl
 sameTy (SUList a) (SUList b) = do Refl <- sameTy a b; pure Refl
+sameTy (SULolly a b) (SULolly c d) = do
+  Refl <- sameTy a c
+  Refl <- sameTy b d
+  pure Refl
 sameTy _ _ = Nothing
 
 requireSame :: SUTy a -> SUTy b -> Either CompileError (a :~: b)
