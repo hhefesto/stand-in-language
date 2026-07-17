@@ -72,6 +72,10 @@ tel2Vectors = do
                 closureCopySource "cannot copy a function"
             , rejectsWith "tel2 rejects closures in machine state"
                 closureStateSource "must be first-order"
+            , acceptsMapCBehavior "tel2 mapc runtime-selected mapper emits MapCS"
+                mapcDemoSource ["ABC"] "chosen\n"
+            , rejectsWith "tel2 rejects an open lambda as a reusable mapper"
+                mapcOpenLambdaSource "must select among closed lambdas"
             ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
@@ -217,6 +221,12 @@ programHasMap = programHasShape isMap
     isMap ShMap {} = True
     isMap _        = False
 
+programHasMapC :: Program -> Bool
+programHasMapC = programHasShape isMapC
+  where
+    isMapC ShMapC = True
+    isMapC _      = False
+
 programHasFold :: Program -> Bool
 programHasFold = programHasShape isFold
   where
@@ -256,6 +266,13 @@ acceptsMapBehavior :: String -> String -> [String] -> String -> (String, Bool)
 acceptsMapBehavior name source inputs expected = (name, case compileTel2 source of
   Left _ -> False
   Right program -> programHasMap program && case runProgramScript program inputs of
+    Right (output, _) -> output == expected
+    Left _            -> False)
+
+acceptsMapCBehavior :: String -> String -> [String] -> String -> (String, Bool)
+acceptsMapCBehavior name source inputs expected = (name, case compileTel2 source of
+  Left _ -> False
+  Right program -> programHasMapC program && case runProgramScript program inputs of
     Right (output, _) -> output == expected
     Left _            -> False)
 
@@ -356,6 +373,22 @@ implicitNatReuseSource = unlines
   , "def double(n: Nat): Nat = add (n,n);"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
   , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double(n) of { 10 -> (\"ten\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+mapcDemoSource :: String
+mapcDemoSource = unlines
+  [ "type State = Unit;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
+  , "def transform(input: Nat * Text): Text = let (flag,text): Nat * Text = input in mapc text with (matchNat flag of { 0 -> \\n -> suc n; _ -> \\n -> add (n,n) });"
+  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Text = transform((0,input)) in matchText result of { \"BCD\" -> (\"chosen\\n\",left ()); other -> (\"bad\\n\",left ()); };"
+  ]
+
+mapcOpenLambdaSource :: String
+mapcOpenLambdaSource = unlines
+  [ "type State = Unit;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
+  , "def addToAll(input: Nat * Text): Text = let (amount,text): Nat * Text = input in mapc text with \\n -> add (amount,n);"
+  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Text = addToAll((1,input)) in (\"done\\n\",left ());"
   ]
 
 makeAdderSource :: String

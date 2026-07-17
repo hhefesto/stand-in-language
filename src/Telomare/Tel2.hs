@@ -80,6 +80,7 @@ data Expr
   | ECase Expr [(String, Expr)]
   | ELam Pattern Expr
   | EApply Expr Expr
+  | EMapC Expr Expr
   deriving (Eq, Show)
 
 data Decl
@@ -146,6 +147,7 @@ exprParser = choice
   [ try lamExpr
   , try applyExpr
   , try letExpr
+  , try mapcExpr
   , try matchTextExpr
   , try matchNatExpr
   , try caseExpr
@@ -215,6 +217,11 @@ exprParser = choice
       input <- exprParser
       reserved "with"
       EMap input <$> identifier
+    mapcExpr = do
+      reserved "mapc"
+      input <- exprParser
+      reserved "with"
+      EMapC input <$> exprParser
     iterExpr = do
       reserved "iterate"
       count <- exprParser
@@ -589,6 +596,21 @@ compileAffineLoop tables env resultTy expression = case expression of
           (Closed.affineMapValueFrom (finish rest inputU) mapperU)
         pure (SomePlacedLoop resultTy core)
       _ -> bad "map result must be a list"
+  EMapC input mapper -> case resultTy of
+    SUList resultElement -> do
+      SomeTy inputListTy <- synthType tables env input
+      case inputListTy of
+        SUList elementTy -> do
+          Elab inputActual rest inputU <- elaborate tables env
+            (freeVars mapper) (SUList elementTy) input
+          Refl <- requireSame (SUList elementTy) inputActual
+          inputCore <- fromDirect (compileDirect inputU)
+          selector <- promoteClosureSelector tables rest
+            elementTy resultElement mapper
+          pure (SomePlacedLoop resultTy
+            (MapCS :.: (selector :***: IdS) :.: SwapS :.: inputCore))
+        _ -> bad "mapc expects a list input with an inferable type"
+    _ -> bad "mapc result must be a list"
   EIter count seed stepName -> do
     requirePromotable "iteration seed" seed
     SomeDef stepIn stepOut stepU <- lookupDef tables stepName
@@ -634,6 +656,65 @@ compileAffineLoop tables env resultTy expression = case expression of
       | Set.null (freeVars value) && not (containsIter value) = Right ()
       | otherwise = bad (description <> " must be closed; open promotion is unavailable")
 
+-- | Compile a reusable-mapper expression to a promoted closure selector:
+-- closed lambdas at the leaves (each promoted by empty-context BoxValS),
+-- runtime dispatch via matchNat\/case over an affine scrutinee.  This is
+-- the only way to form the Bang (Lolly a b) that MapCS needs — no general
+-- promotion of an already-selected closure exists.
+promoteClosureSelector
+  :: Tables
+  -> Env r
+  -> SUTy a
+  -> SUTy b
+  -> Expr
+  -> Either CompileError
+       (Morph (Lift r) ('Bang ('Lolly (Lift a) (Lift b))))
+promoteClosureSelector tables env a b expression = case expression of
+  ELam _ _ | Set.null (freeVars expression) -> do
+    leafCore <- leaf expression
+    pure (BoxValS leafCore :.: WeakS)
+  EMatchNat scrutinee arms fallbackPat fallback
+    | all (Set.null . freeVars . snd) arms
+        && Set.null (freeVars fallback Set.\\ patternNames fallbackPat) -> do
+        Elab keyActual rest scrutU <- elaborate tables env Set.empty
+          SUNat scrutinee
+        Refl <- requireSame SUNat keyActual
+        scrutCore <- fromDirect (compileDirect (finish rest scrutU))
+        dispatch <- dispatchNat arms fallback
+        pure (dispatch :.: scrutCore)
+  ECase scrutinee arms -> do
+    resolved <- traverse resolveArm arms
+    let typeNames = [typeName | (typeName, _, _) <- resolved]
+        armNames = fmap fst arms
+    case resolved of
+      [] -> bad "case has no arms"
+      ((typeName, _, _) : _)
+        | any (/= typeName) typeNames ->
+            bad "case mixes constructors from different data types"
+        | not (unique armNames) -> bad "case repeats a constructor"
+        | length resolved /= constructorCount tables typeName ->
+            bad ("case is not exhaustive for " <> typeName)
+        | otherwise ->
+            let tagged = [(tag, body) | (_, tag, body) <- resolved]
+            in promoteClosureSelector tables env a b
+                 (EMatchNat scrutinee (init tagged) PWild (snd (last tagged)))
+  _ -> bad "a reusable mapper must select among closed lambdas"
+  where
+    resolveArm (name, body) = case Map.lookup name (constructors tables) of
+      Nothing              -> bad ("unknown constructor " <> name)
+      Just (typeName, tag) -> Right (typeName, tag, body)
+    leaf lambda = do
+      lamU <- elaborateClosed tables (SULolly a b) lambda
+      fromDirect (compileDirect lamU)
+    dispatchNat [] fallback = do
+      fallbackCore <- leaf fallback
+      pure (BoxValS fallbackCore :.: WeakS)
+    dispatchNat ((literal, arm) : rest) fallback = do
+      hit <- leaf arm
+      miss <- dispatchNat rest fallback
+      partCore <- fromDirect (compileDirect (partitionNatU literal))
+      pure (CaseS (BoxValS hit :.: WeakS) miss :.: partCore)
+
 definitionRequiresPlacement :: [Decl] -> String -> Bool
 definitionRequiresPlacement decls name = case
   [body | DDef current _ _ _ body <- decls, current == name] of
@@ -659,6 +740,7 @@ isClosedLoop EIter {}  = True
 isClosedLoop EFold {}  = True
 isClosedLoop EWhile {} = True
 isClosedLoop EMap {}   = True
+isClosedLoop EMapC {}  = True
 isClosedLoop _         = False
 
 data SomeClosedLoop where
@@ -841,6 +923,8 @@ exprCalls (ECase value arms) = exprCalls value `Set.union` Set.unions (fmap (exp
 exprCalls (ELam _ body) = exprCalls body
 exprCalls (EApply function argument) =
   exprCalls function `Set.union` exprCalls argument
+exprCalls (EMapC input mapper) =
+  exprCalls input `Set.union` exprCalls mapper
 exprCalls _ = Set.empty
 
 branchCalls :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -875,6 +959,9 @@ iterSteps (ECase value arms) =
 iterSteps (ELam _ body) = iterSteps body
 iterSteps (EApply function argument) =
   iterSteps function `Set.union` iterSteps argument
+iterSteps (EMapC input mapper) =
+  -- the anonymous runtime mapper marks a recursion site by itself
+  Set.insert "mapc" (iterSteps input `Set.union` iterSteps mapper)
 iterSteps _ = Set.empty
 
 branchIters :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -905,6 +992,7 @@ freeVars (ECase value arms) =
 freeVars (ELam pat body) = freeVars body Set.\\ patternNames pat
 freeVars (EApply function argument) =
   freeVars function `Set.union` freeVars argument
+freeVars (EMapC input mapper) = freeVars input `Set.union` freeVars mapper
 freeVars _ = Set.empty
 
 branchVars :: Expr -> [(a, Expr)] -> Pattern -> Expr -> Set.Set String
@@ -1090,6 +1178,18 @@ elaborate tables env demand expected (ECase value arms) = do
     resolveArm (name, body) = case Map.lookup name (constructors tables) of
       Nothing              -> bad ("unknown constructor " <> name)
       Just (typeName, tag) -> Right (typeName, tag, body)
+elaborate tables env demand expected@(SUList b) (EMapC input mapper) = do
+  SomeTy inputListTy <- synthType tables env input
+  case inputListTy of
+    SUList a -> do
+      -- input first: a dispatching mapper consumes the whole remaining
+      -- context, so it must elaborate after the list is taken
+      let pairTy = SUProd inputListTy (SULolly a b)
+      Elab pairActual rest pair <- elaborate tables env demand pairTy
+        (EPair input mapper)
+      Refl <- requireSame pairTy pairActual
+      pure (Elab expected rest (((UMapC :..: USwap) :****: UId) :..: pair))
+    _ -> bad "mapc expects a list input with an inferable type"
 elaborate tables env demand (SULolly a b) (ELam pat body) = do
   let captureNames = Set.toList (freeVars body Set.\\ patternNames pat)
   captures <- traverse (\name -> (,) name <$> envTypeOf name env) captureNames
