@@ -441,7 +441,7 @@ compileEntry tables decls name inputTy outputTy source =
       CompiledBindings bindingEnv _ bindingCore <-
         compileBindings tables bindings
       Elab result continuationRest continuationU <- elaborate tables
-        bindingEnv outputTy continuation
+        bindingEnv Set.empty outputTy continuation
       Refl <- requireSame outputTy result
       core <- fromDirect (Closed.closedContinueFrom
         (finish continuationRest continuationU) WeakS bindingCore)
@@ -498,7 +498,7 @@ compilePlacedBody tables decls env output expression = case expression of
         SomeTy resultTy <- resolveType tables annotation
         SomePlacedDef inputTy actualTy callee <- compilePlacedDef tables decls name
         Refl <- requireSame resultTy actualTy
-        Elab argumentTy rest argumentU <- elaborate tables env inputTy argument
+        Elab argumentTy rest argumentU <- elaborate tables env Set.empty inputTy argument
         Refl <- requireSame inputTy argumentTy
         argumentCore <- fromDirect (compileDirect (finish rest argumentU))
         compilePlacedContinuation tables binder resultTy output body
@@ -506,7 +506,7 @@ compilePlacedBody tables decls env output expression = case expression of
   ELet pat annotation value body
     | not (containsIter value || callsRecursiveDef decls value) -> do
         SomeTy valueTy <- resolveType tables annotation
-        Elab actual rest valueU <- elaborate tables env valueTy value
+        Elab actual rest valueU <- elaborate tables env Set.empty valueTy value
         Refl <- requireSame valueTy actual
         Bound boundEnv reshape <- bindPattern pat valueTy rest
         prefix <- fromDirect (compileDirect (reshape :..: valueU))
@@ -515,7 +515,7 @@ compilePlacedBody tables decls env output expression = case expression of
   ECall name argument | definitionRequiresPlacement decls name -> do
     SomePlacedDef inputTy resultTy callee <- compilePlacedDef tables decls name
     Refl <- requireSame output resultTy
-    Elab argumentTy rest argumentU <- elaborate tables env inputTy argument
+    Elab argumentTy rest argumentU <- elaborate tables env Set.empty inputTy argument
     Refl <- requireSame inputTy argumentTy
     argumentCore <- fromDirect (compileDirect (finish rest argumentU))
     pure (callee :.: argumentCore)
@@ -537,7 +537,7 @@ compilePlacedContinuation tables binder resultTy output body value = do
   if freeVars body `Set.isSubsetOf` Set.singleton binder
     then Right ()
     else bad "unboxed context cannot remain live after recursion"
-  Elab actual rest continuation <- elaborate tables (Bind binder resultTy Empty) output body
+  Elab actual rest continuation <- elaborate tables (Bind binder resultTy Empty) Set.empty output body
   Refl <- requireSame output actual
   continuationCore <- fromDirect
     (compileDirect (finish rest continuation :..: URunit))
@@ -561,7 +561,7 @@ compileAffineLoop tables env resultTy expression = case expression of
     case resultTy of
       SUList resultElement -> do
         Refl <- requireSame resultElement mapperOut
-        Elab inputTy rest inputU <- elaborate tables env (SUList mapperIn) input
+        Elab inputTy rest inputU <- elaborate tables env Set.empty (SUList mapperIn) input
         Refl <- requireSame (SUList mapperIn) inputTy
         core <- fromDirect
           (Closed.affineMapValueFrom (finish rest inputU) mapperU)
@@ -572,7 +572,7 @@ compileAffineLoop tables env resultTy expression = case expression of
     SomeDef stepIn stepOut stepU <- lookupDef tables stepName
     Refl <- requireSame resultTy stepIn
     Refl <- requireSame resultTy stepOut
-    Elab countTy rest countU <- elaborate tables env SUNat count
+    Elab countTy rest countU <- elaborate tables env Set.empty SUNat count
     Refl <- requireSame SUNat countTy
     seedU <- elaborateClosed tables resultTy seed
     core <- fromDirect
@@ -585,7 +585,7 @@ compileAffineLoop tables env resultTy expression = case expression of
       SUProd accumulator element -> do
         Refl <- requireSame resultTy accumulator
         Refl <- requireSame resultTy stepOut
-        Elab inputTy rest inputU <- elaborate tables env (SUList element) input
+        Elab inputTy rest inputU <- elaborate tables env Set.empty (SUList element) input
         Refl <- requireSame (SUList element) inputTy
         seedU <- elaborateClosed tables accumulator seed
         core <- fromDirect
@@ -600,7 +600,7 @@ compileAffineLoop tables env resultTy expression = case expression of
     Refl <- requireSame resultTy stepIn
     Refl <- requireSame resultTy stepOut
     Refl <- requireSame testOut (SUSum SUUnit SUUnit)
-    Elab limitTy rest limitU <- elaborate tables env SUNat limit
+    Elab limitTy rest limitU <- elaborate tables env Set.empty SUNat limit
     Refl <- requireSame SUNat limitTy
     seedU <- elaborateClosed tables resultTy seed
     core <- fromDirect (Closed.affineWhileValueFrom resultTy
@@ -708,7 +708,7 @@ elaborateClosed
   -> Expr
   -> Either CompileError (UMorph 'UUnit a)
 elaborateClosed tables ty value = do
-  Elab actual rest source <- elaborate tables Empty ty value
+  Elab actual rest source <- elaborate tables Empty Set.empty ty value
   Refl <- requireSame ty actual
   pure (finish rest source)
 
@@ -764,7 +764,7 @@ addDef :: Tables -> Decl -> Either CompileError Tables
 addDef tables (DDef name arg input output body) = do
   SomeTy inputTy <- resolveType tables input
   SomeTy outputTy <- resolveType tables output
-  Elab actual _ bodyU <- elaborate tables (Bind arg inputTy Empty) outputTy body
+  Elab actual _ bodyU <- elaborate tables (Bind arg inputTy Empty) Set.empty outputTy body
   Refl <- requireSame outputTy actual
   let function = UExl :..: bodyU :..: URunit
   pure tables {definitions = Map.insert name
@@ -907,120 +907,128 @@ resolveType tables = go []
           Nothing -> bad ("unknown type " <> name)
           Just ty -> go (name : seen) ty
 
-elaborate :: Tables -> Env c -> SUTy expected -> Expr -> Either CompileError (Elab c)
-elaborate _ env expected (EVar name) = do
-  Taken actual rest morph <- takeVar name env
+-- | The demand set holds the variables the REST of the current execution
+-- path will still consume.  A variable looked up while demanded is peeked
+-- (left in the environment behind a priced implicit copy) rather than
+-- consumed; the last use takes it, so every reuse is charged exactly once
+-- per extra use per execution path (spec: T3.Source.Affine's `both`
+-- split rule).
+elaborate :: Tables -> Env c -> Set.Set String -> SUTy expected -> Expr -> Either CompileError (Elab c)
+elaborate _ env demand expected (EVar name) = do
+  Taken actual rest morph <-
+    if name `Set.member` demand then peekVar name env else takeVar name env
   Refl <- requireSame expected actual
   pure (Elab expected rest morph)
-elaborate _ env SUUnit EUnit = pure (constant env SUUnit UId)
-elaborate _ env SUNat (ENat n) = pure (constant env SUNat (UConst n))
-elaborate _ env (SUList SUNat) (EText text) =
+elaborate _ env _ SUUnit EUnit = pure (constant env SUUnit UId)
+elaborate _ env _ SUNat (ENat n) = pure (constant env SUNat (UConst n))
+elaborate _ env _ (SUList SUNat) (EText text) =
   pure (constant env (SUList SUNat) (textU (encode text)))
-elaborate tables env expected (ECon name) = case Map.lookup name (constructors tables) of
+elaborate tables env _ expected (ECon name) = case Map.lookup name (constructors tables) of
   Nothing -> bad ("unknown constructor " <> name)
   Just (_, tag) -> case sameTy expected SUNat of
     Just Refl -> pure (constant env SUNat (UConst tag))
     Nothing   -> bad ("constructor " <> name <> " requires its data type")
-elaborate tables env (SUProd a b) (EPair x y) = do
-  Elab ax rest first <- elaborate tables env a x
+elaborate tables env demand (SUProd a b) (EPair x y) = do
+  Elab ax rest first <- elaborate tables env
+    (demand `Set.union` freeVars y) a x
   Refl <- requireSame a ax
-  Elab by rest' second <- elaborate tables rest b y
+  Elab by rest' second <- elaborate tables rest demand b y
   Refl <- requireSame b by
   pure (Elab (SUProd a b) rest'
     (UUnassoc :..: (UId :****: second) :..: first))
-elaborate tables env expected (ELet pat ty value body) = do
+elaborate tables env demand expected (ELet pat ty value body) = do
   SomeTy valueTy <- resolveType tables ty
-  Elab actual rest first <- elaborate tables env valueTy value
+  Elab actual rest first <- elaborate tables env
+    (demand `Set.union` (freeVars body Set.\\ patternNames pat)) valueTy value
   Refl <- requireSame valueTy actual
   Bound boundEnv reshape <- bindPattern pat valueTy rest
-  Elab result rest' second <- elaborate tables boundEnv expected body
+  Elab result rest' second <- elaborate tables boundEnv demand expected body
   Refl <- requireSame expected result
   pure (Elab expected rest' (second :..: reshape :..: first))
-elaborate tables env expected (ECall name argument) = do
+elaborate tables env demand expected (ECall name argument) = do
   SomeDef input output function <- lookupDef tables name
   Refl <- requireSame expected output
-  Elab actual rest arg <- elaborate tables env input argument
+  Elab actual rest arg <- elaborate tables env demand input argument
   Refl <- requireSame input actual
   pure (Elab output rest ((function :****: UId) :..: arg))
-elaborate tables env (SUProd a b) (ECopy value) = do
+elaborate tables env demand (SUProd a b) (ECopy value) = do
   Refl <- requireSame a b
-  copier <- copyMorph a
-  Elab actual rest input <- elaborate tables env a value
+  Elab actual rest input <- elaborate tables env demand a value
   Refl <- requireSame a actual
-  pure (Elab (SUProd a a) rest ((copier :****: UId) :..: input))
-elaborate tables env SUNat (ESuc value) = do
-  Elab actual rest input <- elaborate tables env SUNat value
+  pure (Elab (SUProd a a) rest ((copyMorph a :****: UId) :..: input))
+elaborate tables env demand SUNat (ESuc value) = do
+  Elab actual rest input <- elaborate tables env demand SUNat value
   Refl <- requireSame SUNat actual
   pure (Elab SUNat rest ((USuc :****: UId) :..: input))
-elaborate tables env SUNat (EAdd value) = do
+elaborate tables env demand SUNat (EAdd value) = do
   let pairTy = SUProd SUNat SUNat
-  Elab actual rest input <- elaborate tables env pairTy value
+  Elab actual rest input <- elaborate tables env demand pairTy value
   Refl <- requireSame pairTy actual
   pure (Elab SUNat rest ((UAdd :****: UId) :..: input))
-elaborate _ env expected@(SUList _) ENil =
+elaborate _ env _ expected@(SUList _) ENil =
   pure (constant env expected UNil)
-elaborate tables env expected@(SUList element) (ECons value rest) = do
-  Elab actual remaining pair <- elaborate tables env
+elaborate tables env demand expected@(SUList element) (ECons value rest) = do
+  Elab actual remaining pair <- elaborate tables env demand
     (SUProd element expected) (EPair value rest)
   Refl <- requireSame (SUProd element expected) actual
   pure (Elab expected remaining ((UCons :****: UId) :..: pair))
-elaborate tables env expected@(SUList resultElement) (EMap input mapperName) = do
+elaborate tables env demand expected@(SUList resultElement) (EMap input mapperName) = do
   SomeDef mapperIn mapperOut mapper <- lookupDef tables mapperName
   Refl <- requireSame resultElement mapperOut
-  Elab actual rest inputU <- elaborate tables env (SUList mapperIn) input
+  Elab actual rest inputU <- elaborate tables env demand (SUList mapperIn) input
   Refl <- requireSame (SUList mapperIn) actual
   pure (Elab expected rest ((UMap mapper :****: UId) :..: inputU))
-elaborate tables env expected (EIter count seed stepName) = do
+elaborate tables env demand expected (EIter count seed stepName) = do
   SomeDef stepIn stepOut step <- lookupDef tables stepName
   Refl <- requireSame expected stepIn
   Refl <- requireSame expected stepOut
-  Elab pairActual rest pair <- elaborate tables env
+  Elab pairActual rest pair <- elaborate tables env demand
     (SUProd SUNat expected) (EPair count seed)
   Refl <- requireSame (SUProd SUNat expected) pairActual
   pure (Elab expected rest ((UIter step :****: UId) :..: pair))
-elaborate tables env expected (EFold input seed stepName) = do
+elaborate tables env demand expected (EFold input seed stepName) = do
   SomeDef stepIn stepOut step <- lookupDef tables stepName
   case stepIn of
     SUProd accumulator element -> do
       Refl <- requireSame expected accumulator
       Refl <- requireSame expected stepOut
       let inputsTy = SUList element
-      Elab pairActual rest pair <- elaborate tables env
+      Elab pairActual rest pair <- elaborate tables env demand
         (SUProd inputsTy accumulator) (EPair input seed)
       Refl <- requireSame (SUProd inputsTy accumulator) pairActual
       pure (Elab accumulator rest ((UFold step :****: UId) :..: pair))
     _ -> bad "fold step must accept accumulator * element"
-elaborate tables env expected (EWhile limit seed testName stepName) = do
+elaborate tables env demand expected (EWhile limit seed testName stepName) = do
   SomeDef testIn testOut test <- lookupDef tables testName
   SomeDef stepIn stepOut step <- lookupDef tables stepName
   Refl <- requireSame expected testIn
   Refl <- requireSame expected stepIn
   Refl <- requireSame expected stepOut
   Refl <- requireSame testOut (SUSum SUUnit SUUnit)
-  Elab pairActual rest pair <- elaborate tables env
+  Elab pairActual rest pair <- elaborate tables env demand
     (SUProd SUNat expected) (EPair limit seed)
   Refl <- requireSame (SUProd SUNat expected) pairActual
   pure (Elab expected rest ((UWhile expected test step :****: UId) :..: pair))
-elaborate tables env (SUList SUNat) (EPrepend prefix suffix) = do
-  Elab actual rest input <- elaborate tables env (SUList SUNat) suffix
+elaborate tables env demand (SUList SUNat) (EPrepend prefix suffix) = do
+  Elab actual rest input <- elaborate tables env demand (SUList SUNat) suffix
   Refl <- requireSame (SUList SUNat) actual
   pure (Elab (SUList SUNat) rest
     ((prependU (encode prefix) :****: UId) :..: input))
-elaborate tables env (SUSum a b) (ELeft value) = do
-  Elab actual rest input <- elaborate tables env a value
+elaborate tables env demand (SUSum a b) (ELeft value) = do
+  Elab actual rest input <- elaborate tables env demand a value
   Refl <- requireSame a actual
   pure (Elab (SUSum a b) rest ((UInl :****: UId) :..: input))
-elaborate tables env (SUSum a b) (ERight value) = do
-  Elab actual rest input <- elaborate tables env b value
+elaborate tables env demand (SUSum a b) (ERight value) = do
+  Elab actual rest input <- elaborate tables env demand b value
   Refl <- requireSame b actual
   pure (Elab (SUSum a b) rest ((UInr :****: UId) :..: input))
-elaborate tables env expected (EMatchText value arms fallbackPat fallback) =
-  elaborateMatches tables env expected (SUList SUNat) partitionTextU encode
+elaborate tables env demand expected (EMatchText value arms fallbackPat fallback) =
+  elaborateMatches tables env demand expected (SUList SUNat) partitionTextU encode
     value arms fallbackPat fallback
-elaborate tables env expected (EMatchNat value arms fallbackPat fallback) =
-  elaborateMatches tables env expected SUNat partitionNatU id
+elaborate tables env demand expected (EMatchNat value arms fallbackPat fallback) =
+  elaborateMatches tables env demand expected SUNat partitionNatU id
     value arms fallbackPat fallback
-elaborate tables env expected (ECase value arms) = do
+elaborate tables env demand expected (ECase value arms) = do
   resolved <- traverse resolveArm arms
   let typeNames = [typeName | (typeName, _, _) <- resolved]
       armNames = fmap fst arms
@@ -1033,19 +1041,23 @@ elaborate tables env expected (ECase value arms) = do
           bad ("case is not exhaustive for " <> typeName)
       | otherwise ->
           let tagged = [(tag, body) | (_, tag, body) <- resolved]
-          in elaborateMatches tables env expected SUNat partitionNatU id value
+          in elaborateMatches tables env demand expected SUNat partitionNatU id value
                (init tagged) PWild (snd (last tagged))
   where
     resolveArm (name, body) = case Map.lookup name (constructors tables) of
       Nothing              -> bad ("unknown constructor " <> name)
       Just (typeName, tag) -> Right (typeName, tag, body)
-elaborate _ _ _ expression = bad ("type mismatch in expression " <> show expression)
+elaborate _ _ _ _ expression = bad ("type mismatch in expression " <> show expression)
 
 -- Exact matching consumes the scrutinee once. Failed partitions reconstruct it
 -- before trying the next arm; every selected branch may weaken its own context.
+-- The scrutinee is elaborated demanding every variable some arm still needs,
+-- so a matched variable may be reused inside the arms (priced per path); the
+-- match still consumes the whole environment, so nothing survives past it.
 elaborateMatches
   :: Tables
   -> Env c
+  -> Set.Set String
   -> SUTy out
   -> SUTy keyTy
   -> (key -> UMorph keyTy (keyTy ':++: keyTy))
@@ -1055,12 +1067,17 @@ elaborateMatches
   -> Pattern
   -> Expr
   -> Either CompileError (Elab c)
-elaborateMatches tables env out keyTy partition convert value arms fallbackPat fallback = do
-  Elab actual rest input <- elaborate tables env keyTy value
+elaborateMatches tables env demand out keyTy partition convert value arms fallbackPat fallback = do
+  let armDemand = Set.unions
+        ((freeVars fallback Set.\\ patternNames fallbackPat)
+          : fmap (freeVars . snd) arms)
+  Elab actual rest input <- elaborate tables env
+    (demand `Set.union` armDemand) keyTy value
   Refl <- requireSame keyTy actual
   let branch pat body = do
         Bound branchEnv reshape <- bindPattern pat keyTy rest
-        Elab actual' leftovers compiled <- elaborate tables branchEnv out body
+        Elab actual' leftovers compiled <- elaborate tables branchEnv
+          Set.empty out body
         Refl <- requireSame out actual'
         pure (URunit :..: finish leftovers compiled :..: reshape)
       arm (literal, body) miss = do
@@ -1083,6 +1100,19 @@ takeVar name (Bind current ty rest)
   | name == current = Right (Taken ty rest UId)
   | otherwise = do
       Taken found remaining morph <- takeVar name rest
+      pure (Taken found (Bind current ty remaining)
+        ((UId :****: USwap) :..: UAssoc :..: (morph :****: UId) :..: USwap))
+
+-- | Non-consuming lookup: the binding stays in the environment and the
+-- projected value is an implicit copy, priced through 'copyMorph'
+-- (ultimately the core CopyS, charged sizeVal in the dup grade).
+peekVar :: String -> Env c -> Either CompileError (Taken c)
+peekVar name Empty = bad ("unknown variable " <> name)
+peekVar name env@(Bind current ty rest)
+  | name == current =
+      Right (Taken ty env (UAssoc :..: (copyMorph ty :****: UId)))
+  | otherwise = do
+      Taken found remaining morph <- peekVar name rest
       pure (Taken found (Bind current ty remaining)
         ((UId :****: USwap) :..: UAssoc :..: (morph :****: UId) :..: USwap))
 
@@ -1109,18 +1139,11 @@ bindTuple _ _ _ = bad "tuple pattern does not match a right-associated product"
 constant :: Env c -> SUTy a -> UMorph 'UUnit a -> Elab c
 constant env ty value = Elab ty env ((value :****: UId) :..: ULunit)
 
-copyMorph :: SUTy a -> Either CompileError (UMorph a (a ':**: a))
-copyMorph SUUnit = Right ULunit
-copyMorph SUNat = Right (UDup SUNat)
-copyMorph (SUProd a b) = do
-  left <- copyMorph a
-  right <- copyMorph b
-  pure (shuffle :..: (left :****: right))
-  where
-    shuffle = UAssoc :..: (UUnassoc :****: UId)
-      :..: ((UId :****: USwap) :****: UId)
-      :..: UUnassoc :..: (UId :****: UUnassoc) :..: UAssoc
-copyMorph _ = bad "copy is available only for Unit, Nat, and their products"
+-- | Copying is total on first-order data and uniformly priced: 'UDup'
+-- compiles to the core CopyS, whose dup grade is the copied value's full
+-- sizeVal.  Explicit @copy@ and implicit reuse share this one path.
+copyMorph :: SUTy a -> UMorph a (a ':**: a)
+copyMorph = UDup
 
 distRight :: UMorph ((a ':++: b) ':**: c) ((a ':**: c) ':++: (b ':**: c))
 distRight = UCase (UInl :..: USwap) (UInr :..: USwap) :..: UDistl :..: USwap

@@ -53,13 +53,20 @@ tel2Vectors = do
             [ rejects "tel2 rejects old grid grammar" "telomare-grid-game 1\nboard 3 3"
             , rejects "tel2 rejects parse errors" "type State = Nat"
             , rejects "tel2 rejects type errors" (small "(\"x\",right \"not a Nat\")")
-            , rejects "tel2 rejects implicit duplication" duplicateSource
             , rejects "tel2 rejects cyclic aliases" cyclicAliasSource
             , rejects "tel2 rejects non-exhaustive enum cases" incompleteCaseSource
             , rejects "tel2 rejects duplicate tuple binders" duplicateBinderSource
             , rejects "tel2 rejects cyclic definitions" cyclicDefinitionSource
             ]
           explicit = accepts "tel2 accepts explicit copy" copySource
+          implicitCopy =
+            [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
+            , accepts "tel2 accepts implicit duplication of a list" implicitListReuseSource
+            , acceptsBehavior "tel2 implicit Nat reuse doubles exactly"
+                implicitNatReuseSource ["go"] "ten\n"
+            , acceptsBehavior "tel2 match scrutinee stays reusable in arms"
+                scrutineeReuseSource ["go", "go"] "sum\nsum\n"
+            ]
           namedData = accepts "tel2 accepts named finite data and case" dataSource
           forward = accepts "tel2 compiles forward definition references" forwardReferenceSource
           closedBounds = accepts "tel2 accepts closed Nat expressions as recursion bounds"
@@ -102,7 +109,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -319,6 +326,29 @@ duplicateSource = unlines
   [ "type State = Nat * Nat;"
   , "def init(u: Unit): Reply State = let n: Nat = 7 in (\"\",right (n,n));"
   , "def step(x: Text * State): Reply State = (\"\",left ());"
+  ]
+
+implicitListReuseSource :: String
+implicitListReuseSource = unlines
+  [ "type State = List Nat * List Nat;"
+  , "def dupList(xs: List Nat): List Nat * List Nat = (xs, xs);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right dupList(cons 1 onto []));"
+  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let _: State = state in (\"\",left ());"
+  ]
+
+implicitNatReuseSource :: String
+implicitNatReuseSource = unlines
+  [ "type State = Nat;"
+  , "def double(n: Nat): Nat = add (n,n);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double(n) of { 10 -> (\"ten\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+scrutineeReuseSource :: String
+scrutineeReuseSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat n of { 0 -> (\"zero\\n\",left ()); _ -> (\"sum\\n\",right add (n,n)); };"
   ]
 
 dataSource :: String
