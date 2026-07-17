@@ -52,7 +52,7 @@ name a current compatibility definition.
 | `listEqual` | deferred | Requires list recursion and Nat equality. |
 | `listPlus` | deferred | Reusable folding exists, but order-preserving append needs a right fold or additional affine list-state support for the open second list. |
 | `flip` | impossible | General function arguments and returned functions are outside first-order `.tel2`. |
-| `con` | impossible | General function composition is higher-order. |
+| `con` | modernized | `composeNat` composes two affine `Nat -o Nat` closures; each is applied exactly once. General polymorphic composition remains unavailable. |
 | `concat` | deferred | Needs nested-list syntax plus order-preserving append; sequencing dependent recursive results remains outside current placement. |
 | `drop` | deferred | Needs modern Nat-bounded list recursion; the historical Church interface is obsolete. |
 | `take` | deferred | Needs modern Nat-bounded list recursion. |

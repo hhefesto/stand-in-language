@@ -39,15 +39,22 @@ rejected; dependent/nested loops and live unboxed context after a recursive
 result remain rejected pending a real placement compiler.
 
 The elaborator carries an ordered typed context. A variable projection returns
-the variable and the context with that binding removed. Pairing elaborates the
-left expression and feeds only its remainder to the right. `let` puts exactly
-the produced value back into the context. Literal matching partitions once;
-failed arms reconstruct the affine scrutinee. Branch-local leftovers are
-weakened. There is no implicit duplication.
+the variable and the context with that binding removed — unless the rest of the
+current path still demands the name, in which case the lookup peeks: the
+binding stays behind a priced copy. Pairing elaborates the left expression and
+feeds only its remainder to the right. `let` puts exactly the produced value
+back into the context. Literal matching partitions once; failed arms
+reconstruct the affine scrutinee. Branch-local leftovers are weakened.
+Duplication of first-order data is implicit and always priced: each copy is a
+core `CopyS` charged the copied value's full size in the duplication grade.
+Affinity is the default costing discipline — affine code has duplication grade
+zero by construction — not a prohibition.
 
-`copy` requires structural evidence. Unit and Nat are copyable, and products are
-copyable exactly when both components are. Product copying is synthesized from
-Nat duplication and product reassociation, not admitted as general contraction.
+Closures are the deliberate exception: a function value (`A -o B`) is applied
+at most once, `Copyable` has no arrow case, and reuse of code exists only as a
+`Bang`-promoted closed closure. Duplicating data is priced by size; duplicating
+suspended computation is gated by the modality — that split is the resource
+principle, and it is where the EAL exponential earns its keep.
 
 The terminal convention is deliberately separate from the language semantics.
 Each compiled entry existentially packages its possibly decorated core endpoint,

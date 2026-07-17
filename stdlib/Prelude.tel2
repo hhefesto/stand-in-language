@@ -51,3 +51,10 @@ def mapIncrement(values: List Nat): List Nat =
 
 def listSum(values: List Nat): Nat =
   fold values from 0 with natAdd;
+
+# First-class closures: an affine function value is applied at most once.
+# composeNat consumes both closures into one; the historical higher-order
+# `con` returns as an honest monomorphic composition.
+def composeNat(functions: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat =
+  let (first,second): (Nat -o Nat) * (Nat -o Nat) = functions in
+  \value -> apply(second, apply(first, value));

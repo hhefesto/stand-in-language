@@ -74,6 +74,12 @@ tel2Vectors = do
                 closureStateSource "must be first-order"
             , acceptsMapCBehavior "tel2 mapc runtime-selected mapper emits MapCS"
                 mapcDemoSource ["ABC"] "chosen\n"
+            , ("tel2 Prelude composeNat composes closures",
+                case compileTel2 (anonymous prelude <> composeNatUseSource) of
+                  Left _ -> False
+                  Right program -> case runProgramScript program ["go"] of
+                    Right (output, _) -> output == "nine\n"
+                    Left _            -> False)
             , rejectsWith "tel2 rejects an open lambda as a reusable mapper"
                 mapcOpenLambdaSource "must select among closed lambdas"
             ]
@@ -373,6 +379,13 @@ implicitNatReuseSource = unlines
   , "def double(n: Nat): Nat = add (n,n);"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
   , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double(n) of { 10 -> (\"ten\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+composeNatUseSource :: String
+composeNatUseSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = composeNat((\\a -> suc a, \\b -> suc b)) in matchNat apply(f, n) of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
   ]
 
 mapcDemoSource :: String

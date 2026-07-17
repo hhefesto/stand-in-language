@@ -45,11 +45,14 @@ tests, but the executable does not import or invoke them.
 
 Whitespace and `#` line comments are ignored. Identifiers start with a letter.
 String escapes are Haskell-style. Module files begin with a header; imports
-precede declarations. Definitions are first-order, monomorphic, and take exactly
+precede declarations. Definitions are monomorphic and take exactly
 one argument. They may refer to definitions or type aliases declared later.
 Definition bodies are compiled in dependency order; dependency cycles are
-rejected. Source recursion is restricted to first-order, manifestly bounded map,
-iteration, fold, and while operations.
+rejected. Functions are first-class: `A -o B` is an affine closure type,
+lambdas capture their free variables, `apply(f, x)` consumes a closure,
+and definitions may return or select closures at runtime. Source recursion
+is restricted to manifestly bounded map, iteration, fold, while, and the
+higher-order `mapc` whose reusable mapper is selected among closed lambdas.
 
 ```text
 program   ::= ("module" ID ";")? ("import" ID ";")* declaration*
@@ -58,8 +61,9 @@ declaration
            |  "data" ID "=" ID ("|" ID)* ";"
            |  "def" ID "(" ID ":" type ")" ":" type "=" expr ";"
 
-type      ::= atom ("*" type)?
-           |  product ("+" type)?
+type      ::= sum ("-o" type)?
+sum       ::= product ("+" sum)?
+product   ::= atom ("*" product)?
 atom      ::= "Unit" | "Nat" | "Text" | ID
            |  "List" atom | "Reply" atom | "(" type ")"
 
@@ -71,7 +75,10 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "copy" expr
            |  "suc" expr
            |  "add" expr
+           |  "\\" pattern "->" expr
+           |  "apply" "(" expr "," expr ")"
            |  "map" expr "with" ID
+           |  "mapc" expr "with" expr
            |  "iterate" expr "from" expr "with" ID
            |  "fold" expr "from" expr "with" ID
            |  "while" expr "from" expr "testing" ID "stepping" ID
@@ -204,13 +211,25 @@ def init(u: Unit): Reply State = ...;
 def step(x: Text * State): Reply State = ...;
 ```
 
-Variables are affine. Looking up a variable removes it from the context;
-weakening is allowed, but writing a variable twice is a type error. `copy e` is
-the only contraction syntax and is accepted for `Unit`, `Nat`, and products of
-copyable components. It elaborates product copying from `UDup SUNat` plus
-structural morphisms, so `compileDirect` reaches `DupNatS`; it does not invoke
-general `UDup` or implicit host copying. Failed literal matches reconstruct the
-consumed value and pass it to the next arm.
+Affinity is the default costing discipline, not a prohibition. Reusing a
+first-order variable just works: the elaborator threads a demand set, a
+demanded lookup leaves the binding behind a priced copy (core `CopyS`,
+charged the value's full size in the duplication grade), and the last use
+consumes it. Every reuse is charged exactly once per extra use per
+execution path; nothing data-shaped is duplicated for free. Explicit
+`copy e` remains supported at every first-order type through the same
+priced path. Closures are the exception: a function value is applied at
+most once, and neither implicit nor explicit copying of a closure is
+accepted — reuse of code is the modality's business (a reusable closure
+is a `Bang`-promoted closed closure, as `mapc` requires). Failed literal
+matches reconstruct the consumed value and pass it to the next arm.
+
+A lambda's free variables are consumed from the ambient context into the
+closure environment (captures interact with implicit copy like any other
+use). Application synthesizes the function type from variable and
+definition-call heads; other heads need an annotated `let`. Machine
+`State` must remain first-order: closures cannot cross the machine
+boundary.
 
 `stdlib/Prelude.tel2` is an ordinary packaged importable module, not
 compiler policy. It defines finite `Bool`, total boolean combinators, Bool/Nat
@@ -221,7 +240,8 @@ six honest monomorphic/modernized historical names. The complete 50-binding
 historical inventory and rationale is `design/PRELUDE_MIGRATION.md`.
 
 `test/programs/tictactoe.tel2` explicitly imports Prelude and now uses both
-`otherPlayer` and `natIsZero`. The game's board is an ordinary nine-Nat product.
+`otherPlayer` and `natIsZero`; board and state reuse is implicit and priced.
+The game's board is an ordinary nine-Nat product.
 Move selection, occupancy, eight line checks,
 tie detection, turn changes, rendering, invalid input, and termination are all
 named `.tel2` definitions. The compiler has no corresponding built-ins.
@@ -271,7 +291,11 @@ a parser proof.
 
 - Modules expose an unqualified global namespace; there are no selective,
   qualified, or package imports.
-- No polymorphism, inference, general recursion, or functions as values.
+- No polymorphism or general type inference; `apply` heads are limited to
+  variables and definition calls. No general recursion.
+- Closures are affine (applied at most once); reusable closures exist only
+  behind `Bang` via empty-context promotion of closed closures, reached
+  from source through `mapc`. There is no dereliction or digging.
 - Source recursion supports independent closed whole-entry loops and reusable
   first-order helpers with an affine runtime fuel/list controller and closed
   seed. Open seeds, live unboxed values after a loop, nested/dependent loops,
@@ -283,7 +307,8 @@ a parser proof.
   text append.
 - Enum cases check constructor coverage, but nominal enum separation is not yet
   retained after enums erase to Nat during elaboration.
-- General sum/list copying and modal placement remain unavailable.
+- Multi-level modal placement remains unavailable; a `mapc` mapper must
+  select among closed lambdas.
 - The linear Haskell frontend is point-free; it has no host-value escape or
   general linear lambda elaborator, and GHC top-level bindings remain
   unrestricted.
@@ -293,9 +318,10 @@ a parser proof.
 
 ## Core transport
 
-`Telomare.Transport` defines schema version 2, a backend-neutral first-order
-tree with an explicit `TyCode` (including `Bang`) and one tag per current
-`Morph` constructor. `exportMorph` requires endpoint singletons because a bare
+`Telomare.Transport` defines schema version 4, a backend-neutral first-order
+tree with an explicit `TyCode` (including `Bang` and `Lolly`) and one tag per
+current `Morph` constructor; closure values are never transported, only
+morphisms are. `exportMorph` requires endpoint singletons because a bare
 polymorphic GADT value does not retain them; `CoreEntry` and `Program` already
 retain enough existential witnesses and can be exported directly. Program
 transport contains the state type and compiled initial/step entries, not the
