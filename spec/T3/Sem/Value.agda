@@ -81,6 +81,7 @@ whileV (suc n) t s a = whileV-go n t s a (t a)
 ⟦ addS       ⟧V (a , b) = a + b
 ⟦ constS k   ⟧V _ = k
 ⟦ dupNatS    ⟧V n = (n , n)
+⟦ copyS _    ⟧V a = (a , a)
 ⟦ guardS t   ⟧V a = guardV a (⟦ t ⟧V a)
 ⟦ dupS       ⟧V a = (a , a)          -- values don't see boxes
 ⟦ boxS f     ⟧V a = ⟦ f ⟧V a

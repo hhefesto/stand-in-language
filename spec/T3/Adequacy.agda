@@ -88,6 +88,7 @@ precise sucS        n       extra = refl
 precise addS        (a , b) extra = refl
 precise (constS _)  _       extra = refl
 precise dupNatS     n       extra = refl
+precise (copyS _)   a       extra = refl
 precise (guardS t)  a extra =
   cong (λ mx → mx >>= λ { (r , t') → just (guardV a r , t') })
        (precise t a extra)

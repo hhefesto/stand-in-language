@@ -66,6 +66,9 @@ CoreListOps = record
 CoreExceptionalCopyOps : ExceptionalCopyOps CoreCategoryOps CoreTensorOps
 CoreExceptionalCopyOps = record { copyObj = nat; copyAt = C.dupNatS }
 
+CoreWitnessedCopyOps : WitnessedCopyOps CoreCategoryOps CoreTensorOps
+CoreWitnessedCopyOps = record { CopyWitness = Copyable; copyWith = C.copyS }
+
 CoreBangOps : RestrictedBangOps CoreCategoryOps CoreTensorOps CoreAffineOps
 CoreBangOps = record
   { bang = !_; copyBang = C.dupS; mapBang = C.boxS

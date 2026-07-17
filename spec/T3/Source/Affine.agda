@@ -1,6 +1,11 @@
 ------------------------------------------------------------------------
 -- Central resource rules for the pointful source elaborator.
 -- This models typed elaboration after parsing; it is not a parser proof.
+--
+-- Implicit copy: context splitting (Split) may send a Copyable binding to
+-- both subexpressions via the `both` rule.  Reuse of copyable data is
+-- therefore admissible without an explicit copy keyword; the elaborator
+-- prices every such reuse through the core copyS primitive.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
@@ -31,7 +36,17 @@ data Lookup : Ctx → ℕ → Ty → Set where
   there : {Γ : Ctx} {A B : Ty} {n : ℕ}
         → Lookup Γ n A → Lookup (B ∷ Γ) (suc n) A
 
--- Split assigns every affine input to at most one subexpression.
+data Copyable : Ty → Set where
+  copyUnit : Copyable unit
+  copyNat  : Copyable nat
+  copyProd : {A B : Ty} → Copyable A → Copyable B → Copyable (A ×T B)
+  copySum  : {A B : Ty} → Copyable A → Copyable B → Copyable (A +T B)
+
+-- Split assigns every affine input to at most one subexpression — except
+-- that a Copyable binding may be sent to BOTH (the `both` rule): this is
+-- the typing content of implicit copy.  The elaborator realizes `both` by
+-- inserting a costed copy (core copyS), so contraction of data is never
+-- free, only priced.
 data Split : Ctx → Ctx → Ctx → Set where
   empty : Split [] [] []
   left  : {Γ Δ Θ : Ctx} {A : Ty}
@@ -40,11 +55,8 @@ data Split : Ctx → Ctx → Ctx → Set where
         → Split Γ Δ Θ → Split (A ∷ Γ) Δ (A ∷ Θ)
   drop  : {Γ Δ Θ : Ctx} {A : Ty}
         → Split Γ Δ Θ → Split (A ∷ Γ) Δ Θ
-
-data Copyable : Ty → Set where
-  copyUnit : Copyable unit
-  copyNat  : Copyable nat
-  copyProd : {A B : Ty} → Copyable A → Copyable B → Copyable (A ×T B)
+  both  : {Γ Δ Θ : Ctx} {A : Ty}
+        → Copyable A → Split Γ Δ Θ → Split (A ∷ Γ) (A ∷ Δ) (A ∷ Θ)
 
 infix 4 _⊢_∶_
 

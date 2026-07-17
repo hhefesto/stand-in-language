@@ -103,6 +103,7 @@ whileT (suc n) t s a = bind-tel (t a) (whileGoT n t s a)
 ⟦ addS       ⟧K (a , b) = return-tel (a + b)
 ⟦ constS k   ⟧K _ = return-tel k
 ⟦ dupNatS    ⟧K n = return-tel (n , n)
+⟦ copyS _    ⟧K a = return-tel (a , a)
 ⟦ guardS t   ⟧K a = bind-tel (⟦ t ⟧K a) λ r → return-tel (guardV a r)
 ⟦ dupS       ⟧K a = return-tel (a , a)
 ⟦ boxS f     ⟧K a = ⟦ f ⟧K a

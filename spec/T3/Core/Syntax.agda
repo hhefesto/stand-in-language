@@ -13,9 +13,13 @@
 --     pricing as whileS's probe.  This is the core target of surface
 --     refinements (charter §2.9); refinement failure is an error VALUE.
 --
--- The affine discipline: weakening (weakS, exlS, exrS) is free; there is NO fork and NO dup on
--- ordinary objects — contraction exists only at !A (dupS) and, as a
--- measured-justified exemption, at machine atoms (dupNatS).
+-- The resource discipline: weakening (weakS, exlS, exrS) is free; affinity
+-- is the DEFAULT COSTING DISCIPLINE, not a prohibition.  Contraction of
+-- first-order DATA is legal wherever it is priced: copyS (below) copies
+-- any Copyable value and the dup grade charges its full sizeT.  dupNatS
+-- remains as the historical machine-atom exemption (dup grade 1); dupS is
+-- contraction at !A.  What stays forbidden is UNPRICED duplication and
+-- duplication of non-data (future closures) outside the modality.
 --
 -- The EAL exponential is dupS/boxS/boxValS/mergeS and NOTHING ELSE:
 --   der : !A ⇨ A   and   dig : !A ⇨ !!A   deliberately DO NOT EXIST.
@@ -23,8 +27,9 @@
 --
 -- boxValS soundness (easy to get
 -- wrong): promotion is EMPTY-CONTEXT only, (unit ⇨ B) → (unit ⇨ !B).
--- A general A ⇨ !A would smuggle contraction: dupS ∘ boxVal would copy an
--- unboxed open input.
+-- A general A ⇨ !A would let dupS ∘ boxVal copy an unboxed open input
+-- WITHOUT pricing it as data.  For Copyable data that copy is now the
+-- priced copyS, so nothing is smuggled; for non-data it stays impossible.
 --
 -- Decision: foldS keeps the pragmatic typing
 -- (elements consumed affinely from the orchestration level).  The faithful
@@ -71,6 +76,9 @@ data _⇨_ : Ty → Ty → Set where
   addS     : (nat ⊗ nat) ⇨ nat
   constS   : {A : Ty} → ℕ → A ⇨ nat
   dupNatS  : nat ⇨ (nat ⊗ nat)                 -- atom exemption (dup grade 1)
+  copyS    : {A : Ty} → Copyable A → A ⇨ (A ⊗ A)
+    -- costed data copy: legal at every Copyable type, charged its full
+    -- sizeT by the dup grade (T3.Sem.Graded copyT).  Work/fuel free.
   -- refinement guard (⊕-error primitive; implicit probe copy, priced)
   guardS   : {A : Ty} → A ⇨ (unit ⊕ unit) → A ⇨ (A ⊕ unit)
     -- test convention: inj₁ = pass, inj₂ = fail.
@@ -116,6 +124,7 @@ depth sucS          = 0
 depth addS          = 0
 depth (constS _)    = 0
 depth dupNatS       = 0
+depth (copyS _)     = 0
 depth (guardS t)    = depth t
 depth dupS          = 0
 depth (boxS f)      = suc (depth f)

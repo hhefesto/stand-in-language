@@ -1,6 +1,13 @@
 ------------------------------------------------------------------------
--- Explicitly witnessed copying. There is no catch-all Copyable constructor:
--- ordinary sums and lists remain affine, while bang uses core contraction.
+-- Costed data copy: correctness of the copyS primitive.
+--
+-- Copyable evidence lives in T3.Core.Ty (every first-order data type is
+-- copyable; future non-data objects will not be).  copyS is a primitive
+-- core constructor (T3.Core.Syntax) rather than a derived term because a
+-- structural list copy is not derivable at level 0 — the old derivation
+-- (dupNatS/dupS leaves + shuffle) only reached Unit/Nat/products/bang.
+-- The primitive charges its full sizeT in the dup grade; value semantics
+-- makes it an honest pair.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
@@ -13,31 +20,6 @@ open import T3.Core.Ty
 open import T3.Core.Syntax
 open import T3.Sem.Value
 
-data Copyable : Ty → Set where
-  copy-unit : Copyable unit
-  copy-nat  : Copyable nat
-  copy-prod : {A B : Ty} → Copyable A → Copyable B → Copyable (A ⊗ B)
-  copy-bang : {A : Ty} → Copyable (! A)
-
--- Rearrange component copies without introducing contraction.
-shuffle : {A B : Ty} → ((A ⊗ A) ⊗ (B ⊗ B)) ⇨ ((A ⊗ B) ⊗ (A ⊗ B))
-shuffle = assocS
-        ∘S (unassocS ⊗S idS)
-        ∘S ((idS ⊗S swapS) ⊗S idS)
-        ∘S unassocS
-        ∘S (idS ⊗S unassocS)
-        ∘S assocS
-
-copyS : {A : Ty} → Copyable A → A ⇨ (A ⊗ A)
-copyS copy-unit       = lunitS
-copyS copy-nat        = dupNatS
-copyS (copy-prod p q) = shuffle ∘S (copyS p ⊗S copyS q)
-copyS copy-bang       = dupS
-
 copyS-correct : {A : Ty} → (p : Copyable A) → (a : ⟦ A ⟧T)
               → ⟦ copyS p ⟧V a ≡ (a , a)
-copyS-correct copy-unit       a       = refl
-copyS-correct copy-nat        a       = refl
-copyS-correct (copy-prod p q) (a , b)
-  rewrite copyS-correct p a | copyS-correct q b = refl
-copyS-correct copy-bang       a       = refl
+copyS-correct _ _ = refl

@@ -57,3 +57,18 @@ sizeT (A ⊕ B)   (inj₂ b) = suc (sizeT B b)
 sizeT (listT A) []       = 1
 sizeT (listT A) (x ∷ xs) = suc (sizeT A x + sizeT (listT A) xs)
 sizeT (! A)     a        = sizeT A a
+
+-- Structural copy evidence: which types admit a costed data copy (the
+-- copyS primitive in T3.Core.Syntax, charged sizeT by the dup grade).
+-- Every first-order data type is copyable — deliberately: duplication of
+-- DATA is legal wherever it is priced.  The witness stays evidence-indexed
+-- (rather than collapsing into Ty) because future non-data objects
+-- (closures) must NOT be copyable: duplicating suspended computation goes
+-- through the ! modality, never through copyS.
+data Copyable : Ty → Set where
+  copy-unit : Copyable unit
+  copy-nat  : Copyable nat
+  copy-prod : {A B : Ty} → Copyable A → Copyable B → Copyable (A ⊗ B)
+  copy-sum  : {A B : Ty} → Copyable A → Copyable B → Copyable (A ⊕ B)
+  copy-list : {A : Ty} → Copyable A → Copyable (listT A)
+  copy-bang : {A : Ty} → Copyable (! A)

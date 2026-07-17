@@ -90,6 +90,7 @@ open import T3.Surface.Sem
 ε addS         = addU
 ε (constS k)   = constU k
 ε dupNatS      = dupU          -- the atom exemption erases to free dup
+ε (copyS _)    = dupU          -- costed data copy erases to free dup
 ε (guardS t)   = guardU (ε t)
 ε dupS         = dupU          -- contraction erases to free dup
 ε (boxS f)     = ε f           -- boxes erase
@@ -191,6 +192,7 @@ private
 ε-factor addS (a , b) = refl
 ε-factor (constS k) a = refl
 ε-factor dupNatS n = refl
+ε-factor (copyS _) a = refl
 ε-factor (guardS {A} t) a =
   trans (guard-strip A a (⟦ t ⟧V a))
         (cong (guardV (stripV A a))
@@ -375,6 +377,7 @@ skelOfCore sucS         d = tipD
 skelOfCore addS         d = tipD
 skelOfCore (constS _)   d = tipD
 skelOfCore dupNatS      d = tipD
+skelOfCore (copyS _)    d = tipD
 skelOfCore (guardS t)   d = skelOfCore t d
 skelOfCore dupS         d = tipD
 skelOfCore (boxS f)     d = skelOfCore f (suc d)
@@ -411,6 +414,7 @@ core-solves sucS         d = tt
 core-solves addS         d = tt
 core-solves (constS _)   d = tt
 core-solves dupNatS      d = tt
+core-solves (copyS _)    d = tt
 core-solves (guardS t)   d = core-solves t d
 core-solves dupS         d = tt
 core-solves (boxS f)     d =

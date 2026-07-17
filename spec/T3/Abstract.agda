@@ -311,6 +311,7 @@ transfer addS         s =
     addSh _         _         = topS
 transfer (constS k)   s = (tipB , natLE k)
 transfer dupNatS      s = (tipB , pairS s s)
+transfer (copyS _)    s = (tipB , pairS s s)
 transfer (guardS t)   s =
   let (bt , _) = transfer t s
   in (bt , sumS (just s) (just unitS))
@@ -475,6 +476,7 @@ sound addS (pairS (natLE n) (natLE m)) (ha , hb) = +-mono-≤′ ha hb
     +-mono-≤′ = +-mono-≤
 sound (constS k) s h = ≤-refl
 sound dupNatS s h = (h , h)
+sound (copyS _) s h = (h , h)
 sound (guardS t) s {a} h with ⟦ t ⟧V a
 ... | inj₁ _ = h
 ... | inj₂ _ = tt

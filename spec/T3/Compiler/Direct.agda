@@ -2,9 +2,10 @@
 -- T3.Compiler.Direct — the first surface-to-core compiler slice.
 --
 -- Direct relates the box-free affine surface fragment to the matching core
--- term.  It deliberately has no rule for general dupU or any recursion:
--- those constructs require modal placement.  dupU at nat is admitted by
--- the measured atom exemption dupNatS.
+-- term.  It deliberately has no rule for recursion: those constructs
+-- require modal placement.  dupU is admitted at every Copyable type by
+-- the costed copy primitive (d-copy), with dupU at nat also retaining the
+-- historical measured atom exemption dupNatS.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
@@ -40,6 +41,7 @@ data Direct : {A B : Ty} → strip A ⇨U strip B → A ⇨ B → Set where
               {f′ : A ⇨ B} {g′ : C ⇨ D}
             → Direct f f′ → Direct g g′ → Direct (f ⊗U g) (f′ ⊗S g′)
   d-dupNat  : Direct dupU dupNatS
+  d-copy    : {A : Ty} (p : Copyable A) → Direct dupU (copyS p)
   d-swap    : {A B : Ty} → Direct swapU (swapS {A} {B})
   d-assoc   : {A B C : Ty} → Direct assocU (assocS {A} {B} {C})
   d-unassoc : {A B C : Ty} → Direct unassocU (unassocS {A} {B} {C})
@@ -72,6 +74,7 @@ direct-erases d-id             = refl
 direct-erases (d-comp dg df)   = cong₂ _∘U_ (direct-erases dg) (direct-erases df)
 direct-erases (d-tensor df dg) = cong₂ _⊗U_ (direct-erases df) (direct-erases dg)
 direct-erases d-dupNat         = refl
+direct-erases (d-copy _)       = refl
 direct-erases d-swap           = refl
 direct-erases d-assoc          = refl
 direct-erases d-unassoc        = refl

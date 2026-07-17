@@ -40,7 +40,7 @@ open import T3.Sem.Value
 data PrimTag : Set where
   idT swapT assocT unassocT exlT exrT weakT runitT lunitT
     inlT inrT distlT nilT consT unconsT
-    natOutT sucT addT constT dupNatT dupT mergeT : PrimTag
+    natOutT sucT addT constT dupNatT dupT copyT mergeT : PrimTag
 
 record CostAlgebra : Set₁ where
   infixr 7 _⋄_
@@ -144,6 +144,7 @@ module Interp (R : CostAlgebra) where
   ⟦ addS ⟧G p@(a , b) = (chargePrim (nat ⊗ nat) nat addT p (a + b) , a + b)
   ⟦ constS {A} k ⟧G a = (chargePrim A nat constT a k , k)
   ⟦ dupNatS ⟧G n = (chargePrim nat (nat ⊗ nat) dupNatT n (n , n) , (n , n))
+  ⟦ copyS {A} _ ⟧G a = (chargePrim A (A ⊗ A) copyT a (a , a) , (a , a))
   ⟦ guardS {A} t ⟧G a =
     let (mt , r) = ⟦ t ⟧G a
     in (chargeProbe A a ⋄ mt , guardV a r)
@@ -237,6 +238,7 @@ module Interp (R : CostAlgebra) where
   G-val addS (a , b) = refl
   G-val (constS k) a = refl
   G-val dupNatS n = refl
+  G-val (copyS _) a = refl
   G-val (guardS t) a = cong (guardV a) (G-val t a)
   G-val dupS a = refl
   G-val (boxS f) a = G-val f a
@@ -269,7 +271,8 @@ workAlg = record
     chargeW _       = 0
 
 -- Dup grade: explicit accounting for copying.
--- Zero on all affine code; sizeT at dupS (THE charge), 1 at dupNatS (atom
+-- Zero on all affine code; sizeT at dupS (THE charge), sizeT at copyS
+-- (costed data copy — the charge IS the license), 1 at dupNatS (atom
 -- exemption), and sizeT per guardS/whileS probe: a
 -- test reads the value it does not consume, and that read is a copy.
 dupAlg : CostAlgebra
@@ -284,6 +287,7 @@ dupAlg = record
     chargeD : (A B : Ty) → PrimTag → ⟦ A ⟧T → ⟦ B ⟧T → ℕ
     chargeD A B dupT    a b = sizeT A a
     chargeD A B dupNatT a b = 1
+    chargeD A B copyT   a b = sizeT A a
     chargeD _ _ _       _ _ = 0
 
 -- Space: (⊔,+) — sequential stages reuse memory, parallel branches

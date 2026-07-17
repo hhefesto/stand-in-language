@@ -128,6 +128,16 @@ record ExceptionalCopyOps (C : CategoryOps) (T : TensorOps C) : Set₁ where
     copyObj : Obj
     copyAt  : Hom copyObj (tensorObj copyObj copyObj)
 
+-- Witnessed (evidence-indexed) copy: copy exists exactly where a witness
+-- does.  The core instantiates the witness with Copyable — total on
+-- first-order data, absent on future non-data objects.
+record WitnessedCopyOps (C : CategoryOps) (T : TensorOps C) : Set₁ where
+  open CategoryOps C
+  open TensorOps T
+  field
+    CopyWitness : Obj → Set
+    copyWith    : {X : Obj} → CopyWitness X → Hom X (tensorObj X X)
+
 record RestrictedBangOps (C : CategoryOps) (T : TensorOps C)
                          (A : AffineOps C T) : Set₁ where
   open CategoryOps C

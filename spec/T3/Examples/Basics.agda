@@ -92,6 +92,40 @@ sumList-cost = refl
 sumList-dup : dupGrade sumList egList ≡ 0        -- affine ⇒ free on nets
 sumList-dup = refl
 
+-- Costed data copy: reuse of first-order data is legal and priced by
+-- size.  Copying is free time (work 0) but never free duplication — the
+-- dup grade charges the full word size of the copied value.
+copyList : listT nat ⇨ (listT nat ⊗ listT nat)
+copyList = copyS (copy-list copy-nat)
+
+copyList-val : ⟦ copyList ⟧V egList ≡ (egList , egList)
+copyList-val = refl
+
+copyList-cost : work copyList egList ≡ 0
+copyList-cost = refl
+
+copyList-dup : dupGrade copyList egList ≡ 7      -- sizeT of the 3-element list
+copyList-dup = refl
+
+copyList-depth : depth copyList ≡ 0
+copyList-depth = refl
+
+-- One input list feeding two folds through one priced copy.
+sumBoth : listT nat ⇨ (! nat ⊗ ! nat)
+sumBoth = (sumList ⊗S sumList) ∘S copyS (copy-list copy-nat)
+
+sumBoth-val : ⟦ sumBoth ⟧V egList ≡ (6 , 6)
+sumBoth-val = refl
+
+sumBoth-cost : work sumBoth egList ≡ 6           -- both folds pay their steps
+sumBoth-cost = refl
+
+sumBoth-dup : dupGrade sumBoth egList ≡ 7        -- exactly the one copy
+sumBoth-dup = refl
+
+sumBoth-adequate : ⟦ sumBoth ⟧K egList 6 ≡ just ((6 , 6) , 0)
+sumBoth-adequate = adequateV sumBoth egList
+
 -- Sharing a computed value is priced. The sum comes
 -- back boxed; dupS copies the box; with no dereliction the copies are
 -- consumed one level down, via mergeS + boxS addS.  The dup charge (size
