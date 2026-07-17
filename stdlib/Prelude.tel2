@@ -33,8 +33,8 @@ def natIsPositive(n: Nat): Bool = boolNot(natIsZero(n));
 def natAdd(values: Nat * Nat): Nat = add values;
 def otherPlayer(player: Nat): Nat = matchNat player of { 1 -> 2; _ -> 1 };
 def increment(n: Nat): Nat = suc n;
-def natDouble(n: Nat): Nat =
-  let pair: Nat * Nat = copy n in natAdd(pair);
+# Reuse is implicit: the second n is a priced copy.
+def natDouble(n: Nat): Nat = natAdd((n,n));
 
 def countListElement(values: Nat * Nat): Nat =
   let (count,value): Nat * Nat = values in

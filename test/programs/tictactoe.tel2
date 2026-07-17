@@ -32,15 +32,9 @@ def firstWin(xs: Eight): Nat =
       0 -> matchNat g of { 0 -> h; x -> x }; x -> x }; x -> x };
       x -> x }; x -> x }; x -> x }; x -> x };
 
+# Reuse of the board is implicit: each extra use is a priced copy.
 def winner(b: Board): Nat =
-  let (p,q): Board * Board = copy b in
-  let (p1,p2): Board * Board = copy p in
-  let (q1,q2): Board * Board = copy q in
-  let (b1,b2): Board * Board = copy p1 in
-  let (b3,b4): Board * Board = copy p2 in
-  let (b5,b6): Board * Board = copy q1 in
-  let (b7,b8): Board * Board = copy q2 in
-  firstWin((row1(b1),row2(b2),row3(b3),col1(b4),col2(b5),col3(b6),diag1(b7),diag2(b8)));
+  firstWin((row1(b),row2(b),row3(b),col1(b),col2(b),col3(b),diag1(b),diag2(b)));
 
 def full(b: Board): Nat =
   let (a,b,c,d,e,f,g,h,i): Board = b in
@@ -52,12 +46,10 @@ def full(b: Board): Nat =
 
 def outcome(s: State): Nat =
   let (board,turn): State = s in
-  let (forWin,forFull): Board * Board = copy board in
-  let w: Nat = winner(forWin) in
-  let (forZero,result): Nat * Nat = copy w in
-  case natIsZero(forZero) of {
-    True -> matchNat full(forFull) of { 0 -> 0; _ -> 3 };
-    False -> result;
+  let w: Nat = winner(board) in
+  case natIsZero(w) of {
+    True -> matchNat full(board) of { 0 -> 0; _ -> 3 };
+    False -> w;
   };
 
 # Each renderer prepends one fixed-width cell to an affine tail.
@@ -84,22 +76,16 @@ def turnText(turn: Nat): Text = matchNat turn of {
   _ -> "Player 2/O to move.\nMove (1-9 or q): "
 };
 def keep(s: State): Reply State =
-  let (displayState,nextState): State * State = copy s in
-  let (board,turn): State = displayState in
-  let suffix: Text = turnText(turn) in
-  (render((board,suffix)),right nextState);
+  let (board,turn): State = s in
+  (render((board,turnText(turn))),right (board,turn));
 
 def invalid(s: State): Reply State =
-  let (displayState,nextState): State * State = copy s in
-  let (board,turn): State = displayState in
-  let suffix: Text = turnText(turn) in
-  (prepend "Invalid input; enter 1-9 or q.\n" render((board,suffix)),right nextState);
+  let (board,turn): State = s in
+  (prepend "Invalid input; enter 1-9 or q.\n" render((board,turnText(turn))),right (board,turn));
 
 def occupied(s: State): Reply State =
-  let (displayState,nextState): State * State = copy s in
-  let (board,turn): State = displayState in
-  let suffix: Text = turnText(turn) in
-  (prepend "That square is occupied.\n" render((board,suffix)),right nextState);
+  let (board,turn): State = s in
+  (prepend "That square is occupied.\n" render((board,turnText(turn))),right (board,turn));
 
 def next(s: State): Reply State =
   let (board,turn): State = s in
@@ -109,9 +95,8 @@ def oWon(s: State): Reply State = let (board,turn): State = s in (render((board,
 def tied(s: State): Reply State = let (board,turn): State = s in (render((board,"Tie game.\n")),left ());
 
 def finish(s: State): Reply State =
-  let (inspect,keepState): State * State = copy s in
-  let result: Nat = outcome(inspect) in
-  matchNat result of { 0 -> next(keepState); 1 -> xWon(keepState); 2 -> oWon(keepState); _ -> tied(keepState) };
+  let result: Nat = outcome(s) in
+  matchNat result of { 0 -> next(s); 1 -> xWon(s); 2 -> oWon(s); _ -> tied(s) };
 
 def m1(s: State): Reply State = let (board,turn): State=s in let (mark,nextTurn): Nat*Nat=copy turn in let (a,b,c,d,e,f,g,h,i): Board=board in matchNat a of { 0 -> finish(((mark,b,c,d,e,f,g,h,i),nextTurn)); x -> occupied(((x,b,c,d,e,f,g,h,i),nextTurn)) };
 def m2(s: State): Reply State = let (board,turn): State=s in let (mark,nextTurn): Nat*Nat=copy turn in let (a,b,c,d,e,f,g,h,i): Board=board in matchNat b of { 0 -> finish(((a,mark,c,d,e,f,g,h,i),nextTurn)); x -> occupied(((a,x,c,d,e,f,g,h,i),nextTurn)) };
