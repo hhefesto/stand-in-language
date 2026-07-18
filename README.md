@@ -11,9 +11,13 @@ nix run . -- test/programs/tictactoe.tel2
 cabal run telomare -- test/programs/tictactoe.tel2
 ```
 
-`--certificate` prints the program-level core summary, `--meter` prints
-accumulated formal core work, and `--max-work N` bounds that work. The executable
-accepts `.tel2` only.
+`--certificate` prints the program-level core summary INCLUDING the
+certified static work bound: an a-priori per-entry cap ("step <= N, any
+input") computed by abstract interpretation and proved sound in Agda
+(`T3.Bound.costW-sound`) — by adequacy it is literally a machine fuel
+bound. `--meter` prints accumulated formal core work, and `--max-work N`
+bounds that work. Static bounds are honest, not tight: loops are charged
+full fuel and branches by max. The executable accepts `.tel2` only.
 `--emit-transport init|step` prints one backend-neutral core entry and exits,
 providing the explicit handoff to experimental runtimes.
 
@@ -260,7 +264,15 @@ work units. Its compiled entry has nonzero depth and contains `IterS`, `FoldS`,
 
 ## Formal Boundary
 
-`spec/Everything.agda` checks under `--safe` with no postulates. The formal
+`spec/Everything.agda` checks under `--safe` with no postulates.
+`T3.Bound` proves the certified static work bound: `costW`, an abstract
+interpretation over the `T3.Abstract` shape domain (extended with
+cost-carrying closure shapes), returns an upper bound on the work grade,
+and `costW-sound` proves every covered input's actual work stays under
+it — so with adequacy, a static bound is a machine fuel bound. The
+work slice only counts events; certified duplication/space bounds need a
+static size domain and remain future work, as do input-shape refinements
+beyond the all-top entry shape. The formal
 surface/core bridge proves successful direct elaboration erases to its source
 and preserves value semantics. `T3.Categorical.Vocabulary` separates operation
 capabilities from law records; `T3.Categorical.Interpretation` bundles the raw

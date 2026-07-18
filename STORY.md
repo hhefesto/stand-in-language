@@ -152,6 +152,18 @@ transcripts pass through both `UMorph` and `Morph`. The removed frontend no
 longer computes reachable positions, renders a board, or recognizes any game
 declaration.
 
+## Budgets Became Bounds
+
+The abstract interpretation that sized recursion (shapes, fuel-bounded
+unrolling, budget trees) now also certifies cost: `T3.Bound.costW`
+computes a static work bound per entry and `costW-sound` proves the
+exact work grade of any covered run never exceeds it. Closure shapes
+carry their body-cost bound Kripke-style, so the bound survives runtime
+selection and application. Because adequacy makes fuel equal work, the
+number printed by `--certificate` is a proved fuel cap: run the entry
+with that much fuel and it always completes. Work only; duplication and
+space bounds await a static size domain.
+
 ## Proof Story
 
 The Agda core proves adequacy and graded laws. The Agda direct relation proves

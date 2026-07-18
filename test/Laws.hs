@@ -11,6 +11,7 @@ import Numeric.Natural (Natural)
 import Test.QuickCheck
 
 import SpecVectors (isZero, predS)
+import Telomare.Budget (ShapeH (..), costW)
 import Telomare.Core
 import Telomare.Denotation
 
@@ -188,6 +189,17 @@ prop_mapc_coherence =
       && work prog xs == fromIntegral (length xs) + sum (fmap (work f) xs)
       && evalK prog xs (work prog xs) == Just (fmap (evalV f) xs, 0)
 
+-- Static work bound soundness (Agda: T3.Bound.costW-sound): on generated
+-- loop-capped programs at exact input shapes, the certified bound
+-- dominates the measured work.
+prop_cost_bound_sound :: Property
+prop_cost_bound_sound =
+  forAll (genProg anyLeaf) $ \(ProgNB p) ->
+  forAll smallNat $ \n ->
+    case fst (costW p (NatLE n)) of
+      Just bound -> work p n <= bound
+      Nothing    -> False   -- generated fuel is shaped, so always sized
+
 -- CopyS charge exactness (Agda: dupAlg.chargeD copyT = sizeT): the dup
 -- grade of a lone copy is exactly the copied value's size, and the copy
 -- is free work.
@@ -221,6 +233,7 @@ lawProps =
   , ("prop_work_functorial",         prop_work_functorial)
   , ("prop_dup_functorial",          prop_dup_functorial)
   , ("prop_copy_charge_exact",       prop_copy_charge_exact)
+  , ("prop_cost_bound_sound",        prop_cost_bound_sound)
   , ("prop_closure_beta",            prop_closure_beta)
   , ("prop_mapc_coherence",          prop_mapc_coherence)
   , ("prop_map_coherence_precision", prop_map_coherence_precision)

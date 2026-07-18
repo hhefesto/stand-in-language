@@ -17,11 +17,14 @@ module Telomare.Budget
   , BudgetT (..)
   , joinShape
   , transferB
+  , costW
+  , shapeOfSTy
   ) where
 
 import Numeric.Natural (Natural)
 
 import Telomare.Core
+import Telomare.Surface (SUTy (..))
 
 -- | Shapes (spec: @T3.Abstract.Shape@), dynamically typed.
 data ShapeH
@@ -32,6 +35,8 @@ data ShapeH
   | SumSh (Maybe ShapeH) (Maybe ShapeH)
   | ListSh Natural ShapeH
   | BangSh ShapeH
+  | LollySh (Maybe Natural)
+    -- ^ "applying this closure costs at most n work" (Nothing = unbounded)
   deriving (Eq, Show)
 
 -- | Budget trees over the recursion skeleton (spec: @T3.Abstract.BudgetD@;
@@ -67,6 +72,7 @@ joinShape (PairSh a b) (PairSh c d) = PairSh (joinShape a c) (joinShape b d)
 joinShape (SumSh l r) (SumSh l' r') = SumSh (joinM l l') (joinM r r')
 joinShape (ListSh n a) (ListSh m b) = ListSh (max n m) (joinShape a b)
 joinShape (BangSh a) (BangSh b)     = BangSh (joinShape a b)
+joinShape (LollySh a) (LollySh b)   = LollySh (joinMB a b)
 joinShape _ _                       = TopS
 
 splitP :: ShapeH -> (ShapeH, ShapeH)
@@ -224,3 +230,148 @@ transferB (WhileS _ t st) s =
 predN :: Natural -> Natural
 predN 0 = 0
 predN n = n - 1
+
+-- | Static work bound (spec: @T3.Bound.costW@, mirrored 1:1): an
+-- a-priori upper bound on the work grade of any covered input;
+-- 'Nothing' = unbounded.  By @T3.Bound.costW-sound@ and adequacy, a
+-- 'Just' bound is a machine fuel bound.
+lollyCostOf :: ShapeH -> Maybe Natural
+lollyCostOf (LollySh mc) = mc
+lollyCostOf _            = Nothing
+
+addC :: Maybe Natural -> Maybe Natural -> Maybe Natural
+addC (Just a) (Just b) = Just (a + b)
+addC _ _               = Nothing
+
+mulC :: Maybe Natural -> Maybe Natural -> Maybe Natural
+mulC (Just a) (Just b) = Just (a * b)
+mulC _ _               = Nothing
+
+aiterC :: (ShapeH -> (Maybe Natural, ShapeH)) -> Natural -> ShapeH
+       -> (Maybe Natural, ShapeH)
+aiterC _ 0 s = (Just 0, s)
+aiterC f n s =
+  let (c1, s1) = f s
+      (cn, sn) = aiterC f (n - 1) s1
+  in (addC (Just 1) (addC c1 cn), joinShape s sn)
+
+costW :: Morph a b -> ShapeH -> (Maybe Natural, ShapeH)
+costW IdS s = (Just 0, s)
+costW (g :.: f) s =
+  let (cf, sf) = costW f s
+      (cg, sg) = costW g sf
+  in (addC cf cg, sg)
+costW (f :***: g) s =
+  let (sa, sc) = splitP s
+      (cf, sb) = costW f sa
+      (cg, sd) = costW g sc
+  in (addC cf cg, PairSh sb sd)
+costW SwapS s = let (a, b) = splitP s in (Just 0, PairSh b a)
+costW AssocS s =
+  let (ab, c) = splitP s; (a, b) = splitP ab
+  in (Just 0, PairSh a (PairSh b c))
+costW UnassocS s =
+  let (a, bc) = splitP s; (b, c) = splitP bc
+  in (Just 0, PairSh (PairSh a b) c)
+costW ExlS s = (Just 0, fst (splitP s))
+costW ExrS s = (Just 0, snd (splitP s))
+costW WeakS _ = (Just 0, UnitS)
+costW RunitS s = (Just 0, PairSh s UnitS)
+costW LunitS s = (Just 0, PairSh UnitS s)
+costW InlS s = (Just 0, SumSh (Just s) Nothing)
+costW InrS s = (Just 0, SumSh Nothing (Just s))
+costW (CaseS l r) s =
+  let (ml, mr) = splitE s
+      resL = fmap (costW l) ml
+      resR = fmap (costW r) mr
+      costOf = maybe (Just 0) fst
+      shape = case (resL, resR) of
+        (Just (_, x), Just (_, y)) -> joinShape x y
+        (Just (_, x), Nothing)     -> x
+        (Nothing, Just (_, y))     -> y
+        (Nothing, Nothing)         -> TopS
+  in (joinMB (costOf resL) (costOf resR), shape)
+costW DistlS s =
+  let (a, bc) = splitP s
+      (mb, mc) = splitE bc
+  in (Just 0, SumSh (PairSh a <$> mb) (PairSh a <$> mc))
+costW NilS _ = (Just 0, ListSh 0 TopS)
+costW ConsS s =
+  let (e, l) = splitP s
+  in (Just 0, case l of
+       ListSh n es -> ListSh (n + 1) (joinShape e es)
+       _           -> TopS)
+costW UnconsS s = (Just 0, SumSh (Just UnitS) (Just rest))
+  where
+    rest = case s of
+      ListSh n es -> PairSh es (ListSh (predN n) es)
+      _           -> PairSh TopS TopS
+costW NatOutS s = (Just 1, case s of
+  NatLE n -> SumSh (Just UnitS) (Just (NatLE (predN n)))
+  _       -> SumSh (Just UnitS) (Just TopS))
+costW SucS s = (Just 0, case s of
+  NatLE n -> NatLE (n + 1)
+  _       -> TopS)
+costW AddS s =
+  let (a, b) = splitP s
+  in (Just 0, case (a, b) of
+       (NatLE n, NatLE m) -> NatLE (n + m)
+       _                  -> TopS)
+costW (ConstS k) _ = (Just 0, NatLE k)
+costW DupNatS s = (Just 0, PairSh s s)
+costW (CopyS _) s = (Just 0, PairSh s s)
+costW (CurryS _ f) s = (Just 0, LollySh (fst (costW f (PairSh s TopS))))
+costW ApplyS s = (addC (Just 1) (lollyCostOf (fst (splitP s))), TopS)
+costW MapCS s =
+  let (sbf, sl) = splitP s
+      lenOf (ListSh n _) = Just n
+      lenOf _            = Nothing
+  in (mulC (lenOf sl) (addC (Just 1) (lollyCostOf (unbangS sbf))), TopS)
+costW (GuardS _ t) s = (fst (costW t s), SumSh (Just s) (Just UnitS))
+costW (DupS _) s = (Just 0, PairSh s s)
+costW (BoxS f) s = let (c, r) = costW f (unbangS s) in (c, BangSh r)
+costW (BoxValS f) s = let (c, r) = costW f s in (c, BangSh r)
+costW MergeS s =
+  let (a, b) = splitP s
+  in (Just 0, BangSh (PairSh (unbangS a) (unbangS b)))
+costW (MapS f) s =
+  let lenOf (ListSh n _) = Just n
+      lenOf _            = Nothing
+      elemOfS (ListSh _ e) = e
+      elemOfS _            = TopS
+  in (mulC (lenOf s) (addC (Just 1) (fst (costW f (elemOfS s)))), TopS)
+costW (IterS f) s =
+  let (fu, a0) = splitP s
+  in case fu of
+       NatLE n -> let (c, r) = aiterC (costW f) n (unbangS a0)
+                  in (c, BangSh r)
+       _       -> (Nothing, TopS)
+costW (FoldS f) s =
+  let (ls, b0) = splitP s
+      elemOfS (ListSh _ e) = e
+      elemOfS _            = TopS
+  in case ls of
+       ListSh n _ ->
+         let (c, r) = aiterC (\x -> costW f (PairSh x (elemOfS ls))) n
+                        (unbangS b0)
+         in (c, BangSh r)
+       _ -> (Nothing, TopS)
+costW (WhileS _ t st) s =
+  let (fu, a0) = splitP s
+      stepC x = let (ct, _) = costW t x
+                    (cs, r) = costW st x
+                in (addC ct cs, r)
+  in case fu of
+       NatLE n -> let (c, r) = aiterC stepC n (unbangS a0)
+                  in (c, BangSh r)
+       _       -> (Nothing, TopS)
+
+-- | The all-top shape of a surface type: what --certificate may assume
+-- about an arbitrary input (spec: @T3.Bound.shapeOfTy@ over Lift).
+shapeOfSTy :: SUTy a -> ShapeH
+shapeOfSTy SUUnit        = UnitS
+shapeOfSTy SUNat         = TopS
+shapeOfSTy (SUProd a b)  = PairSh (shapeOfSTy a) (shapeOfSTy b)
+shapeOfSTy (SUSum a b)   = SumSh (Just (shapeOfSTy a)) (Just (shapeOfSTy b))
+shapeOfSTy (SUList _)    = TopS
+shapeOfSTy (SULolly _ _) = LollySh Nothing

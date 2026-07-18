@@ -22,6 +22,7 @@ import Data.Type.Equality ((:~:) (Refl))
 import Numeric.Natural (Natural)
 import System.IO (hFlush, hPutStrLn, isEOF, stderr, stdout)
 
+import Telomare.Budget (costW, shapeOfSTy)
 import Telomare.Compiler.Direct (Strip, eraseMorph, stripSTy)
 import Telomare.Core
 import Telomare.Denotation
@@ -52,8 +53,16 @@ data Program where
     -> Program
 
 programCertificateSummary :: Program -> String
-programCertificateSummary program =
+programCertificateSummary program@(Program stateTy _ _ initial step) =
   "typed affine program: core depth " <> show (programDepth program)
+    <> "\nstatic work bound: init " <> boundOf initial
+    <> ", step " <> boundOf step <> " (any input)"
+  where
+    boundOf :: CoreEntry a b -> String
+    boundOf (CoreEntry inputTy _ _ morph) =
+      case fst (costW morph (shapeOfSTy inputTy)) of
+        Just n  -> "<= " <> show n
+        Nothing -> "unbounded (contains unsized recursion)"
 
 programDepth :: Program -> Natural
 programDepth (Program _ _ _ initial step) = max (entryDepth initial) (entryDepth step)

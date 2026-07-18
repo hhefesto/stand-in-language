@@ -1,5 +1,6 @@
 module Tel2Vectors (tel2Vectors) where
 
+import BoundVectors (tictactoeBoundVectors)
 import Data.List (isInfixOf)
 import System.Directory (doesFileExist, getTemporaryDirectory, makeAbsolute,
                          withCurrentDirectory)
@@ -130,10 +131,11 @@ tel2Vectors = do
           needsPrelude = ("tictactoe genuinely depends on imported Prelude",
             case compileTel2 (anonymous source) of Left _ -> True; Right _ -> False)
           mutation = sourceMutation (anonymous prelude <> anonymous source)
+          bounds = tictactoeBoundVectors program
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : closures <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =

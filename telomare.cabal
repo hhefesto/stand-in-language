@@ -91,7 +91,8 @@ test-suite telomare-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
-    other-modules:    BudgetOracle
+    other-modules:    BoundVectors
+                    , BudgetOracle
                     , CertificateVectors
                     , CompileFailVectors
                     , CopyVectors
