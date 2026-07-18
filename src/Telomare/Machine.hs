@@ -99,20 +99,20 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
     Right (reply, remaining, spent)
       | not (equalU replyTy (evalU sourceInit ()) reply) ->
           pure (Left "surface/core evaluator disagreement")
-      | otherwise -> loop remaining spent reply
+      | otherwise -> loop remaining spent (0 :: Natural) reply
   where
     replyTy = SUProd (SUList SUNat) (SUSum SUUnit stateTy)
-    loop remaining spent (output, continuation) = do
+    loop remaining spent count (output, continuation) = do
       case decode output of
         Left err -> pure (Left err)
         Right rendered -> do
           putStr rendered
           hFlush stdout
           case continuation of
-            Left () -> finish spent
+            Left () -> finish spent count
             Right state -> do
               eof <- isEOF
-              if eof then finish spent else do
+              if eof then finish spent count else do
                 input <- getLine
                 let inputValue = (encode input, state)
                 result <- runInteractive replyTy remaining spent step inputValue
@@ -121,10 +121,21 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
                   Right (reply, remaining', spent')
                     | not (equalU replyTy (evalU sourceStep inputValue) reply) ->
                         pure (Left "surface/core evaluator disagreement")
-                    | otherwise -> loop remaining' spent' reply
-    finish spent = do
-      when report (hPutStrLn stderr ("core work: " <> show spent))
+                    | otherwise -> loop remaining' spent' (count + 1) reply
+    entryBound :: CoreEntry a b -> Maybe Natural
+    entryBound (CoreEntry inputTy _ _ morph) =
+      fst (costW morph (shapeOfSTy inputTy))
+    finish spent count = do
+      when report (hPutStrLn stderr ("core work: " <> show spent <> cap))
       pure (Right ())
+      where
+        -- the measured/certified bridge: a count-input session is
+        -- certified to cost at most init-bound + count * step-bound
+        cap = case (entryBound initial, entryBound step) of
+          (Just ib, Just sb) ->
+            " (certified cap for " <> show count <> " inputs: "
+              <> show (ib + count * sb) <> ")"
+          _ -> ""
 
 runCore :: SUTy b -> CoreEntry a b -> UVal a -> Either String (UVal b, Natural)
 runCore _ (CoreEntry inputTy coreTy Refl morph) input =
