@@ -129,12 +129,15 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
       when report (hPutStrLn stderr ("core work: " <> show spent <> cap))
       pure (Right ())
       where
-        -- the measured/certified bridge: a count-input session is
-        -- certified to cost at most init-bound + count * step-bound
+        -- the measured/certified bridge, with the arithmetic shown:
+        -- a count-input session is certified to cost at most
+        -- init-bound + count * step-bound, the numbers --certificate
+        -- prints per entry
         cap = case (entryBound initial, entryBound step) of
           (Just ib, Just sb) ->
-            " (certified cap for " <> show count <> " inputs: "
-              <> show (ib + count * sb) <> ")"
+            " <= certified cap init " <> show ib <> " + "
+              <> show count <> " steps * " <> show sb <> " = "
+              <> show (ib + count * sb)
           _ -> ""
 
 runCore :: SUTy b -> CoreEntry a b -> UVal a -> Either String (UVal b, Natural)
