@@ -3,7 +3,9 @@
 This ledger covers every top-level name bound by `test/programs/Prelude.tel`.
 It describes migration status, not semantic proof. The old file is untyped,
 higher-order, Church-encoded compatibility source; `.tel2` is monomorphic,
-first-order, affine source over primitive `Nat` and finite nullary data.
+affine source over primitive `Nat` and finite nullary data, with first-class
+affine closures (`A -o B`, applied at most once; reusable closures exist only
+as promoted closed lambdas, reached from source through `mapc`).
 
 Statuses mean:
 
@@ -41,7 +43,7 @@ name a current compatibility definition.
 | `dMinus` | deferred | Runtime-bounded iteration exists, but truncated subtraction still needs predecessor/state support without promoting an open seed. |
 | `minus` | obsolete | Church-facing subtraction wrapper has no modern interface. |
 | `range` | deferred | Source list construction and runtime bounds exist, but range still needs affine state that carries an open endpoint/index through iteration. |
-| `map` | specialized | Source `map input with mapper` is reusable, first-order, monomorphic, order-preserving, and backed by `MapS`; `Prelude.mapIncrement : List Nat -> List Nat` is concrete. The historical function-valued polymorphic interface remains impossible. |
+| `map` | specialized | Source `map input with mapper` is reusable, first-order, monomorphic, order-preserving, and backed by `MapS`; `Prelude.mapIncrement : List Nat -> List Nat` is concrete. `mapc input with mapper` additionally maps with a function value selected at runtime among closed lambdas (`MapCS`). The polymorphic interface remains unavailable. |
 | `foldr` | specialized | `listLength` is an orientation-insensitive specialization. The current `FoldS` is a reusable named-step left fold, so historical right-associative higher-order `foldr` is not exposed. |
 | `foldl` | specialized | Source `fold input from seed with step` is a reusable first-order left fold; `Prelude.listLength` and `Prelude.listSum` are concrete `List Nat` instances. Runtime function arguments and polymorphism remain unavailable. |
 | `zipWith` | deferred | Requires synchronized list recursion and a specialized first-order operator interface. |
@@ -51,7 +53,7 @@ name a current compatibility definition.
 | `listLength` | modernized | `Prelude.listLength : List Nat -> Nat`; reusable first-order `FoldS` placement over an affine runtime list. |
 | `listEqual` | deferred | Requires list recursion and Nat equality. |
 | `listPlus` | deferred | Reusable folding exists, but order-preserving append needs a right fold or additional affine list-state support for the open second list. |
-| `flip` | impossible | General function arguments and returned functions are outside first-order `.tel2`. |
+| `flip` | modernized | `flipNat` swaps the pair argument of an affine `Nat * Nat -o Nat` closure. General polymorphic flip remains unavailable. |
 | `con` | modernized | `composeNat` composes two affine `Nat -o Nat` closures; each is applied exactly once. General polymorphic composition remains unavailable. |
 | `concat` | deferred | Needs nested-list syntax plus order-preserving append; sequencing dependent recursive results remains outside current placement. |
 | `drop` | deferred | Needs modern Nat-bounded list recursion; the historical Church interface is obsolete. |

@@ -241,10 +241,12 @@ historical inventory and rationale is `design/PRELUDE_MIGRATION.md`.
 
 `test/programs/tictactoe.tel2` explicitly imports Prelude and now uses both
 `otherPlayer` and `natIsZero`; board and state reuse is implicit and priced.
-The game's board is an ordinary nine-Nat product.
-Move selection, occupancy, eight line checks,
-tie detection, turn changes, rendering, invalid input, and termination are all
-named `.tel2` definitions. The compiler has no corresponding built-ins.
+The game's board is an ordinary nine-Nat product. Moves go through cell
+lenses (`Nat * (Nat -o Board)`) handled by one shared `moveAt`, and one
+`cellText` renderer takes per-square label/separator closures — the game is
+the working demonstration of first-class functions over data. Line checks,
+tie detection, turn changes, invalid input, and termination are all named
+`.tel2` definitions. The compiler has no corresponding built-ins.
 The fixed product scans remain direct: replacing them with a recursive fold
 would require retaining an unboxed state copy after the boxed fold result, which
 the current placement boundary intentionally rejects.

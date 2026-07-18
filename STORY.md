@@ -135,10 +135,13 @@ does not expose `Bang` as a host source type.
 The example is ordinary source code, not compiler policy. It explicitly imports
 the ordinary `Prelude.tel2` module and uses its player-transition and zero-test
 definitions.
-Nine Nat values form a named `Board` product and one Nat is the turn. Definitions
-implement line classification, eight winning projections, tie detection, fixed-width
-rendering, legal and occupied moves, invalid input, turn changes, and replies.
-The repeated board uses are visibly enabled by `copy`.
+Nine Nat values form a named `Board` product and one Nat is the turn. The game
+is the in-repo demonstration of first-class functions over data: each move goes
+through a cell lens (`Cell = Nat * (Nat -o Board)` — the inspected square plus
+a one-shot rebuild closure capturing the other eight) placed by one shared
+`moveAt`, and one `cellText` renderer receives per-square label and separator
+callbacks. Board and turn reuse is implicit and priced; `winner` forms all
+eight lines from a single destructuring.
 The fixed winner/full scans remain direct because a fold result is boxed and the
 game must retain its unboxed state for rendering and the next turn. Current
 placement rejects that live context rather than inserting open promotion or a

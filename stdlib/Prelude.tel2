@@ -58,3 +58,12 @@ def listSum(values: List Nat): Nat =
 def composeNat(functions: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat =
   let (first,second): (Nat -o Nat) * (Nat -o Nat) = functions in
   \value -> apply(second, apply(first, value));
+
+# flipNat swaps the pair argument of an affine binary closure; the
+# historical `flip` returns for uncurried monomorphic functions.
+def flipNat(f: Nat * Nat -o Nat): Nat * Nat -o Nat =
+  \p -> let (a,b): Nat * Nat = p in apply(f, (b,a));
+
+# constNat discards its argument and returns the captured value; the
+# priced capture is the only cost.
+def constNat(k: Nat): Nat -o Nat = \_ -> k;

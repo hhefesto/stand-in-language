@@ -75,11 +75,11 @@ tel2Vectors = do
             , acceptsMapCBehavior "tel2 mapc runtime-selected mapper emits MapCS"
                 mapcDemoSource ["ABC"] "chosen\n"
             , ("tel2 Prelude composeNat composes closures",
-                case compileTel2 (anonymous prelude <> composeNatUseSource) of
-                  Left _ -> False
-                  Right program -> case runProgramScript program ["go"] of
-                    Right (output, _) -> output == "nine\n"
-                    Left _            -> False)
+                preludeBehavior prelude composeNatUseSource "nine\n")
+            , ("tel2 Prelude flipNat swaps closure arguments",
+                preludeBehavior prelude flipNatUseSource "seven\n")
+            , ("tel2 Prelude constNat captures and returns",
+                preludeBehavior prelude constNatUseSource "five\n")
             , rejectsWith "tel2 rejects an open lambda as a reusable mapper"
                 mapcOpenLambdaSource "must select among closed lambdas"
             ]
@@ -379,6 +379,28 @@ implicitNatReuseSource = unlines
   , "def double(n: Nat): Nat = add (n,n);"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
   , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double(n) of { 10 -> (\"ten\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+preludeBehavior :: String -> String -> String -> Bool
+preludeBehavior prelude source expected =
+  case compileTel2 (anonymous prelude <> source) of
+    Left _ -> False
+    Right program -> case runProgramScript program ["go"] of
+      Right (output, _) -> output == expected
+      Left _            -> False
+
+flipNatUseSource :: String
+flipNatUseSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat * Nat -o Nat = flipNat(\\p -> let (a,b): Nat * Nat = p in a) in matchNat apply(f, (0,n)) of { 7 -> (\"seven\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+constNatUseSource :: String
+constNatUseSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 9);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat = constNat(5) in matchNat apply(f, 0) of { 5 -> (\"five\\n\",left ()); m -> (\"bad\\n\",left ()); };"
   ]
 
 composeNatUseSource :: String
