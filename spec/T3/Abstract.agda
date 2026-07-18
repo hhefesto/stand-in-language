@@ -57,13 +57,17 @@ open import T3.Place using (Skel; tip; bin; rec; call; skelOf; ε)
 -- ────────────────────────────────────────────────────────────────────────────
 
 data Shape : Ty → Set where
-  topS  : {A : Ty} → Shape A
-  unitS : Shape unit
-  natLE : ℕ → Shape nat
-  pairS : {A B : Ty} → Shape A → Shape B → Shape (A ⊗ B)
-  sumS  : {A B : Ty} → Maybe (Shape A) → Maybe (Shape B) → Shape (A ⊕ B)
-  listS : {A : Ty} → ℕ → Shape A → Shape (listT A)
-  bangS : {A : Ty} → Shape A → Shape (! A)
+  topS   : {A : Ty} → Shape A
+  unitS  : Shape unit
+  natLE  : ℕ → Shape nat
+  pairS  : {A B : Ty} → Shape A → Shape B → Shape (A ⊗ B)
+  sumS   : {A B : Ty} → Maybe (Shape A) → Maybe (Shape B) → Shape (A ⊕ B)
+  listS  : {A : Ty} → ℕ → Shape A → Shape (listT A)
+  bangS  : {A : Ty} → Shape A → Shape (! A)
+  lollyS : {A B : Ty} → Maybe ℕ → Shape (A ⊸ B)
+    -- "applying this closure costs ≤ n work" (nothing = unbounded).
+    -- Value-level meaning is trivial (γ below); the cost meaning lives
+    -- in T3.Bound's work relation γW.
 
 -- Meaning: which values a shape covers.
 γ : {A : Ty} → Shape A → ⟦ A ⟧T → Set
@@ -81,6 +85,11 @@ data Shape : Ty → Set where
         γMaybe nothing  _ = ⊥
 γ (listS n s)   xs       = (length xs ≤ n) × All (γ s) xs
 γ (bangS s)     a        = γ s a
+γ (lollyS _)    _        = ⊤
+
+joinMB : Maybe ℕ → Maybe ℕ → Maybe ℕ
+joinMB (just a) (just b) = just (a ⊔ b)
+joinMB _        _        = nothing
 
 -- Join (⊔S): sound upper bound of two shapes.
 joinM : {A : Ty} → (Shape A → Shape A → Shape A)
@@ -99,6 +108,7 @@ pairS a b  ⊔S pairS c d  = pairS (a ⊔S c) (b ⊔S d)
 sumS l r   ⊔S sumS l′ r′ = sumS (joinM _⊔S_ l l′) (joinM _⊔S_ r r′)
 listS n a  ⊔S listS m b  = listS (n ⊔ m) (a ⊔S b)
 bangS a    ⊔S bangS b    = bangS (a ⊔S b)
+lollyS a   ⊔S lollyS b   = lollyS (joinMB a b)
 
 ⊔S-l : {A : Ty} (x y : Shape A) {a : ⟦ A ⟧T} → γ x a → γ (x ⊔S y) a
 ⊔S-r : {A : Ty} (x y : Shape A) {a : ⟦ A ⟧T} → γ y a → γ (x ⊔S y) a
@@ -124,6 +134,8 @@ bangS a    ⊔S bangS b    = bangS (a ⊔S b)
   (≤-trans hl (m≤m⊔n n m) , All.map (λ {x} → ⊔S-l a b {x}) he)
 ⊔S-l (bangS a)   topS        _  = tt
 ⊔S-l (bangS a)   (bangS b)   h  = ⊔S-l a b h
+⊔S-l (lollyS a)  topS        _  = tt
+⊔S-l (lollyS a)  (lollyS b)  _  = tt
 
 ⊔S-r topS        y           h  = tt
 ⊔S-r unitS       topS        _  = tt
@@ -146,6 +158,8 @@ bangS a    ⊔S bangS b    = bangS (a ⊔S b)
   (≤-trans hl (m≤n⊔m n m) , All.map (λ {x} → ⊔S-r a b {x}) he)
 ⊔S-r (bangS a)   topS        _  = tt
 ⊔S-r (bangS a)   (bangS b)   h  = ⊔S-r a b h
+⊔S-r (lollyS a)  topS        _  = tt
+⊔S-r (lollyS a)  (lollyS b)  _  = tt
 
 -- Structure-view helpers (each trivially sound, established inline in
 -- `sound`): every Shape at a composite type views as its components.
@@ -176,10 +190,6 @@ elemOf topS        = topS
 -- ────────────────────────────────────────────────────────────────────────────
 -- § 2  Budgets: one Maybe ℕ per recursion site (nothing = unsizable ⊤)
 -- ────────────────────────────────────────────────────────────────────────────
-
-joinMB : Maybe ℕ → Maybe ℕ → Maybe ℕ
-joinMB (just a) (just b) = just (a ⊔ b)
-joinMB _        _        = nothing
 
 data BudgetD : Skel → Set where
   tipB  : BudgetD tip

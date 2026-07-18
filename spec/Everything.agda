@@ -31,5 +31,7 @@ import T3.Compiler.Partition
 import T3.Source.Affine
 import T3.Abstract
 import T3.Examples.Budgets
+import T3.Bound
+import T3.Examples.Bounds
 import T3.Sem.Length
 import T3.Categorical.Interpretation
