@@ -139,6 +139,18 @@ tel2Vectors = do
             , acceptsBehavior "tel2 multiplies via an open pair seed (R2)"
                 multiplySource ["go"] "twelve\n"
             ]
+          closureLoops =
+            [ acceptsBehavior "tel2 iterc runs a closure-bodied iteration"
+                itercSource ["go"] "five\n"
+            , acceptsBehavior "tel2 foldc folds with a closure body"
+                foldcSource ["go"] "eight\n"
+            , acceptsBehavior "tel2 whilec loops with closure test and step"
+                whilecSource ["go"] "zero\n"
+            , acceptsBehavior "tel2 mapc dispatches a mapper by matchText"
+                mapcTextSource ["ABC"] "picked\n"
+            , rejectsWith "tel2 rejects an open whilec stepping selector"
+                whilecOpenStepSource "stepping selector must be closed"
+            ]
           syntaxMain =
             [ acceptsBehavior "tel2 main entry synthesizes init and step"
                 mainCounterSource ["go"] "start\ndone\n"
@@ -199,7 +211,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> openSeeds <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> openSeeds <> closureLoops <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -914,6 +926,41 @@ multiplySource = unlines
   , "def timesStep(p: Nat * Nat): Nat * Nat = let (acc, a) = p in let (a1, a2) = copy a in (add (acc, a1), a2);"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 4);"
   , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let pair = iterate 3 from (0, n) with timesStep in let (result, rest) = pair in let _ = rest in matchNat result of { 12 -> (\"twelve\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+itercSource :: String
+itercSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let total = iterc n from 0 with \\x -> suc x in matchNat total of { 5 -> (\"five\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+foldcSource :: String
+foldcSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 2);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let total = foldc [1, 2, 3] from n with \\(acc, x) -> add (acc, x) in matchNat total of { 8 -> (\"eight\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+whilecSource :: String
+whilecSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let total = whilec 9 from n testing \\x -> matchNat x of { 0 -> left (); k -> let _ = k in right (); } stepping \\x -> let _ = x in 0 in matchNat total of { 0 -> (\"zero\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+mapcTextSource :: String
+mapcTextSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = n in let ys: List Nat = mapc cons 65 onto [] with matchText input of { \"ABC\" -> \\x -> suc x; _ -> \\x -> x; } in matchText ys of { \"B\" -> (\"picked\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+whilecOpenStepSource :: String
+whilecOpenStepSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let (a, b) = copy n in let total = whilec 9 from a testing \\x -> matchNat x of { 0 -> left (); k -> let _ = k in right (); } stepping \\x -> let _ = x in b in matchNat total of { k -> let _ = k in (\"done\\n\",left ()); };"
   ]
 
 closureSeedSource :: String

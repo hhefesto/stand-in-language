@@ -59,7 +59,11 @@ rejected. Functions are first-class: `A -o B` is an affine closure type,
 lambdas capture their free variables, `apply(f, x)` consumes a closure,
 and definitions may return or select closures at runtime. Source recursion
 is restricted to manifestly bounded map, iteration, fold, while, and the
-higher-order `mapc` whose reusable mapper is selected among closed lambdas.
+higher-order `mapc`, `iterc`, `foldc`, and `whilec`, whose reusable
+closure bodies are selected among closed lambdas (dispatch by `matchNat`,
+`matchText`, or `case` over an affine scrutinee); their seeds may be open
+first-order data (promoted at the loop boundary), and `whilec`'s stepping
+selector must be closed.
 `if c then t else e` is sugar for a `matchNat` taking `else` at `0`; list
 literals are sugar for `cons` chains; multi-binding `let`s and multi-argument
 lambdas nest (lambdas curry). Application is by juxtaposition of atomic
@@ -104,6 +108,9 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "apply" "(" expr "," expr ")"
            |  "map" expr "with" ID
            |  "mapc" expr "with" expr
+           |  "iterc" expr "from" expr "with" expr
+           |  "foldc" expr "from" expr "with" expr
+           |  "whilec" expr "from" expr "testing" expr "stepping" expr
            |  "iterate" expr "from" expr "with" ID
            |  "fold" expr "from" expr "with" ID
            |  "while" expr "from" expr "testing" ID "stepping" ID

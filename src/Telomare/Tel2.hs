@@ -81,6 +81,9 @@ data Expr
   | ELam Pattern Expr
   | EApply Expr Expr
   | EMapC Expr Expr
+  | EIterC Expr Expr Expr
+  | EFoldC Expr Expr Expr
+  | EWhileC Expr Expr Expr Expr
   -- | Juxtaposition application @f x@. Exists only between parsing and
   -- 'resolveApps', which rewrites every occurrence to ECall or EApply.
   | EApp Expr Expr
@@ -119,7 +122,7 @@ reservedWords = Set.fromList
   [ "module", "import", "type", "data", "def"
   , "let", "in", "if", "then", "else"
   , "matchText", "matchNat", "case", "of"
-  , "map", "mapc", "iterate", "fold", "while"
+  , "map", "mapc", "iterc", "foldc", "whilec", "iterate", "fold", "while"
   , "from", "with", "testing", "stepping"
   , "copy", "suc", "add", "cons", "onto", "prepend"
   , "left", "right", "apply"
@@ -171,6 +174,9 @@ exprParser = choice
   , try applyExpr
   , try letExpr
   , try mapcExpr
+  , try itercExpr
+  , try foldcExpr
+  , try whilecExpr
   , try matchTextExpr
   , try matchNatExpr
   , try caseExpr
@@ -258,6 +264,29 @@ exprParser = choice
       input <- exprParser
       reserved "with"
       EMapC input <$> exprParser
+    itercExpr = do
+      reserved "iterc"
+      count <- exprParser
+      reserved "from"
+      seed <- exprParser
+      reserved "with"
+      EIterC count seed <$> exprParser
+    foldcExpr = do
+      reserved "foldc"
+      input <- exprParser
+      reserved "from"
+      seed <- exprParser
+      reserved "with"
+      EFoldC input seed <$> exprParser
+    whilecExpr = do
+      reserved "whilec"
+      limit <- exprParser
+      reserved "from"
+      seed <- exprParser
+      reserved "testing"
+      test <- exprParser
+      reserved "stepping"
+      EWhileC limit seed test <$> exprParser
     iterExpr = do
       reserved "iterate"
       count <- exprParser
@@ -572,6 +601,13 @@ resolveApps defs = go
       ELam pat body -> ELam pat (go (bind pat bound) body)
       EApply function argument -> EApply (go bound function) (go bound argument)
       EMapC input mapper -> EMapC (go bound input) (go bound mapper)
+      EIterC count seed mapper ->
+        EIterC (go bound count) (go bound seed) (go bound mapper)
+      EFoldC input seed mapper ->
+        EFoldC (go bound input) (go bound seed) (go bound mapper)
+      EWhileC limit seed test step ->
+        EWhileC (go bound limit) (go bound seed) (go bound test)
+          (go bound step)
     bind pat bound = patternNames pat `Set.union` bound
 
 compileEntry
@@ -738,6 +774,54 @@ compileAffineLoop tables env resultTy expression = case expression of
             (MapCS :.: (selector :***: IdS) :.: SwapS :.: inputCore))
         _ -> bad "mapc expects a list input with an inferable type"
     _ -> bad "mapc result must be a list"
+  -- closure-bodied loops (M5): the reusable body is a promoted-closure
+  -- selector (mapc's discipline); the Ground seed enters the modality
+  -- through PromoteS at the loop boundary.
+  EIterC count seed mapper -> do
+    ground <- requireGround "iterc seed" seed resultTy
+    let pairTy = SUProd SUNat resultTy
+    Elab pairActual rest pairU <- elaborate tables env (freeVars mapper)
+      pairTy (EPair count seed)
+    Refl <- requireSame pairTy pairActual
+    pairCore <- fromDirect (compileDirect pairU)
+    selector <- promoteClosureSelector tables rest resultTy resultTy mapper
+    pure (SomePlacedLoop resultTy
+      (IterCS :.: (selector :***: (IdS :***: PromoteS ground))
+        :.: SwapS :.: pairCore))
+  EFoldC input seed mapper -> do
+    ground <- requireGround "foldc seed" seed resultTy
+    SomeTy inputListTy <- synthType tables env input
+    case inputListTy of
+      SUList elementTy -> do
+        let pairTy = SUProd (SUList elementTy) resultTy
+        Elab pairActual rest pairU <- elaborate tables env (freeVars mapper)
+          pairTy (EPair input seed)
+        Refl <- requireSame pairTy pairActual
+        pairCore <- fromDirect (compileDirect pairU)
+        selector <- promoteClosureSelector tables rest
+          (SUProd resultTy elementTy) resultTy mapper
+        pure (SomePlacedLoop resultTy
+          (FoldCS :.: (selector :***: (IdS :***: PromoteS ground))
+            :.: SwapS :.: pairCore))
+      _ -> bad "foldc expects a list input with an inferable type"
+  EWhileC limit seed test step -> do
+    ground <- requireGround "whilec seed" seed resultTy
+    if Set.null (freeVars step)
+      then Right ()
+      else bad "whilec's stepping selector must be closed"
+    let pairTy = SUProd SUNat resultTy
+    Elab pairActual rest pairU <- elaborate tables env (freeVars test)
+      pairTy (EPair limit seed)
+    Refl <- requireSame pairTy pairActual
+    pairCore <- fromDirect (compileDirect pairU)
+    testSel <- promoteClosureSelector tables rest resultTy
+      (SUSum SUUnit SUUnit) test
+    stepSel <- promoteClosureSelector tables Empty resultTy resultTy step
+    pure (SomePlacedLoop resultTy
+      (WhileCS (liftSTy resultTy)
+        :.: (testSel :***:
+              ((stepSel :***: (IdS :***: PromoteS ground)) :.: LunitS))
+        :.: SwapS :.: pairCore))
   EIter count seed stepName -> do
     SomeDef stepIn stepOut stepU <- lookupDef tables stepName
     Refl <- requireSame resultTy stepIn
@@ -849,6 +933,15 @@ promoteClosureSelector tables env a b expression = case expression of
         scrutCore <- fromDirect (compileDirect (finish rest scrutU))
         dispatch <- dispatchNat arms fallback
         pure (dispatch :.: scrutCore)
+  EMatchText scrutinee arms fallbackPat fallback
+    | all (Set.null . freeVars . snd) arms
+        && Set.null (freeVars fallback Set.\\ patternNames fallbackPat) -> do
+        Elab keyActual rest scrutU <- elaborate tables env Set.empty
+          (SUList SUNat) scrutinee
+        Refl <- requireSame (SUList SUNat) keyActual
+        scrutCore <- fromDirect (compileDirect (finish rest scrutU))
+        dispatch <- dispatchText arms fallback
+        pure (dispatch :.: scrutCore)
   ECase scrutinee arms -> do
     resolved <- traverse resolveArm arms
     let typeNames = [typeName | (typeName, _, _) <- resolved]
@@ -881,6 +974,14 @@ promoteClosureSelector tables env a b expression = case expression of
       miss <- dispatchNat rest fallback
       partCore <- fromDirect (compileDirect (partitionNatU literal))
       pure (CaseS (BoxValS hit :.: WeakS) miss :.: partCore)
+    dispatchText [] fallback = do
+      fallbackCore <- leaf fallback
+      pure (BoxValS fallbackCore :.: WeakS)
+    dispatchText ((literal, arm) : rest) fallback = do
+      hit <- leaf arm
+      miss <- dispatchText rest fallback
+      partCore <- fromDirect (compileDirect (partitionTextU (encode literal)))
+      pure (CaseS (BoxValS hit :.: WeakS) miss :.: partCore)
 
 definitionRequiresPlacement :: [Decl] -> String -> Bool
 definitionRequiresPlacement decls name = case
@@ -908,6 +1009,9 @@ isClosedLoop EFold {}  = True
 isClosedLoop EWhile {} = True
 isClosedLoop EMap {}   = True
 isClosedLoop EMapC {}  = True
+isClosedLoop EIterC {} = True
+isClosedLoop EFoldC {} = True
+isClosedLoop EWhileC {} = True
 isClosedLoop _         = False
 
 data SomeClosedLoop where
@@ -1091,6 +1195,12 @@ exprCalls (EApply function argument) =
   exprCalls function `Set.union` exprCalls argument
 exprCalls (EMapC input mapper) =
   exprCalls input `Set.union` exprCalls mapper
+exprCalls (EIterC count seed mapper) =
+  exprCalls count `Set.union` exprCalls seed `Set.union` exprCalls mapper
+exprCalls (EFoldC input seed mapper) =
+  exprCalls input `Set.union` exprCalls seed `Set.union` exprCalls mapper
+exprCalls (EWhileC limit seed test step) = Set.unions
+  [exprCalls limit, exprCalls seed, exprCalls test, exprCalls step]
 exprCalls _ = Set.empty
 
 branchCalls :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -1128,6 +1238,13 @@ iterSteps (EApply function argument) =
 iterSteps (EMapC input mapper) =
   -- the anonymous runtime mapper marks a recursion site by itself
   Set.insert "mapc" (iterSteps input `Set.union` iterSteps mapper)
+iterSteps (EIterC count seed mapper) =
+  Set.insert "mapc" (Set.unions [iterSteps count, iterSteps seed, iterSteps mapper])
+iterSteps (EFoldC input seed mapper) =
+  Set.insert "mapc" (Set.unions [iterSteps input, iterSteps seed, iterSteps mapper])
+iterSteps (EWhileC limit seed test step) =
+  Set.insert "mapc" (Set.unions
+    [iterSteps limit, iterSteps seed, iterSteps test, iterSteps step])
 iterSteps _ = Set.empty
 
 branchIters :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -1159,6 +1276,12 @@ freeVars (ELam pat body) = freeVars body Set.\\ patternNames pat
 freeVars (EApply function argument) =
   freeVars function `Set.union` freeVars argument
 freeVars (EMapC input mapper) = freeVars input `Set.union` freeVars mapper
+freeVars (EIterC count seed mapper) = Set.unions
+  [freeVars count, freeVars seed, freeVars mapper]
+freeVars (EFoldC input seed mapper) = Set.unions
+  [freeVars input, freeVars seed, freeVars mapper]
+freeVars (EWhileC limit seed test step) = Set.unions
+  [freeVars limit, freeVars seed, freeVars test, freeVars step]
 freeVars _ = Set.empty
 
 branchVars :: Expr -> [(a, Expr)] -> Pattern -> Expr -> Set.Set String
@@ -1356,6 +1479,62 @@ elaborate tables env demand expected@(SUList b) (EMapC input mapper) = do
       Refl <- requireSame pairTy pairActual
       pure (Elab expected rest (((UMapC :..: USwap) :****: UId) :..: pair))
     _ -> bad "mapc expects a list input with an inferable type"
+elaborate tables env demand expected (EIterC count seed mapper) = do
+  -- controller pair first (mapc's rule): the dispatching mapper
+  -- consumes the whole remaining context
+  let pairTy = SUProd (SUProd SUNat expected) (SULolly expected expected)
+  Elab pairActual rest pair <- elaborate tables env demand pairTy
+    (EPair (EPair count seed) mapper)
+  Refl <- requireSame pairTy pairActual
+  pure (Elab expected rest (((UIterC :..: USwap) :****: UId) :..: pair))
+elaborate tables env demand expected (EFoldC input seed mapper) = do
+  SomeTy inputListTy <- synthType tables env input
+  case inputListTy of
+    SUList a -> do
+      let pairTy = SUProd (SUProd inputListTy expected)
+            (SULolly (SUProd expected a) expected)
+      Elab pairActual rest pair <- elaborate tables env demand pairTy
+        (EPair (EPair input seed) mapper)
+      Refl <- requireSame pairTy pairActual
+      pure (Elab expected rest (((UFoldC :..: USwap) :****: UId) :..: pair))
+    _ -> bad "foldc expects a list input with an inferable type"
+elaborate tables env demand expected (EWhileC limit seed test step) = do
+  let pairTy = SUProd (SUProd SUNat expected)
+        (SUProd (SULolly expected (SUSum SUUnit SUUnit))
+          (SULolly expected expected))
+  Elab pairActual rest pair <- elaborate tables env demand pairTy
+    (EPair (EPair limit seed) (EPair test step))
+  Refl <- requireSame pairTy pairActual
+  pure (Elab expected rest
+    (((UWhileC expected :..: UAssoc :..: USwap) :****: UId) :..: pair))
+elaborate tables env demand expected (EIterC count seed mapper) = do
+  -- controller pair first (mapc's rule): the dispatching mapper
+  -- consumes the whole remaining context
+  let pairTy = SUProd (SUProd SUNat expected) (SULolly expected expected)
+  Elab pairActual rest pair <- elaborate tables env demand pairTy
+    (EPair (EPair count seed) mapper)
+  Refl <- requireSame pairTy pairActual
+  pure (Elab expected rest (((UIterC :..: USwap) :****: UId) :..: pair))
+elaborate tables env demand expected (EFoldC input seed mapper) = do
+  SomeTy inputListTy <- synthType tables env input
+  case inputListTy of
+    SUList a -> do
+      let pairTy = SUProd (SUProd inputListTy expected)
+            (SULolly (SUProd expected a) expected)
+      Elab pairActual rest pair <- elaborate tables env demand pairTy
+        (EPair (EPair input seed) mapper)
+      Refl <- requireSame pairTy pairActual
+      pure (Elab expected rest (((UFoldC :..: USwap) :****: UId) :..: pair))
+    _ -> bad "foldc expects a list input with an inferable type"
+elaborate tables env demand expected (EWhileC limit seed test step) = do
+  let pairTy = SUProd (SUProd SUNat expected)
+        (SUProd (SULolly expected (SUSum SUUnit SUUnit))
+          (SULolly expected expected))
+  Elab pairActual rest pair <- elaborate tables env demand pairTy
+    (EPair (EPair limit seed) (EPair test step))
+  Refl <- requireSame pairTy pairActual
+  pure (Elab expected rest
+    (((UWhileC expected :..: UAssoc :..: USwap) :****: UId) :..: pair))
 elaborate tables env demand (SULolly a b) (ELam pat body) = do
   let captureNames = Set.toList (freeVars body Set.\\ patternNames pat)
   captures <- traverse (\name -> (,) name <$> envTypeOf name env) captureNames
@@ -1446,6 +1625,9 @@ synthType tables _ (EFold _ _ step) = do
 synthType tables _ (EWhile _ _ _ step) = do
   SomeDef _ output _ <- lookupDef tables step
   pure (SomeTy output)
+synthType tables env (EIterC _ seed _) = synthType tables env seed
+synthType tables env (EFoldC _ seed _) = synthType tables env seed
+synthType tables env (EWhileC _ seed _ _) = synthType tables env seed
 synthType _ _ _ =
   bad "cannot infer a type here; annotate the binding (bind a function with an annotated let and apply the variable)"
 

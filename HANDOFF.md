@@ -63,7 +63,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (322 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (327 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -135,26 +135,20 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    rejected. Prelude `dTimes`/`dMinus` wiring is slated with the M5
    stdlib pass; the closed-entry bindings path (`compileClosedLoop`)
    still requires closed seeds.
-9. **M5 (nearly done)** — closure-bodied loops are fully certified and
-   mirrored: Agda `iterCS`/`foldCS`/`whileCS` proven across
-   value/graded/exec/adequacy/placement/abstract/Bound (work+dup
-   `fuel *∞ (1 +∞ lollyCostOf …)` with uniform Kripke round bounds;
-   space `(nothing , topS)` v1 like mapCS); Haskell `IterCS`/`FoldCS`/
-   `WhileCS` (WhileCS carries `STy` for probe sizing) across
-   Core/Denotation/Space/Budget/Surface (`UIterC`/`UFoldC`/`UWhileC`,
-   placement-only)/Direct; transport **v6** (`iter-clo`/`fold-clo`/
-   `while-clo`, round-tripped). REMAINING for M5 close-out: (a) Tel2
-   surface forms — extend `mapc`'s pattern to the loops (suggested:
-   `iterc count from seed with <selector>`, `foldc input from seed with
-   <selector>`, `whilec limit from seed testing <selector> stepping
-   <selector>`), elaborated on the placement path via
-   `promoteClosureSelector` + the new cores (assemble like Tel2's mapc:
-   `IterCS :.: (selector :***: pairCore)`-style with the (fuel, !seed)
-   pair; seed promoted closed or via `PromoteS`); (b) richer selectors:
-   `matchText` dispatch and let-bound closed lambdas in
-   `promoteClosureSelector`; (c) `synthType` for annotated lambdas;
-   (d) accept/behavior vectors + HANDOFF/README/SYNTAX updates. Do NOT
-   rewrite ttt in the same commit (goldens stay stable).
+9. **M5 (done)** — closure-bodied loops shipped end to end: Agda
+   `iterCS`/`foldCS`/`whileCS` certified across value/graded/exec/
+   adequacy/placement/abstract/Bound (work+dup `fuel *∞ (1 +∞ body)`
+   with uniform Kripke round bounds; space `(nothing , topS)` v1 like
+   mapCS); Haskell mirror + transport **v6**; tel2 surface `iterc`/
+   `foldc`/`whilec` (mapc's promoted-selector discipline, Ground seeds
+   promoted at the loop boundary, `whilec`'s stepping selector closed);
+   `promoteClosureSelector` gained `matchText` dispatch; apply-head
+   synthesis was already delivered by S2/S3's `synthType` chains.
+   Minor polish left for future sessions: let-bound closed lambdas as
+   selector leaves, `synthType` for annotated lambdas and `mapc`
+   results, and the M5-era stdlib pass (Prelude `dTimes`/`dMinus`,
+   possible ttt rewrite using the new forms — goldens deliberately
+   untouched).
 
 Every new core constructor remains a cross-stack change: Agda, Haskell,
 transport, budget analysis, Ops, and tests. No Bend and no game-specific
