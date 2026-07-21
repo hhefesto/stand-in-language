@@ -76,6 +76,18 @@ sizeT (A ⊸ B)   _        = 1
 -- closure is suspended computation, and duplicating computation goes
 -- through the ! modality (dupS on ! (A ⊸ B)), never through copyS.
 -- That absence is the modal rule.
+-- Bang-free, arrow-free first-order data: the license for R2 data
+-- promotion (promoteS in T3.Core.Syntax).  Deliberately NOT Copyable:
+-- Copyable (! A) exists, and promotion at ! A would be dig — the
+-- operator whose absence fixes box depth.  Ground rules ! out
+-- structurally, so no dig arises by composition.
+data Ground : Ty → Set where
+  ground-unit : Ground unit
+  ground-nat  : Ground nat
+  ground-prod : {A B : Ty} → Ground A → Ground B → Ground (A ⊗ B)
+  ground-sum  : {A B : Ty} → Ground A → Ground B → Ground (A ⊕ B)
+  ground-list : {A : Ty} → Ground A → Ground (listT A)
+
 data Copyable : Ty → Set where
   copy-unit : Copyable unit
   copy-nat  : Copyable nat

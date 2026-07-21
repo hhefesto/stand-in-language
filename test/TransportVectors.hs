@@ -16,6 +16,9 @@ allConstructors = WhileS SNat predicate SucS
 constructorNodes :: [Artifact]
 constructorNodes =
   [ exportMorph SNat SNat IdS
+  , exportMorph SNat (SBang SNat) (PromoteS GroundNat)
+  , exportMorph (SList SNat) (SBang (SList SNat))
+      (PromoteS (GroundList GroundNat))
   , exportMorph SNat SNat (SucS :.: IdS)
   , exportMorph (SProd SNat SUnit) (SProd SNat SUnit) (IdS :***: IdS)
   , exportMorph (SProd SNat SUnit) (SProd SUnit SNat) SwapS
@@ -66,6 +69,9 @@ transportVectors =
   , ("transport-compose-intermediate-rejected", isLeft (validateArtifact (Artifact transportVersion TNat TNat (NCompose NSuc NNil))))
   , ("transport-box-val-unit-rejected", isLeft (validateArtifact (Artifact transportVersion TUnit (TBang TNat) (NBoxVal NSuc))))
   , ("transport-dup-bang-rejected", isLeft (validateArtifact (Artifact transportVersion TNat (TProd TNat TNat) (NDup TNat))))
+  , ("transport-promote-bang-rejected", isLeft (validateArtifact
+      (Artifact transportVersion (TBang TNat) (TBang (TBang TNat))
+        (NPromote (TBang TNat)))))
   , ("transport-copy-endpoint-rejected", isLeft (validateArtifact (Artifact transportVersion (TList TNat) (TList TNat) (NCopy (TList TNat)))))
   , ("transport-copy-mismatch-rejected", isLeft (validateArtifact (Artifact transportVersion TNat (TProd TNat TNat) (NCopy (TList TNat)))))
   , ("transport-curry-endpoint-rejected", isLeft (validateArtifact

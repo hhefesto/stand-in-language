@@ -90,6 +90,12 @@ data _⇨_ : Ty → Ty → Set where
   curryS   : {C A B : Ty} → (C ⊗ A) ⇨ B → C ⇨ (A ⊸ B)
   applyS   : {A B : Ty} → ((A ⊸ B) ⊗ A) ⇨ B
   mapCS    : {A B : Ty} → (! (A ⊸ B) ⊗ listT A) ⇨ ! (listT B)
+  -- R2 data promotion: Ground (bang-free first-order) values may enter
+  -- the modality in place.  Sound since R3 because every later dup is
+  -- priced full sizeT; Ground excludes ! so this is never dig
+  -- (design/PROMOTE.md).  Work 0, dup 0; a runtime value is promoted,
+  -- not a code region, so depth stays 0 and towerHeight is untouched.
+  promoteS : {A : Ty} → Ground A → A ⇨ ! A
   -- EAL exponential — the ENTIRE duplication interface
   dupS     : {A : Ty} → ! A ⇨ (! A ⊗ ! A)      -- contraction, only at !
   boxS     : {A B : Ty} → A ⇨ B → (! A ⇨ ! B)  -- promotion (functoriality)
@@ -140,6 +146,7 @@ depth (curryS f)    = depth f
 depth applyS        = 0
 depth mapCS         = 1
   -- the closure body runs one level down, like every recursion body
+depth (promoteS _)  = 0
 depth dupS          = 0
 depth (boxS f)      = suc (depth f)
 depth (boxValS f)   = suc (depth f)

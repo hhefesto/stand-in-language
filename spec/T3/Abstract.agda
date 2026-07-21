@@ -331,6 +331,7 @@ transfer mapCS        s = (recB nothing (topBD tip) , topS)
 transfer (guardS t)   s =
   let (bt , _) = transfer t s
   in (bt , sumS (just s) (just unitS))
+transfer (promoteS _) s = (tipB , bangS s)
 transfer dupS         s = (tipB , pairS s s)
 transfer (boxS f)     s = let (b , r) = transfer f (unbang s) in (b , bangS r)
 transfer (boxValS f)  s = let (b , r) = transfer f s in (b , bangS r)
@@ -499,6 +500,7 @@ sound mapCS s h = tt
 sound (guardS t) s {a} h with ⟦ t ⟧V a
 ... | inj₁ _ = h
 ... | inj₂ _ = tt
+sound (promoteS _) s h = h
 sound dupS s h = (h , h)
 sound (boxS f) topS h = sound f topS tt
 sound (boxS f) (bangS s) h = sound f s h

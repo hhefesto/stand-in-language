@@ -141,6 +141,7 @@ eraseMorph (CurryS sc f)  = UCurry (stripSTy sc) (eraseMorph f)
 eraseMorph ApplyS         = UApply
 eraseMorph MapCS          = UMapC
 eraseMorph (GuardS sa t)  = UGuard (stripSTy sa) (eraseMorph t)
+eraseMorph (PromoteS _)   = UId
 eraseMorph (DupS sa)      = UDup (stripSTy sa)
 eraseMorph (BoxS f)       = eraseMorph f
 eraseMorph (BoxValS f)    = eraseMorph f

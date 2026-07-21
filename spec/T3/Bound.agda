@@ -291,6 +291,7 @@ costW mapCS        s =
   in (lenOf sl *∞ (just 1 +∞ lollyCostOf (unbang sbf)) , topS)
 costW (guardS t)   s =
   (proj₁ (costW t s) , sumS (just s) (just unitS))
+costW (promoteS _) s = (just 0 , bangS s)
 costW dupS         s = (just 0 , pairS s s)
 costW (boxS f)     s = let (c , r) = costW f (unbang s) in (c , bangS r)
 costW (boxValS f)  s = let (c , r) = costW f s in (c , bangS r)
@@ -425,6 +426,7 @@ costD applyS       s = (lollyCostOf (proj₁ (splitP s)) , topS)
 costD mapCS        s =
   let (sbf , sl) = splitP s
   in (lenOf sl *D∞ lollyCostOf (unbang sbf) , topS)
+costD (promoteS _) s = (just 0 , bangS s)
 costD dupS         s = (sizeS s , pairS s s)
 costD (boxS f)     s = let (c , r) = costD f (unbang s) in (c , bangS r)
 costD (boxValS f)  s = let (c , r) = costD f s in (c , bangS r)
@@ -910,6 +912,7 @@ costW-sound (guardS t) s {ga} h
   with proj₂ (⟦ t ⟧C ga) | costW-sound t s {ga} h
 ... | inj₁ _ | (ct , _) = (ct , h)
 ... | inj₂ _ | (ct , _) = (ct , tt)
+costW-sound (promoteS _) s h = (≤∞-zero _ , h)
 costW-sound dupS s h = (≤∞-zero _ , (h , h))
 costW-sound (boxS f) topS h =
   let (c , r) = costW-sound f topS tt in (c , r)
@@ -1084,6 +1087,7 @@ costD-sound (mapCS {A} {B}) (pairS (bangS (lollyS nothing)) (listS n es))
 costD-sound (mapCS {A} {B}) (pairS (bangS (lollyS (just k))) (listS n es))
   {gf , gxs} (relF , (hlen , _)) =
   (mapD-bound A B (λ _ → ⊤) gf (just k) (λ x _ → relF x) n gxs hlen (all-⊤ gxs) , tt)
+costD-sound (promoteS _) s h = (≤∞-zero _ , h)
 costD-sound dupS s h = (sizeS-sound s h , (h , h))
 costD-sound (boxS f) topS h = let (c , r) = costD-sound f topS tt in (c , r)
 costD-sound (boxS f) (bangS s) h = let (c , r) = costD-sound f s h in (c , r)

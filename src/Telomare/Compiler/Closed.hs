@@ -11,8 +11,11 @@ module Telomare.Compiler.Closed
   ( closedValue
   , affineMapValueFrom
   , affineIterValueFrom
+  , affineIterOpenFrom
   , affineFoldValueFrom
+  , affineFoldOpenFrom
   , affineWhileValueFrom
+  , affineWhileOpenFrom
   , closedIterValue
   , closedMapValue
   , closedIterValueFrom
@@ -30,7 +33,7 @@ module Telomare.Compiler.Closed
 import Numeric.Natural (Natural)
 
 import Telomare.Compiler.Direct (DirectError, compileDirect)
-import Telomare.Core (Morph (..), Ty (..))
+import Telomare.Core (Ground, Morph (..), Ty (..))
 import Telomare.Surface (Lift, SUTy, UMorph (..), UTy (..), liftSTy)
 
 -- | Empty-context promotion of a directly compilable value.
@@ -88,6 +91,45 @@ affineWhileValueFrom stateTy limit seed test step = do
   stepCore <- compileDirect step
   pure (WhileS (liftSTy stateTy) testCore stepCore
     :.: (limitCore :***: seedCore) :.: RunitS)
+
+-- | R2 iteration with an open seed: the (count, seed) pair is elaborated
+-- from the live context as one morphism and the Ground seed enters the
+-- modality through 'PromoteS' at the loop boundary (design\/PROMOTE.md).
+affineIterOpenFrom
+  :: Ground (Lift a)
+  -> UMorph x ('UNat ':**: a)
+  -> UMorph a a
+  -> Either DirectError (Morph (Lift x) ('Bang (Lift a)))
+affineIterOpenFrom ground pair step = do
+  pairCore <- compileDirect pair
+  stepCore <- compileDirect step
+  pure (IterS stepCore :.: (IdS :***: PromoteS ground) :.: pairCore)
+
+-- | R2 fold with an open accumulator seed (see 'affineIterOpenFrom').
+affineFoldOpenFrom
+  :: Ground (Lift b)
+  -> UMorph x ('UList a ':**: b)
+  -> UMorph (b ':**: a) b
+  -> Either DirectError (Morph (Lift x) ('Bang (Lift b)))
+affineFoldOpenFrom ground pair step = do
+  pairCore <- compileDirect pair
+  stepCore <- compileDirect step
+  pure (FoldS stepCore :.: (IdS :***: PromoteS ground) :.: pairCore)
+
+-- | R2 bounded while with an open seed (see 'affineIterOpenFrom').
+affineWhileOpenFrom
+  :: SUTy a
+  -> Ground (Lift a)
+  -> UMorph x ('UNat ':**: a)
+  -> UMorph a ('UUnit ':++: 'UUnit)
+  -> UMorph a a
+  -> Either DirectError (Morph (Lift x) ('Bang (Lift a)))
+affineWhileOpenFrom stateTy ground pair test step = do
+  pairCore <- compileDirect pair
+  testCore <- compileDirect test
+  stepCore <- compileDirect step
+  pure (WhileS (liftSTy stateTy) testCore stepCore
+    :.: (IdS :***: PromoteS ground) :.: pairCore)
 
 -- | Closed-input specialization of 'affineMapValueFrom'.
 closedMapValue

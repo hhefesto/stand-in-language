@@ -41,7 +41,7 @@ import Telomare.Surface (liftSTy)
 -- closures ('TLolly', 'NCurry', 'NApply', 'NMapC').  Closure VALUES are
 -- never transported — only morphisms are.
 transportVersion :: Int
-transportVersion = 4
+transportVersion = 5
 
 -- | Runtime representation of every core object, including the exponential.
 data TyCode
@@ -84,6 +84,7 @@ data Node
   | NApply
   | NMapC
   | NGuard TyCode Node
+  | NPromote TyCode
   | NDup TyCode
   | NBox Node
   | NBoxVal Node
@@ -176,6 +177,7 @@ exportNode (CurryS sc f)  = NCurry (styCode sc) (exportNode f)
 exportNode ApplyS         = NApply
 exportNode MapCS          = NMapC
 exportNode (GuardS a t)   = NGuard (styCode a) (exportNode t)
+exportNode (PromoteS g)   = NPromote (styCode (groundSTy g))
 exportNode (DupS a)       = NDup (styCode a)
 exportNode (BoxS f)       = NBox (exportNode f)
 exportNode (BoxValS f)    = NBoxVal (exportNode f)
@@ -257,6 +259,15 @@ occurs variable ty = do
     ILolly a b -> (||) <$> occurs variable a <*> occurs variable b
     IUnit      -> pure False
     INat       -> pure False
+
+-- promote's license (spec: Ground): bang- and arrow-free first-order data
+groundIType :: IType -> Bool
+groundIType IUnit         = True
+groundIType INat          = True
+groundIType (IProd a b)   = groundIType a && groundIType b
+groundIType (ISum a b)    = groundIType a && groundIType b
+groundIType (IList a)     = groundIType a
+groundIType _             = False
 
 unify :: String -> IType -> IType -> Infer ()
 unify context left right = do
@@ -341,6 +352,11 @@ inferNode node = case node of
     unify "guard input" ti a
     unify "guard predicate" to (ISum IUnit IUnit)
     pure (a, ISum a IUnit)
+  NPromote witness -> do
+    let a = fromCode witness
+    if groundIType a
+      then pure (a, IBang a)
+      else failValidation "promote expects a bang-free first-order type"
   NDup witness -> let a = fromCode witness in pure (IBang a, IProd (IBang a) (IBang a))
   NBox body -> do
     (input, output) <- inferNode body
@@ -401,6 +417,7 @@ renderNode node = case node of
   NCurry ty body -> list ["curry", renderType ty, renderNode body]
   NApply -> atom "apply"; NMapC -> atom "map-clo"
   NGuard ty test -> list ["guard", renderType ty, renderNode test]
+  NPromote ty -> list ["promote", renderType ty]
   NDup ty -> list ["dup", renderType ty]; NBox body -> unary "box" body
   NBoxVal body -> unary "box-val" body; NMerge -> atom "merge"; NMap body -> unary "map" body
   NIter body -> unary "iter" body
@@ -449,7 +466,8 @@ nodeP = parens $ choice
   , symbol "copy" >> NCopy <$> typeP
   , symbol "curry" >> NCurry <$> typeP <*> nodeP
   , nullary "apply" NApply, nullary "map-clo" NMapC
-  , symbol "guard" >> NGuard <$> typeP <*> nodeP, symbol "dup" >> NDup <$> typeP
+  , symbol "guard" >> NGuard <$> typeP <*> nodeP
+  , symbol "promote" >> NPromote <$> typeP, symbol "dup" >> NDup <$> typeP
   , unary "box" NBox, unary "box-val" NBoxVal, nullary "merge" NMerge
   , unary "map" NMap, unary "iter" NIter, unary "fold" NFold
   , symbol "while" >> NWhile <$> typeP <*> nodeP <*> nodeP

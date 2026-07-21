@@ -10,7 +10,8 @@ not ends.
   duplication grade. Explicit `copy` uses the same path.
 - `A -o B` closures are affine. Reusable code is a promoted closed
   `Bang (Lolly a b)`; `mapc` may select among promoted closed lambdas.
-- Agda and Haskell share `CurryS`, `ApplyS`, and `MapCS`; transport is v4.
+- Agda and Haskell share `CurryS`, `ApplyS`, `MapCS`, and the R2 data
+  promotion `PromoteS` (`design/PROMOTE.md`); transport is v5.
 - `design/CLOSURES.md` is the accepted closure design.
 - Historical `.tel`, `Telomare.Linear`, and `src/Telomare/Compat/` are frozen.
 
@@ -62,7 +63,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (318 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (322 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -121,8 +122,19 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    improving the Agda `spaceS` result shapes and re-proving), and the v1
    DSL bounds only the input text, not the machine state, so ttt's step
    duplication cap stays unbounded (its state contains Text).
-8. **M4** — R2 `PromoteS` (copyable open seeds), transport v5, unblocking
-   `multiplyNat`/`dTimes`/`dMinus`.
+8. **M4 (done)** — R2 data promotion `promoteS : Ground A → A ⇨ ! A`
+   (`design/PROMOTE.md`): Ground excludes `!` so it is never dig; free in
+   work and dup (later duplication is priced at its dup sites); depth 0
+   (a value is promoted, not a code region). Cross-stack: every Agda
+   theorem (work/dup/space/adequacy/placement/abstract) covers it with
+   one-line cases; Haskell mirrors in Core/Denotation/Space/Budget;
+   transport is v5 with `NPromote` (groundness validated). The elaborator
+   accepts open loop seeds of Ground type on the placement path
+   (`affine{Iter,Fold,While}OpenFrom`), proving multiplication via an
+   open pair seed (`multiplySource`); closure-typed open seeds are still
+   rejected. Prelude `dTimes`/`dMinus` wiring is slated with the M5
+   stdlib pass; the closed-entry bindings path (`compileClosedLoop`)
+   still requires closed seeds.
 9. **M5** — closure-bodied `IterCS`/`FoldCS`/`WhileCS`, richer `mapc`
    selectors, apply-head synthesis, transport v6.
 

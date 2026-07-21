@@ -98,6 +98,7 @@ open import T3.Surface.Sem
 ε applyS       = applyU
 ε mapCS        = mapCU
 ε (guardS t)   = guardU (ε t)
+ε (promoteS _) = idU           -- data promotion is value-invisible
 ε dupS         = dupU          -- contraction erases to free dup
 ε (boxS f)     = ε f           -- boxes erase
 ε (boxValS f)  = ε f
@@ -247,6 +248,7 @@ private
 ε-rel applyS {gf , ga} {uf , ua} (relF , relA) = relF ga ua relA
 ε-rel (mapCS {A} {B}) {f , xs} {uf , us} (relF , relXs) =
   map-rel A B f uf relF xs us relXs
+ε-rel (promoteS _) rel = rel
 ε-rel dupS rel = (rel , rel)
 ε-rel (boxS f) rel = ε-rel f rel
 ε-rel (boxValS f) rel = ε-rel f rel
@@ -470,6 +472,7 @@ skelOfCore (curryS f)   d = skelOfCore f d
 skelOfCore applyS       d = tipD
 skelOfCore mapCS        d = recD d tipD
 skelOfCore (guardS t)   d = skelOfCore t d
+skelOfCore (promoteS _) d = tipD
 skelOfCore dupS         d = tipD
 skelOfCore (boxS f)     d = skelOfCore f (suc d)
 skelOfCore (boxValS f)  d = skelOfCore f (suc d)
@@ -510,6 +513,7 @@ core-solves (curryS f)   d = core-solves f d
 core-solves applyS       d = tt
 core-solves mapCS        d = (≤-refl , tt)
 core-solves (guardS t)   d = core-solves t d
+core-solves (promoteS _) d = tt
 core-solves dupS         d = tt
 core-solves (boxS f)     d =
   solves-anti (skelOfCore f (suc d)) (n≤1+n d) (core-solves f (suc d))

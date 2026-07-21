@@ -136,6 +136,7 @@ whileSp A (suc n) t s a = let (pt , r) = t a in whileSpGo A n t s a pt r
   in (suc (sz A a) ⊔ pb , b)
 ⟦_⟧S {(! (A ⊸ B)) ⊗ listT _} mapCS (gf , xs) =
   let (p , ys) = mapSp A B gf xs in (suc p , ys)
+⟦_⟧S {A} (promoteS _) a = (sz A a , a)
 ⟦_⟧S {(! A)} dupS a = (sz A a + sz A a , (a , a))
 ⟦ boxS f ⟧S a = ⟦ f ⟧S a
 ⟦ boxValS f ⟧S a = ⟦ f ⟧S a

@@ -201,6 +201,7 @@ transferB MapCS _ = (RecT Nothing TipT, TopS)
 transferB (GuardS _ t) s =
   let (bt, _) = transferB t s
   in (bt, SumSh (Just s) (Just UnitS))
+transferB (PromoteS _) s = (TipT, BangSh s)
 transferB (DupS _) s = (TipT, PairSh s s)
 transferB (BoxS f) s = let (b, r) = transferB f (unbangS s) in (b, BangSh r)
 transferB (BoxValS f) s = let (b, r) = transferB f s in (b, BangSh r)
@@ -357,6 +358,7 @@ costW MapCS s =
   let (sbf, sl) = splitP s
   in (mulC (lenOfS sl) (addC (Just 1) (lollyCostOf (unbangS sbf))), TopS)
 costW (GuardS _ t) s = (fst (costW t s), SumSh (Just s) (Just UnitS))
+costW (PromoteS _) s = (Just 0, BangSh s)
 costW (DupS _) s = (Just 0, PairSh s s)
 costW (BoxS f) s = let (c, r) = costW f (unbangS s) in (c, BangSh r)
 costW (BoxValS f) s = let (c, r) = costW f s in (c, BangSh r)
@@ -600,6 +602,7 @@ costSp r MapCS s =
                (lollyCostOf (unbangS sbf)))
          _ -> Nothing
      , TopS, RBang (RList RUnknown))
+costSp r (PromoteS _) s = (sizeR r s, BangSh s, RBang r)
 costSp r (DupS _) s =
   (addC (sizeR r s) (sizeR r s), PairSh s s, RProd r r)
 costSp r (BoxS f) s =
@@ -760,6 +763,7 @@ costD ApplyS s = (lollyCostOf (fst (splitP s)), TopS)
 costD MapCS s =
   let (sbf, sl) = splitP s
   in (mulD (lenOfS sl) (lollyCostOf (unbangS sbf)), TopS)
+costD (PromoteS _) s = (Just 0, BangSh s)
 costD (DupS sa) s = (sizeS (SBang sa) s, PairSh s s)
 costD (BoxS f) s = let (c, r) = costD f (unbangS s) in (c, BangSh r)
 costD (BoxValS f) s = let (c, r) = costD f s in (c, BangSh r)

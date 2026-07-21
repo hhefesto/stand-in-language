@@ -32,7 +32,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Paths_telomare (getDataFileName)
 import qualified Telomare.Compiler.Closed as Closed
 import Telomare.Compiler.Direct
-import Telomare.Core (Morph (..), STy (..), Ty (..))
+import Telomare.Core (Ground, Morph (..), STy (..), Ty (..), groundOfSTy)
 import Telomare.Machine
 import Telomare.Surface
 
@@ -739,49 +739,89 @@ compileAffineLoop tables env resultTy expression = case expression of
         _ -> bad "mapc expects a list input with an inferable type"
     _ -> bad "mapc result must be a list"
   EIter count seed stepName -> do
-    requirePromotable "iteration seed" seed
     SomeDef stepIn stepOut stepU <- lookupDef tables stepName
     Refl <- requireSame resultTy stepIn
     Refl <- requireSame resultTy stepOut
-    Elab countTy rest countU <- elaborate tables env Set.empty SUNat count
-    Refl <- requireSame SUNat countTy
-    seedU <- elaborateClosed tables resultTy seed
-    core <- fromDirect
-      (Closed.affineIterValueFrom (finish rest countU) seedU stepU)
-    pure (SomePlacedLoop resultTy core)
+    if closedSeed seed
+      then do
+        Elab countTy rest countU <- elaborate tables env Set.empty SUNat count
+        Refl <- requireSame SUNat countTy
+        seedU <- elaborateClosed tables resultTy seed
+        core <- fromDirect
+          (Closed.affineIterValueFrom (finish rest countU) seedU stepU)
+        pure (SomePlacedLoop resultTy core)
+      else do
+        ground <- requireGround "iteration seed" seed resultTy
+        let pairTy = SUProd SUNat resultTy
+        Elab pairActual rest pairU <- elaborate tables env Set.empty pairTy
+          (EPair count seed)
+        Refl <- requireSame pairTy pairActual
+        core <- fromDirect
+          (Closed.affineIterOpenFrom ground (finish rest pairU) stepU)
+        pure (SomePlacedLoop resultTy core)
   EFold input seed stepName -> do
-    requirePromotable "fold seed" seed
     SomeDef stepIn stepOut stepU <- lookupDef tables stepName
     case stepIn of
       SUProd accumulator element -> do
         Refl <- requireSame resultTy accumulator
         Refl <- requireSame resultTy stepOut
-        Elab inputTy rest inputU <- elaborate tables env Set.empty (SUList element) input
-        Refl <- requireSame (SUList element) inputTy
-        seedU <- elaborateClosed tables accumulator seed
-        core <- fromDirect
-          (Closed.affineFoldValueFrom (finish rest inputU) seedU stepU)
-        pure (SomePlacedLoop accumulator core)
+        if closedSeed seed
+          then do
+            Elab inputTy rest inputU <- elaborate tables env Set.empty (SUList element) input
+            Refl <- requireSame (SUList element) inputTy
+            seedU <- elaborateClosed tables accumulator seed
+            core <- fromDirect
+              (Closed.affineFoldValueFrom (finish rest inputU) seedU stepU)
+            pure (SomePlacedLoop accumulator core)
+          else do
+            ground <- requireGround "fold seed" seed accumulator
+            let pairTy = SUProd (SUList element) accumulator
+            Elab pairActual rest pairU <- elaborate tables env Set.empty pairTy
+              (EPair input seed)
+            Refl <- requireSame pairTy pairActual
+            core <- fromDirect
+              (Closed.affineFoldOpenFrom ground (finish rest pairU) stepU)
+            pure (SomePlacedLoop accumulator core)
       _ -> bad "fold step must accept accumulator * element"
   EWhile limit seed testName stepName -> do
-    requirePromotable "while seed" seed
     SomeDef testIn testOut testU <- lookupDef tables testName
     SomeDef stepIn stepOut stepU <- lookupDef tables stepName
     Refl <- requireSame resultTy testIn
     Refl <- requireSame resultTy stepIn
     Refl <- requireSame resultTy stepOut
     Refl <- requireSame testOut (SUSum SUUnit SUUnit)
-    Elab limitTy rest limitU <- elaborate tables env Set.empty SUNat limit
-    Refl <- requireSame SUNat limitTy
-    seedU <- elaborateClosed tables resultTy seed
-    core <- fromDirect (Closed.affineWhileValueFrom resultTy
-      (finish rest limitU) seedU testU stepU)
-    pure (SomePlacedLoop resultTy core)
+    if closedSeed seed
+      then do
+        Elab limitTy rest limitU <- elaborate tables env Set.empty SUNat limit
+        Refl <- requireSame SUNat limitTy
+        seedU <- elaborateClosed tables resultTy seed
+        core <- fromDirect (Closed.affineWhileValueFrom resultTy
+          (finish rest limitU) seedU testU stepU)
+        pure (SomePlacedLoop resultTy core)
+      else do
+        ground <- requireGround "while seed" seed resultTy
+        let pairTy = SUProd SUNat resultTy
+        Elab pairActual rest pairU <- elaborate tables env Set.empty pairTy
+          (EPair limit seed)
+        Refl <- requireSame pairTy pairActual
+        core <- fromDirect (Closed.affineWhileOpenFrom resultTy ground
+          (finish rest pairU) testU stepU)
+        pure (SomePlacedLoop resultTy core)
   _ -> bad "expected recursion with an affine controller"
   where
-    requirePromotable description value
-      | Set.null (freeVars value) && not (containsIter value) = Right ()
-      | otherwise = bad (description <> " must be closed; open promotion is unavailable")
+    closedSeed value = Set.null (freeVars value) && not (containsIter value)
+    -- R2: an open seed is promoted at the loop boundary when its type is
+    -- Ground (bang- and arrow-free first-order data) — design/PROMOTE.md.
+    requireGround :: String -> Expr -> SUTy a
+                  -> Either CompileError (Ground (Lift a))
+    requireGround description value ty
+      | containsIter value =
+          bad (description <> " cannot contain recursion")
+      | otherwise = case groundOfSTy (liftSTy ty) of
+          Just ground -> Right ground
+          Nothing -> bad (description
+            <> " must be closed or promotable first-order data;"
+            <> " closures cannot be promoted")
 
 -- | Compile a reusable-mapper expression to a promoted closure selector:
 -- closed lambdas at the leaves (each promoted by empty-context BoxValS),

@@ -21,6 +21,9 @@ module Telomare.Core
   , sizeVal
   , Copyable (..)
   , copyableSTy
+  , Ground (..)
+  , groundSTy
+  , groundOfSTy
   , Morph (..)
   , depth
   , towerHeight
@@ -124,6 +127,35 @@ sizeVal (SLolly _ _) _        = 1
 -- stays evidence-indexed (rather than collapsing into 'STy') because
 -- future non-data objects (closures) must NOT be copyable: duplicating
 -- suspended computation goes through the 'Bang' modality, never 'CopyS'.
+-- | Bang-free, arrow-free first-order data (spec: @T3.Core.Ty.Ground@):
+-- the license for R2 data promotion ('PromoteS').  Deliberately not
+-- 'Copyable' — @Copyable ('Bang a)@ exists, and promotion at a bang
+-- would be dig, the operator whose absence fixes box depth.
+data Ground a where
+  GroundUnit :: Ground 'Unit
+  GroundNat  :: Ground 'Nat
+  GroundProd :: Ground a -> Ground b -> Ground (a ':*: b)
+  GroundSum  :: Ground a -> Ground b -> Ground (a ':+: b)
+  GroundList :: Ground a -> Ground ('ListT a)
+
+-- | The type a Ground witness proves (total: Ground is structural).
+groundSTy :: Ground a -> STy a
+groundSTy GroundUnit       = SUnit
+groundSTy GroundNat        = SNat
+groundSTy (GroundProd a b) = SProd (groundSTy a) (groundSTy b)
+groundSTy (GroundSum a b)  = SSum (groundSTy a) (groundSTy b)
+groundSTy (GroundList a)   = SList (groundSTy a)
+
+-- | Recover a Ground witness from a type when it is bang- and arrow-free.
+groundOfSTy :: STy a -> Maybe (Ground a)
+groundOfSTy SUnit        = Just GroundUnit
+groundOfSTy SNat         = Just GroundNat
+groundOfSTy (SProd a b)  = GroundProd <$> groundOfSTy a <*> groundOfSTy b
+groundOfSTy (SSum a b)   = GroundSum <$> groundOfSTy a <*> groundOfSTy b
+groundOfSTy (SList a)    = GroundList <$> groundOfSTy a
+groundOfSTy (SBang _)    = Nothing
+groundOfSTy (SLolly _ _) = Nothing
+
 data Copyable a where
   CopyUnit :: Copyable 'Unit
   CopyNat  :: Copyable 'Nat
@@ -185,6 +217,11 @@ data Morph (a :: Ty) (b :: Ty) where
   ApplyS   :: Morph ('Lolly a b ':*: a) b
   MapCS    :: Morph ('Bang ('Lolly a b) ':*: 'ListT a) ('Bang ('ListT b))
   GuardS   :: STy a -> Morph a ('Unit ':+: 'Unit) -> Morph a (a ':+: 'Unit)
+  PromoteS :: Ground a -> Morph a ('Bang a)
+    -- ^ R2 data promotion (spec: @promoteS@, design\/PROMOTE.md): Ground
+    -- (bang-free first-order) values enter the modality in place.  Free
+    -- in work and dup — every later duplication is priced at its dup
+    -- site — and never dig, because Ground rules @Bang@ out.
   DupS     :: STy a -> Morph ('Bang a) ('Bang a ':*: 'Bang a)
   BoxS     :: Morph a b -> Morph ('Bang a) ('Bang b)
   BoxValS  :: Morph 'Unit b -> Morph 'Unit ('Bang b)
@@ -232,6 +269,7 @@ depth ApplyS         = 0
 depth MapCS          = 1
   -- the closure body runs one level down, like every recursion body
 depth (GuardS _ t)   = depth t
+depth (PromoteS _)   = 0
 depth (DupS _)       = 0
 depth (BoxS f)       = 1 + depth f
 depth (BoxValS f)    = 1 + depth f

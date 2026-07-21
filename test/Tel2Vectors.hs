@@ -131,6 +131,14 @@ tel2Vectors = do
             , rejectsWith "tel2 asks for an annotation on an unannotated lambda"
                 (small "let f = \\x -> x in (\"\",left ())") "annotate the binding"
             ]
+          openSeeds =
+            [ acceptsBehavior "tel2 promotes an open iteration seed (R2)"
+                openSeedSource ["go"] "six\n"
+            , acceptsBehavior "tel2 promotes an open fold seed (R2)"
+                openFoldSeedSource ["go"] "eight\n"
+            , acceptsBehavior "tel2 multiplies via an open pair seed (R2)"
+                multiplySource ["go"] "twelve\n"
+            ]
           syntaxMain =
             [ acceptsBehavior "tel2 main entry synthesizes init and step"
                 mainCounterSource ["go"] "start\ndone\n"
@@ -179,7 +187,8 @@ tel2Vectors = do
             , rejectsWith "tel2 rejects captured fold seed" capturedFoldSeedSource "fold seed cannot capture"
             , rejectsWith "tel2 rejects captured while seed" capturedWhileSeedSource "while seed cannot capture"
             , rejectsWith "tel2 rejects nested closed recursion" nestedRecursionSource "cannot capture or contain recursion"
-            , rejectsWith "tel2 rejects open recursive seed" openSeedSource "must be closed; open promotion is unavailable"
+            , rejectsWith "tel2 rejects an open closure-typed seed"
+                closureSeedSource "closures cannot be promoted"
             , rejectsWith "tel2 rejects live context after recursion" residualContextSource "cannot remain live"
             , rejects "tel2 rejects a map mapper with the wrong result type" wrongMapResultSource
             ]
@@ -190,7 +199,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> openSeeds <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -886,9 +895,33 @@ openSeedSource :: String
 openSeedSource = unlines
   [ "type State = Nat;"
   , "def increment(n: Nat): Nat = suc n;"
-  , "def bad(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let (fuel,seed): Nat * Nat = copy state in let result: Nat = iterate fuel from seed with increment in (\"\",right result);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
+  , "def step(request: Text * State): Reply State = let (input,state) = request in let _ = input in let (fuel,seed) = copy state in let result = iterate fuel from seed with increment in matchNat result of { 6 -> (\"six\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+openFoldSeedSource :: String
+openFoldSeedSource = unlines
+  [ "type State = Nat;"
+  , "def double(n: Nat): Nat = add (n,n);"
+  , "def plus(p: Nat * Nat): Nat = add p;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = bad(request);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let seed = suc n in let total = fold [1, 2, 3] from double seed with plus in matchNat total of { 8 -> (\"eight\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+multiplySource :: String
+multiplySource = unlines
+  [ "type State = Nat;"
+  , "def timesStep(p: Nat * Nat): Nat * Nat = let (acc, a) = p in let (a1, a2) = copy a in (add (acc, a1), a2);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 4);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let pair = iterate 3 from (0, n) with timesStep in let (result, rest) = pair in let _ = rest in matchNat result of { 12 -> (\"twelve\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+closureSeedSource :: String
+closureSeedSource = unlines
+  [ "type State = Nat;"
+  , "def stepc(f: Nat -o Nat): Nat -o Nat = f;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let f: Nat -o Nat = \\x -> add (x,n) in let g = iterate 2 from f with stepc in matchNat apply(g, 1) of { k -> let _ = k in (\"done\\n\",left ()); };"
   ]
 
 residualContextSource :: String

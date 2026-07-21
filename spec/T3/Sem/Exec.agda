@@ -124,6 +124,7 @@ KVal (A ⊸ B)   = KVal A → TelM (KVal B)
 ⟦ curryS f   ⟧K c = return-tel (λ a → ⟦ f ⟧K (c , a))
 ⟦ applyS     ⟧K (f , a) = step-tel (f a)
 ⟦ mapCS      ⟧K (f , xs) = mapT xs f
+⟦ promoteS _ ⟧K a = return-tel a
 ⟦ dupS       ⟧K a = return-tel (a , a)
 ⟦ boxS f     ⟧K a = ⟦ f ⟧K a
 ⟦ boxValS f  ⟧K a = ⟦ f ⟧K a

@@ -36,11 +36,11 @@ name a current compatibility definition.
 | `c2d` | obsolete | Primitive `Nat` replaces the Church/data conversion boundary. |
 | `dPlus` | modernized | `LegacyPrelude.dPlus : Nat * Nat -> Nat`, implemented by `add`/`AddS`. |
 | `plus` | obsolete | Church-numeral composition is higher-order; use `natAdd`. |
-| `dTimes` | deferred | Runtime-bounded iteration exists, but multiplication still needs an affine state design that retains the multiplicand without promoting an open seed. |
+| `dTimes` | unblocked (R2) | `PromoteS` admits open Ground seeds: iterate from the pair `(0, a)`, the step re-copying the multiplicand (priced `copy`). See the `multiplySource` vector; Prelude wiring lands with the M5 stdlib pass. |
 | `times` | obsolete | Church multiplication is higher-order. |
 | `dPow` | deferred | Needs multiplication plus sound dynamic/nested iteration. |
 | `pow` | obsolete | Church exponentiation is higher-order. |
-| `dMinus` | deferred | Runtime-bounded iteration exists, but truncated subtraction still needs predecessor/state support without promoting an open seed. |
+| `dMinus` | unblocked (R2) | Open Ground seeds (`PromoteS`) carry the running value through iteration; predecessor via `matchNat`. Prelude wiring lands with the M5 stdlib pass. |
 | `minus` | obsolete | Church-facing subtraction wrapper has no modern interface. |
 | `range` | deferred | Source list construction and runtime bounds exist, but range still needs affine state that carries an open endpoint/index through iteration. |
 | `map` | specialized | Source `map input with mapper` is reusable, first-order, monomorphic, order-preserving, and backed by `MapS`; `Prelude.mapIncrement : List Nat -> List Nat` is concrete. `mapc input with mapper` additionally maps with a function value selected at runtime among closed lambdas (`MapCS`). The polymorphic interface remains unavailable. |

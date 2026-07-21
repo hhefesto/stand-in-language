@@ -165,6 +165,7 @@ module Interp (R : CostAlgebra) where
 
   ⟦_⟧G : {A B : Ty} → A ⇨ B → GVal ℳ A → ℳ × GVal ℳ B
   ⟦_⟧G {A} idS a = (chargePrim A A idT (sz A a) (sz A a) , a)
+  ⟦_⟧G {A} (promoteS _) a = (chargePrim A (! A) idT (sz A a) (sz A a) , a)
   ⟦ g ∘S f ⟧G a =
     let (m , b) = ⟦ f ⟧G a
         (r , c) = ⟦ g ⟧G b
@@ -325,6 +326,7 @@ module Interp (R : CostAlgebra) where
   G-val : {A B : Ty} (f : A ⇨ B) {ga : GVal ℳ A} {a : ⟦ A ⟧T}
         → ≈G ℳ A ga a → ≈G ℳ B (proj₂ (⟦ f ⟧G ga)) (⟦ f ⟧V a)
   G-val idS rel = rel
+  G-val (promoteS _) rel = rel
   G-val (g ∘S f) rel = G-val g (G-val f rel)
   G-val (f ⊗S g) (ra , rc) = (G-val f ra , G-val g rc)
   G-val swapS (ra , rb) = (rb , ra)

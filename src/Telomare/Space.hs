@@ -156,6 +156,7 @@ evalSp ApplyS (DPair f a) =
   in (max (1 + dSize a) pb, b)
 evalSp MapCS (DPair f (DList xs)) =
   let (p, ys) = mapSp (applyClo f) xs in (1 + p, DList ys)
+evalSp (PromoteS _) v = (dSize v, v)
 evalSp (DupS _) v = (2 * dSize v, DPair v v)
 evalSp (BoxS f) v = evalSp f v
 evalSp (BoxValS f) v = evalSp f v

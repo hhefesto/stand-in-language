@@ -70,6 +70,7 @@ evalV (CurryS sc f) c                = Closure sc f c
 evalV ApplyS (Closure _ body env, a) = evalV body (env, a)
 evalV MapCS (Closure _ body env, xs) = fmap (\x -> evalV body (env, x)) xs
 evalV (GuardS _ t) a                 = guardOut a (evalV t a)
+evalV (PromoteS _) a                 = a
 evalV (DupS _) a                     = (a, a)
 evalV (BoxS f) a                     = evalV f a
 evalV (BoxValS f) a                  = evalV f a
@@ -179,6 +180,7 @@ evalG alg MapCS (Closure _ body env, xs) =
 evalG alg (GuardS sa t) a =
   let (mt, r) = evalG alg t a
   in (caSeq alg (caProbe alg (sizeVal sa a)) mt, guardOut a r)
+evalG alg (PromoteS _) a       = (caZero alg, a)
 evalG alg (DupS sa) a          = (caDup alg (sizeVal (SBang sa) a), (a, a))
 evalG alg (BoxS f) a           = evalG alg f a
 evalG alg (BoxValS f) a        = evalG alg f a
@@ -273,6 +275,7 @@ evalK MapCS (Closure _ body env, xs) g =
   mapK (\x -> evalK body (env, x)) xs g
 evalK (GuardS _ t) a g           =
   evalK t a g >>= \(r, g') -> Just (guardOut a r, g')
+evalK (PromoteS _) a g           = Just (a, g)
 evalK (DupS _) a g               = Just ((a, a), g)
 evalK (BoxS f) a g               = evalK f a g
 evalK (BoxValS f) a g            = evalK f a g
