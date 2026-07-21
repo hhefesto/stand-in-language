@@ -114,6 +114,9 @@ skelWith v = go
     go (BoxValS f)    = go f
     go (CurryS _ f)   = go f
     go MapCS          = RecT v TipT
+    go IterCS         = RecT v TipT
+    go FoldCS         = RecT v TipT
+    go (WhileCS _)    = RecT v TipT
     go (MapS f)       = RecT v (go f)
     go (IterS f)      = RecT v (go f)
     go (FoldS f)      = RecT v (go f)
@@ -198,6 +201,9 @@ transferB (CopyS _) s = (TipT, PairSh s s)
 transferB (CurryS _ f) _ = (fst (transferB f TopS), TopS)
 transferB ApplyS _ = (TipT, TopS)
 transferB MapCS _ = (RecT Nothing TipT, TopS)
+transferB IterCS _ = (RecT Nothing TipT, TopS)
+transferB FoldCS _ = (RecT Nothing TipT, TopS)
+transferB (WhileCS _) _ = (RecT Nothing TipT, TopS)
 transferB (GuardS _ t) s =
   let (bt, _) = transferB t s
   in (bt, SumSh (Just s) (Just UnitS))
@@ -357,6 +363,22 @@ costW ApplyS s = (addC (Just 1) (lollyCostOf (fst (splitP s))), TopS)
 costW MapCS s =
   let (sbf, sl) = splitP s
   in (mulC (lenOfS sl) (addC (Just 1) (lollyCostOf (unbangS sbf))), TopS)
+costW IterCS s =
+  let (sbf, rest) = splitP s
+      (fu, _) = splitP rest
+  in (mulC (fuelOfS fu) (addC (Just 1) (lollyCostOf (unbangS sbf))), TopS)
+costW FoldCS s =
+  let (sbf, rest) = splitP s
+      (ls, _) = splitP rest
+  in (mulC (lenOfS ls) (addC (Just 1) (lollyCostOf (unbangS sbf))), TopS)
+costW (WhileCS _) s =
+  let (st, rest) = splitP s
+      (sf, q) = splitP rest
+      (fu, _) = splitP q
+  in ( mulC (fuelOfS fu)
+        (addC (Just 1)
+          (addC (lollyCostOf (unbangS st)) (lollyCostOf (unbangS sf))))
+     , TopS)
 costW (GuardS _ t) s = (fst (costW t s), SumSh (Just s) (Just UnitS))
 costW (PromoteS _) s = (Just 0, BangSh s)
 costW (DupS _) s = (Just 0, PairSh s s)
@@ -602,6 +624,19 @@ costSp r MapCS s =
                (lollyCostOf (unbangS sbf)))
          _ -> Nothing
      , TopS, RBang (RList RUnknown))
+costSp r IterCS _ =
+  let (_, rest) = splitRP r
+      (_, racc) = splitRP rest
+  in (Nothing, TopS, racc)
+costSp r FoldCS _ =
+  let (_, rest) = splitRP r
+      (_, racc) = splitRP rest
+  in (Nothing, TopS, racc)
+costSp r (WhileCS _) _ =
+  let (_, rest) = splitRP r
+      (_, q) = splitRP rest
+      (_, racc) = splitRP q
+  in (Nothing, TopS, racc)
 costSp r (PromoteS _) s = (sizeR r s, BangSh s, RBang r)
 costSp r (DupS _) s =
   (addC (sizeR r s) (sizeR r s), PairSh s s, RProd r r)
@@ -763,6 +798,19 @@ costD ApplyS s = (lollyCostOf (fst (splitP s)), TopS)
 costD MapCS s =
   let (sbf, sl) = splitP s
   in (mulD (lenOfS sl) (lollyCostOf (unbangS sbf)), TopS)
+costD IterCS s =
+  let (sbf, rest) = splitP s
+      (fu, _) = splitP rest
+  in (mulD (fuelOfS fu) (lollyCostOf (unbangS sbf)), TopS)
+costD FoldCS s =
+  let (sbf, rest) = splitP s
+      (ls, _) = splitP rest
+  in (mulD (lenOfS ls) (lollyCostOf (unbangS sbf)), TopS)
+costD (WhileCS _) s =
+  let (_, rest) = splitP s
+      (_, q) = splitP rest
+      (fu, _) = splitP q
+  in (mulD (fuelOfS fu) Nothing, TopS)
 costD (PromoteS _) s = (Just 0, BangSh s)
 costD (DupS sa) s = (sizeS (SBang sa) s, PairSh s s)
 costD (BoxS f) s = let (c, r) = costD f (unbangS s) in (c, BangSh r)
@@ -794,6 +842,10 @@ costD (WhileS sa t st) s =
        NatLE n -> let (c, r) = aiterD roundD n (unbangS a0)
                   in (c, BangSh r)
        _       -> (Nothing, TopS)
+
+fuelOfS :: ShapeH -> Maybe Natural
+fuelOfS (NatLE n) = Just n
+fuelOfS _         = Nothing
 
 lenOfS :: ShapeH -> Maybe Natural
 lenOfS (ListSh n _) = Just n

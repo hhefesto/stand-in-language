@@ -41,7 +41,7 @@ import Telomare.Surface (liftSTy)
 -- closures ('TLolly', 'NCurry', 'NApply', 'NMapC').  Closure VALUES are
 -- never transported — only morphisms are.
 transportVersion :: Int
-transportVersion = 5
+transportVersion = 6
 
 -- | Runtime representation of every core object, including the exponential.
 data TyCode
@@ -83,6 +83,9 @@ data Node
   | NCurry TyCode Node
   | NApply
   | NMapC
+  | NIterC
+  | NFoldC
+  | NWhileC TyCode
   | NGuard TyCode Node
   | NPromote TyCode
   | NDup TyCode
@@ -176,6 +179,9 @@ exportNode (CopyS w)      = NCopy (styCode (copyableSTy w))
 exportNode (CurryS sc f)  = NCurry (styCode sc) (exportNode f)
 exportNode ApplyS         = NApply
 exportNode MapCS          = NMapC
+exportNode IterCS         = NIterC
+exportNode FoldCS         = NFoldC
+exportNode (WhileCS a)    = NWhileC (styCode a)
 exportNode (GuardS a t)   = NGuard (styCode a) (exportNode t)
 exportNode (PromoteS g)   = NPromote (styCode (groundSTy g))
 exportNode (DupS a)       = NDup (styCode a)
@@ -346,6 +352,19 @@ inferNode node = case node of
     a <- fresh
     b <- fresh
     pure (IProd (IBang (ILolly a b)) (IList a), IBang (IList b))
+  NIterC -> do
+    a <- fresh
+    pure (IProd (IBang (ILolly a a)) (IProd INat (IBang a)), IBang a)
+  NFoldC -> do
+    a <- fresh
+    b <- fresh
+    pure (IProd (IBang (ILolly (IProd b a) b)) (IProd (IList a) (IBang b))
+         , IBang b)
+  NWhileC witness -> do
+    let a = fromCode witness
+    pure (IProd (IBang (ILolly a (ISum IUnit IUnit)))
+            (IProd (IBang (ILolly a a)) (IProd INat (IBang a)))
+         , IBang a)
   NGuard witness test -> do
     let a = fromCode witness
     (ti, to) <- inferNode test
@@ -416,6 +435,8 @@ renderNode node = case node of
   NDupNat -> atom "dup-nat"; NCopy ty -> list ["copy", renderType ty]
   NCurry ty body -> list ["curry", renderType ty, renderNode body]
   NApply -> atom "apply"; NMapC -> atom "map-clo"
+  NIterC -> atom "iter-clo"; NFoldC -> atom "fold-clo"
+  NWhileC ty -> list ["while-clo", renderType ty]
   NGuard ty test -> list ["guard", renderType ty, renderNode test]
   NPromote ty -> list ["promote", renderType ty]
   NDup ty -> list ["dup", renderType ty]; NBox body -> unary "box" body
@@ -466,6 +487,8 @@ nodeP = parens $ choice
   , symbol "copy" >> NCopy <$> typeP
   , symbol "curry" >> NCurry <$> typeP <*> nodeP
   , nullary "apply" NApply, nullary "map-clo" NMapC
+  , nullary "iter-clo" NIterC, nullary "fold-clo" NFoldC
+  , symbol "while-clo" >> NWhileC <$> typeP
   , symbol "guard" >> NGuard <$> typeP <*> nodeP
   , symbol "promote" >> NPromote <$> typeP, symbol "dup" >> NDup <$> typeP
   , unary "box" NBox, unary "box-val" NBoxVal, nullary "merge" NMerge

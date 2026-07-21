@@ -69,6 +69,12 @@ evalV (CopyS _) a                    = (a, a)
 evalV (CurryS sc f) c                = Closure sc f c
 evalV ApplyS (Closure _ body env, a) = evalV body (env, a)
 evalV MapCS (Closure _ body env, xs) = fmap (\x -> evalV body (env, x)) xs
+evalV IterCS (Closure _ body env, (n, a)) =
+  iterV n (\x -> evalV body (env, x)) a
+evalV FoldCS (Closure _ body env, (xs, b)) =
+  foldV xs (\p -> evalV body (env, p)) b
+evalV (WhileCS _) (Closure _ tb te, (Closure _ sb se, (n, a))) =
+  whileV n (\x -> evalV tb (te, x)) (\x -> evalV sb (se, x)) a
 evalV (GuardS _ t) a                 = guardOut a (evalV t a)
 evalV (PromoteS _) a                 = a
 evalV (DupS _) a                     = (a, a)
@@ -177,6 +183,12 @@ evalG alg ApplyS (Closure _ body env, a) =
   in (caSeq alg (caApply alg) m, b)
 evalG alg MapCS (Closure _ body env, xs) =
   mapG alg (\x -> evalG alg body (env, x)) xs
+evalG alg IterCS (Closure _ body env, (n, a)) =
+  iterG alg (\x -> evalG alg body (env, x)) n a
+evalG alg FoldCS (Closure _ body env, (xs, b)) =
+  foldG alg (\p -> evalG alg body (env, p)) xs b
+evalG alg (WhileCS sa) (Closure _ tb te, (Closure _ sb se, (n, a))) =
+  whileG alg sa (\x -> evalG alg tb (te, x)) (\x -> evalG alg sb (se, x)) n a
 evalG alg (GuardS sa t) a =
   let (mt, r) = evalG alg t a
   in (caSeq alg (caProbe alg (sizeVal sa a)) mt, guardOut a r)
@@ -273,6 +285,12 @@ evalK (CurryS sc f) c g          = Just (Closure sc f c, g)
 evalK ApplyS (Closure _ body env, a) g = stepK (evalK body (env, a)) g
 evalK MapCS (Closure _ body env, xs) g =
   mapK (\x -> evalK body (env, x)) xs g
+evalK IterCS (Closure _ body env, (n, a)) g =
+  iterK (\x -> evalK body (env, x)) n a g
+evalK FoldCS (Closure _ body env, (xs, b)) g =
+  foldK (\p -> evalK body (env, p)) xs b g
+evalK (WhileCS _) (Closure _ tb te, (Closure _ sb se, (n, a))) g =
+  whileK (\x -> evalK tb (te, x)) (\x -> evalK sb (se, x)) n a g
 evalK (GuardS _ t) a g           =
   evalK t a g >>= \(r, g') -> Just (guardOut a r, g')
 evalK (PromoteS _) a g           = Just (a, g)

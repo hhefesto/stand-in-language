@@ -17,6 +17,16 @@ constructorNodes :: [Artifact]
 constructorNodes =
   [ exportMorph SNat SNat IdS
   , exportMorph SNat (SBang SNat) (PromoteS GroundNat)
+  , exportMorph (SProd (SBang (SLolly SNat SNat)) (SProd SNat (SBang SNat)))
+      (SBang SNat) IterCS
+  , exportMorph
+      (SProd (SBang (SLolly (SProd SNat SNat) SNat))
+        (SProd (SList SNat) (SBang SNat)))
+      (SBang SNat) FoldCS
+  , exportMorph
+      (SProd (SBang (SLolly SNat (SSum SUnit SUnit)))
+        (SProd (SBang (SLolly SNat SNat)) (SProd SNat (SBang SNat))))
+      (SBang SNat) (WhileCS SNat)
   , exportMorph (SList SNat) (SBang (SList SNat))
       (PromoteS (GroundList GroundNat))
   , exportMorph SNat SNat (SucS :.: IdS)

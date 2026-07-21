@@ -132,6 +132,11 @@ data UMorph (a :: UTy) (b :: UTy) where
   UCurry   :: SUTy c -> UMorph (c ':**: a) b -> UMorph c ('ULolly a b)
   UApply   :: UMorph ('ULolly a b ':**: a) b
   UMapC    :: UMorph ('ULolly a b ':**: 'UList a) ('UList b)
+  UIterC   :: UMorph ('ULolly a a ':**: ('UNat ':**: a)) a
+  UFoldC   :: UMorph ('ULolly (b ':**: a) b ':**: ('UList a ':**: b)) b
+  UWhileC  :: SUTy a
+           -> UMorph ('ULolly a ('UUnit ':++: 'UUnit)
+                       ':**: ('ULolly a a ':**: ('UNat ':**: a))) a
   UGuard   :: SUTy a -> UMorph a ('UUnit ':++: 'UUnit)
            -> UMorph a (a ':++: 'UUnit)
   UMap     :: UMorph a b -> UMorph ('UList a) ('UList b)
@@ -175,6 +180,12 @@ evalU (UConst k) _                    = k
 evalU (UCurry sc f) c                 = UClosure sc f c
 evalU UApply (UClosure _ body env, a) = evalU body (env, a)
 evalU UMapC (UClosure _ body env, xs) = fmap (\x -> evalU body (env, x)) xs
+evalU UIterC (UClosure _ body env, (n, a)) =
+  iterU n (\x -> evalU body (env, x)) a
+evalU UFoldC (UClosure _ body env, (xs, b)) =
+  foldU xs (\p -> evalU body (env, p)) b
+evalU (UWhileC _) (UClosure _ tb te, (UClosure _ sb se, (n, a))) =
+  whileU n (\x -> evalU tb (te, x)) (\x -> evalU sb (se, x)) a
 evalU (UGuard _ t) a                  = guardU a (evalU t a)
 evalU (UMap f) xs                     = fmap (evalU f) xs
 evalU (UIter f) (n, a)                = iterU n (evalU f) a
@@ -211,7 +222,7 @@ data UShape
   | ShInl | ShInr | ShCase UShape UShape | ShDistl
   | ShNil | ShCons | ShUncons | ShNatOut | ShSuc | ShAdd | ShConst Natural
   | ShGuard UShape | ShMap UShape | ShIter UShape | ShFold UShape | ShWhile UShape UShape
-  | ShCurry UShape | ShApply | ShMapC
+  | ShCurry UShape | ShApply | ShMapC | ShIterC | ShFoldC | ShWhileC
   deriving (Eq, Show)
 
 shapeU :: UMorph a b -> UShape
@@ -241,6 +252,9 @@ shapeU (UConst k)     = ShConst k
 shapeU (UCurry _ f)   = ShCurry (shapeU f)
 shapeU UApply         = ShApply
 shapeU UMapC          = ShMapC
+shapeU UIterC         = ShIterC
+shapeU UFoldC         = ShFoldC
+shapeU (UWhileC _)    = ShWhileC
 shapeU (UGuard _ t)   = ShGuard (shapeU t)
 shapeU (UMap f)       = ShMap (shapeU f)
 shapeU (UIter f)      = ShIter (shapeU f)

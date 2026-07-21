@@ -156,6 +156,13 @@ evalSp ApplyS (DPair f a) =
   in (max (1 + dSize a) pb, b)
 evalSp MapCS (DPair f (DList xs)) =
   let (p, ys) = mapSp (applyClo f) xs in (1 + p, DList ys)
+evalSp IterCS (DPair f (DPair (DNat n) a)) =
+  let (p, c) = iterSp (applyClo f) n a in (2 + p, c)
+evalSp FoldCS (DPair f (DPair (DList xs) b)) =
+  let (p, c) = foldSp (applyClo f) xs b
+  in (1 + max (dSize (DList xs) + dSize b) p, c)
+evalSp (WhileCS _) (DPair t (DPair s (DPair (DNat n) a))) =
+  let (p, c) = whileSp (applyClo t) (applyClo s) n a in (3 + p, c)
 evalSp (PromoteS _) v = (dSize v, v)
 evalSp (DupS _) v = (2 * dSize v, DPair v v)
 evalSp (BoxS f) v = evalSp f v

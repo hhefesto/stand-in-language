@@ -216,6 +216,13 @@ data Morph (a :: Ty) (b :: Ty) where
   CurryS   :: STy c -> Morph (c ':*: a) b -> Morph c ('Lolly a b)
   ApplyS   :: Morph ('Lolly a b ':*: a) b
   MapCS    :: Morph ('Bang ('Lolly a b) ':*: 'ListT a) ('Bang ('ListT b))
+  IterCS   :: Morph ('Bang ('Lolly a a) ':*: ('Nat ':*: 'Bang a)) ('Bang a)
+  FoldCS   :: Morph ('Bang ('Lolly (b ':*: a) b) ':*: ('ListT a ':*: 'Bang b))
+                    ('Bang b)
+  WhileCS  :: STy a
+           -> Morph ('Bang ('Lolly a ('Unit ':+: 'Unit))
+                      ':*: ('Bang ('Lolly a a) ':*: ('Nat ':*: 'Bang a)))
+                    ('Bang a)
   GuardS   :: STy a -> Morph a ('Unit ':+: 'Unit) -> Morph a (a ':+: 'Unit)
   PromoteS :: Ground a -> Morph a ('Bang a)
     -- ^ R2 data promotion (spec: @promoteS@, design\/PROMOTE.md): Ground
@@ -267,6 +274,9 @@ depth (CurryS _ f)   = depth f
   -- linearity keeps that at the curry site's level
 depth ApplyS         = 0
 depth MapCS          = 1
+depth IterCS         = 1
+depth FoldCS         = 1
+depth (WhileCS _)    = 1
   -- the closure body runs one level down, like every recursion body
 depth (GuardS _ t)   = depth t
 depth (PromoteS _)   = 0
