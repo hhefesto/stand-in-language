@@ -20,8 +20,9 @@ not ends.
   wherever the resource model permits. `design/SYNTAX.md` is the normative
   mapping, including the deliberate `left`/`right` divergence (tel2 keeps
   sum injections; telomare0 used them as pair projections).
-- The space metric is retention-aware live-heap peak. The streaming `spaceAlg`
-  is not a memory bound and is slated for deletion (M1/M2).
+- The space metric is retention-aware live-heap peak (`design/SPACE.md`).
+  The streaming `spaceAlg` was not a memory bound and has been deleted;
+  the certified replacement is M2.
 
 ## Certified Resources
 
@@ -81,9 +82,11 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    defaults `type State = Nat;`, halts when the returned state is 0. The
    `main` call is let-bound with a plain variable so recursive `main`
    bodies still take the placement path.
-5. **M1** — `design/SPACE.md`: normative live-heap metric; document why the
-   `CostAlgebra`/`Interp` abstraction cannot express retention (dedicated
-   interpreter required) and delete `spaceAlg`.
+5. **M1 (done)** — `design/SPACE.md` defines the normative live-heap metric
+   `spc` (retention explicit: tensor siblings, loop tails, closure envs),
+   documents why no `CostAlgebra` instance can express retention, and
+   records the `mapS suc` counter-example. `spaceAlg`/`⟦_⟧SP`/`space` are
+   deleted from `Graded.agda`.
 6. **M2** — prove the static space bound (`spec/T3/Sem/Space.agda`,
    `spec/T3/SpaceBound.agda`: `spaceS`, `γS`, `spaceS-sound`) and mirror it in
    Haskell (`src/Telomare/Space.hs` untyped sized meter, `Budget.hs` static

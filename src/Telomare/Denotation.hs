@@ -16,10 +16,11 @@
 --     charges the shipped instances actually distinguish ('caNatOut',
 --     'caDup', 'caDupNat', plus 'caZero' for every other leaf); the
 --     size-dependent charges receive the already-computed 'sizeVal'.
---   * The space instance (@spaceAlg@, Agda @⟦_⟧SP@) is NOT mirrored yet:
---     it charges sizes at every leaf and so needs full singleton
---     threading.  The Agda spec remains its definition; the mirror lands
---     when a backend consumes it.
+--   * Space is deliberately NOT a 'CostAlgebra' instance (nor an Agda
+--     one): retention — a loop's un-consumed tail, a tensor's sibling —
+--     is invisible to any per-leaf charge algebra.  The live-heap metric
+--     has a dedicated sized interpreter instead (design\/SPACE.md;
+--     Agda @T3.Sem.Space@, Haskell "Telomare.Space").
 module Telomare.Denotation
   ( evalV
   , CostAlgebra (..)

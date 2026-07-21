@@ -1,11 +1,13 @@
 ------------------------------------------------------------------------
 -- T3.Sem.Graded — ONE graded interpretation, many cost algebras.
 --
--- Work, duplication, and space resource readings collapse into one
+-- Work and duplication resource readings collapse into one
 -- interpretation ⟦_⟧G parameterized by a CostAlgebra.  The execution
 -- semantics ⟦_⟧K (T3.Sem.Exec) deliberately stays separate: it is not a
 -- grading but the machine, and T3.Adequacy proves it precise against the
--- work instance.
+-- work instance.  Space is NOT an instance — retention (a loop's tail, a
+-- tensor's sibling) is invisible to any CostAlgebra; the live-heap metric
+-- has its own sized interpreter (design/SPACE.md, T3.Sem.Space).
 --
 -- CLOSURES change the shape of graded values: a closure's body cost is
 -- dynamic (paid at each apply), so the graded meaning of A ⊸ B must
@@ -31,7 +33,7 @@
 module T3.Sem.Graded where
 
 open import Data.Empty   using (⊥; ⊥-elim)
-open import Data.Nat     using (ℕ; zero; suc; _+_; _⊔_)
+open import Data.Nat     using (ℕ; zero; suc; _+_)
 open import Data.Product using (_×_; _,_; proj₁; proj₂)
 open import Data.Sum     using (_⊎_; inj₁; inj₂)
 open import Data.List    using (List; []; _∷_)
@@ -112,7 +114,7 @@ record CostAlgebra : Set₁ where
                                    -- charge on input/output SIZES
     chargeStep  : ℳ                -- per taken loop step
     chargeBase  : (A : Ty) → ℕ → ℳ
-                                   -- at loop exhaustion/stop (space: live size)
+                                   -- at loop exhaustion/stop
     chargeProbe : (A : Ty) → ℕ → ℳ
                                    -- guardS / whileS test: the implicit
                                    -- copy of the probed value, never free
@@ -385,7 +387,13 @@ module Interp (R : CostAlgebra) where
       (λ gx x rx → G-val s {gx} {x} rx)
       ga a relA
 
--- ── The three measured instances ────────────────────────────────────────────
+-- ── The two measured instances ──────────────────────────────────────────────
+--
+-- Space is deliberately NOT a CostAlgebra instance: chargePrim sees only
+-- the leaf's own input/output sizes and _⋄_ combines bare grades, so no
+-- instance can count retained values (a loop's un-consumed tail, a
+-- tensor's sibling).  The live-heap metric gets a dedicated sized
+-- interpreter instead — see design/SPACE.md and T3.Sem.Space.
 
 -- Work (tel): 1 per natOut look, 1 per apply (paid before the body's
 -- dynamic grade), 1 per taken loop step; everything else free; boxes
@@ -424,29 +432,14 @@ dupAlg = record
     chargeD _ _ copyT   szA _ = szA
     chargeD _ _ _       _   _ = 0
 
--- Space: (⊔,+) — sequential stages reuse memory, parallel branches
--- co-live; every leaf's peak is the larger of its input and output.
-spaceAlg : CostAlgebra
-spaceAlg = record
-  { ℳ = ℕ ; _⋄_ = _⊔_ ; _∥_ = _+_
-  ; chargePrim  = λ _ _ _ szA szB → szA ⊔ szB
-  ; chargeStep  = 0
-  ; chargeBase  = λ _ sz → sz
-  ; chargeProbe = λ _ sz → sz
-  }
-
 open Interp workAlg  public using ()
   renaming (⟦_⟧G to ⟦_⟧C; G-val to C-val;
             mapG to mapGW; iterG to iterGW; foldG to foldGW;
             whileGo to whileGoW; whileG to whileGW)
 open Interp dupAlg   public using () renaming (⟦_⟧G to ⟦_⟧D)
-open Interp spaceAlg public using () renaming (⟦_⟧G to ⟦_⟧SP)
 
 work : {A B : Ty} → A ⇨ B → GVal ℕ A → ℕ
 work f a = proj₁ (⟦ f ⟧C a)
 
 dupGrade : {A B : Ty} → A ⇨ B → GVal ℕ A → ℕ
 dupGrade f a = proj₁ (⟦ f ⟧D a)
-
-space : {A B : Ty} → A ⇨ B → GVal ℕ A → ℕ
-space f a = proj₁ (⟦ f ⟧SP a)
