@@ -14,6 +14,15 @@ not ends.
 - `design/CLOSURES.md` is the accepted closure design.
 - Historical `.tel`, `Telomare.Linear`, and `src/Telomare/Compat/` are frozen.
 
+## Standing Objectives
+
+- Tel2 surface syntax converges on telomare0 (the `.tel` language on `master`)
+  wherever the resource model permits. `design/SYNTAX.md` is the normative
+  mapping, including the deliberate `left`/`right` divergence (tel2 keeps
+  sum injections; telomare0 used them as pair projections).
+- The space metric is retention-aware live-heap peak. The streaming `spaceAlg`
+  is not a memory bound and is slated for deletion (M1/M2).
+
 ## Certified Resources
 
 `spec/T3/Bound.agda` now proves both static analyses sound for every core
@@ -39,7 +48,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (282 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (290 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -48,16 +57,36 @@ next release or handoff.
 
 ## Next Milestones
 
-1. Decide and document the space metric. Existing `spaceAlg` appears to measure
-   streaming/local peak, not total live heap; do not advertise it as a memory
-   bound until this is resolved.
-2. After that decision, prove and mirror the static space bound using `sizeS`.
-3. Add user-declared input-shape refinements so the CLI can report finite
-   size-dependent duplication/space caps.
-4. Implement R2 data promotion: copyable open seeds plus residual live context
-   (`PromoteS`), unblocking `multiplyNat` and fold-with-retained-state.
-5. Add closure-bodied `FoldCS`/`IterCS`/`WhileCS`, richer `mapc` selectors, and
-   apply-head synthesis beyond variables/calls.
+Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
+`design/SYNTAX.md`), then the resource milestones (M1–M5). Goldens
+`test/golden/tel2_ttt_*.txt` stay byte-identical through S1–M3.
+
+1. **S1 (done)** — lexical sugar: `--`/`{- -}` comments, `if/then/else`
+   (desugars to `matchNat`, sound for Nat and declaration-ordered enums),
+   `[e1, …]` list literals, multi-arg lambdas (curried), multi-binding `let`.
+   All parser-level desugarings; elaborator untouched. Note: consuming a
+   curried lambda still needs each partial application let-bound (`apply`
+   heads are variables/calls until M5).
+2. **S2** — juxtaposition application `f x y` (`EApp` node; head resolves to
+   def call or closure apply at elaboration; reserved words excluded from
+   identifiers).
+3. **S3** — optional `let` type annotations via bounded local synthesis
+   (`def` annotations stay required).
+4. **S4** — telomare0-style `main` entry sugar synthesizing `init`/`step`
+   (halt when next state is 0).
+5. **M1** — `design/SPACE.md`: normative live-heap metric; document why the
+   `CostAlgebra`/`Interp` abstraction cannot express retention (dedicated
+   interpreter required) and delete `spaceAlg`.
+6. **M2** — prove the static space bound (`spec/T3/Sem/Space.agda`,
+   `spec/T3/SpaceBound.agda`: `spaceS`, `γS`, `spaceS-sound`) and mirror it in
+   Haskell (`src/Telomare/Space.hs` untyped sized meter, `Budget.hs` static
+   mirror, certificate + `--meter` wiring).
+7. **M3** — `--assume-shape` input refinements with runtime `coversValue`
+   validation, making ttt's size-dependent caps finite.
+8. **M4** — R2 `PromoteS` (copyable open seeds), transport v5, unblocking
+   `multiplyNat`/`dTimes`/`dMinus`.
+9. **M5** — closure-bodied `IterCS`/`FoldCS`/`WhileCS`, richer `mapc`
+   selectors, apply-head synthesis, transport v6.
 
 Every new core constructor remains a cross-stack change: Agda, Haskell,
 transport, budget analysis, Ops, and tests. No Bend and no game-specific

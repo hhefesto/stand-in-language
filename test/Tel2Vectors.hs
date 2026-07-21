@@ -84,6 +84,23 @@ tel2Vectors = do
             , rejectsWith "tel2 rejects an open lambda as a reusable mapper"
                 mapcOpenLambdaSource "must select among closed lambdas"
             ]
+          syntaxSugar =
+            [ accepts "tel2 accepts dash and block comments" commentSource
+            , acceptsBehavior "tel2 if over a nonzero Nat takes the then branch"
+                (ifNatSource "2") ["go"] "yes\n"
+            , acceptsBehavior "tel2 if over zero takes the else branch"
+                (ifNatSource "0") ["go"] "no\n"
+            , acceptsBehavior "tel2 if over a data enum uses declaration tags"
+                ifBoolSource ["go"] "true\n"
+            , acceptsBehavior "tel2 list literal folds like its cons chain"
+                listLiteralSource ["go"] "six\n"
+            , acceptsBehavior "tel2 multi-argument lambda curries"
+                multiArgLambdaSource ["go"] "five\n"
+            , acceptsBehavior "tel2 multi-binding let nests"
+                multiLetSource ["go"] "five\n"
+            , rejects "tel2 rejects if without else"
+                (small "if 1 then (\"\",left ()) ")
+            ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
             , accepts "tel2 accepts implicit duplication of a list" implicitListReuseSource
@@ -135,7 +152,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -381,6 +398,53 @@ implicitNatReuseSource = unlines
   , "def double(n: Nat): Nat = add (n,n);"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
   , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double(n) of { 10 -> (\"ten\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  ]
+
+commentSource :: String
+commentSource = unlines
+  [ "-- dash comment before declarations"
+  , "{- block comment {- nested -} still a comment -}"
+  , "type State = Nat; # legacy hash comment"
+  , "def init(u: Unit): Reply State = (\"\",left ()); -- trailing dash comment"
+  , "def step(x: Text * State): Reply State = {- inline -} (\"\",left ());"
+  ]
+
+ifNatSource :: String -> String
+ifNatSource seed = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right " <> seed <> ");"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in (if n then \"yes\\n\" else \"no\\n\", left ());"
+  ]
+
+ifBoolSource :: String
+ifBoolSource = unlines
+  [ "data Bool = False | True;"
+  , "type State = Nat;"
+  , "def toBool(n: Nat): Bool = matchNat n of { 0 -> False; _ -> True; };"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 1);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in (if toBool(n) then \"true\\n\" else \"false\\n\", left ());"
+  ]
+
+listLiteralSource :: String
+listLiteralSource = unlines
+  [ "type State = Nat;"
+  , "def plus(p: Nat * Nat): Nat = add p;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let total: Nat = fold [1, 2, 3] from 0 with plus in matchNat total of { 6 -> (\"six\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+multiArgLambdaSource :: String
+multiArgLambdaSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in let g: Nat -o Nat = apply(f, 2) in matchNat apply(g, 3) of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+multiLetSource :: String
+multiLetSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input; _: Nat = n; a: Nat = 2; b: Nat = 3 in matchNat add (a,b) of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
   ]
 
 preludeBehavior :: String -> String -> String -> Bool

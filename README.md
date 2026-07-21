@@ -48,7 +48,9 @@ tests, but the executable does not import or invoke them.
 
 ## Language
 
-Whitespace and `#` line comments are ignored. Identifiers start with a letter.
+Whitespace, `--` and `#` line comments, and nested `{- -}` block comments are
+ignored (`--` is preferred; see `design/SYNTAX.md` for the telomare0
+convergence plan). Identifiers start with a letter.
 String escapes are Haskell-style. Module files begin with a header; imports
 precede declarations. Definitions are monomorphic and take exactly
 one argument. They may refer to definitions or type aliases declared later.
@@ -58,6 +60,9 @@ lambdas capture their free variables, `apply(f, x)` consumes a closure,
 and definitions may return or select closures at runtime. Source recursion
 is restricted to manifestly bounded map, iteration, fold, while, and the
 higher-order `mapc` whose reusable mapper is selected among closed lambdas.
+`if c then t else e` is sugar for a `matchNat` taking `else` at `0`; list
+literals are sugar for `cons` chains; multi-binding `let`s and multi-argument
+lambdas nest (lambdas curry).
 
 ```text
 program   ::= ("module" ID ";")? ("import" ID ";")* declaration*
@@ -73,14 +78,15 @@ atom      ::= "Unit" | "Nat" | "Text" | ID
            |  "List" atom | "Reply" atom | "(" type ")"
 
 expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
-           |  "[]" | "cons" expr "onto" expr
+           |  "[" (expr ("," expr)*)? "]" | "cons" expr "onto" expr
            |  "(" expr "," expr ("," expr)* ")"
            |  ID "(" expr ")"
-           |  "let" pattern ":" type "=" expr "in" expr
+           |  "let" binding (";" binding)* "in" expr
+           |  "if" expr "then" expr "else" expr
            |  "copy" expr
            |  "suc" expr
            |  "add" expr
-           |  "\\" pattern "->" expr
+           |  "\\" pattern+ "->" expr
            |  "apply" "(" expr "," expr ")"
            |  "map" expr "with" ID
            |  "mapc" expr "with" expr
@@ -93,6 +99,7 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "matchText" expr "of" "{" textArm* pattern "->" expr ";"? "}"
            |  "case" expr "of" "{" constructorArm+ "}"
 
+binding   ::= pattern ":" type "=" expr
 pattern   ::= ID | "_" | "(" ID ("," ID)+ ")"
 natArm    ::= NAT "->" expr ";"
 textArm   ::= STRING "->" expr ";"

@@ -98,7 +98,10 @@ data Source = Source
 type Parser = Parsec Void String
 
 spaceConsumer :: Parser ()
-spaceConsumer = L.space space1 (L.skipLineComment "#") empty
+spaceConsumer = L.space space1 lineComment blockComment
+  where
+    lineComment = L.skipLineComment "--" <|> L.skipLineComment "#"
+    blockComment = L.skipBlockCommentNested "{-" "-}"
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme spaceConsumer
@@ -151,6 +154,7 @@ exprParser = choice
   , try matchTextExpr
   , try matchNatExpr
   , try caseExpr
+  , try ifExpr
   , try mapExpr
   , try iterExpr
   , try foldExpr
@@ -167,13 +171,25 @@ exprParser = choice
   where
     letExpr = do
       reserved "let"
+      bindings <- sepBy1 letBinding (symbol ";")
+      reserved "in"
+      body <- exprParser
+      pure (foldr (\(pat, ty, value) rest -> ELet pat ty value rest) body bindings)
+    letBinding = do
       pat <- patternParser
       void (symbol ":")
       ty <- typeParser
       void (symbol "=")
       value <- exprParser
-      reserved "in"
-      ELet pat ty value <$> exprParser
+      pure (pat, ty, value)
+    ifExpr = do
+      reserved "if"
+      condition <- exprParser
+      reserved "then"
+      whenTrue <- exprParser
+      reserved "else"
+      whenFalse <- exprParser
+      pure (EMatchNat condition [(0, whenFalse)] PWild whenTrue)
     matchTextExpr = do
       reserved "matchText"
       value <- exprParser
@@ -247,9 +263,10 @@ exprParser = choice
       EWhile limit seed test <$> identifier
     lamExpr = do
       void (symbol "\\")
-      pat <- patternParser
+      pats <- some patternParser
       void (symbol "->")
-      ELam pat <$> exprParser
+      body <- exprParser
+      pure (foldr ELam body pats)
     applyExpr = do
       reserved "apply"
       void (symbol "(")
@@ -271,7 +288,7 @@ exprParser = choice
     rightExpr = reserved "right" *> (ERight <$> exprParser)
     atomExpr = choice
       [ try (symbol "()" $> EUnit)
-      , try (symbol "[]" $> ENil)
+      , listExpr
       , between (symbol "(") (symbol ")") (try pairExpr <|> exprParser)
       , EText <$> stringLiteral
       , ENat <$> natural
@@ -279,6 +296,8 @@ exprParser = choice
       , do name <- identifier
            pure (if startsUpper name then ECon name else EVar name)
       ]
+    listExpr = between (symbol "[") (symbol "]") $
+      foldr ECons ENil <$> sepBy exprParser (symbol ",")
     pairExpr = do
       values <- sepBy1 exprParser (symbol ",")
       if length values < 2
