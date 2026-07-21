@@ -41,15 +41,17 @@ constructor.
   unchanged (closures carry their space peak as their grade).
 - Haskell mirrors these as `costW`, `sizeS`, `costD` in
   `src/Telomare/Budget.hs`; the space meter is `evalSp` on untyped sized
-  values in `src/Telomare/Space.hs`, the static mirror is `costSp`
-  (type-blind: `TopS` sizes to unbounded, so it dominates the certified
-  bound but is coarser — see `design/SPACE.md`).
-- `--certificate` prints per-entry work, duplication, and space bounds.
-  Tic-tac-toe is currently work `init <= 65`, `step <= 779`; duplication
-  `init <= 10`, step unbounded; space unbounded for both entries (the
-  type-blind `TopS` sizing — the `TyR` refinement scheduled with M3 fixes
-  this). `--meter` prints the exact measured peak (`core peak space: 153`
-  for the 5-move win) beside the work line.
+  values in `src/Telomare/Space.hs`, the static mirror is `costSp` with a
+  partial type rep `TyR` so atomic tops size as one word (unbounded only
+  where the type is genuinely lost — see `design/SPACE.md`).
+- `--certificate` prints per-entry work, duplication, and space bounds,
+  refinable by `--assume-shape 'text<=N'` (runtime-validated by
+  `coversValue`). Tic-tac-toe is currently work `init <= 65`,
+  `step <= 779`; duplication `init <= 10`, step unbounded (its state
+  contains Text; the v1 flag bounds only the input text); space unbounded
+  (map/closure result shapes are `topS` in the certified analysis).
+  `--meter` prints the exact measured peak (`core peak space: 153` for
+  the 5-move win) beside the work line.
 
 Bounds are constants at a supplied `Shape`. Finite duplication bounds for
 variable-size inputs require a refined input shape; the all-top CLI entry shape
@@ -105,8 +107,8 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    into `--certificate` and `--meter` (`core peak space` with a
    certified session cap `max(init, step)` when finite). Remaining
    polish for later sessions: an Agda value-coherence lemma for `⟦_⟧S`
-   (Haskell hand vectors cover it today), the two planned QuickCheck
-   space laws, and the `TyR` typed-size refinement of `costSp`.
+   (Haskell hand vectors cover it today) and the two planned QuickCheck
+   space laws.
 7. **M3 (done)** — `--assume-shape 'text<=N'` refines the certified step
    bounds; every admitted input is validated by `coversValue`
    (`Budget.hs`, the value-level mirror of `γW`) and nonconforming input
