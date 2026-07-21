@@ -135,34 +135,26 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    rejected. Prelude `dTimes`/`dMinus` wiring is slated with the M5
    stdlib pass; the closed-entry bindings path (`compileClosedLoop`)
    still requires closed seeds.
-9. **M5 (in progress)** — closure-bodied `iterCS`/`foldCS`/`whileCS`
-   (Agda names; Haskell `IterCS`/`FoldCS`/`WhileCS`), richer `mapc`
-   selectors, transport v6. Decisions taken: types
-   `iterCS : (!(A⊸A) ⊗ (nat ⊗ !A)) ⇨ !A`,
-   `foldCS : (!((B⊗A)⊸B) ⊗ (listT A ⊗ !B)) ⇨ !B`,
-   `whileCS : (!(A⊸(unit⊕unit)) ⊗ (!(A⊸A) ⊗ (nat ⊗ !A))) ⇨ !A`
-   (the while test IS boxed); depth 1 each; work/dup bounds
-   `fuel *∞ (just 1 +∞ lollyCostOf …)` mapCS-style; space bounds
-   `(nothing , topS)` v1 (consistent with mapCS). Progress: Agda
-   Core/Syntax + depth, Value, Graded (`⟦_⟧G` via generic
-   iterG/foldG/whileG with the closure as body; `G-val` via
-   iterG-rel/foldG-rel/whileG-rel) DONE. Next checker stops: Place
-   (needs new surface ops `iterCU`/`foldCU`/`whileCU` in
-   T3.Surface.Syntax + Sem, ε to them, ε-rel via the iter/fold/while
-   analogues of map-rel, skelOfCore `recD d tipD`, core-solves like
-   mapCS), Exec (`iterT`/`foldT`/`whileT` with the closure), Adequacy
-   (iter/fold/while `-prec` analogues of `map-prec` instantiated with
-   the closure), Abstract (`transfer _ = (recB nothing (topBD tip) , topS)`,
-   `sound _ = tt` like mapCS), Bound (costW/costD
-   `fuel *∞ (1 +∞ lollyCostOf)`-style + soundness lemmas mirroring
-   `map-bound`/`mapD-bound` but over iterG/foldG/whileG with a UNIFORM
-   per-round closure bound from `γW lollyS` — no shape evolution),
-   SpaceBound (`(nothing , topS)` one-liners). Then Haskell mirror
-   (Surface UMorph + Direct + Core + Denotation + Space + Budget + Ops +
-   Transport v6), Tel2 surface (`iterc`/`foldc`/`whilec` with
-   `promoteClosureSelector`-selected bodies, or extend the existing loop
-   keywords), selector/synthType extensions, vectors. Do NOT rewrite ttt
-   in the same commit (goldens stay stable).
+9. **M5 (nearly done)** — closure-bodied loops are fully certified and
+   mirrored: Agda `iterCS`/`foldCS`/`whileCS` proven across
+   value/graded/exec/adequacy/placement/abstract/Bound (work+dup
+   `fuel *∞ (1 +∞ lollyCostOf …)` with uniform Kripke round bounds;
+   space `(nothing , topS)` v1 like mapCS); Haskell `IterCS`/`FoldCS`/
+   `WhileCS` (WhileCS carries `STy` for probe sizing) across
+   Core/Denotation/Space/Budget/Surface (`UIterC`/`UFoldC`/`UWhileC`,
+   placement-only)/Direct; transport **v6** (`iter-clo`/`fold-clo`/
+   `while-clo`, round-tripped). REMAINING for M5 close-out: (a) Tel2
+   surface forms — extend `mapc`'s pattern to the loops (suggested:
+   `iterc count from seed with <selector>`, `foldc input from seed with
+   <selector>`, `whilec limit from seed testing <selector> stepping
+   <selector>`), elaborated on the placement path via
+   `promoteClosureSelector` + the new cores (assemble like Tel2's mapc:
+   `IterCS :.: (selector :***: pairCore)`-style with the (fuel, !seed)
+   pair; seed promoted closed or via `PromoteS`); (b) richer selectors:
+   `matchText` dispatch and let-bound closed lambdas in
+   `promoteClosureSelector`; (c) `synthType` for annotated lambdas;
+   (d) accept/behavior vectors + HANDOFF/README/SYNTAX updates. Do NOT
+   rewrite ttt in the same commit (goldens stay stable).
 
 Every new core constructor remains a cross-stack change: Agda, Haskell,
 transport, budget analysis, Ops, and tests. No Bend and no game-specific
