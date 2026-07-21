@@ -1,6 +1,6 @@
 module Prelude;
 
-# A monomorphic, total foundation over the direct and affine-recursion fragments.
+-- A monomorphic, total foundation over the direct and affine-recursion fragments.
 data Bool = False | True;
 
 def natIdentity(n: Nat): Nat = n;
@@ -12,16 +12,16 @@ def boolNot(value: Bool): Bool = case value of {
 };
 
 def boolAnd(values: Bool * Bool): Bool =
-  let (a,b): Bool * Bool = values in
+  let (a,b) = values in
   case a of { False -> False; True -> b; };
 
 def boolOr(values: Bool * Bool): Bool =
-  let (a,b): Bool * Bool = values in
+  let (a,b) = values in
   case a of { False -> b; True -> True; };
 
 def boolXor(values: Bool * Bool): Bool =
-  let (a,b): Bool * Bool = values in
-  case a of { False -> b; True -> boolNot(b); };
+  let (a,b) = values in
+  case a of { False -> b; True -> boolNot b; };
 
 def boolToNat(value: Bool): Nat = case value of {
   False -> 0;
@@ -29,41 +29,41 @@ def boolToNat(value: Bool): Nat = case value of {
 };
 
 def natIsZero(n: Nat): Bool = matchNat n of { 0 -> True; _ -> False };
-def natIsPositive(n: Nat): Bool = boolNot(natIsZero(n));
+def natIsPositive(n: Nat): Bool = boolNot (natIsZero n);
 def natAdd(values: Nat * Nat): Nat = add values;
 def otherPlayer(player: Nat): Nat = matchNat player of { 1 -> 2; _ -> 1 };
 def increment(n: Nat): Nat = suc n;
-# Reuse is implicit: the second n is a priced copy.
-def natDouble(n: Nat): Nat = natAdd((n,n));
+-- Reuse is implicit: the second n is a priced copy.
+def natDouble(n: Nat): Nat = natAdd (n,n);
 
 def countListElement(values: Nat * Nat): Nat =
-  let (count,value): Nat * Nat = values in
-  let _: Nat = value in
-  increment(count);
+  let (count,value) = values in
+  let _ = value in
+  increment count;
 
 def listLength(values: List Nat): Nat =
   fold values from 0 with countListElement;
 
-# First-order specializations of the historical higher-order list vocabulary.
-# The mapper and fold step are named source definitions, never runtime values.
+-- First-order specializations of the historical higher-order list vocabulary.
+-- The mapper and fold step are named source definitions, never runtime values.
 def mapIncrement(values: List Nat): List Nat =
   map values with increment;
 
 def listSum(values: List Nat): Nat =
   fold values from 0 with natAdd;
 
-# First-class closures: an affine function value is applied at most once.
-# composeNat consumes both closures into one; the historical higher-order
-# `con` returns as an honest monomorphic composition.
+-- First-class closures: an affine function value is applied at most once.
+-- composeNat consumes both closures into one; the historical higher-order
+-- `con` returns as an honest monomorphic composition.
 def composeNat(functions: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat =
-  let (first,second): (Nat -o Nat) * (Nat -o Nat) = functions in
-  \value -> apply(second, apply(first, value));
+  let (first,second) = functions in
+  \value -> second (first value);
 
-# flipNat swaps the pair argument of an affine binary closure; the
-# historical `flip` returns for uncurried monomorphic functions.
+-- flipNat swaps the pair argument of an affine binary closure; the
+-- historical `flip` returns for uncurried monomorphic functions.
 def flipNat(f: Nat * Nat -o Nat): Nat * Nat -o Nat =
-  \p -> let (a,b): Nat * Nat = p in apply(f, (b,a));
+  \p -> let (a,b) = p in f (b,a);
 
-# constNat discards its argument and returns the captured value; the
-# priced capture is the only cost.
+-- constNat discards its argument and returns the captured value; the
+-- priced capture is the only cost.
 def constNat(k: Nat): Nat -o Nat = \_ -> k;

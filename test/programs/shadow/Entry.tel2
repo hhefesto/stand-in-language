@@ -2,7 +2,7 @@ module ShadowEntry;
 import Prelude;
 
 type State = Nat;
-def init(u: Unit): Reply State = ("",right shadowValue(u));
+def init(u: Unit): Reply State = ("",right (shadowValue u));
 def step(x: Text * State): Reply State =
-  let (input,state): Text * State = x in
+  let (input,state) = x in
   matchNat state of { 9 -> ("local\n",left ()); n -> ("wrong\n",left ()) };

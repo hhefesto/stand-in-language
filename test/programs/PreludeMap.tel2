@@ -4,12 +4,12 @@ import Prelude;
 type State = Unit;
 
 def init(u: Unit): Reply State =
-  let _: Unit = u in ("",right ());
+  let _ = u in ("",right ());
 
 def step(request: Text * State): Reply State =
-  let (input,state): Text * State = request in
-  let _: State = state in
-  let output: Text = mapIncrement(input) in
+  let (input,state) = request in
+  let _ = state in
+  let output = mapIncrement input in
   matchText output of {
     "BCD" -> ("mapped\n",left ());
     other -> ("bad\n",left ());

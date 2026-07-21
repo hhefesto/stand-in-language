@@ -1,51 +1,51 @@
 module examples;
 
-# Prelude is found in the packaged standard library. LegacyPrelude demonstrates
-# that compatibility names are ordinary imported definitions, not compiler
-# built-ins.
+-- Prelude is found in the packaged standard library. LegacyPrelude demonstrates
+-- that compatibility names are ordinary imported definitions, not compiler
+-- built-ins.
 import Prelude;
 import LegacyPrelude;
 
-# This state records the four results computed by init:
-#   iterate result * fold result * while result * addition result
+-- This state records the four results computed by init:
+--   iterate result * fold result * while result * addition result
 type State = Nat * Nat * Nat * Nat;
 
-# Fold consumes one list element at a time. For Text, each element is a Unicode
-# code point, so folding natAdd over "ABC" computes 65 + 66 + 67 = 198.
-def sumStep(values: Nat * Nat): Nat = natAdd(values);
+-- Fold consumes one list element at a time. For Text, each element is a Unicode
+-- code point, so folding natAdd over "ABC" computes 65 + 66 + 67 = 198.
+def sumStep(values: Nat * Nat): Nat = natAdd values;
 
-# While tests use left () to stop and right () to continue. The loop also has
-# explicit fuel, so it remains total even if a test never asks it to stop.
+-- While tests use left () to stop and right () to continue. The loop also has
+-- explicit fuel, so it remains total even if a test never asks it to stop.
 def reachedThree(n: Nat): Unit + Unit =
   matchNat n of { 3 -> left (); _ -> right () };
 
-# These loops are closed: their inputs and seeds capture no affine variables.
-# The compiler promotes each result with BoxValS, realizes the loops as IterS,
-# FoldS, and WhileS, merges the boxed results, then runs this continuation in
-# one BoxS. No host-language loop or implicit unboxing is involved.
+-- These loops are closed: their inputs and seeds capture no affine variables.
+-- The compiler promotes each result with BoxValS, realizes the loops as IterS,
+-- FoldS, and WhileS, merges the boxed results, then runs this continuation in
+-- one BoxS. No host-language loop or implicit unboxing is involved.
 def init(u: Unit): Reply State =
-  # Apply increment five times, starting from zero: 5.
-  let total: Nat = iterate 5 from 0 with increment in
-  # Fold the code points of a closed Text value: 198.
-  let ascii: Nat = fold "ABC" from 0 with sumStep in
-  # Stop at 3, with a maximum of ten tests/steps: 3.
-  let stopped: Nat = while 10 from 0 testing reachedThree stepping increment in
-  # Affine variables cannot be used twice. copy makes the two uses of total
-  # explicit: one is retained for checking and one is consumed by addition.
-  let copies: Nat * Nat = copy total in
-  let (exact,forSum): Nat * Nat = copies in
-  let sum: Nat = dPlus((forSum,10)) in
+  -- Apply increment five times, starting from zero: 5.
+  let total = iterate 5 from 0 with increment in
+  -- Fold the code points of a closed Text value: 198.
+  let ascii = fold "ABC" from 0 with sumStep in
+  -- Stop at 3, with a maximum of ten tests/steps: 3.
+  let stopped = while 10 from 0 testing reachedThree stepping increment in
+  -- Affine variables cannot be used twice. copy makes the two uses of total
+  -- explicit: one is retained for checking and one is consumed by addition.
+  let copies = copy total in
+  let (exact,forSum) = copies in
+  let sum = dPlus (forSum,10) in
   ("Telomare typed-core tour:\n- iterate: increment 0 five times = 5\n- fold: sum the code points in ABC = 198\n- while: increment until 3, with fuel 10 = 3\n- add: explicitly copy 5, then add 10 = 15\nEnter anything to verify the stored results, or q to stop.\n",
     right (exact,ascii,stopped,sum));
 
-# step consumes the complete request and state exactly once. A non-q input
-# checks every stored result; reaching the success message therefore confirms
-# that the boxed core result was stripped back to the expected source shape.
+-- step consumes the complete request and state exactly once. A non-q input
+-- checks every stored result; reaching the success message therefore confirms
+-- that the boxed core result was stripped back to the expected source shape.
 def step(request: Text * State): Reply State =
-  let (input,state): Text * State = request in
+  let (input,state) = request in
   matchText input of {
     "q" -> ("Stopped.\n",left ());
-    _ -> let (exact,ascii,stopped,sum): State = state in
+    _ -> let (exact,ascii,stopped,sum) = state in
          matchNat exact of {
            5 -> matchNat ascii of {
              198 -> matchNat stopped of {

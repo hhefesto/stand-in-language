@@ -1,11 +1,11 @@
 module LegacyPrelude;
 import Prelude;
 
-# Honest monomorphic compatibility names. Tuple arguments replace historical
-# currying; Church/list/partial APIs are intentionally absent.
-def id(value: Nat): Nat = natIdentity(value);
-def not(value: Bool): Bool = boolNot(value);
-def and(values: Bool * Bool): Bool = boolAnd(values);
-def or(values: Bool * Bool): Bool = boolOr(values);
-def succ(value: Nat): Nat = increment(value);
-def dPlus(values: Nat * Nat): Nat = natAdd(values);
+-- Honest monomorphic compatibility names. Tuple arguments replace historical
+-- currying; Church/list/partial APIs are intentionally absent.
+def id(value: Nat): Nat = natIdentity value;
+def not(value: Bool): Bool = boolNot value;
+def and(values: Bool * Bool): Bool = boolAnd values;
+def or(values: Bool * Bool): Bool = boolOr values;
+def succ(value: Nat): Nat = increment value;
+def dPlus(values: Nat * Nat): Nat = natAdd values;
