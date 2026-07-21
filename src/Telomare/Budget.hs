@@ -18,8 +18,10 @@ module Telomare.Budget
   , joinShape
   , transferB
   , sizeS
+  , sizeSH
   , costW
   , costD
+  , costSp
   , shapeOfSTy
   ) where
 
@@ -382,6 +384,161 @@ costW (WhileS _ t st) s =
   in case fu of
        NatLE n -> let (c, r) = aiterC stepC n (unbangS a0)
                   in (c, BangSh r)
+       _       -> (Nothing, TopS)
+
+-- | Type-blind static word-size bound.  Where the typed 'sizeS' resolves
+-- @TopS@ through its 'STy' witness (atomic tops are one word), no
+-- singleton is available inside 'costSp''s composite traversal, so
+-- @TopS@ is over-approximated to unbounded.  Every result therefore
+-- dominates the certified Agda bound (@T3.SpaceBound.spaceS@) at the
+-- corresponding typed shape — sound, occasionally coarser.
+sizeSH :: ShapeH -> Maybe Natural
+sizeSH TopS = Nothing
+sizeSH UnitS = Just 1
+sizeSH (NatLE _) = Just 1
+sizeSH (PairSh a b) = addC (sizeSH a) (sizeSH b)
+sizeSH (SumSh a b) =
+  addC (Just 1) (joinMB (maybe (Just 0) sizeSH a) (maybe (Just 0) sizeSH b))
+sizeSH (ListSh n a) = listSizeC n a
+sizeSH (BangSh a) = sizeSH a
+sizeSH (LollySh _) = Just 1
+
+listSizeC :: Natural -> ShapeH -> Maybe Natural
+listSizeC 0 _  = Just 1
+listSizeC k es = addC (Just 1) (addC (sizeSH es) (listSizeC (k - 1) es))
+
+-- spec: T3.SpaceBound.aiterSp — rounds join by max, every round also
+-- charges the current shape's size so an early dynamic stop is dominated.
+aiterSp :: (ShapeH -> (Maybe Natural, ShapeH)) -> Natural -> ShapeH
+        -> (Maybe Natural, ShapeH)
+aiterSp _ 0 s = (sizeSH s, s)
+aiterSp f n s =
+  let (c1, s1) = f s
+      (cn, sn) = aiterSp f (n - 1) s1
+  in (joinMB (sizeSH s) (joinMB c1 cn), joinShape s sn)
+
+-- spec: T3.SpaceBound.mapSpC — tail retained through the round, produced
+-- element through the rest of the traversal.
+mapSpC :: Natural -> ShapeH -> ShapeH -> Maybe Natural -> Maybe Natural
+mapSpC 0 _ _ _    = Just 1
+mapSpC n es re cb =
+  joinMB (addC (listSizeC (n - 1) es) cb)
+         (addC (sizeSH re) (mapSpC (n - 1) es re cb))
+
+-- | Static live-heap space bound (spec: @T3.SpaceBound.spaceS@,
+-- proved sound there by @spaceS-sound@ against @T3.Sem.Space.⟦_⟧S@).
+costSp :: Morph a b -> ShapeH -> (Maybe Natural, ShapeH)
+costSp IdS s = (sizeSH s, s)
+costSp (g :.: f) s =
+  let (cf, sf) = costSp f s
+      (cg, sg) = costSp g sf
+  in (joinMB cf cg, sg)
+costSp (f :***: g) s =
+  let (sa, sc) = splitP s
+      (cf, sb) = costSp f sa
+      (cg, sd) = costSp g sc
+  in (joinMB (addC (sizeSH sc) cf) (addC (sizeSH sb) cg), PairSh sb sd)
+costSp SwapS s = let (a, b) = splitP s in (sizeSH s, PairSh b a)
+costSp AssocS s =
+  let (ab, c) = splitP s; (a, b) = splitP ab
+  in (sizeSH s, PairSh a (PairSh b c))
+costSp UnassocS s =
+  let (a, bc) = splitP s; (b, c) = splitP bc
+  in (sizeSH s, PairSh (PairSh a b) c)
+costSp ExlS s = (sizeSH s, fst (splitP s))
+costSp ExrS s = (sizeSH s, snd (splitP s))
+costSp WeakS s = (sizeSH s, UnitS)
+costSp RunitS s = (addC (Just 1) (sizeSH s), PairSh s UnitS)
+costSp LunitS s = (addC (Just 1) (sizeSH s), PairSh UnitS s)
+costSp InlS s = (addC (Just 1) (sizeSH s), SumSh (Just s) Nothing)
+costSp InrS s = (addC (Just 1) (sizeSH s), SumSh Nothing (Just s))
+costSp (CaseS l r) s =
+  let (ml, mr) = splitE s
+      resL = fmap (costSp l) ml
+      resR = fmap (costSp r) mr
+      costOf = maybe (Just 0) fst
+      shape = case (resL, resR) of
+        (Just (_, x), Just (_, y)) -> joinShape x y
+        (Just (_, x), Nothing)     -> x
+        (Nothing, Just (_, y))     -> y
+        (Nothing, Nothing)         -> TopS
+  in (joinMB (sizeSH s) (joinMB (costOf resL) (costOf resR)), shape)
+costSp DistlS s =
+  let (a, bc) = splitP s
+      (mb, mc) = splitE bc
+  in (sizeSH s, SumSh (PairSh a <$> mb) (PairSh a <$> mc))
+costSp NilS _ = (Just 1, ListSh 0 TopS)
+costSp ConsS s =
+  let (e, l) = splitP s
+  in (addC (Just 1) (sizeSH s), case l of
+       ListSh n es -> ListSh (n + 1) (joinShape e es)
+       _           -> TopS)
+costSp UnconsS s = (addC (Just 1) (sizeSH s), SumSh (Just UnitS) (Just rest))
+  where
+    rest = case s of
+      ListSh n es -> PairSh es (ListSh (predN n) es)
+      _           -> PairSh TopS TopS
+costSp NatOutS s = (Just 2, case s of
+  NatLE n -> SumSh (Just UnitS) (Just (NatLE (predN n)))
+  _       -> SumSh (Just UnitS) (Just TopS))
+costSp SucS s = (Just 1, case s of
+  NatLE n -> NatLE (n + 1)
+  _       -> TopS)
+costSp AddS s =
+  let (a, b) = splitP s
+  in (Just 2, case (a, b) of
+       (NatLE n, NatLE m) -> NatLE (n + m)
+       _                  -> TopS)
+costSp (ConstS k) s = (sizeSH s, NatLE k)
+costSp DupNatS s = (Just 2, PairSh s s)
+costSp (CopyS _) s = (addC (sizeSH s) (sizeSH s), PairSh s s)
+costSp (GuardS _ t) s =
+  (joinMB (fst (costSp t s)) (addC (Just 1) (sizeSH s))
+  , SumSh (Just s) (Just UnitS))
+costSp (CurryS _ f) s = (sizeSH s, LollySh (fst (costSp f (PairSh s TopS))))
+costSp ApplyS s =
+  let (sf, sa) = splitP s
+  in (joinMB (addC (Just 1) (sizeSH sa)) (lollyCostOf sf), TopS)
+costSp MapCS s =
+  let (sbf, sl) = splitP s
+  in (case sl of
+       ListSh n es ->
+         addC (Just 1) (mapSpC n es TopS (lollyCostOf (unbangS sbf)))
+       _ -> Nothing
+     , TopS)
+costSp (DupS _) s = (addC (sizeSH s) (sizeSH s), PairSh s s)
+costSp (BoxS f) s = let (c, r) = costSp f (unbangS s) in (c, BangSh r)
+costSp (BoxValS f) s = let (c, r) = costSp f s in (c, BangSh r)
+costSp MergeS s =
+  let (a, b) = splitP s
+  in (sizeSH s, BangSh (PairSh (unbangS a) (unbangS b)))
+costSp (MapS f) s = case s of
+  ListSh n es ->
+    let (cb, re) = costSp f es in (mapSpC n es re cb, TopS)
+  _ -> (Nothing, TopS)
+costSp (IterS f) s =
+  let (fu, a0) = splitP s
+  in case fu of
+       NatLE n -> let (c, r) = aiterSp (costSp f) n (unbangS a0)
+                  in (addC (Just 1) c, BangSh r)
+       _       -> (Nothing, TopS)
+costSp (FoldS f) s =
+  let (ls, b0) = splitP s
+  in case ls of
+       ListSh n es ->
+         let stepC x = let (cb, rb) = costSp f (PairSh x es)
+                       in (addC (listSizeC n es) cb, rb)
+             (c, r) = aiterSp stepC n (unbangS b0)
+         in (joinMB (sizeSH s) c, BangSh r)
+       _ -> (Nothing, TopS)
+costSp (WhileS _ t st) s =
+  let (fu, a0) = splitP s
+      stepC x = let (ct, _) = costSp t x
+                    (cs, r) = costSp st x
+                in (joinMB ct cs, r)
+  in case fu of
+       NatLE n -> let (c, r) = aiterSp stepC n (unbangS a0)
+                  in (addC (Just 1) c, BangSh r)
        _       -> (Nothing, TopS)
 
 -- Duplication multiplication preserves the useful affine case:

@@ -40,6 +40,7 @@ library
                     , Telomare.Infer
                     , Telomare.Linear
                     , Telomare.Ops
+                    , Telomare.Space
                     , Telomare.Surface
                     , Telomare.Transport
                     , Telomare.Tel2
@@ -100,6 +101,7 @@ test-suite telomare-test
                     , Laws
                     , LinearVectors
                     , MeterVectors
+                    , SpaceVectors
                     , ParityTel
                     , SpecVectors
                     , SurfaceVectors

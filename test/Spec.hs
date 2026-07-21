@@ -17,6 +17,7 @@ import Laws (lawProps)
 import LinearVectors (linearVectors)
 import MeterVectors (meterVectors)
 import ParityTel (parityVectors)
+import SpaceVectors (spaceVectors)
 import SpecVectors (specVectors)
 import SurfaceVectors (surfaceVectors)
 import Tel2Vectors (tel2Vectors)
@@ -27,7 +28,7 @@ main = do
   telParity <- parityVectors
   tel2 <- tel2Vectors
   compileFails <- compileFailVectors
-  let vectors = specVectors <> surfaceVectors <> linearVectors <> compileFails <> copyVectors <> oracleVectors <> budgetVectors <> boundVectors <> certificateVectors <> meterVectors <> telParity <> tel2 <> transportVectors
+  let vectors = specVectors <> surfaceVectors <> linearVectors <> compileFails <> copyVectors <> oracleVectors <> budgetVectors <> boundVectors <> certificateVectors <> meterVectors <> spaceVectors <> telParity <> tel2 <> transportVectors
       props   = lawProps <> inferProps
       failedVectors = [n | (n, ok) <- vectors, not ok]
   forM_ vectors $ \(n, ok) ->

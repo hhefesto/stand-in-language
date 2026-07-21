@@ -33,11 +33,13 @@ Sizes are `sizeVal`/`sizeG` words. For `f : A ⇨ B` run on input `a`:
     while the body folds.
   - `iterS`/`whileS`: `spc body acc_i` (plus the probe's read for `whileS`);
     the counter is a word.
-- **Closures**: a closure value occupies `1 + sz env` words (`curryS`
-  captures its environment; `sizeVal` on `Lolly` counts it). `applyS` runs
-  the body on `env ⊗ arg` — ordinary composition afterward.
-- **Boxes**: transparent — `sz (box v) = 1 + sz v`, and running boxed code
-  charges the same space as running it unboxed; promotion adds the box word.
+- **Closures**: one word (the `sizeT`/`sizeVal` pointer model). The
+  environment's words surface when the body runs: `applyS` charges the
+  body's peak on `env ⊗ arg`, which is at least `sz env + sz arg`. The
+  sit-in-heap undercount between creation and application is the same one
+  documented for the dup grade in `T3.Core.Ty`.
+- **Boxes**: weightless and transparent (`sizeT (! A) = sizeT A`); running
+  boxed code charges the same space as running it unboxed.
 
 Peak, not sum: `spc` is a maximum over the trace, so bounds compose with
 `⊔` along sequence and `+` only across genuinely co-live siblings.
@@ -84,6 +86,16 @@ transition ever mentions it.
   constant to every round's charge, so bounds proved for the loop body in
   isolation lift to any placement — no live-parameter threading is needed
   in the static analysis.
-- v1 keeps `Shape` unchanged: arrow shapes size to `nothing`, so programs
-  that retain closures across loop rounds get an unbounded space cap
-  (refined in the M5 era if needed).
+- v1 keeps `Shape` unchanged: `lollyS` carries only the closure's peak
+  bound, so `mapCS`'s retained output prefix is bounded through `topS`
+  element sizes — finite only at atomic element types.
+- **Haskell static mirror is type-blind** (`sizeSH TopS = unbounded`): the
+  typed Agda `sizeS` resolves atomic `topS` to one word, but `costSp`
+  cannot thread singletons through composite morphisms, so every `TopS`
+  reached in a shape makes the Haskell bound unbounded. In particular
+  list shapes built from `NilS` carry `TopS` elements, so today's
+  certificate prints `static space bound: … unbounded` for entries that
+  touch lists. The fix (an M3-era refinement alongside `--assume-shape`)
+  is a partial type representation (`TyR`) threaded through `costSp` so
+  atomic tops size to one word. The measured meter (`--meter`'s
+  `core peak space`) is exact today regardless.

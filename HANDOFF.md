@@ -34,11 +34,22 @@ constructor.
 - `sizeS-sound`: covered values fit the type-sensitive static word bound.
 - `costD-sound`: exact duplication is below `costD`, including copies, probes,
   closures, maps, folds, iteration, and while.
-- Haskell mirrors these as `costW`, `sizeS`, and `costD` in
-  `src/Telomare/Budget.hs`.
-- `--certificate` prints per-entry work and duplication bounds. Tic-tac-toe is
-  currently work `init <= 65`, `step <= 779`; duplication `init <= 10`, with
-  step unbounded for arbitrary input because `Text` has unrestricted size.
+- `spaceS-sound` (`spec/T3/SpaceBound.agda`): the exact live-heap peak
+  computed by the dedicated sized interpreter `⟦_⟧S`
+  (`spec/T3/Sem/Space.agda`) is below the static `spaceS` — retention
+  (tensor siblings, loop tails, map prefixes) is charged, reusing `γW`
+  unchanged (closures carry their space peak as their grade).
+- Haskell mirrors these as `costW`, `sizeS`, `costD` in
+  `src/Telomare/Budget.hs`; the space meter is `evalSp` on untyped sized
+  values in `src/Telomare/Space.hs`, the static mirror is `costSp`
+  (type-blind: `TopS` sizes to unbounded, so it dominates the certified
+  bound but is coarser — see `design/SPACE.md`).
+- `--certificate` prints per-entry work, duplication, and space bounds.
+  Tic-tac-toe is currently work `init <= 65`, `step <= 779`; duplication
+  `init <= 10`, step unbounded; space unbounded for both entries (the
+  type-blind `TopS` sizing — the `TyR` refinement scheduled with M3 fixes
+  this). `--meter` prints the exact measured peak (`core peak space: 153`
+  for the 5-move win) beside the work line.
 
 Bounds are constants at a supplied `Shape`. Finite duplication bounds for
 variable-size inputs require a refined input shape; the all-top CLI entry shape
@@ -49,7 +60,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (306 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (314 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -87,12 +98,19 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    documents why no `CostAlgebra` instance can express retention, and
    records the `mapS suc` counter-example. `spaceAlg`/`⟦_⟧SP`/`space` are
    deleted from `Graded.agda`.
-6. **M2** — prove the static space bound (`spec/T3/Sem/Space.agda`,
-   `spec/T3/SpaceBound.agda`: `spaceS`, `γS`, `spaceS-sound`) and mirror it in
-   Haskell (`src/Telomare/Space.hs` untyped sized meter, `Budget.hs` static
-   mirror, certificate + `--meter` wiring).
+6. **M2 (done)** — certified static space bound: `spec/T3/Sem/Space.agda`
+   (dedicated sized interpreter `⟦_⟧S`) + `spec/T3/SpaceBound.agda`
+   (`spaceS`, `spaceS-sound` over `γW`); Haskell meter `evalSp`
+   (`src/Telomare/Space.hs`) and static `costSp` (`Budget.hs`), wired
+   into `--certificate` and `--meter` (`core peak space` with a
+   certified session cap `max(init, step)` when finite). Remaining
+   polish for later sessions: an Agda value-coherence lemma for `⟦_⟧S`
+   (Haskell hand vectors cover it today), the two planned QuickCheck
+   space laws, and the `TyR` typed-size refinement of `costSp`.
 7. **M3** — `--assume-shape` input refinements with runtime `coversValue`
-   validation, making ttt's size-dependent caps finite.
+   validation, making ttt's size-dependent caps finite; includes the
+   `TyR` partial type rep so `costSp` sizes atomic tops as one word
+   (today list-touching entries print `space … unbounded`).
 8. **M4** — R2 `PromoteS` (copyable open seeds), transport v5, unblocking
    `multiplyNat`/`dTimes`/`dMinus`.
 9. **M5** — closure-bodied `IterCS`/`FoldCS`/`WhileCS`, richer `mapc`

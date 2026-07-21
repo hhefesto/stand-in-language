@@ -22,10 +22,11 @@ import Data.Type.Equality ((:~:) (Refl))
 import Numeric.Natural (Natural)
 import System.IO (hFlush, hPutStrLn, isEOF, stderr, stdout)
 
-import Telomare.Budget (costD, costW, shapeOfSTy)
+import Telomare.Budget (costD, costSp, costW, shapeOfSTy)
 import Telomare.Compiler.Direct (Strip, eraseMorph, stripSTy)
 import Telomare.Core
 import Telomare.Denotation
+import Telomare.Space (evalSp, toDVal)
 import Telomare.Surface
 
 type TextU = 'UList 'UNat
@@ -59,6 +60,8 @@ programCertificateSummary program@(Program _ _ _ initial step) =
     <> ", step " <> workBound step <> " (any input)"
     <> "\nstatic duplication bound: init " <> dupBound initial
     <> ", step " <> dupBound step <> " (any input)"
+    <> "\nstatic space bound: init " <> spaceBound initial
+    <> ", step " <> spaceBound step <> " (any input)"
   where
     workBound :: CoreEntry a b -> String
     workBound (CoreEntry inputTy _ _ morph) =
@@ -66,6 +69,9 @@ programCertificateSummary program@(Program _ _ _ initial step) =
     dupBound :: CoreEntry a b -> String
     dupBound (CoreEntry inputTy _ _ morph) =
       renderBound (fst (costD morph (shapeOfSTy inputTy)))
+    spaceBound :: CoreEntry a b -> String
+    spaceBound (CoreEntry inputTy _ _ morph) =
+      renderBound (fst (costSp morph (shapeOfSTy inputTy)))
     renderBound (Just n) = "<= " <> show n
     renderBound Nothing  = "unbounded"
 
@@ -101,37 +107,43 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
   result <- runInteractive replyTy limit 0 initial ()
   case result of
     Left err -> pure (Left err)
-    Right (reply, remaining, spent)
+    Right (reply, remaining, spent, peak)
       | not (equalU replyTy (evalU sourceInit ()) reply) ->
           pure (Left "surface/core evaluator disagreement")
-      | otherwise -> loop remaining spent (0 :: Natural) reply
+      | otherwise -> loop remaining spent peak (0 :: Natural) reply
   where
     replyTy = SUProd (SUList SUNat) (SUSum SUUnit stateTy)
-    loop remaining spent count (output, continuation) = do
+    loop remaining spent peak count (output, continuation) = do
       case decode output of
         Left err -> pure (Left err)
         Right rendered -> do
           putStr rendered
           hFlush stdout
           case continuation of
-            Left () -> finish spent count
+            Left () -> finish spent peak count
             Right state -> do
               eof <- isEOF
-              if eof then finish spent count else do
+              if eof then finish spent peak count else do
                 input <- getLine
                 let inputValue = (encode input, state)
                 result <- runInteractive replyTy remaining spent step inputValue
                 case result of
                   Left err -> pure (Left err)
-                  Right (reply, remaining', spent')
+                  Right (reply, remaining', spent', peak')
                     | not (equalU replyTy (evalU sourceStep inputValue) reply) ->
                         pure (Left "surface/core evaluator disagreement")
-                    | otherwise -> loop remaining' spent' (count + 1) reply
+                    | otherwise ->
+                        loop remaining' spent' (max peak peak') (count + 1) reply
     entryBound :: CoreEntry a b -> Maybe Natural
     entryBound (CoreEntry inputTy _ _ morph) =
       fst (costW morph (shapeOfSTy inputTy))
-    finish spent count = do
-      when report (hPutStrLn stderr ("core work: " <> show spent <> cap))
+    entrySpace :: CoreEntry a b -> Maybe Natural
+    entrySpace (CoreEntry inputTy _ _ morph) =
+      fst (costSp morph (shapeOfSTy inputTy))
+    finish spent peak count = do
+      when report $ do
+        hPutStrLn stderr ("core work: " <> show spent <> cap)
+        hPutStrLn stderr ("core peak space: " <> show peak <> spaceCap)
       pure (Right ())
       where
         -- the measured/certified bridge, with the arithmetic shown:
@@ -143,6 +155,13 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
             " <= certified cap init " <> show ib <> " + "
               <> show count <> " steps * " <> show sb <> " = "
               <> show (ib + count * sb)
+          _ -> ""
+        -- space is a peak, not a sum: the session cap is the larger of
+        -- the two per-entry certified caps
+        spaceCap = case (entrySpace initial, entrySpace step) of
+          (Just ib, Just sb) ->
+            " <= certified cap max(init " <> show ib <> ", step "
+              <> show sb <> ") = " <> show (max ib sb)
           _ -> ""
 
 runCore :: SUTy b -> CoreEntry a b -> UVal a -> Either String (UVal b, Natural)
@@ -163,11 +182,12 @@ runInteractive
   -> Natural
   -> CoreEntry a b
   -> UVal a
-  -> IO (Either String (UVal b, Maybe Natural, Natural))
+  -> IO (Either String (UVal b, Maybe Natural, Natural, Natural))
 runInteractive _ limit already (CoreEntry inputTy coreTy Refl morph) input = pure $ do
   let liftedInput = toLift inputTy input
       value = evalV morph liftedInput
       (needed, gradedValue) = evalG workAlg morph liftedInput
+      peak = fst (evalSp morph (toDVal (liftSTy inputTy) liftedInput))
       available = fromMaybe needed limit
   if available < needed
     then Left "core fuel exhausted"
@@ -175,7 +195,10 @@ runInteractive _ limit already (CoreEntry inputTy coreTy Refl morph) input = pur
       Just (executed, remaining)
         | equalCore coreTy value gradedValue
             && equalCore coreTy value executed ->
-            Right (fromCore coreTy value, fmap (const remaining) limit, already + needed)
+            Right ( fromCore coreTy value
+                  , fmap (const remaining) limit
+                  , already + needed
+                  , peak)
       _ -> Left "core evaluator disagreement"
 
 equalU :: SUTy a -> UVal a -> UVal a -> Bool
