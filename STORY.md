@@ -154,15 +154,15 @@ declaration.
 
 ## Budgets Became Bounds
 
-The abstract interpretation that sized recursion (shapes, fuel-bounded
-unrolling, budget trees) now also certifies cost: `T3.Bound.costW`
-computes a static work bound per entry and `costW-sound` proves the
-exact work grade of any covered run never exceeds it. Closure shapes
-carry their body-cost bound Kripke-style, so the bound survives runtime
-selection and application. Because adequacy makes fuel equal work, the
-number printed by `--certificate` is a proved fuel cap: run the entry
-with that much fuel and it always completes. Work only; duplication and
-space bounds await a static size domain.
+The abstract interpretation that sized recursion now certifies work and
+duplication. `T3.Bound.costW` and `costD` compute static per-entry bounds;
+`costW-sound` and `costD-sound` prove the exact grades of covered runs never
+exceed them. Closure shapes carry resource-specific body bounds Kripke-style,
+and `sizeS` gives type-sensitive word bounds for copies and probes. Because
+adequacy makes fuel equal work, the work number printed by `--certificate` is a
+proved fuel cap. Duplication may be unbounded at the all-top entry shape when it
+depends on arbitrary list size. Space certification remains open until the
+project fixes whether its target is streaming-local peak or total live memory.
 
 ## Proof Story
 

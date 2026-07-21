@@ -11,13 +11,14 @@ nix run . -- test/programs/tictactoe.tel2
 cabal run telomare -- test/programs/tictactoe.tel2
 ```
 
-`--certificate` prints the program-level core summary INCLUDING the
-certified static work bound: an a-priori per-entry cap ("step <= N, any
-input") computed by abstract interpretation and proved sound in Agda
-(`T3.Bound.costW-sound`) — by adequacy it is literally a machine fuel
-bound. `--meter` prints accumulated formal core work, and `--max-work N`
-bounds that work. Static bounds are honest, not tight: loops are charged
-full fuel and branches by max. The executable accepts `.tel2` only.
+`--certificate` prints certified static work and duplication bounds: a-priori
+per-entry caps computed by abstract interpretation and proved sound in Agda
+(`T3.Bound.costW-sound` and `costD-sound`). By adequacy, the work bound is
+literally a machine fuel bound. A duplication bound may be unbounded for an
+arbitrary variable-size input while remaining finite at a refined input shape.
+`--meter` prints accumulated formal core work, and `--max-work N` bounds that
+work. Static bounds are honest, not tight: loops are charged full fuel and
+branches by max. The executable accepts `.tel2` only.
 `--emit-transport init|step` prints one backend-neutral core entry and exits,
 providing the explicit handoff to experimental runtimes.
 
@@ -265,14 +266,15 @@ work units. Its compiled entry has nonzero depth and contains `IterS`, `FoldS`,
 ## Formal Boundary
 
 `spec/Everything.agda` checks under `--safe` with no postulates.
-`T3.Bound` proves the certified static work bound: `costW`, an abstract
-interpretation over the `T3.Abstract` shape domain (extended with
-cost-carrying closure shapes), returns an upper bound on the work grade,
-and `costW-sound` proves every covered input's actual work stays under
-it — so with adequacy, a static bound is a machine fuel bound. The
-work slice only counts events; certified duplication/space bounds need a
-static size domain and remain future work, as do input-shape refinements
-beyond the all-top entry shape. The formal
+`T3.Bound` proves certified static work and duplication bounds. `costW` and
+`costD` interpret `T3.Abstract` shapes, including closure body costs; the
+type-sensitive `sizeS` bounds value words for copy and probe charges.
+`costW-sound` and `costD-sound` prove every covered run stays below the
+corresponding bound. With adequacy, a static work bound is a machine fuel
+bound. Arbitrary-input duplication is necessarily unbounded when it depends on
+an unrestricted list size; input-shape refinements can recover finite caps.
+Certified space remains future work pending a precise decision on whether the
+current graded `spaceAlg` denotes streaming-local peak or total live memory. The formal
 surface/core bridge proves successful direct elaboration erases to its source
 and preserves value semantics. `T3.Categorical.Vocabulary` separates operation
 capabilities from law records; `T3.Categorical.Interpretation` bundles the raw

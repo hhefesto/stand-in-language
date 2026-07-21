@@ -11,7 +11,7 @@ import Numeric.Natural (Natural)
 import Test.QuickCheck
 
 import SpecVectors (isZero, predS)
-import Telomare.Budget (ShapeH (..), costW)
+import Telomare.Budget (ShapeH (..), costD, costW)
 import Telomare.Core
 import Telomare.Denotation
 
@@ -200,6 +200,15 @@ prop_cost_bound_sound =
       Just bound -> work p n <= bound
       Nothing    -> False   -- generated fuel is shaped, so always sized
 
+-- Static duplication bound soundness (Agda: T3.Bound.costD-sound).
+prop_dup_bound_sound :: Property
+prop_dup_bound_sound =
+  forAll (genProg anyLeaf) $ \(ProgNB p) ->
+  forAll smallNat $ \n ->
+    case fst (costD p (NatLE n)) of
+      Just bound -> dupGrade p n <= bound
+      Nothing    -> False
+
 -- CopyS charge exactness (Agda: dupAlg.chargeD copyT = sizeT): the dup
 -- grade of a lone copy is exactly the copied value's size, and the copy
 -- is free work.
@@ -234,6 +243,7 @@ lawProps =
   , ("prop_dup_functorial",          prop_dup_functorial)
   , ("prop_copy_charge_exact",       prop_copy_charge_exact)
   , ("prop_cost_bound_sound",        prop_cost_bound_sound)
+  , ("prop_dup_bound_sound",         prop_dup_bound_sound)
   , ("prop_closure_beta",            prop_closure_beta)
   , ("prop_mapc_coherence",          prop_mapc_coherence)
   , ("prop_map_coherence_precision", prop_map_coherence_precision)

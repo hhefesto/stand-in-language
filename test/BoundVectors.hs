@@ -2,12 +2,13 @@
 {-# LANGUAGE GADTs         #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | Static work-bound vectors: the refl facts of
+-- | Static work/duplication-bound vectors: the refl facts of
 -- @spec\/T3\/Examples\/Bounds.agda@ transcribed 1:1 by name, plus the
 -- tic-tac-toe acceptance check (a concrete certified bound exists and
 -- dominates the measured work of every golden-transcript run).
 module BoundVectors (boundVectors, tictactoeBoundVectors) where
 
+import Data.List (isInfixOf)
 import Data.Maybe (isJust, isNothing)
 import Numeric.Natural (Natural)
 
@@ -16,7 +17,6 @@ import Telomare.Budget
 import Telomare.Core
 import Telomare.Denotation
 import Telomare.Machine
-import Telomare.Surface (SUTy (..))
 
 double :: Morph 'Nat ('Bang 'Nat)
 double = IterS (SucS :.: SucS) :.: (IdS :***: BoxValS (ConstS 0)) :.: RunitS
@@ -51,8 +51,32 @@ probe3 =
       :.: NatOutS)
     :.: NatOutS
 
+incrementAll :: Morph ('ListT 'Nat) ('Bang ('ListT 'Nat))
+incrementAll = MapS SucS
+
+sumList :: Morph ('ListT 'Nat) ('Bang 'Nat)
+sumList = FoldS AddS :.: (IdS :***: BoxValS (ConstS 0)) :.: RunitS
+
+copyList :: Morph ('ListT 'Nat) ('ListT 'Nat ':*: 'ListT 'Nat)
+copyList = CopyS (CopyList CopyNat)
+
+sumBoth :: Morph ('ListT 'Nat) ('Bang 'Nat ':*: 'Bang 'Nat)
+sumBoth = (sumList :***: sumList) :.: copyList
+
+isPositive :: Morph 'Nat ('Unit ':+: 'Unit)
+isPositive = CaseS InrS (InlS :.: WeakS) :.: NatOutS
+
+positive :: Morph 'Nat ('Nat ':+: 'Unit)
+positive = GuardS SNat isPositive
+
 sumShape :: ShapeH
 sumShape = SumSh (Just UnitS) (Just UnitS)
+
+list3Shape :: ShapeH
+list3Shape = ListSh 3 (NatLE 5)
+
+egList :: [Natural]
+egList = [1, 2, 3]
 
 -- | (name in Examples/Bounds.agda, holds in the mirror)
 boundVectors :: [(String, Bool)]
@@ -72,6 +96,20 @@ boundVectors =
   , ("mapChosen-bound-holds-right", work mapChosen (Right ()) <= 4)
   , ("probe3-bound", fst (costW probe3 TopS) == Just 3)
   , ("probe3-bound-holds", work probe3 100 <= 3)
+  , ("list3-size", sizeS (SList SNat) list3Shape == Just 7)
+  , ("nat-top-size", sizeS SNat TopS == Just 1)
+  , ("copyList-dup-bound", fst (costD copyList list3Shape) == Just 7)
+  , ("copyList-dup-bound-holds", dupGrade copyList egList <= 7)
+  , ("sumBoth-dup-bound", fst (costD sumBoth list3Shape) == Just 7)
+  , ("sumBoth-dup-bound-holds", dupGrade sumBoth egList <= 7)
+  , ("map-dup-bound", fst (costD incrementAll TopS) == Just 0)
+  , ("map-dup-bound-holds", dupGrade incrementAll egList <= 0)
+  , ("positive-dup-bound", fst (costD positive TopS) == Just 1)
+  , ("positive-dup-bound-holds", dupGrade positive 5 <= 1)
+  , ("countDown-dup-bound", fst (costD countDown (NatLE 5)) == Just 5)
+  , ("countDown-dup-bound-holds", dupGrade countDown 5 <= 5)
+  , ("applyInc-dup-bound", fst (costD applyInc TopS) == Just 0)
+  , ("applyInc-dup-bound-holds", dupGrade applyInc 5 <= 0)
   ]
 
 -- | Acceptance: the compiled game has concrete certified bounds and
@@ -81,6 +119,8 @@ tictactoeBoundVectors :: Program -> [(String, Bool)]
 tictactoeBoundVectors program@(Program _ _ _ initial step) =
   [ ("tictactoe init has a certified static work bound", isJust initBound)
   , ("tictactoe step has a certified static work bound", isJust stepBound)
+  , ("tictactoe certificate reports static duplication bounds",
+      "static duplication bound:" `isInfixOf` programCertificateSummary program)
   , ("tictactoe golden runs stay under the certified bounds",
       all runBounded goldenScripts)
   ]

@@ -1,12 +1,11 @@
 ------------------------------------------------------------------------
--- T3.Examples.Bounds — the static work bound on worked examples; every
+-- T3.Examples.Bounds — static work/dup bounds on worked examples; every
 -- fact computes by refl and becomes a Haskell test vector 1:1 by name
 -- (test/BoundVectors.hs).
 --
--- Each example pairs the static bound (costW at an input shape) with an
--- instance check that a concrete run's exact work stays under it.  The
--- bound is an honest upper bound, not a tight one: loops are charged
--- full-fuel, branches by max.
+-- Examples pair static bounds with checks that concrete grades stay below
+-- them.  Bounds are honest rather than necessarily tight: loops use full
+-- fuel and branches use their maximum.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
@@ -17,6 +16,7 @@ open import Data.Maybe   using (Maybe; just; nothing)
 open import Data.Product using (_,_; proj₁)
 open import Data.Sum     using (inj₁; inj₂)
 open import Data.List    using (List; []; _∷_)
+open import Data.List.Relation.Unary.All using (All; []; _∷_)
 open import Data.Unit    using (⊤; tt)
 open import Relation.Binary.PropositionalEquality using (_≡_; refl)
 
@@ -26,8 +26,9 @@ open import T3.Sem.Graded
 open import T3.Abstract using (Shape; topS; natLE; pairS; bangS; listS)
 open import T3.Bound
 open import T3.Examples.Basics using (double; countDown; applyInc;
-                                      chooseOp; applyChosen; mapChosen;
-                                      egList)
+                                       chooseOp; applyChosen; mapChosen;
+                                       incrementAll; copyList; sumBoth;
+                                       positive; egList)
 
 -- double: iterate (+2) n times.  At fuel ≤ 5 the loop is charged five
 -- rounds of one step each; the seed and plumbing are free.
@@ -108,3 +109,65 @@ probe3-bound = refl
 
 probe3-bound-holds : work probe3 100 ≤ 3
 probe3-bound-holds = work-bounded probe3 100
+
+-- ── Static duplication bounds ───────────────────────────────────────────────
+
+list3S : Shape (listT nat)
+list3S = listS 3 (natLE 5)
+
+list3-size : sizeS list3S ≡ just 7
+list3-size = refl
+
+nat-top-size : sizeS (topS {A = nat}) ≡ just 1
+nat-top-size = refl
+
+-- A three-element Nat list occupies one nil word plus two words per cons.
+-- copyS charges that complete input size.
+copyList-dup-bound : proj₁ (costD copyList list3S) ≡ just 7
+copyList-dup-bound = refl
+
+copyList-dup-bound-holds : dupGrade copyList egList ≤ 7
+copyList-dup-bound-holds = dup-bounded-at copyList list3S
+  (s≤s (s≤s (s≤s z≤n)) ,
+   s≤s z≤n ∷ s≤s (s≤s z≤n) ∷
+   s≤s (s≤s (s≤s z≤n)) ∷ [])
+
+-- The two folds are affine; the only duplication is the shared input copy.
+sumBoth-dup-bound : proj₁ (costD sumBoth list3S) ≡ just 7
+sumBoth-dup-bound = refl
+
+sumBoth-dup-bound-holds : dupGrade sumBoth egList ≤ 7
+sumBoth-dup-bound-holds = dup-bounded-at sumBoth list3S
+  (s≤s (s≤s (s≤s z≤n)) ,
+   s≤s z≤n ∷ s≤s (s≤s z≤n) ∷
+   s≤s (s≤s (s≤s z≤n)) ∷ [])
+
+-- A zero-duplication map remains statically zero even at unknown length.
+map-dup-bound : proj₁ (costD incrementAll topS) ≡ just 0
+map-dup-bound = refl
+
+map-dup-bound-holds : dupGrade incrementAll egList ≤ 0
+map-dup-bound-holds = dup-bounded incrementAll egList
+
+-- guardS copies its probed Nat once.
+positive-dup-bound : proj₁ (costD positive topS) ≡ just 1
+positive-dup-bound = refl
+
+positive-dup-bound-holds : dupGrade positive 5 ≤ 1
+positive-dup-bound-holds = dup-bounded positive 5
+
+-- Full-unroll while bound: five possible probes, while the concrete run
+-- stops after four.  Test and step bodies themselves are affine.
+countDown-dup-bound : proj₁ (costD countDown (natLE 5)) ≡ just 5
+countDown-dup-bound = refl
+
+countDown-dup-bound-holds : dupGrade countDown 5 ≤ 5
+countDown-dup-bound-holds = dup-bounded-at countDown (natLE 5)
+  (s≤s (s≤s (s≤s (s≤s (s≤s z≤n)))))
+
+-- Closure formation/application introduces no duplication for this body.
+applyInc-dup-bound : proj₁ (costD applyInc topS) ≡ just 0
+applyInc-dup-bound = refl
+
+applyInc-dup-bound-holds : dupGrade applyInc 5 ≤ 0
+applyInc-dup-bound-holds = dup-bounded applyInc 5

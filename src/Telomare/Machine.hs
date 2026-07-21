@@ -22,7 +22,7 @@ import Data.Type.Equality ((:~:) (Refl))
 import Numeric.Natural (Natural)
 import System.IO (hFlush, hPutStrLn, isEOF, stderr, stdout)
 
-import Telomare.Budget (costW, shapeOfSTy)
+import Telomare.Budget (costD, costW, shapeOfSTy)
 import Telomare.Compiler.Direct (Strip, eraseMorph, stripSTy)
 import Telomare.Core
 import Telomare.Denotation
@@ -53,16 +53,21 @@ data Program where
     -> Program
 
 programCertificateSummary :: Program -> String
-programCertificateSummary program@(Program stateTy _ _ initial step) =
+programCertificateSummary program@(Program _ _ _ initial step) =
   "typed affine program: core depth " <> show (programDepth program)
-    <> "\nstatic work bound: init " <> boundOf initial
-    <> ", step " <> boundOf step <> " (any input)"
+    <> "\nstatic work bound: init " <> workBound initial
+    <> ", step " <> workBound step <> " (any input)"
+    <> "\nstatic duplication bound: init " <> dupBound initial
+    <> ", step " <> dupBound step <> " (any input)"
   where
-    boundOf :: CoreEntry a b -> String
-    boundOf (CoreEntry inputTy _ _ morph) =
-      case fst (costW morph (shapeOfSTy inputTy)) of
-        Just n  -> "<= " <> show n
-        Nothing -> "unbounded (contains unsized recursion)"
+    workBound :: CoreEntry a b -> String
+    workBound (CoreEntry inputTy _ _ morph) =
+      renderBound (fst (costW morph (shapeOfSTy inputTy)))
+    dupBound :: CoreEntry a b -> String
+    dupBound (CoreEntry inputTy _ _ morph) =
+      renderBound (fst (costD morph (shapeOfSTy inputTy)))
+    renderBound (Just n) = "<= " <> show n
+    renderBound Nothing  = "unbounded"
 
 programDepth :: Program -> Natural
 programDepth (Program _ _ _ initial step) = max (entryDepth initial) (entryDepth step)
