@@ -17,6 +17,7 @@ import Telomare.Budget
 import Telomare.Core
 import Telomare.Denotation
 import Telomare.Machine
+import Telomare.Surface (SUTy (..))
 
 double :: Morph 'Nat ('Bang 'Nat)
 double = IterS (SucS :.: SucS) :.: (IdS :***: BoxValS (ConstS 0)) :.: RunitS
@@ -120,9 +121,20 @@ tictactoeBoundVectors program@(Program _ _ _ initial step) =
   [ ("tictactoe init has a certified static work bound", isJust initBound)
   , ("tictactoe step has a certified static work bound", isJust stepBound)
   , ("tictactoe certificate reports static duplication bounds",
-      "static duplication bound:" `isInfixOf` programCertificateSummary program)
+      "static duplication bound:" `isInfixOf` programCertificateSummary Nothing program)
   , ("tictactoe golden runs stay under the certified bounds",
       all runBounded goldenScripts)
+  , ("tictactoe certificate reports a static space bound line",
+      "static space bound:" `isInfixOf` programCertificateSummary Nothing program)
+  , ("assume-shape certificate names its assumption",
+      "(inputs satisfying --assume-shape text<=4)" `isInfixOf`
+        programCertificateSummary (Just (AssumeTextLE 4)) program)
+  , ("coversValue admits a conforming step input",
+      coversValue stepTy (PairSh (ListSh 4 (NatLE 0x10FFFF)) TopS)
+        (map fromIntegral [104, 105], 0 :: Natural))
+  , ("coversValue rejects an oversized step input",
+      not (coversValue stepTy (PairSh (ListSh 1 (NatLE 0x10FFFF)) TopS)
+        (map fromIntegral [104, 105], 0 :: Natural)))
   ]
   where
     entryBound :: CoreEntry a b -> Maybe Natural
@@ -130,6 +142,7 @@ tictactoeBoundVectors program@(Program _ _ _ initial step) =
       fst (costW morph (shapeOfSTy inputTy))
     initBound = entryBound initial
     stepBound = entryBound step
+    stepTy = SUProd (SUList SUNat) SUNat
     goldenScripts =
       [ ["1", "4", "2", "5", "3"]
       , ["q"]

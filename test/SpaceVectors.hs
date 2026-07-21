@@ -9,7 +9,7 @@ module SpaceVectors (spaceVectors) where
 
 import Numeric.Natural (Natural)
 
-import Telomare.Budget (ShapeH (..), costSp)
+import Telomare.Budget (ShapeH (..), costSp, tyROf)
 import Telomare.Core
 import Telomare.Space (evalSp, spacePeak, toDVal)
 
@@ -41,6 +41,6 @@ spaceVectors =
   ]
 
 dominates :: STy a -> Morph a b -> ShapeH -> Val a -> Bool
-dominates sa f shape v = case fst (costSp f shape) of
-  Nothing    -> True
-  Just bound -> fst (evalSp f (toDVal sa v)) <= bound
+dominates sa f shape v = case costSp (tyROf sa) f shape of
+  (Nothing, _, _)    -> True
+  (Just bound, _, _) -> fst (evalSp f (toDVal sa v)) <= bound

@@ -18,17 +18,20 @@ module Telomare.Budget
   , joinShape
   , transferB
   , sizeS
-  , sizeSH
+  , sizeR
+  , TyR (..)
+  , tyROf
   , costW
   , costD
   , costSp
+  , coversValue
   , shapeOfSTy
   ) where
 
 import Numeric.Natural (Natural)
 
 import Telomare.Core
-import Telomare.Surface (SUTy (..))
+import Telomare.Surface (SUTy (..), UVal)
 
 -- | Shapes (spec: @T3.Abstract.Shape@), dynamically typed.
 data ShapeH
@@ -386,160 +389,285 @@ costW (WhileS _ t st) s =
                   in (c, BangSh r)
        _       -> (Nothing, TopS)
 
--- | Type-blind static word-size bound.  Where the typed 'sizeS' resolves
--- @TopS@ through its 'STy' witness (atomic tops are one word), no
--- singleton is available inside 'costSp''s composite traversal, so
--- @TopS@ is over-approximated to unbounded.  Every result therefore
--- dominates the certified Agda bound (@T3.SpaceBound.spaceS@) at the
--- corresponding typed shape — sound, occasionally coarser.
-sizeSH :: ShapeH -> Maybe Natural
-sizeSH TopS = Nothing
-sizeSH UnitS = Just 1
-sizeSH (NatLE _) = Just 1
-sizeSH (PairSh a b) = addC (sizeSH a) (sizeSH b)
-sizeSH (SumSh a b) =
-  addC (Just 1) (joinMB (maybe (Just 0) sizeSH a) (maybe (Just 0) sizeSH b))
-sizeSH (ListSh n a) = listSizeC n a
-sizeSH (BangSh a) = sizeSH a
-sizeSH (LollySh _) = Just 1
+-- | Partial core-type representation threaded through 'costSp' so the
+-- typed view of sizes survives composite traversal: an atomic @TopS@
+-- (nat, unit, closure) is one word, exactly as the Agda @sizeS@
+-- resolves it through the type index.  'RUnknown' appears only where
+-- the traversal genuinely loses the type (apply results, mapCS
+-- elements); its sizes are unbounded.
+data TyR
+  = RUnit
+  | RNat
+  | RProd TyR TyR
+  | RSum TyR TyR
+  | RList TyR
+  | RBang TyR
+  | RLolly
+  | RUnknown
+  deriving (Eq, Show)
 
-listSizeC :: Natural -> ShapeH -> Maybe Natural
-listSizeC 0 _  = Just 1
-listSizeC k es = addC (Just 1) (addC (sizeSH es) (listSizeC (k - 1) es))
+tyROf :: STy a -> TyR
+tyROf SUnit        = RUnit
+tyROf SNat         = RNat
+tyROf (SProd a b)  = RProd (tyROf a) (tyROf b)
+tyROf (SSum a b)   = RSum (tyROf a) (tyROf b)
+tyROf (SList a)    = RList (tyROf a)
+tyROf (SBang a)    = RBang (tyROf a)
+tyROf (SLolly _ _) = RLolly
+
+splitRP :: TyR -> (TyR, TyR)
+splitRP (RProd a b) = (a, b)
+splitRP _           = (RUnknown, RUnknown)
+
+splitRE :: TyR -> (TyR, TyR)
+splitRE (RSum a b) = (a, b)
+splitRE _          = (RUnknown, RUnknown)
+
+unbangR :: TyR -> TyR
+unbangR (RBang a) = a
+unbangR _         = RUnknown
+
+elemR :: TyR -> TyR
+elemR (RList a) = a
+elemR _         = RUnknown
+
+pickR :: TyR -> TyR -> TyR
+pickR RUnknown r = r
+pickR r _        = r
+
+-- | Typed static word-size bound over the partial representation
+-- (spec: @T3.Bound.sizeS@; the Agda @topS@ clauses are the RUnit/RNat/
+-- RLolly TopS cases here).
+sizeR :: TyR -> ShapeH -> Maybe Natural
+sizeR RUnit  TopS = Just 1
+sizeR RNat   TopS = Just 1
+sizeR RLolly TopS = Just 1
+sizeR _      TopS = Nothing
+sizeR _ UnitS     = Just 1
+sizeR _ (NatLE _) = Just 1
+sizeR r (PairSh a b) =
+  let (x, y) = splitRP r in addC (sizeR x a) (sizeR y b)
+sizeR r (SumSh a b) =
+  let (x, y) = splitRE r
+  in addC (Just 1)
+       (joinMB (maybe (Just 0) (sizeR x) a) (maybe (Just 0) (sizeR y) b))
+sizeR r (ListSh n a) = listSizeR n (elemR r) a
+sizeR r (BangSh a)   = sizeR (unbangR r) a
+sizeR _ (LollySh _)  = Just 1
+
+listSizeR :: Natural -> TyR -> ShapeH -> Maybe Natural
+listSizeR 0 _ _  = Just 1
+listSizeR k r es = addC (Just 1) (addC (sizeR r es) (listSizeR (k - 1) r es))
 
 -- spec: T3.SpaceBound.aiterSp — rounds join by max, every round also
 -- charges the current shape's size so an early dynamic stop is dominated.
-aiterSp :: (ShapeH -> (Maybe Natural, ShapeH)) -> Natural -> ShapeH
+aiterSp :: TyR -> (ShapeH -> (Maybe Natural, ShapeH)) -> Natural -> ShapeH
         -> (Maybe Natural, ShapeH)
-aiterSp _ 0 s = (sizeSH s, s)
-aiterSp f n s =
+aiterSp r _ 0 s = (sizeR r s, s)
+aiterSp r f n s =
   let (c1, s1) = f s
-      (cn, sn) = aiterSp f (n - 1) s1
-  in (joinMB (sizeSH s) (joinMB c1 cn), joinShape s sn)
+      (cn, sn) = aiterSp r f (n - 1) s1
+  in (joinMB (sizeR r s) (joinMB c1 cn), joinShape s sn)
 
 -- spec: T3.SpaceBound.mapSpC — tail retained through the round, produced
 -- element through the rest of the traversal.
-mapSpC :: Natural -> ShapeH -> ShapeH -> Maybe Natural -> Maybe Natural
-mapSpC 0 _ _ _    = Just 1
-mapSpC n es re cb =
-  joinMB (addC (listSizeC (n - 1) es) cb)
-         (addC (sizeSH re) (mapSpC (n - 1) es re cb))
+mapSpR :: Natural -> TyR -> ShapeH -> TyR -> ShapeH -> Maybe Natural
+       -> Maybe Natural
+mapSpR 0 _ _ _ _ _        = Just 1
+mapSpR n re es rb rs cb =
+  joinMB (addC (listSizeR (n - 1) re es) cb)
+         (addC (sizeR rb rs) (mapSpR (n - 1) re es rb rs cb))
 
--- | Static live-heap space bound (spec: @T3.SpaceBound.spaceS@,
--- proved sound there by @spaceS-sound@ against @T3.Sem.Space.⟦_⟧S@).
-costSp :: Morph a b -> ShapeH -> (Maybe Natural, ShapeH)
-costSp IdS s = (sizeSH s, s)
-costSp (g :.: f) s =
-  let (cf, sf) = costSp f s
-      (cg, sg) = costSp g sf
-  in (joinMB cf cg, sg)
-costSp (f :***: g) s =
-  let (sa, sc) = splitP s
-      (cf, sb) = costSp f sa
-      (cg, sd) = costSp g sc
-  in (joinMB (addC (sizeSH sc) cf) (addC (sizeSH sb) cg), PairSh sb sd)
-costSp SwapS s = let (a, b) = splitP s in (sizeSH s, PairSh b a)
-costSp AssocS s =
-  let (ab, c) = splitP s; (a, b) = splitP ab
-  in (sizeSH s, PairSh a (PairSh b c))
-costSp UnassocS s =
-  let (a, bc) = splitP s; (b, c) = splitP bc
-  in (sizeSH s, PairSh (PairSh a b) c)
-costSp ExlS s = (sizeSH s, fst (splitP s))
-costSp ExrS s = (sizeSH s, snd (splitP s))
-costSp WeakS s = (sizeSH s, UnitS)
-costSp RunitS s = (addC (Just 1) (sizeSH s), PairSh s UnitS)
-costSp LunitS s = (addC (Just 1) (sizeSH s), PairSh UnitS s)
-costSp InlS s = (addC (Just 1) (sizeSH s), SumSh (Just s) Nothing)
-costSp InrS s = (addC (Just 1) (sizeSH s), SumSh Nothing (Just s))
-costSp (CaseS l r) s =
-  let (ml, mr) = splitE s
-      resL = fmap (costSp l) ml
-      resR = fmap (costSp r) mr
-      costOf = maybe (Just 0) fst
+-- | Static live-heap space bound (spec: @T3.SpaceBound.spaceS@, proved
+-- sound there by @spaceS-sound@ against @T3.Sem.Space.⟦_⟧S@).  The TyR
+-- component resolves atomic top sizes; wherever it degrades to
+-- 'RUnknown' the result only gets looser, never unsound.
+costSp :: TyR -> Morph a b -> ShapeH -> (Maybe Natural, ShapeH, TyR)
+costSp r IdS s = (sizeR r s, s, r)
+costSp r (g :.: f) s =
+  let (cf, sf, rf) = costSp r f s
+      (cg, sg, rg) = costSp rf g sf
+  in (joinMB cf cg, sg, rg)
+costSp r (f :***: g) s =
+  let (ra, rc) = splitRP r
+      (sa, sc) = splitP s
+      (cf, sb, rb) = costSp ra f sa
+      (cg, sd, rd) = costSp rc g sc
+  in ( joinMB (addC (sizeR rc sc) cf) (addC (sizeR rb sb) cg)
+     , PairSh sb sd, RProd rb rd)
+costSp r SwapS s =
+  let (ra, rb) = splitRP r
+      (a, b) = splitP s
+  in (sizeR r s, PairSh b a, RProd rb ra)
+costSp r AssocS s =
+  let (rab, rc) = splitRP r; (ra, rb) = splitRP rab
+      (ab, c) = splitP s; (a, b) = splitP ab
+  in (sizeR r s, PairSh a (PairSh b c), RProd ra (RProd rb rc))
+costSp r UnassocS s =
+  let (ra, rbc) = splitRP r; (rb, rc) = splitRP rbc
+      (a, bc) = splitP s; (b, c) = splitP bc
+  in (sizeR r s, PairSh (PairSh a b) c, RProd (RProd ra rb) rc)
+costSp r ExlS s = (sizeR r s, fst (splitP s), fst (splitRP r))
+costSp r ExrS s = (sizeR r s, snd (splitP s), snd (splitRP r))
+costSp r WeakS s = (sizeR r s, UnitS, RUnit)
+costSp r RunitS s = (addC (Just 1) (sizeR r s), PairSh s UnitS, RProd r RUnit)
+costSp r LunitS s = (addC (Just 1) (sizeR r s), PairSh UnitS s, RProd RUnit r)
+costSp r InlS s =
+  (addC (Just 1) (sizeR r s), SumSh (Just s) Nothing, RSum r RUnknown)
+costSp r InrS s =
+  (addC (Just 1) (sizeR r s), SumSh Nothing (Just s), RSum RUnknown r)
+costSp r (CaseS l rr) s =
+  let (rl, rrt) = splitRE r
+      (ml, mr) = splitE s
+      resL = fmap (costSp rl l) ml
+      resR = fmap (costSp rrt rr) mr
+      costOf = maybe (Just 0) (\(c, _, _) -> c)
       shape = case (resL, resR) of
-        (Just (_, x), Just (_, y)) -> joinShape x y
-        (Just (_, x), Nothing)     -> x
-        (Nothing, Just (_, y))     -> y
-        (Nothing, Nothing)         -> TopS
-  in (joinMB (sizeSH s) (joinMB (costOf resL) (costOf resR)), shape)
-costSp DistlS s =
-  let (a, bc) = splitP s
+        (Just (_, x, _), Just (_, y, _)) -> joinShape x y
+        (Just (_, x, _), Nothing)        -> x
+        (Nothing, Just (_, y, _))        -> y
+        (Nothing, Nothing)               -> TopS
+      tyOut = case (resL, resR) of
+        (Just (_, _, x), Just (_, _, y)) -> pickR x y
+        (Just (_, _, x), Nothing)        -> x
+        (Nothing, Just (_, _, y))        -> y
+        (Nothing, Nothing)               -> RUnknown
+  in (joinMB (sizeR r s) (joinMB (costOf resL) (costOf resR)), shape, tyOut)
+costSp r DistlS s =
+  let (ra, rbc) = splitRP r; (rb, rc) = splitRE rbc
+      (a, bc) = splitP s
       (mb, mc) = splitE bc
-  in (sizeSH s, SumSh (PairSh a <$> mb) (PairSh a <$> mc))
-costSp NilS _ = (Just 1, ListSh 0 TopS)
-costSp ConsS s =
-  let (e, l) = splitP s
-  in (addC (Just 1) (sizeSH s), case l of
-       ListSh n es -> ListSh (n + 1) (joinShape e es)
-       _           -> TopS)
-costSp UnconsS s = (addC (Just 1) (sizeSH s), SumSh (Just UnitS) (Just rest))
+  in ( sizeR r s
+     , SumSh (PairSh a <$> mb) (PairSh a <$> mc)
+     , RSum (RProd ra rb) (RProd ra rc))
+costSp _ NilS _ = (Just 1, ListSh 0 TopS, RList RUnknown)
+costSp r ConsS s =
+  let (re, rl) = splitRP r
+      (e, l) = splitP s
+  in ( addC (Just 1) (sizeR r s)
+     , case l of
+         ListSh n es -> ListSh (n + 1) (joinShape e es)
+         _           -> TopS
+     , RList (pickR re (elemR rl)))
+costSp r UnconsS s =
+  ( addC (Just 1) (sizeR r s)
+  , SumSh (Just UnitS) (Just rest)
+  , RSum RUnit (RProd (elemR r) r))
   where
     rest = case s of
       ListSh n es -> PairSh es (ListSh (predN n) es)
       _           -> PairSh TopS TopS
-costSp NatOutS s = (Just 2, case s of
-  NatLE n -> SumSh (Just UnitS) (Just (NatLE (predN n)))
-  _       -> SumSh (Just UnitS) (Just TopS))
-costSp SucS s = (Just 1, case s of
+costSp _ NatOutS s =
+  ( Just 2
+  , case s of
+      NatLE n -> SumSh (Just UnitS) (Just (NatLE (predN n)))
+      _       -> SumSh (Just UnitS) (Just TopS)
+  , RSum RUnit RNat)
+costSp _ SucS s = (Just 1, case s of
   NatLE n -> NatLE (n + 1)
-  _       -> TopS)
-costSp AddS s =
+  _       -> TopS
+  , RNat)
+costSp _ AddS s =
   let (a, b) = splitP s
   in (Just 2, case (a, b) of
        (NatLE n, NatLE m) -> NatLE (n + m)
-       _                  -> TopS)
-costSp (ConstS k) s = (sizeSH s, NatLE k)
-costSp DupNatS s = (Just 2, PairSh s s)
-costSp (CopyS _) s = (addC (sizeSH s) (sizeSH s), PairSh s s)
-costSp (GuardS _ t) s =
-  (joinMB (fst (costSp t s)) (addC (Just 1) (sizeSH s))
-  , SumSh (Just s) (Just UnitS))
-costSp (CurryS _ f) s = (sizeSH s, LollySh (fst (costSp f (PairSh s TopS))))
-costSp ApplyS s =
-  let (sf, sa) = splitP s
-  in (joinMB (addC (Just 1) (sizeSH sa)) (lollyCostOf sf), TopS)
-costSp MapCS s =
-  let (sbf, sl) = splitP s
-  in (case sl of
-       ListSh n es ->
-         addC (Just 1) (mapSpC n es TopS (lollyCostOf (unbangS sbf)))
-       _ -> Nothing
-     , TopS)
-costSp (DupS _) s = (addC (sizeSH s) (sizeSH s), PairSh s s)
-costSp (BoxS f) s = let (c, r) = costSp f (unbangS s) in (c, BangSh r)
-costSp (BoxValS f) s = let (c, r) = costSp f s in (c, BangSh r)
-costSp MergeS s =
-  let (a, b) = splitP s
-  in (sizeSH s, BangSh (PairSh (unbangS a) (unbangS b)))
-costSp (MapS f) s = case s of
+       _                  -> TopS
+     , RNat)
+costSp r (ConstS k) s = (sizeR r s, NatLE k, RNat)
+costSp _ DupNatS s = (Just 2, PairSh s s, RProd RNat RNat)
+costSp r (CopyS _) s =
+  (addC (sizeR r s) (sizeR r s), PairSh s s, RProd r r)
+costSp r (GuardS _ t) s =
+  let (ct, _, _) = costSp r t s
+  in ( joinMB ct (addC (Just 1) (sizeR r s))
+     , SumSh (Just s) (Just UnitS)
+     , RSum r RUnit)
+costSp r (CurryS _ f) s =
+  let (cb, _, _) = costSp (RProd r RUnknown) f (PairSh s TopS)
+  in (sizeR r s, LollySh cb, RLolly)
+costSp r ApplyS s =
+  let (_, ra) = splitRP r
+      (sf, sa) = splitP s
+  in ( joinMB (addC (Just 1) (sizeR ra sa)) (lollyCostOf sf)
+     , TopS, RUnknown)
+costSp r MapCS s =
+  let (rbf, rl) = splitRP r
+      (sbf, sl) = splitP s
+  in ( case sl of
+         ListSh n es ->
+           addC (Just 1)
+             (mapSpR n (elemR rl) es RUnknown TopS
+               (lollyCostOf (unbangS sbf)))
+         _ -> Nothing
+     , TopS, RBang (RList RUnknown))
+costSp r (DupS _) s =
+  (addC (sizeR r s) (sizeR r s), PairSh s s, RProd r r)
+costSp r (BoxS f) s =
+  let (c, r', rf) = costSp (unbangR r) f (unbangS s) in (c, BangSh r', RBang rf)
+costSp r (BoxValS f) s =
+  let (c, r', rf) = costSp r f s in (c, BangSh r', RBang rf)
+costSp r MergeS s =
+  let (ra, rb) = splitRP r
+      (a, b) = splitP s
+  in ( sizeR r s
+     , BangSh (PairSh (unbangS a) (unbangS b))
+     , RBang (RProd (unbangR ra) (unbangR rb)))
+costSp r (MapS f) s = case s of
   ListSh n es ->
-    let (cb, re) = costSp f es in (mapSpC n es re cb, TopS)
-  _ -> (Nothing, TopS)
-costSp (IterS f) s =
-  let (fu, a0) = splitP s
+    let (cb, re, rb) = costSp (elemR r) f es
+    in (mapSpR n (elemR r) es rb re cb, TopS, RBang (RList rb))
+  _ -> (Nothing, TopS, RBang (RList RUnknown))
+costSp r (IterS f) s =
+  let (_, racc0) = splitRP r
+      racc = unbangR racc0
+      (fu, a0) = splitP s
   in case fu of
-       NatLE n -> let (c, r) = aiterSp (costSp f) n (unbangS a0)
-                  in (addC (Just 1) c, BangSh r)
-       _       -> (Nothing, TopS)
-costSp (FoldS f) s =
-  let (ls, b0) = splitP s
+       NatLE n ->
+         let step x = let (c, r', _) = costSp racc f x in (c, r')
+             (c, r') = aiterSp racc step n (unbangS a0)
+         in (addC (Just 1) c, BangSh r', RBang racc)
+       _ -> (Nothing, TopS, RBang racc)
+costSp r (FoldS f) s =
+  let (rl, racc0) = splitRP r
+      racc = unbangR racc0
+      relem = elemR rl
+      (ls, b0) = splitP s
   in case ls of
        ListSh n es ->
-         let stepC x = let (cb, rb) = costSp f (PairSh x es)
-                       in (addC (listSizeC n es) cb, rb)
-             (c, r) = aiterSp stepC n (unbangS b0)
-         in (joinMB (sizeSH s) c, BangSh r)
-       _ -> (Nothing, TopS)
-costSp (WhileS _ t st) s =
-  let (fu, a0) = splitP s
-      stepC x = let (ct, _) = costSp t x
-                    (cs, r) = costSp st x
-                in (joinMB ct cs, r)
+         let step x = let (cb, rb, _) = costSp (RProd racc relem) f (PairSh x es)
+                      in (addC (listSizeR n relem es) cb, rb)
+             (c, r') = aiterSp racc step n (unbangS b0)
+         in (joinMB (sizeR r s) c, BangSh r', RBang racc)
+       _ -> (Nothing, TopS, RBang racc)
+costSp r (WhileS _ t st) s =
+  let (_, racc0) = splitRP r
+      racc = unbangR racc0
+      (fu, a0) = splitP s
+      step x = let (ct, _, _) = costSp racc t x
+                   (cs, r', _) = costSp racc st x
+               in (joinMB ct cs, r')
   in case fu of
-       NatLE n -> let (c, r) = aiterSp stepC n (unbangS a0)
-                  in (addC (Just 1) c, BangSh r)
-       _       -> (Nothing, TopS)
+       NatLE n ->
+         let (c, r') = aiterSp racc step n (unbangS a0)
+         in (addC (Just 1) c, BangSh r', RBang racc)
+       _ -> (Nothing, TopS, RBang racc)
+
+-- | Runtime input validation: the value-level mirror of the Agda
+-- coverage relation @γW@ (closures are conservatively rejected — a
+-- closure bound is semantic and machine inputs are first-order anyway).
+-- This is what makes a conditional @--assume-shape@ certificate honest:
+-- every admitted input is checked, nonconforming input is refused.
+coversValue :: SUTy a -> ShapeH -> UVal a -> Bool
+coversValue _ TopS _ = True
+coversValue SUUnit UnitS _ = True
+coversValue SUNat (NatLE n) v = v <= n
+coversValue (SUProd a b) (PairSh sa sb) (x, y) =
+  coversValue a sa x && coversValue b sb y
+coversValue (SUSum a _) (SumSh (Just sa) _) (Left x) = coversValue a sa x
+coversValue (SUSum _ b) (SumSh _ (Just sb)) (Right y) = coversValue b sb y
+coversValue (SUList a) (ListSh n es) xs =
+  fromIntegral (length xs) <= n && all (coversValue a es) xs
+coversValue _ _ _ = False
 
 -- Duplication multiplication preserves the useful affine case:
 -- an unknown number of zero-cost rounds still costs zero.

@@ -5,6 +5,8 @@
 --   telomare --emit-transport init program.tel2  print one core entry
 --   telomare --meter program.tel2        print formal work on stderr at exit
 --   telomare --max-work N program.tel2   cap global formal work
+--   telomare --assume-shape text<=N program.tel2  refine certified step
+--     bounds to inputs with at most N characters (validated at runtime)
 module Main (main) where
 
 import Control.Monad (when)
@@ -24,6 +26,7 @@ data Opts = Opts
   , optTransport   :: Maybe String
   , optMeter       :: Bool
   , optMaxWork     :: Maybe Natural
+  , optAssume      :: Maybe String
   }
 
 opts :: Parser Opts
@@ -37,6 +40,8 @@ opts = Opts
               <> help "print formal core work to stderr on exit")
   <*> optional (option auto (long "max-work" <> metavar "N"
               <> help "stop after N units of formal core work"))
+  <*> optional (strOption (long "assume-shape" <> metavar "text<=N"
+              <> help "refine the certified step bounds to inputs whose text component has at most N characters; inputs are validated at runtime"))
 
 main :: IO ()
 main = run =<< execParser
@@ -57,12 +62,15 @@ runTel2 o = do
     Left (CompileError err) -> hPutStrLn stderr err >> exitFailure
     Right program -> case optTransport o of
       Just entry -> emitTransport entry program
-      Nothing -> do
-        when (optCertificate o) (putStrLn (programCertificateSummary program))
-        result <- runProgramIO (optMaxWork o) (optMeter o) program
-        case result of
-          Left err -> hPutStrLn stderr err >> exitFailure
-          Right () -> pure ()
+      Nothing -> case traverse parseAssume (optAssume o) of
+        Left err -> hPutStrLn stderr err >> exitFailure
+        Right assume -> do
+          when (optCertificate o)
+            (putStrLn (programCertificateSummary assume program))
+          result <- runProgramIO (optMaxWork o) (optMeter o) assume program
+          case result of
+            Left err -> hPutStrLn stderr err >> exitFailure
+            Right () -> pure ()
 
 emitTransport :: String -> Program -> IO ()
 emitTransport entry program = case entry of

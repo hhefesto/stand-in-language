@@ -9,6 +9,8 @@ module Telomare.Machine
   , ReplyU
   , CoreEntry (..)
   , Program (..)
+  , Assume (..)
+  , parseAssume
   , programCertificateSummary
   , programDepth
   , runProgramScript
@@ -22,7 +24,8 @@ import Data.Type.Equality ((:~:) (Refl))
 import Numeric.Natural (Natural)
 import System.IO (hFlush, hPutStrLn, isEOF, stderr, stdout)
 
-import Telomare.Budget (costD, costSp, costW, shapeOfSTy)
+import Telomare.Budget (ShapeH (..), costD, costSp, costW, coversValue,
+                        shapeOfSTy, tyROf)
 import Telomare.Compiler.Direct (Strip, eraseMorph, stripSTy)
 import Telomare.Core
 import Telomare.Denotation
@@ -53,16 +56,41 @@ data Program where
     -> CoreEntry (TextU ':**: s) (ReplyU s)
     -> Program
 
-programCertificateSummary :: Program -> String
-programCertificateSummary program@(Program _ _ _ initial step) =
+-- | The v1 @--assume-shape@ refinement: a bound on the step input's
+-- Text component.  The refined shape it induces on step's input is
+-- checked against every admitted input by 'coversValue', which is what
+-- keeps the conditional certificate honest.
+newtype Assume = AssumeTextLE Natural
+
+assumeStepShape :: SUTy s -> Maybe Assume -> ShapeH
+assumeStepShape stateTy Nothing = shapeOfSTy (SUProd (SUList SUNat) stateTy)
+assumeStepShape stateTy (Just (AssumeTextLE n)) =
+  PairSh (ListSh n (NatLE 0x10FFFF)) (shapeOfSTy stateTy)
+
+assumeSuffix :: Maybe Assume -> String
+assumeSuffix Nothing = " (any input)"
+assumeSuffix (Just (AssumeTextLE n)) =
+  " (inputs satisfying --assume-shape text<=" <> show n <> ")"
+
+parseAssume :: String -> Either String Assume
+parseAssume spec = case splitAt 6 spec of
+  ("text<=", digits)
+    | not (null digits) && all (`elem` "0123456789") digits ->
+        Right (AssumeTextLE (read digits))
+  _ -> Left ("--assume-shape expects text<=N, got " <> spec)
+
+programCertificateSummary :: Maybe Assume -> Program -> String
+programCertificateSummary assume program@(Program stateTy _ _ initial step) =
   "typed affine program: core depth " <> show (programDepth program)
     <> "\nstatic work bound: init " <> workBound initial
-    <> ", step " <> workBound step <> " (any input)"
+    <> ", step " <> stepWorkBound <> suffix
     <> "\nstatic duplication bound: init " <> dupBound initial
-    <> ", step " <> dupBound step <> " (any input)"
+    <> ", step " <> stepDupBound <> suffix
     <> "\nstatic space bound: init " <> spaceBound initial
-    <> ", step " <> spaceBound step <> " (any input)"
+    <> ", step " <> stepSpaceBound <> suffix
   where
+    suffix = assumeSuffix assume
+    stepShape = assumeStepShape stateTy assume
     workBound :: CoreEntry a b -> String
     workBound (CoreEntry inputTy _ _ morph) =
       renderBound (fst (costW morph (shapeOfSTy inputTy)))
@@ -71,7 +99,16 @@ programCertificateSummary program@(Program _ _ _ initial step) =
       renderBound (fst (costD morph (shapeOfSTy inputTy)))
     spaceBound :: CoreEntry a b -> String
     spaceBound (CoreEntry inputTy _ _ morph) =
-      renderBound (fst (costSp morph (shapeOfSTy inputTy)))
+      renderBound (firstOf3 (costSp (tyROf (liftSTy inputTy)) morph
+        (shapeOfSTy inputTy)))
+    stepWorkBound = case step of
+      CoreEntry _ _ _ morph -> renderBound (fst (costW morph stepShape))
+    stepDupBound = case step of
+      CoreEntry _ _ _ morph -> renderBound (fst (costD morph stepShape))
+    stepSpaceBound = case step of
+      CoreEntry inputTy _ _ morph -> renderBound
+        (firstOf3 (costSp (tyROf (liftSTy inputTy)) morph stepShape))
+    firstOf3 (c, _, _) = c
     renderBound (Just n) = "<= " <> show n
     renderBound Nothing  = "unbounded"
 
@@ -102,8 +139,9 @@ runProgramScript (Program stateTy initialU stepU initial step) inputs = do
           go rt it source core (transcript <> output) (total + spent) (snd reply) rest
     go _ _ _ _ transcript total (Right _) [] = Right (transcript, total)
 
-runProgramIO :: Maybe Natural -> Bool -> Program -> IO (Either String ())
-runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) = do
+runProgramIO :: Maybe Natural -> Bool -> Maybe Assume -> Program
+             -> IO (Either String ())
+runProgramIO limit report assume (Program stateTy sourceInit sourceStep initial step) = do
   result <- runInteractive replyTy limit 0 initial ()
   case result of
     Left err -> pure (Left err)
@@ -113,6 +151,8 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
       | otherwise -> loop remaining spent peak (0 :: Natural) reply
   where
     replyTy = SUProd (SUList SUNat) (SUSum SUUnit stateTy)
+    stepInputTy = SUProd (SUList SUNat) stateTy
+    stepShape = assumeStepShape stateTy assume
     loop remaining spent peak count (output, continuation) = do
       case decode output of
         Left err -> pure (Left err)
@@ -126,20 +166,26 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
               if eof then finish spent peak count else do
                 input <- getLine
                 let inputValue = (encode input, state)
-                result <- runInteractive replyTy remaining spent step inputValue
-                case result of
-                  Left err -> pure (Left err)
-                  Right (reply, remaining', spent', peak')
-                    | not (equalU replyTy (evalU sourceStep inputValue) reply) ->
-                        pure (Left "surface/core evaluator disagreement")
-                    | otherwise ->
-                        loop remaining' spent' (max peak peak') (count + 1) reply
-    entryBound :: CoreEntry a b -> Maybe Natural
-    entryBound (CoreEntry inputTy _ _ morph) =
-      fst (costW morph (shapeOfSTy inputTy))
-    entrySpace :: CoreEntry a b -> Maybe Natural
-    entrySpace (CoreEntry inputTy _ _ morph) =
-      fst (costSp morph (shapeOfSTy inputTy))
+                if not (coversValue stepInputTy stepShape inputValue)
+                  then pure (Left ("input violates the assumed shape"
+                    <> assumeSuffix assume))
+                  else do
+                    result <- runInteractive replyTy remaining spent step inputValue
+                    case result of
+                      Left err -> pure (Left err)
+                      Right (reply, remaining', spent', peak')
+                        | not (equalU replyTy (evalU sourceStep inputValue) reply) ->
+                            pure (Left "surface/core evaluator disagreement")
+                        | otherwise ->
+                            loop remaining' spent' (max peak peak') (count + 1) reply
+    entryBound :: ShapeH -> CoreEntry a b -> Maybe Natural
+    entryBound shape (CoreEntry _ _ _ morph) = fst (costW morph shape)
+    entrySpace :: ShapeH -> CoreEntry a b -> Maybe Natural
+    entrySpace shape (CoreEntry inputTy _ _ morph) =
+      case costSp (tyROf (liftSTy inputTy)) morph shape of
+        (c, _, _) -> c
+    initShape = case initial of
+      CoreEntry inputTy _ _ _ -> shapeOfSTy inputTy
     finish spent peak count = do
       when report $ do
         hPutStrLn stderr ("core work: " <> show spent <> cap)
@@ -150,7 +196,7 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
         -- a count-input session is certified to cost at most
         -- init-bound + count * step-bound, the numbers --certificate
         -- prints per entry
-        cap = case (entryBound initial, entryBound step) of
+        cap = case (entryBound initShape initial, entryBound stepShape step) of
           (Just ib, Just sb) ->
             " <= certified cap init " <> show ib <> " + "
               <> show count <> " steps * " <> show sb <> " = "
@@ -158,7 +204,7 @@ runProgramIO limit report (Program stateTy sourceInit sourceStep initial step) =
           _ -> ""
         -- space is a peak, not a sum: the session cap is the larger of
         -- the two per-entry certified caps
-        spaceCap = case (entrySpace initial, entrySpace step) of
+        spaceCap = case (entrySpace initShape initial, entrySpace stepShape step) of
           (Just ib, Just sb) ->
             " <= certified cap max(init " <> show ib <> ", step "
               <> show sb <> ") = " <> show (max ib sb)

@@ -60,7 +60,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (314 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (318 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -107,10 +107,18 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    polish for later sessions: an Agda value-coherence lemma for `⟦_⟧S`
    (Haskell hand vectors cover it today), the two planned QuickCheck
    space laws, and the `TyR` typed-size refinement of `costSp`.
-7. **M3** — `--assume-shape` input refinements with runtime `coversValue`
-   validation, making ttt's size-dependent caps finite; includes the
-   `TyR` partial type rep so `costSp` sizes atomic tops as one word
-   (today list-touching entries print `space … unbounded`).
+7. **M3 (done)** — `--assume-shape 'text<=N'` refines the certified step
+   bounds; every admitted input is validated by `coversValue`
+   (`Budget.hs`, the value-level mirror of `γW`) and nonconforming input
+   is refused with a nonzero exit, keeping the conditional certificate
+   honest. Includes the `TyR` partial type rep threaded through `costSp`
+   so atomic tops size as one word (a Nat-state program's init space is
+   now finite). Residual gaps for later: the certified analysis returns
+   `topS` for map/closure results (so entries that route data through
+   `map`/`mapc`/`apply` still print `space unbounded` — fixing it means
+   improving the Agda `spaceS` result shapes and re-proving), and the v1
+   DSL bounds only the input text, not the machine state, so ttt's step
+   duplication cap stays unbounded (its state contains Text).
 8. **M4** — R2 `PromoteS` (copyable open seeds), transport v5, unblocking
    `multiplyNat`/`dTimes`/`dMinus`.
 9. **M5** — closure-bodied `IterCS`/`FoldCS`/`WhileCS`, richer `mapc`
