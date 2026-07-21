@@ -66,7 +66,11 @@ lambdas nest (lambdas curry). Application is by juxtaposition of atomic
 expressions, `f x y`, and is left-associative: a head naming a local binding
 applies that closure, an unshadowed definition name is a call — lexical scope
 wins. Keywords cannot be identifiers, so chains stop at `in`, `with`, `then`,
-and their kin. `f(x)` and `apply(f, x)` remain valid.
+and their kin. `f(x)` and `apply(f, x)` remain valid. `let` annotations may
+be omitted when the bound value's type is synthesizable (variables, literals,
+tuples, calls and applications, `suc`/`add`, `copy`, `prepend`, and loop
+results via their step definitions); lambdas, injections, and `[]`/`mapc`
+results still need one, and `def` signatures are always explicit.
 
 ```text
 program   ::= ("module" ID ";")? ("import" ID ";")* declaration*
@@ -104,7 +108,7 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "matchText" expr "of" "{" textArm* pattern "->" expr ";"? "}"
            |  "case" expr "of" "{" constructorArm+ "}"
 
-binding   ::= pattern ":" type "=" expr
+binding   ::= pattern (":" type)? "=" expr
 pattern   ::= ID | "_" | "(" ID ("," ID)+ ")"
 natArm    ::= NAT "->" expr ";"
 textArm   ::= STRING "->" expr ";"

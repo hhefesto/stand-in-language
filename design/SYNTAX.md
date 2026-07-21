@@ -63,6 +63,16 @@ valid in both languages with different meanings.
 - Reserved words are excluded from identifiers so `let a: T = f x in …` does
   not consume `in` as an argument; chains stop at keywords.
 
+### S3 details
+
+- `let pat = value in body` synthesizes the binding's type from the value:
+  variables, literals, tuples, calls/applications, `suc`/`add`, `copy`,
+  `prepend`, and loop forms (through their step definitions' signatures).
+  No unification: lambdas, `left`/`right`, `[]`, and `mapc` results still
+  need `: T`; `def` argument/result annotations stay required (entry ABI and
+  definition tables).
+- Works on every path, including recursion placement (`let total = fold …`).
+
 ### S4 details and limits
 
 - Only fires when neither `init` nor `step` is declared; declaring `main`
@@ -77,5 +87,5 @@ valid in both languages with different meanings.
 |---|---|---|
 | S1 | comments, `if`, list literals, multi-arg λ, multi-`let` | **done** |
 | S2 | juxtaposition application | **done** |
-| S3 | optional `let` annotations | planned |
+| S3 | optional `let` annotations | **done** |
 | S4 | `main` entry sugar | planned |

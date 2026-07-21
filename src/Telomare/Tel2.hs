@@ -61,7 +61,7 @@ data Expr
   | EText String
   | ECon String
   | EPair Expr Expr
-  | ELet Pattern Type Expr Expr
+  | ELet Pattern (Maybe Type) Expr Expr
   | ECall String Expr
   | ECopy Expr
   | ESuc Expr
@@ -198,8 +198,7 @@ exprParser = choice
       pure (foldr (\(pat, ty, value) rest -> ELet pat ty value rest) body bindings)
     letBinding = do
       pat <- patternParser
-      void (symbol ":")
-      ty <- typeParser
+      ty <- optional (symbol ":" *> typeParser)
       void (symbol "=")
       value <- exprParser
       pure (pat, ty, value)
@@ -611,14 +610,16 @@ compilePlacedBody
   -> Either CompileError (Morph (Lift c) ('Bang (Lift output)))
 compilePlacedBody tables decls env output expression = case expression of
   ELet (PVar binder) annotation loop body | isClosedLoop loop -> do
-    SomeTy resultTy <- resolveType tables annotation
+    SomeTy resultTy <- resolveAnnotation tables env annotation loop
     SomePlacedLoop actualTy loopCore <- compileAffineLoop tables env resultTy loop
     Refl <- requireSame resultTy actualTy
     compilePlacedContinuation tables binder resultTy output body loopCore
   ELet (PVar binder) annotation (ECall name argument) body
     | definitionRequiresPlacement decls name -> do
-        SomeTy resultTy <- resolveType tables annotation
         SomePlacedDef inputTy actualTy callee <- compilePlacedDef tables decls name
+        SomeTy resultTy <- case annotation of
+          Just declared -> resolveType tables declared
+          Nothing       -> pure (SomeTy actualTy)
         Refl <- requireSame resultTy actualTy
         Elab argumentTy rest argumentU <- elaborate tables env Set.empty inputTy argument
         Refl <- requireSame inputTy argumentTy
@@ -627,7 +628,7 @@ compilePlacedBody tables decls env output expression = case expression of
           (callee :.: argumentCore)
   ELet pat annotation value body
     | not (containsIter value || callsRecursiveDef decls value) -> do
-        SomeTy valueTy <- resolveType tables annotation
+        SomeTy valueTy <- resolveAnnotation tables env annotation value
         Elab actual rest valueU <- elaborate tables env Set.empty valueTy value
         Refl <- requireSame valueTy actual
         Bound boundEnv reshape <- bindPattern pat valueTy rest
@@ -818,7 +819,7 @@ callsRecursiveDef :: [Decl] -> Expr -> Bool
 callsRecursiveDef decls expression = any (definitionRequiresPlacement decls)
   (Set.toList (exprCalls expression))
 
-data BindingSpec = BindingSpec String Type Expr
+data BindingSpec = BindingSpec String (Maybe Type) Expr
 
 closedEntry :: Expr -> Maybe ([BindingSpec], Expr)
 closedEntry = go []
@@ -842,9 +843,8 @@ data SomeClosedLoop where
     -> Morph 'Unit ('Bang (Lift a))
     -> SomeClosedLoop
 
-compileClosedLoop :: Tables -> Type -> Expr -> Either CompileError SomeClosedLoop
-compileClosedLoop tables annotation expression = do
-  SomeTy resultTy <- resolveType tables annotation
+compileClosedLoop :: Tables -> SomeTy -> Expr -> Either CompileError SomeClosedLoop
+compileClosedLoop tables (SomeTy resultTy) expression =
   case expression of
     EMap input mapperName -> do
       requireClosed "map input" input
@@ -921,8 +921,8 @@ compileBindings _ [] = do
   core <- fromDirect (Closed.closedValue UId)
   pure (CompiledBindings Empty SUnit core)
 compileBindings tables (BindingSpec name annotation expression : rest) = do
-  SomeTy declaredTy <- resolveType tables annotation
-  SomeClosedLoop actualTy loopCore <- compileClosedLoop tables annotation expression
+  declared@(SomeTy declaredTy) <- resolveAnnotation tables Empty annotation expression
+  SomeClosedLoop actualTy loopCore <- compileClosedLoop tables declared expression
   Refl <- requireSame declaredTy actualTy
   CompiledBindings env envTy restCore <- compileBindings tables rest
   if envContains name env
@@ -1157,8 +1157,8 @@ elaborate tables env demand (SUProd a b) (EPair x y) = do
   Refl <- requireSame b by
   pure (Elab (SUProd a b) rest'
     (UUnassoc :..: (UId :****: second) :..: first))
-elaborate tables env demand expected (ELet pat ty value body) = do
-  SomeTy valueTy <- resolveType tables ty
+elaborate tables env demand expected (ELet pat annotation value body) = do
+  SomeTy valueTy <- resolveAnnotation tables env annotation value
   Elab actual rest first <- elaborate tables env
     (demand `Set.union` (freeVars body Set.\\ patternNames pat)) valueTy value
   Refl <- requireSame valueTy actual
@@ -1322,6 +1322,13 @@ buildCaps ((name, SomeTy ty) : rest) = case buildCaps rest of
     SomeCaps (SUProd ty restTy) (Bind name ty restEnv)
       (EPair (EVar name) restExpr)
 
+-- | An explicit annotation resolves as written; an omitted one is
+-- synthesized from the bound value (bounded synthesis, no unification).
+resolveAnnotation
+  :: Tables -> Env c -> Maybe Type -> Expr -> Either CompileError SomeTy
+resolveAnnotation tables _ (Just annotation) _ = resolveType tables annotation
+resolveAnnotation tables env Nothing value = synthType tables env value
+
 -- Minimal type synthesis for apply heads: variables, definition calls, and
 -- applications thereof (so chains like @f x y@ elaborate).
 synthType :: Tables -> Env c -> Expr -> Either CompileError SomeTy
@@ -1336,8 +1343,38 @@ synthType tables env (EApply function _) = do
     _               -> bad "cannot apply a value that is not a function"
 synthType _ _ (ECon name) =
   bad ("constructor " <> name <> " is not a function; enum constructors take no payload")
+synthType _ _ EUnit = pure (SomeTy SUUnit)
+synthType _ _ (ENat _) = pure (SomeTy SUNat)
+synthType _ _ (EText _) = pure (SomeTy (SUList SUNat))
+synthType tables env (EPair x y) = do
+  SomeTy a <- synthType tables env x
+  SomeTy b <- synthType tables env y
+  pure (SomeTy (SUProd a b))
+synthType _ _ (ESuc _) = pure (SomeTy SUNat)
+synthType _ _ (EAdd _) = pure (SomeTy SUNat)
+synthType tables env (ECopy value) = do
+  SomeTy a <- synthType tables env value
+  pure (SomeTy (SUProd a a))
+synthType _ _ (EPrepend _ _) = pure (SomeTy (SUList SUNat))
+synthType tables env (ECons value _) = do
+  SomeTy a <- synthType tables env value
+  pure (SomeTy (SUList a))
+synthType tables _ (EMap _ mapper) = do
+  SomeDef _ output _ <- lookupDef tables mapper
+  pure (SomeTy (SUList output))
+synthType tables _ (EIter _ _ step) = do
+  SomeDef _ output _ <- lookupDef tables step
+  pure (SomeTy output)
+synthType tables _ (EFold _ _ step) = do
+  SomeDef stepIn _ _ <- lookupDef tables step
+  case stepIn of
+    SUProd accumulator _ -> pure (SomeTy accumulator)
+    _                    -> bad "fold step must accept accumulator * element"
+synthType tables _ (EWhile _ _ _ step) = do
+  SomeDef _ output _ <- lookupDef tables step
+  pure (SomeTy output)
 synthType _ _ _ =
-  bad "cannot infer the function here; bind it with an annotated let and apply the variable"
+  bad "cannot infer a type here; annotate the binding (bind a function with an annotated let and apply the variable)"
 
 envTypeOf :: String -> Env c -> Either CompileError SomeTy
 envTypeOf name Empty = bad ("unknown variable " <> name)

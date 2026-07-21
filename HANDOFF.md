@@ -48,7 +48,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (298 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (303 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -72,8 +72,10 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    `EApply`, def head → `ECall`; lexical scope wins; symmetric for `f(x)`
    call forms). Reserved words excluded from identifiers. `synthType`
    projects through `EApply`, so chains and nested applies elaborate.
-3. **S3** — optional `let` type annotations via bounded local synthesis
-   (`def` annotations stay required).
+3. **S3 (done)** — optional `let` type annotations via bounded local
+   synthesis (`synthType`: variables, literals, tuples, calls/applications,
+   `suc`/`add`, `copy`, `prepend`, loop forms via step-def types; lambdas and
+   injections still need annotations; `def` annotations stay required).
 4. **S4** — telomare0-style `main` entry sugar synthesizing `init`/`step`
    (halt when next state is 0).
 5. **M1** — `design/SPACE.md`: normative live-heap metric; document why the

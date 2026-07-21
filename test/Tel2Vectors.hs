@@ -119,6 +119,18 @@ tel2Vectors = do
             , rejects "tel2 rejects a keyword as an identifier"
                 (small "let in: Nat = 1 in (\"\",left ())")
             ]
+          syntaxInfer =
+            [ acceptsBehavior "tel2 let infers a literal binding"
+                inferLiteralSource ["go"] "seven\n"
+            , acceptsBehavior "tel2 let infers a call-chain binding"
+                inferCallSource ["go"] "ten\n"
+            , acceptsBehavior "tel2 let infers a tuple split"
+                inferTupleSource ["go"] "five\n"
+            , acceptsBehavior "tel2 let infers a fold binding through placement"
+                inferFoldSource ["go"] "three\n"
+            , rejectsWith "tel2 asks for an annotation on an unannotated lambda"
+                (small "let f = \\x -> x in (\"\",left ())") "annotate the binding"
+            ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
             , accepts "tel2 accepts implicit duplication of a list" implicitListReuseSource
@@ -170,7 +182,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -510,6 +522,36 @@ keywordBoundarySource = unlines
   , "def plus(p: Nat * Nat): Nat = add p;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
   , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let total: Nat = fold [1, 2] from double 0 with plus in matchNat total of { 3 -> (\"three\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+inferLiteralSource :: String
+inferLiteralSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _ = input in let m = n in matchNat m of { 7 -> (\"seven\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+inferCallSource :: String
+inferCallSource = unlines
+  [ "type State = Nat;"
+  , "def double(n: Nat): Nat = add (n,n);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _ = input in let _ = n in let d = double 5 in matchNat d of { 10 -> (\"ten\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+inferTupleSource :: String
+inferTupleSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in matchNat n of { 5 -> (\"five\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+inferFoldSource :: String
+inferFoldSource = unlines
+  [ "type State = Nat;"
+  , "def plus(p: Nat * Nat): Nat = add p;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let _ = n in let total = fold [1, 2] from 0 with plus in matchNat total of { 3 -> (\"three\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
   ]
 
 conApplySource :: String
