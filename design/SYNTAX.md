@@ -76,10 +76,14 @@ valid in both languages with different meanings.
 ### S4 details and limits
 
 - Only fires when neither `init` nor `step` is declared; declaring `main`
-  alongside them is an error.
+  alongside them is an error (`pick one entry style`).
 - State is Nat-encoded (`type State = Nat;` is implied if undeclared); halting
   is `next state == 0`, priced honestly through the `matchNat` on the state.
+  A non-Nat `State` fails elaboration of the synthesized halt test.
 - First input of a session is the empty string, matching the CLI loop.
+- The synthesized bodies bind the `main` call with a plain variable
+  (`let pair = main(request) in …`) so a `main` containing recursion still
+  matches the placement path's placed-call shape.
 
 ## Status
 
@@ -88,4 +92,4 @@ valid in both languages with different meanings.
 | S1 | comments, `if`, list literals, multi-arg λ, multi-`let` | **done** |
 | S2 | juxtaposition application | **done** |
 | S3 | optional `let` annotations | **done** |
-| S4 | `main` entry sugar | planned |
+| S4 | `main` entry sugar | **done** |

@@ -48,7 +48,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (303 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (306 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -76,8 +76,11 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    synthesis (`synthType`: variables, literals, tuples, calls/applications,
    `suc`/`add`, `copy`, `prepend`, loop forms via step-def types; lambdas and
    injections still need annotations; `def` annotations stay required).
-4. **S4** — telomare0-style `main` entry sugar synthesizing `init`/`step`
-   (halt when next state is 0).
+4. **S4 (done)** — telomare0-style `main` entry sugar (`expandMain`):
+   `def main(io: Text * State): Text * State` synthesizes `init`/`step`,
+   defaults `type State = Nat;`, halts when the returned state is 0. The
+   `main` call is let-bound with a plain variable so recursive `main`
+   bodies still take the placement path.
 5. **M1** — `design/SPACE.md`: normative live-heap metric; document why the
    `CostAlgebra`/`Interp` abstraction cannot express retention (dedicated
    interpreter required) and delete `spaceAlg`.

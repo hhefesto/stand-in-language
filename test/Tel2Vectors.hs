@@ -131,6 +131,14 @@ tel2Vectors = do
             , rejectsWith "tel2 asks for an annotation on an unannotated lambda"
                 (small "let f = \\x -> x in (\"\",left ())") "annotate the binding"
             ]
+          syntaxMain =
+            [ acceptsBehavior "tel2 main entry synthesizes init and step"
+                mainCounterSource ["go"] "start\ndone\n"
+            , acceptsBehavior "tel2 main entry supports recursion through placement"
+                mainFoldSource [] "three\n"
+            , rejectsWith "tel2 rejects main alongside init/step"
+                mainAndInitSource "pick one entry style"
+            ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
             , accepts "tel2 accepts implicit duplication of a list" implicitListReuseSource
@@ -182,7 +190,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -552,6 +560,25 @@ inferFoldSource = unlines
   , "def plus(p: Nat * Nat): Nat = add p;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
   , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let _ = n in let total = fold [1, 2] from 0 with plus in matchNat total of { 3 -> (\"three\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  ]
+
+mainCounterSource :: String
+mainCounterSource = unlines
+  [ "def main(io: Text * Nat): Text * Nat = let (input, count) = io in let _ = input in matchNat count of { 0 -> (\"start\\n\", 1); 1 -> (\"done\\n\", 0); k -> let _ = k in (\"bad\\n\", 0); };"
+  ]
+
+mainFoldSource :: String
+mainFoldSource = unlines
+  [ "def plus(p: Nat * Nat): Nat = add p;"
+  , "def main(io: Text * Nat): Text * Nat = let (input, count) = io in let _ = input in let _ = count in let total = fold [1, 2] from 0 with plus in matchNat total of { 3 -> (\"three\\n\", 0); k -> let _ = k in (\"bad\\n\", 0); };"
+  ]
+
+mainAndInitSource :: String
+mainAndInitSource = unlines
+  [ "type State = Nat;"
+  , "def main(io: Text * Nat): Text * Nat = io;"
+  , "def init(u: Unit): Reply State = (\"\",left ());"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
 conApplySource :: String

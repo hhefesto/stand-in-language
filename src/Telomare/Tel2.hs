@@ -466,7 +466,40 @@ parseSource :: FilePath -> String -> Either CompileError Source
 parseSource name = either (bad . errorBundlePretty) Right . parse sourceParser name
 
 compileDecls :: [Decl] -> Either CompileError Program
-compileDecls rawDecls = do
+compileDecls parsedDecls = expandMain parsedDecls >>= compileExpanded
+
+-- | telomare0-style entry sugar: when neither @init@ nor @step@ is declared
+-- and @main@ is, synthesize both from @main : Text * State -> Text * State@
+-- (defaulting @type State = Nat;@), halting when the next state is 0. The
+-- priced @matchNat@ on the returned state is the honest halt test. The
+-- @main@ call is bound with a plain variable so a recursive @main@ still
+-- matches the placement path.
+expandMain :: [Decl] -> Either CompileError [Decl]
+expandMain decls
+  | not hasMain = Right decls
+  | hasInit || hasStep =
+      bad "main cannot be combined with init/step; pick one entry style"
+  | otherwise = Right (decls <> [stateDecl | not hasState] <> [initDecl, stepDecl])
+  where
+    defined name = not (null [() | DDef current _ _ _ _ <- decls, current == name])
+    hasMain = defined "main"
+    hasInit = defined "init"
+    hasStep = defined "step"
+    hasState = "State" `elem`
+      ([name | DType name _ <- decls] <> [name | DData name _ <- decls])
+    stateDecl = DType "State" TNat
+    reply body = ELet (PVar "pair") Nothing body
+      (ELet (PTuple ["text", "s"]) Nothing (EVar "pair")
+        (EPair (EVar "text")
+          (EMatchNat (EVar "s") [(0, ELeft EUnit)] (PVar "k") (ERight (EVar "k")))))
+    initDecl = DDef "init" "u" TUnit (TReply (TName "State"))
+      (reply (ECall "main" (EPair (EText "") (ENat 0))))
+    stepDecl = DDef "step" "request" (TProd TText (TName "State"))
+      (TReply (TName "State"))
+      (reply (ECall "main" (EVar "request")))
+
+compileExpanded :: [Decl] -> Either CompileError Program
+compileExpanded rawDecls = do
   tablesWithTypes <- foldM addTypeDecl emptyTables decls
   orderedDefs <- orderDefinitions decls
   tables <- foldM addDef tablesWithTypes orderedDefs

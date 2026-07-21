@@ -70,7 +70,12 @@ and their kin. `f(x)` and `apply(f, x)` remain valid. `let` annotations may
 be omitted when the bound value's type is synthesizable (variables, literals,
 tuples, calls and applications, `suc`/`add`, `copy`, `prepend`, and loop
 results via their step definitions); lambdas, injections, and `[]`/`mapc`
-results still need one, and `def` signatures are always explicit.
+results still need one, and `def` signatures are always explicit. A module
+may declare a telomare0-style entry `def main(io: Text * State): Text * State`
+instead of `init`/`step`: both are synthesized, `State` defaults to `Nat`,
+`main` first runs with an empty input and state `0`, and the machine halts
+when the returned state is `0` (a priced `matchNat` performs the halt test).
+Declaring `main` alongside `init`/`step` is an error.
 
 ```text
 program   ::= ("module" ID ";")? ("import" ID ";")* declaration*
