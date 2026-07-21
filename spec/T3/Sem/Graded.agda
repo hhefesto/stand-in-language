@@ -241,6 +241,11 @@ module Interp (R : CostAlgebra) where
     in (chargePrim ((A ⊸ B) ⊗ A) B applyT (suc (sz A a)) (sz B b) ⋄ m , b)
   ⟦ mapCS {A} {B} ⟧G (f , xs) =
     mapG (λ ys → chargeBase (! (listT B)) (sz (listT B) ys)) xs f
+  ⟦ iterCS {A} ⟧G (f , (n , a)) =
+    iterG (λ x → chargeBase (! A) (sz A x)) n f a
+  ⟦ foldCS {A} {B} ⟧G (f , (xs , b)) =
+    foldG (λ x → chargeBase (! B) (sz B x)) xs f b
+  ⟦ whileCS {A} ⟧G (t , (s , (n , a))) = whileG A n t s a
   ⟦ dupS {A} ⟧G a =
     (chargePrim (! A) (! A ⊗ ! A) dupT (sz A a) (sz A a + sz A a) , (a , a))
   ⟦ boxS f ⟧G a = ⟦ f ⟧G a
@@ -369,6 +374,16 @@ module Interp (R : CostAlgebra) where
   G-val (mapCS {A} {B}) {gf , gxs} {f , xs} (relF , relXs) =
     mapG-rel A B (λ ys → chargeBase (! (listT B)) (sz (listT B) ys))
       gf f relF gxs xs relXs
+  G-val (iterCS {A}) {gf , (gn , ga)} {f , (n , a)} (relF , (refl , relA)) =
+    iterG-rel A (λ x → chargeBase (! A) (sz A x)) n gf f relF ga a relA
+  G-val (foldCS {A} {B}) {gf , (gxs , gb)} {f , (xs , b)}
+    (relF , (relXs , relB)) =
+    foldG-rel A B (λ x → chargeBase (! B) (sz B x)) gf f
+      (λ gb' b' gx x rb rx → relF (gb' , gx) (b' , x) (rb , rx))
+      gxs xs relXs gb b relB
+  G-val (whileCS {A}) {gt , (gs , (gn , ga))} {t , (s , (n , a))}
+    (relT , (relS , (refl , relA))) =
+    whileG-rel A n gt t gs s relT relS ga a relA
   G-val dupS rel = (rel , rel)
   G-val (boxS f) rel = G-val f rel
   G-val (boxValS f) rel = G-val f rel

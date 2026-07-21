@@ -90,6 +90,14 @@ data _⇨_ : Ty → Ty → Set where
   curryS   : {C A B : Ty} → (C ⊗ A) ⇨ B → C ⇨ (A ⊸ B)
   applyS   : {A B : Ty} → ((A ⊸ B) ⊗ A) ⇨ B
   mapCS    : {A B : Ty} → (! (A ⊸ B) ⊗ listT A) ⇨ ! (listT B)
+  -- closure-bodied recursion (M5): one reusable promoted closure drives
+  -- the loop, applied once per round one level down — mapCS's
+  -- discipline extended to iteration, fold, and bounded while (whose
+  -- test is a second reusable closure, probed once per round).
+  iterCS   : {A : Ty} → (! (A ⊸ A) ⊗ (nat ⊗ ! A)) ⇨ ! A
+  foldCS   : {A B : Ty} → (! ((B ⊗ A) ⊸ B) ⊗ (listT A ⊗ ! B)) ⇨ ! B
+  whileCS  : {A : Ty} →
+    (! (A ⊸ (unit ⊕ unit)) ⊗ (! (A ⊸ A) ⊗ (nat ⊗ ! A))) ⇨ ! A
   -- R2 data promotion: Ground (bang-free first-order) values may enter
   -- the modality in place.  Sound since R3 because every later dup is
   -- priced full sizeT; Ground excludes ! so this is never dig
@@ -146,6 +154,9 @@ depth (curryS f)    = depth f
 depth applyS        = 0
 depth mapCS         = 1
   -- the closure body runs one level down, like every recursion body
+depth iterCS        = 1
+depth foldCS        = 1
+depth whileCS       = 1
 depth (promoteS _)  = 0
 depth dupS          = 0
 depth (boxS f)      = suc (depth f)
