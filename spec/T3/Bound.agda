@@ -289,6 +289,20 @@ costW applyS       s =
 costW mapCS        s =
   let (sbf , sl) = splitP s
   in (lenOf sl *∞ (just 1 +∞ lollyCostOf (unbang sbf)) , topS)
+costW iterCS       s =
+  let (sbf , rest) = splitP s
+      (fu , _) = splitP rest
+  in (fuelOf fu *∞ (just 1 +∞ lollyCostOf (unbang sbf)) , topS)
+costW foldCS       s =
+  let (sbf , rest) = splitP s
+      (ls , _) = splitP rest
+  in (lenOf ls *∞ (just 1 +∞ lollyCostOf (unbang sbf)) , topS)
+costW whileCS      s =
+  let (st , rest) = splitP s
+      (sf , q) = splitP rest
+      (fu , _) = splitP q
+  in (fuelOf fu *∞ (just 1 +∞ (lollyCostOf (unbang st) +∞ lollyCostOf (unbang sf)))
+     , topS)
 costW (guardS t)   s =
   (proj₁ (costW t s) , sumS (just s) (just unitS))
 costW (promoteS _) s = (just 0 , bangS s)
@@ -426,6 +440,19 @@ costD applyS       s = (lollyCostOf (proj₁ (splitP s)) , topS)
 costD mapCS        s =
   let (sbf , sl) = splitP s
   in (lenOf sl *D∞ lollyCostOf (unbang sbf) , topS)
+costD iterCS       s =
+  let (sbf , rest) = splitP s
+      (fu , _) = splitP rest
+  in (fuelOf fu *D∞ lollyCostOf (unbang sbf) , topS)
+costD foldCS       s =
+  let (sbf , rest) = splitP s
+      (ls , _) = splitP rest
+  in (lenOf ls *D∞ lollyCostOf (unbang sbf) , topS)
+costD whileCS      s =
+  let (_ , rest) = splitP s
+      (_ , q) = splitP rest
+      (fu , _) = splitP q
+  in (fuelOf fu *D∞ nothing , topS)
 costD (promoteS _) s = (just 0 , bangS s)
 costD dupS         s = (sizeS s , pairS s s)
 costD (boxS f)     s = let (c , r) = costD f (unbang s) in (c , bangS r)
@@ -686,9 +713,83 @@ private
           (suc n) s)) regroup grouped
        , ⊔S-rW s _ ihs)
 
+  len0-fold : (A B : Ty) (fG : (GVal ℕ B × GVal ℕ A) → ℕ × GVal ℕ B)
+            → ∀ xs (b : GVal ℕ B) → length xs ≤ 0
+            → proj₁ (Dup.foldG (λ _ → 0) xs fG b) ≤ 0
+  len0-fold A B fG [] b z≤n = z≤n
+  len0-fold A B fG (x ∷ xs) b ()
+
   all-⊤ : {X : Set} (xs : List X) → All (λ _ → ⊤) xs
   all-⊤ []       = []
   all-⊤ (_ ∷ xs) = tt ∷ all-⊤ xs
+
+  -- closure-bodied loops (M5): the boxed body's Kripke bound is uniform
+  -- over every argument, so no shape evolution is needed — k ≤ n rounds
+  -- each cost at most 1 + c.
+  iterC-bound : (A : Ty) (fG : GVal ℕ A → ℕ × GVal ℕ A) (c : ℕ)
+              → (∀ x → proj₁ (fG x) ≤ c)
+              → ∀ n k (a : GVal ℕ A) → k ≤ n
+              → proj₁ (iterGW (λ _ → 0) k fG a) ≤ n * suc c
+  iterC-bound A fG c h n zero a kn = z≤n
+  iterC-bound A fG c h (suc n) (suc k) a (s≤s kn) =
+    s≤s (+-mono-≤ (h a) (iterC-bound A fG c h n k (proj₂ (fG a)) kn))
+
+  foldC-bound : (A B : Ty) (fG : (GVal ℕ B × GVal ℕ A) → ℕ × GVal ℕ B)
+                (c : ℕ)
+              → (∀ p → proj₁ (fG p) ≤ c)
+              → ∀ n xs (b : GVal ℕ B) → length xs ≤ n
+              → proj₁ (foldGW (λ _ → 0) xs fG b) ≤ n * suc c
+  foldC-bound A B fG c h n [] b hl = z≤n
+  foldC-bound A B fG c h (suc n) (x ∷ xs) b (s≤s hl) =
+    s≤s (+-mono-≤ (h (b , x))
+      (foldC-bound A B fG c h n xs (proj₂ (fG (b , x))) hl))
+
+  whileC-bound : (A : Ty) (tG : GVal ℕ A → ℕ × (⊤ ⊎ ⊤))
+                 (sG : GVal ℕ A → ℕ × GVal ℕ A) (ct cs : ℕ)
+               → (∀ x → proj₁ (tG x) ≤ ct)
+               → (∀ x → proj₁ (sG x) ≤ cs)
+               → ∀ n k (a : GVal ℕ A) → k ≤ n
+               → proj₁ (whileGW A k tG sG a) ≤ n * suc (ct + cs)
+  whileC-bound A tG sG ct cs ht hs n zero a kn = z≤n
+  whileC-bound A tG sG ct cs ht hs (suc n) (suc k) a (s≤s kn)
+    with proj₂ (tG a)
+  ... | inj₁ _ =
+    ≤-trans
+      (≤-trans (ht a)
+        (≤-trans (m≤m+n ct cs)
+          (m≤m+n (ct + cs) (n * suc (ct + cs)))))
+      (n≤1+n _)
+  ... | inj₂ _ =
+    let mt = proj₁ (tG a)
+        ms = proj₁ (sG a)
+        r  = proj₁ (whileGW A k tG sG (proj₂ (sG a)))
+        ih = whileC-bound A tG sG ct cs ht hs n k (proj₂ (sG a)) kn
+        inner : (mt + ms) + r ≤ (ct + cs) + n * suc (ct + cs)
+        inner = +-mono-≤ (+-mono-≤ (ht a) (hs a)) ih
+        inner′ : mt + (ms + r) ≤ (ct + cs) + n * suc (ct + cs)
+        inner′ = subst (λ z → z ≤ (ct + cs) + n * suc (ct + cs))
+                   (+-assoc mt ms r) inner
+    in subst (λ z → z ≤ suc ((ct + cs) + n * suc (ct + cs)))
+         (sym (+-suc mt (ms + r))) (s≤s inner′)
+
+  -- dup-grade versions: no chargeStep, so k ≤ n rounds cost ≤ n · c.
+  iterDC-bound : (A : Ty) (fG : GVal ℕ A → ℕ × GVal ℕ A) (c : ℕ)
+               → (∀ x → proj₁ (fG x) ≤ c)
+               → ∀ n k (a : GVal ℕ A) → k ≤ n
+               → proj₁ (Dup.iterG (λ _ → 0) k fG a) ≤ n * c
+  iterDC-bound A fG c h n zero a kn = z≤n
+  iterDC-bound A fG c h (suc n) (suc k) a (s≤s kn) =
+    +-mono-≤ (h a) (iterDC-bound A fG c h n k (proj₂ (fG a)) kn)
+
+  foldDC-bound : (A B : Ty) (fG : (GVal ℕ B × GVal ℕ A) → ℕ × GVal ℕ B)
+                 (c : ℕ)
+               → (∀ p → proj₁ (fG p) ≤ c)
+               → ∀ n xs (b : GVal ℕ B) → length xs ≤ n
+               → proj₁ (Dup.foldG (λ _ → 0) xs fG b) ≤ n * c
+  foldDC-bound A B fG c h n [] b hl = z≤n
+  foldDC-bound A B fG c h (suc n) (x ∷ xs) b (s≤s hl) =
+    +-mono-≤ (h (b , x))
+      (foldDC-bound A B fG c h n xs (proj₂ (fG (b , x))) hl)
 
   -- one map: every element covered ⇒ total cost ≤ n · (1 + per-element)
   map-bound : (A B : Ty) (P : GVal ℕ A → Set)
@@ -908,6 +1009,52 @@ costW-sound (mapCS {A} {B}) (pairS (bangS (lollyS (just k))) (listS n es))
   ( map-bound A B (λ _ → ⊤) gf (just k) (λ x _ → relF x) n gxs hlen
       (all-⊤ gxs)
   , tt)
+costW-sound iterCS topS h = (tt , tt)
+costW-sound iterCS (pairS sbf topS) h = (tt , tt)
+costW-sound iterCS (pairS sbf (pairS topS a0)) h = (tt , tt)
+costW-sound iterCS (pairS topS (pairS (natLE N) a0)) h = (tt , tt)
+costW-sound iterCS (pairS (bangS topS) (pairS (natLE N) a0)) h = (tt , tt)
+costW-sound iterCS (pairS (bangS (lollyS nothing)) (pairS (natLE N) a0)) h =
+  (tt , tt)
+costW-sound (iterCS {A})
+  (pairS (bangS (lollyS (just c))) (pairS (natLE N) a0))
+  {gf , (gn , ga)} (relF , (hn , _)) =
+  (iterC-bound A gf c (λ x → relF x) N gn ga hn , tt)
+costW-sound foldCS topS h = (tt , tt)
+costW-sound foldCS (pairS sbf topS) h = (tt , tt)
+costW-sound foldCS (pairS sbf (pairS topS b0)) h = (tt , tt)
+costW-sound foldCS (pairS topS (pairS (listS n es) b0)) h = (tt , tt)
+costW-sound foldCS (pairS (bangS topS) (pairS (listS n es) b0)) h = (tt , tt)
+costW-sound foldCS (pairS (bangS (lollyS nothing)) (pairS (listS n es) b0)) h =
+  (tt , tt)
+costW-sound (foldCS {A} {B})
+  (pairS (bangS (lollyS (just c))) (pairS (listS n es) b0))
+  {gf , (gxs , gb)} (relF , ((hlen , _) , _)) =
+  (foldC-bound A B gf c (λ p → relF p) n gxs gb hlen , tt)
+costW-sound whileCS topS h = (tt , tt)
+costW-sound whileCS (pairS st topS) h = (tt , tt)
+costW-sound whileCS (pairS st (pairS sf topS)) h = (tt , tt)
+costW-sound whileCS (pairS st (pairS sf (pairS topS a0))) h = (tt , tt)
+costW-sound whileCS (pairS topS (pairS sf (pairS (natLE N) a0))) h = (tt , tt)
+costW-sound whileCS (pairS (bangS topS) (pairS sf (pairS (natLE N) a0))) h =
+  (tt , tt)
+costW-sound whileCS
+  (pairS (bangS (lollyS nothing)) (pairS sf (pairS (natLE N) a0))) h =
+  (tt , tt)
+costW-sound whileCS
+  (pairS (bangS (lollyS (just ct))) (pairS topS (pairS (natLE N) a0))) h =
+  (tt , tt)
+costW-sound whileCS
+  (pairS (bangS (lollyS (just ct)))
+    (pairS (bangS topS) (pairS (natLE N) a0))) h = (tt , tt)
+costW-sound whileCS
+  (pairS (bangS (lollyS (just ct)))
+    (pairS (bangS (lollyS nothing)) (pairS (natLE N) a0))) h = (tt , tt)
+costW-sound (whileCS {A})
+  (pairS (bangS (lollyS (just ct)))
+    (pairS (bangS (lollyS (just cs))) (pairS (natLE N) a0)))
+  {gt , (gs , (gn , ga))} (relT , (relS , (hn , _))) =
+  (whileC-bound A gt gs ct cs (λ x → relT x) (λ x → relS x) N gn ga hn , tt)
 costW-sound (guardS t) s {ga} h
   with proj₂ (⟦ t ⟧C ga) | costW-sound t s {ga} h
 ... | inj₁ _ | (ct , _) = (ct , h)
@@ -1087,6 +1234,89 @@ costD-sound (mapCS {A} {B}) (pairS (bangS (lollyS nothing)) (listS n es))
 costD-sound (mapCS {A} {B}) (pairS (bangS (lollyS (just k))) (listS n es))
   {gf , gxs} (relF , (hlen , _)) =
   (mapD-bound A B (λ _ → ⊤) gf (just k) (λ x _ → relF x) n gxs hlen (all-⊤ gxs) , tt)
+costD-sound iterCS topS h = (tt , tt)
+costD-sound iterCS (pairS topS topS) h = (tt , tt)
+costD-sound iterCS (pairS topS (pairS topS a0)) h = (tt , tt)
+costD-sound iterCS (pairS topS (pairS (natLE zero) a0)) (_ , (z≤n , _)) =
+  (z≤n , tt)
+costD-sound iterCS (pairS topS (pairS (natLE (suc N)) a0)) h = (tt , tt)
+costD-sound iterCS (pairS (bangS topS) topS) h = (tt , tt)
+costD-sound iterCS (pairS (bangS topS) (pairS topS a0)) h = (tt , tt)
+costD-sound iterCS (pairS (bangS topS) (pairS (natLE zero) a0))
+  (_ , (z≤n , _)) = (z≤n , tt)
+costD-sound iterCS (pairS (bangS topS) (pairS (natLE (suc N)) a0)) h =
+  (tt , tt)
+costD-sound iterCS (pairS (bangS (lollyS nothing)) topS) h = (tt , tt)
+costD-sound iterCS (pairS (bangS (lollyS nothing)) (pairS topS a0)) h =
+  (tt , tt)
+costD-sound iterCS (pairS (bangS (lollyS nothing)) (pairS (natLE zero) a0))
+  (_ , (z≤n , _)) = (z≤n , tt)
+costD-sound iterCS
+  (pairS (bangS (lollyS nothing)) (pairS (natLE (suc N)) a0)) h = (tt , tt)
+costD-sound (iterCS {A}) (pairS (bangS (lollyS (just 0))) rest)
+  {gf , (gn , ga)} (relF , _) =
+  ( subst (λ z → proj₁ (Dup.iterG (λ _ → 0) gn gf ga) ≤ z)
+      (*-zero-right gn)
+      (iterDC-bound A gf 0 (λ x → relF x) gn gn ga ≤-refl)
+  , tt)
+costD-sound iterCS (pairS (bangS (lollyS (just (suc k)))) topS) h = (tt , tt)
+costD-sound iterCS
+  (pairS (bangS (lollyS (just (suc k)))) (pairS topS a0)) h = (tt , tt)
+costD-sound iterCS
+  (pairS (bangS (lollyS (just (suc k)))) (pairS (natLE zero) a0))
+  (_ , (z≤n , _)) = (z≤n , tt)
+costD-sound (iterCS {A})
+  (pairS (bangS (lollyS (just (suc k)))) (pairS (natLE (suc N)) a0))
+  {gf , (gn , ga)} (relF , (hn , _)) =
+  (iterDC-bound A gf (suc k) (λ x → relF x) (suc N) gn ga hn , tt)
+costD-sound foldCS (pairS topS topS) h = (tt , tt)
+costD-sound foldCS topS h = (tt , tt)
+costD-sound foldCS (pairS topS (pairS topS b0)) h = (tt , tt)
+costD-sound (foldCS {A} {B}) (pairS topS (pairS (listS zero es) b0))
+  {gf , (gxs , gb)} h =
+  (len0-fold A B gf gxs gb (proj₁ (proj₁ (proj₂ h))) , tt)
+costD-sound foldCS (pairS topS (pairS (listS (suc n) es) b0)) h = (tt , tt)
+costD-sound foldCS (pairS (bangS topS) topS) h = (tt , tt)
+costD-sound foldCS (pairS (bangS topS) (pairS topS b0)) h = (tt , tt)
+costD-sound (foldCS {A} {B}) (pairS (bangS topS) (pairS (listS zero es) b0))
+  {gf , (gxs , gb)} h =
+  (len0-fold A B gf gxs gb (proj₁ (proj₁ (proj₂ h))) , tt)
+costD-sound foldCS (pairS (bangS topS) (pairS (listS (suc n) es) b0)) h =
+  (tt , tt)
+costD-sound foldCS (pairS (bangS (lollyS nothing)) topS) h = (tt , tt)
+costD-sound foldCS (pairS (bangS (lollyS nothing)) (pairS topS b0)) h =
+  (tt , tt)
+costD-sound (foldCS {A} {B})
+  (pairS (bangS (lollyS nothing)) (pairS (listS zero es) b0))
+  {gf , (gxs , gb)} h =
+  (len0-fold A B gf gxs gb (proj₁ (proj₁ (proj₂ h))) , tt)
+costD-sound foldCS
+  (pairS (bangS (lollyS nothing)) (pairS (listS (suc n) es) b0)) h = (tt , tt)
+costD-sound (foldCS {A} {B}) (pairS (bangS (lollyS (just 0))) rest)
+  {gf , (gxs , gb)} (relF , _) =
+  ( subst (λ z → proj₁ (Dup.foldG (λ _ → 0) gxs gf gb) ≤ z)
+      (*-zero-right (length gxs))
+      (foldDC-bound A B gf 0 (λ p → relF p) (length gxs) gxs gb ≤-refl)
+  , tt)
+costD-sound foldCS (pairS (bangS (lollyS (just (suc k)))) topS) h = (tt , tt)
+costD-sound foldCS
+  (pairS (bangS (lollyS (just (suc k)))) (pairS topS b0)) h = (tt , tt)
+costD-sound (foldCS {A} {B})
+  (pairS (bangS (lollyS (just (suc k)))) (pairS (listS zero es) b0))
+  {gf , (gxs , gb)} h =
+  (len0-fold A B gf gxs gb (proj₁ (proj₁ (proj₂ h))) , tt)
+costD-sound (foldCS {A} {B})
+  (pairS (bangS (lollyS (just (suc k)))) (pairS (listS (suc n) es) b0))
+  {gf , (gxs , gb)} (relF , ((hlen , _) , _)) =
+  (foldDC-bound A B gf (suc k) (λ p → relF p) (suc n) gxs gb hlen , tt)
+costD-sound whileCS topS h = (tt , tt)
+costD-sound whileCS (pairS st topS) h = (tt , tt)
+costD-sound whileCS (pairS st (pairS sf topS)) h = (tt , tt)
+costD-sound whileCS (pairS st (pairS sf (pairS topS a0))) h = (tt , tt)
+costD-sound whileCS (pairS st (pairS sf (pairS (natLE zero) a0)))
+  (_ , (_ , (z≤n , _))) = (z≤n , tt)
+costD-sound whileCS (pairS st (pairS sf (pairS (natLE (suc N)) a0))) h =
+  (tt , tt)
 costD-sound (promoteS _) s h = (≤∞-zero _ , h)
 costD-sound dupS s h = (sizeS-sound s h , (h , h))
 costD-sound (boxS f) topS h = let (c , r) = costD-sound f topS tt in (c , r)

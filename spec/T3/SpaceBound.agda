@@ -196,6 +196,9 @@ spaceS (mapCS {A} {B}) s =
     goC : Maybe ℕ → Shape A → ℕ∞ → ℕ∞
     goC nothing  _  _  = nothing
     goC (just n) es mc = just 1 +∞ mapSpC n es (topS {B}) mc
+spaceS iterCS       s = (nothing , topS)
+spaceS foldCS       s = (nothing , topS)
+spaceS whileCS      s = (nothing , topS)
 spaceS (promoteS _) s = (sizeS s , bangS s)
 spaceS dupS         s = (sizeS s +∞ sizeS s , pairS s s)
 spaceS (boxS f)     s = let (c , r) = spaceS f (unbang s) in (c , bangS r)
@@ -542,6 +545,9 @@ spaceS-sound (mapCS {A} {B}) (pairS (bangS (lollyS mc)) (listS n es))
   ( ≤∞-suc _ (mapSp-bound A B es (topS {B}) mc gf
       (λ x _ → (relF x , tt)) n gxs hlen hall)
   , tt)
+spaceS-sound iterCS s h = (tt , tt)
+spaceS-sound foldCS s h = (tt , tt)
+spaceS-sound whileCS s h = (tt , tt)
 spaceS-sound (promoteS _) s h = (sizeS-sound s h , h)
 spaceS-sound dupS s h =
   (≤∞-+ _ _ (sizeS-sound s h) (sizeS-sound s h) , (h , h))

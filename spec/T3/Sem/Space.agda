@@ -136,6 +136,13 @@ whileSp A (suc n) t s a = let (pt , r) = t a in whileSpGo A n t s a pt r
   in (suc (sz A a) ⊔ pb , b)
 ⟦_⟧S {(! (A ⊸ B)) ⊗ listT _} mapCS (gf , xs) =
   let (p , ys) = mapSp A B gf xs in (suc p , ys)
+⟦_⟧S (iterCS {A}) (gf , (n , a)) =
+  let (p , c) = iterSp A gf n a in (suc (suc p) , c)
+⟦_⟧S (foldCS {A} {B}) (gf , (xs , b)) =
+  let (p , c) = foldSp A B gf xs b
+  in (suc ((sz (listT A) xs + sz B b) ⊔ p) , c)
+⟦_⟧S (whileCS {A}) (gt , (gs , (n , a))) =
+  let (p , c) = whileSp A n gt gs a in (suc (suc (suc p)) , c)
 ⟦_⟧S {A} (promoteS _) a = (sz A a , a)
 ⟦_⟧S {(! A)} dupS a = (sz A a + sz A a , (a , a))
 ⟦ boxS f ⟧S a = ⟦ f ⟧S a

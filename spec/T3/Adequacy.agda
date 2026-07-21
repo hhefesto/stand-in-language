@@ -280,6 +280,16 @@ precise applyS (kf , ka) (gf , ga) (relF , relA) extra =
   relF ka ga relA extra
 precise (mapCS {A} {B}) (kf , kxs) (gf , gxs) (relF , relXs) extra =
   map-prec A B kf gf relF kxs gxs relXs extra
+precise (iterCS {A}) (kf , (kn , ka)) (gf , (.kn , ga))
+  (relF , (refl , relA)) extra =
+  iter-prec A kf gf relF kn ka ga relA extra
+precise (foldCS {A} {B}) (kf , (kxs , kb)) (gf , (gxs , gb))
+  (relF , (relXs , relB)) extra =
+  fold-prec A B kf gf (λ kp gp rp → relF kp gp rp)
+    kxs gxs relXs kb gb relB extra
+precise (whileCS {A}) (kt , (ks , (kn , ka))) (gt , (gs , (.kn , ga)))
+  (relT , (relS , (refl , relA))) extra =
+  while-prec A kt gt ks gs relT relS kn ka ga relA extra
 precise (promoteS _) ka ga rel extra = (ka , refl , rel)
 precise dupS ka ga rel extra = ((ka , ka) , refl , (rel , rel))
 precise (boxS f) ka ga rel extra = precise f ka ga rel extra

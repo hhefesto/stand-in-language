@@ -97,6 +97,9 @@ open import T3.Surface.Sem
 ε (curryS f)   = curryU (ε f)
 ε applyS       = applyU
 ε mapCS        = mapCU
+ε iterCS       = iterCU
+ε foldCS       = foldCU
+ε whileCS      = whileCU
 ε (guardS t)   = guardU (ε t)
 ε (promoteS _) = idU           -- data promotion is value-invisible
 ε dupS         = dupU          -- contraction erases to free dup
@@ -248,6 +251,18 @@ private
 ε-rel applyS {gf , ga} {uf , ua} (relF , relA) = relF ga ua relA
 ε-rel (mapCS {A} {B}) {f , xs} {uf , us} (relF , relXs) =
   map-rel A B f uf relF xs us relXs
+ε-rel (iterCS {A}) {f , (n , a)} {uf , (un , ua)} (relF , (refl , relA)) =
+  iter-rel A n f uf relF a ua relA
+ε-rel (foldCS {A} {B}) {f , (xs , b)} {uf , (us , ub)}
+  (relF , (relXs , relB)) =
+  fold-rel A B f uf
+    (λ b' ub' x ux rb rx → relF (b' , x) (ub' , ux) (rb , rx))
+    xs us relXs b ub relB
+ε-rel (whileCS {A}) {t , (s , (n , a))} {ut , (us , (un , ua))}
+  (relT , (relS , (refl , relA))) =
+  while-rel A n t ut s us
+    (λ x u r → ≈ε-verdict (t x) (ut u) (relT x u r))
+    relS a ua relA
 ε-rel (promoteS _) rel = rel
 ε-rel dupS rel = (rel , rel)
 ε-rel (boxS f) rel = ε-rel f rel
@@ -432,6 +447,9 @@ skelOf (constU _)   = tip
 skelOf (curryU f)   = skelOf f
 skelOf applyU       = tip
 skelOf mapCU        = rec tip
+skelOf iterCU       = rec tip
+skelOf foldCU       = rec tip
+skelOf whileCU      = rec tip
 skelOf (guardU t)   = skelOf t
 skelOf (mapU f)     = rec (skelOf f)
 skelOf (iterU f)    = rec (skelOf f)
@@ -471,6 +489,9 @@ skelOfCore (copyS _)    d = tipD
 skelOfCore (curryS f)   d = skelOfCore f d
 skelOfCore applyS       d = tipD
 skelOfCore mapCS        d = recD d tipD
+skelOfCore iterCS       d = recD d tipD
+skelOfCore foldCS       d = recD d tipD
+skelOfCore whileCS      d = recD d tipD
 skelOfCore (guardS t)   d = skelOfCore t d
 skelOfCore (promoteS _) d = tipD
 skelOfCore dupS         d = tipD
@@ -512,6 +533,9 @@ core-solves (copyS _)    d = tt
 core-solves (curryS f)   d = core-solves f d
 core-solves applyS       d = tt
 core-solves mapCS        d = (≤-refl , tt)
+core-solves iterCS       d = (≤-refl , tt)
+core-solves foldCS       d = (≤-refl , tt)
+core-solves whileCS      d = (≤-refl , tt)
 core-solves (guardS t)   d = core-solves t d
 core-solves (promoteS _) d = tt
 core-solves dupS         d = tt

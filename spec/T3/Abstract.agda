@@ -328,6 +328,9 @@ transfer (curryS f)   s =
   (proj₁ (transfer f topS) , topS)
 transfer applyS       s = (tipB , topS)
 transfer mapCS        s = (recB nothing (topBD tip) , topS)
+transfer iterCS       s = (recB nothing (topBD tip) , topS)
+transfer foldCS       s = (recB nothing (topBD tip) , topS)
+transfer whileCS      s = (recB nothing (topBD tip) , topS)
 transfer (guardS t)   s =
   let (bt , _) = transfer t s
   in (bt , sumS (just s) (just unitS))
@@ -497,6 +500,9 @@ sound (copyS _) s h = (h , h)
 sound (curryS f) s h = tt
 sound applyS s h = tt
 sound mapCS s h = tt
+sound iterCS s h = tt
+sound foldCS s h = tt
+sound whileCS s h = tt
 sound (guardS t) s {a} h with ⟦ t ⟧V a
 ... | inj₁ _ = h
 ... | inj₂ _ = tt
