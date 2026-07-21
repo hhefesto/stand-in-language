@@ -101,6 +101,24 @@ tel2Vectors = do
             , rejects "tel2 rejects if without else"
                 (small "if 1 then (\"\",left ()) ")
             ]
+          syntaxApp =
+            [ acceptsBehavior "tel2 juxtaposition calls a definition"
+                chainDefSource ["go"] "ten\n"
+            , acceptsBehavior "tel2 juxtaposition chains through a curried closure"
+                chainClosureSource ["go"] "five\n"
+            , acceptsBehavior "tel2 nested apply heads synthesize"
+                nestedApplySource ["go"] "five\n"
+            , acceptsBehavior "tel2 local closure shadows a definition in call position"
+                shadowClosureSource ["go"] "local\n"
+            , acceptsBehavior "tel2 call syntax applies a closure parameter"
+                paramCallSource ["go"] "four\n"
+            , acceptsBehavior "tel2 application chain stops at keywords"
+                keywordBoundarySource ["go"] "three\n"
+            , rejectsWith "tel2 rejects applying an enum constructor"
+                conApplySource "take no payload"
+            , rejects "tel2 rejects a keyword as an identifier"
+                (small "let in: Nat = 1 in (\"\",left ())")
+            ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
             , accepts "tel2 accepts implicit duplication of a list" implicitListReuseSource
@@ -152,7 +170,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> syntaxSugar <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -445,6 +463,61 @@ multiLetSource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
   , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input; _: Nat = n; a: Nat = 2; b: Nat = 3 in matchNat add (a,b) of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+chainDefSource :: String
+chainDefSource = unlines
+  [ "type State = Nat;"
+  , "def double(n: Nat): Nat = add (n,n);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double n of { 10 -> (\"ten\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+chainClosureSource :: String
+chainClosureSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in matchNat f 2 3 of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+nestedApplySource :: String
+nestedApplySource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in matchNat apply(apply(f, 2), 3) of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+shadowClosureSource :: String
+shadowClosureSource = unlines
+  [ "type State = Nat;"
+  , "def inc(n: Nat): Nat = suc n;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let inc: Nat -o Nat = \\x -> add (x,x) in matchNat inc 4 of { 8 -> (\"local\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+paramCallSource :: String
+paramCallSource = unlines
+  [ "type State = Nat;"
+  , "def useIt(f: Nat -o Nat): Nat = f(3);"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in matchNat useIt(\\x -> suc x) of { 4 -> (\"four\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+keywordBoundarySource :: String
+keywordBoundarySource = unlines
+  [ "type State = Nat;"
+  , "def double(n: Nat): Nat = add (n,n);"
+  , "def plus(p: Nat * Nat): Nat = add p;"
+  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let total: Nat = fold [1, 2] from double 0 with plus in matchNat total of { 3 -> (\"three\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  ]
+
+conApplySource :: String
+conApplySource = unlines
+  [ "data Answer = No | Yes;"
+  , "type State = Nat;"
+  , "def init(u: Unit): Reply State = let b: Nat = Yes 5 in let _: Nat = b in (\"\",left ());"
+  , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
 preludeBehavior :: String -> String -> String -> Bool

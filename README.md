@@ -62,7 +62,11 @@ is restricted to manifestly bounded map, iteration, fold, while, and the
 higher-order `mapc` whose reusable mapper is selected among closed lambdas.
 `if c then t else e` is sugar for a `matchNat` taking `else` at `0`; list
 literals are sugar for `cons` chains; multi-binding `let`s and multi-argument
-lambdas nest (lambdas curry).
+lambdas nest (lambdas curry). Application is by juxtaposition of atomic
+expressions, `f x y`, and is left-associative: a head naming a local binding
+applies that closure, an unshadowed definition name is a call — lexical scope
+wins. Keywords cannot be identifiers, so chains stop at `in`, `with`, `then`,
+and their kin. `f(x)` and `apply(f, x)` remain valid.
 
 ```text
 program   ::= ("module" ID ";")? ("import" ID ";")* declaration*
@@ -81,6 +85,7 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "[" (expr ("," expr)*)? "]" | "cons" expr "onto" expr
            |  "(" expr "," expr ("," expr)* ")"
            |  ID "(" expr ")"
+           |  atom atom+
            |  "let" binding (";" binding)* "in" expr
            |  "if" expr "then" expr "else" expr
            |  "copy" expr

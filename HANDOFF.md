@@ -48,7 +48,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (290 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (298 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -67,9 +67,11 @@ Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
    All parser-level desugarings; elaborator untouched. Note: consuming a
    curried lambda still needs each partial application let-bound (`apply`
    heads are variables/calls until M5).
-2. **S2** — juxtaposition application `f x y` (`EApp` node; head resolves to
-   def call or closure apply at elaboration; reserved words excluded from
-   identifiers).
+2. **S2 (done)** — juxtaposition application `f x y`. Parsed as `EApp`,
+   normalized away by `resolveApps` right after parsing (bound head →
+   `EApply`, def head → `ECall`; lexical scope wins; symmetric for `f(x)`
+   call forms). Reserved words excluded from identifiers. `synthType`
+   projects through `EApply`, so chains and nested applies elaborate.
 3. **S3** — optional `let` type annotations via bounded local synthesis
    (`def` annotations stay required).
 4. **S4** — telomare0-style `main` entry sugar synthesizing `init`/`step`

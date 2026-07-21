@@ -50,12 +50,18 @@ valid in both languages with different meanings.
 
 ### S2 details
 
-- New AST node `EApp` with elaborator dispatch: head that names a definition
-  (and is not shadowed by a local binding) compiles as a call; anything else
-  synthesizes a closure and applies. Applying an enum constructor is an error
-  (constructors are payload-free).
-- Reserved words are excluded from identifiers so `let a = f x in …` does not
-  consume `in` as an argument.
+- `EApp` exists only between parsing and `resolveApps`, which rewrites every
+  application (and every `f(x)` call form) scope-awarely: a head naming a
+  local binding becomes `EApply` (closure application), an unshadowed
+  definition name becomes `ECall` — lexical scope wins. Downstream analyses
+  (`freeVars`, `exprCalls`, placement) never see `EApp`.
+- The rewrite is symmetric: `f(3)` where `f` is a closure-typed parameter or
+  `let`-binding applies the closure.
+- `synthType` projects through `EApply` heads, so chains `f x y` and nested
+  `apply(apply(f, 2), 3)` both elaborate.
+- Applying an enum constructor is an error (constructors are payload-free).
+- Reserved words are excluded from identifiers so `let a: T = f x in …` does
+  not consume `in` as an argument; chains stop at keywords.
 
 ### S4 details and limits
 
@@ -70,6 +76,6 @@ valid in both languages with different meanings.
 | Stage | Feature | Status |
 |---|---|---|
 | S1 | comments, `if`, list literals, multi-arg λ, multi-`let` | **done** |
-| S2 | juxtaposition application | planned |
+| S2 | juxtaposition application | **done** |
 | S3 | optional `let` annotations | planned |
 | S4 | `main` entry sugar | planned |

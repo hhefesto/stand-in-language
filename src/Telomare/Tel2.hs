@@ -81,6 +81,9 @@ data Expr
   | ELam Pattern Expr
   | EApply Expr Expr
   | EMapC Expr Expr
+  -- | Juxtaposition application @f x@. Exists only between parsing and
+  -- 'resolveApps', which rewrites every occurrence to ECall or EApply.
+  | EApp Expr Expr
   deriving (Eq, Show)
 
 data Decl
@@ -109,11 +112,28 @@ lexeme = L.lexeme spaceConsumer
 symbol :: String -> Parser String
 symbol = L.symbol spaceConsumer
 
+-- | Excluded from identifiers so juxtaposition application stops at keywords
+-- (otherwise @let a: T = f x in ...@ would consume @in@ as an argument).
+reservedWords :: Set.Set String
+reservedWords = Set.fromList
+  [ "module", "import", "type", "data", "def"
+  , "let", "in", "if", "then", "else"
+  , "matchText", "matchNat", "case", "of"
+  , "map", "mapc", "iterate", "fold", "while"
+  , "from", "with", "testing", "stepping"
+  , "copy", "suc", "add", "cons", "onto", "prepend"
+  , "left", "right", "apply"
+  ]
+
 identifier :: Parser String
-identifier = lexeme ((:) <$> letterChar <*> many (alphaNumChar <|> char '_'))
+identifier = lexeme . try $ do
+  name <- (:) <$> letterChar <*> many (alphaNumChar <|> char '_')
+  if name `Set.member` reservedWords
+    then fail ("keyword " <> name <> " cannot be an identifier")
+    else pure name
 
 reserved :: String -> Parser ()
-reserved word = lexeme (string word *> notFollowedBy alphaNumChar)
+reserved word = lexeme (string word *> notFollowedBy (alphaNumChar <|> char '_'))
 
 stringLiteral :: Parser String
 stringLiteral = lexeme (char '"' *> manyTill L.charLiteral (char '"'))
@@ -166,9 +186,10 @@ exprParser = choice
   , try prependExpr
   , try leftExpr
   , try rightExpr
-  , atomExpr
+  , appExpr
   ]
   where
+    appExpr = foldl EApp <$> atomExpr <*> many atomExpr
     letExpr = do
       reserved "let"
       bindings <- sepBy1 letBinding (symbol ";")
@@ -446,7 +467,7 @@ parseSource :: FilePath -> String -> Either CompileError Source
 parseSource name = either (bad . errorBundlePretty) Right . parse sourceParser name
 
 compileDecls :: [Decl] -> Either CompileError Program
-compileDecls decls = do
+compileDecls rawDecls = do
   tablesWithTypes <- foldM addTypeDecl emptyTables decls
   orderedDefs <- orderDefinitions decls
   tables <- foldM addDef tablesWithTypes orderedDefs
@@ -467,6 +488,59 @@ compileDecls decls = do
     _ -> bad "init/step do not implement the machine ABI for State"
   where
     replyTy stateTy = SUProd (SUList SUNat) (SUSum SUUnit stateTy)
+    decls = fmap resolveDecl rawDecls
+    defNames = Set.fromList [name | DDef name _ _ _ _ <- rawDecls]
+    resolveDecl (DDef name arg input output body) =
+      DDef name arg input output (resolveApps defNames (Set.singleton arg) body)
+    resolveDecl decl = decl
+
+-- | Resolve surface applications after parsing: a juxtaposition head (or a
+-- call form @f(x)@) naming a local binding applies a closure, an unshadowed
+-- definition name is a call — lexical scope wins. No EApp survives this
+-- pass, so the elaborator and the placement\/free-variable analyses only
+-- ever see ECall and EApply.
+resolveApps :: Set.Set String -> Set.Set String -> Expr -> Expr
+resolveApps defs = go
+  where
+    go bound expression = case expression of
+      EApp (EVar name) argument
+        | name `Set.member` bound -> EApply (EVar name) (go bound argument)
+        | name `Set.member` defs -> ECall name (go bound argument)
+        | otherwise -> EApply (EVar name) (go bound argument)
+      EApp function argument -> EApply (go bound function) (go bound argument)
+      ECall name argument
+        | name `Set.member` bound -> EApply (EVar name) (go bound argument)
+        | otherwise -> ECall name (go bound argument)
+      EVar {} -> expression
+      EUnit -> expression
+      ENat {} -> expression
+      EText {} -> expression
+      ECon {} -> expression
+      ENil -> expression
+      EPair x y -> EPair (go bound x) (go bound y)
+      ELet pat ty value body ->
+        ELet pat ty (go bound value) (go (bind pat bound) body)
+      ECopy value -> ECopy (go bound value)
+      ESuc value -> ESuc (go bound value)
+      EAdd value -> EAdd (go bound value)
+      ECons value rest -> ECons (go bound value) (go bound rest)
+      EMap input mapper -> EMap (go bound input) mapper
+      EIter count seed step -> EIter (go bound count) (go bound seed) step
+      EFold input seed step -> EFold (go bound input) (go bound seed) step
+      EWhile limit seed test step ->
+        EWhile (go bound limit) (go bound seed) test step
+      EPrepend prefix value -> EPrepend prefix (go bound value)
+      ELeft value -> ELeft (go bound value)
+      ERight value -> ERight (go bound value)
+      EMatchText value arms pat fallback -> EMatchText (go bound value)
+        (fmap (fmap (go bound)) arms) pat (go (bind pat bound) fallback)
+      EMatchNat value arms pat fallback -> EMatchNat (go bound value)
+        (fmap (fmap (go bound)) arms) pat (go (bind pat bound) fallback)
+      ECase value arms -> ECase (go bound value) (fmap (fmap (go bound)) arms)
+      ELam pat body -> ELam pat (go (bind pat bound) body)
+      EApply function argument -> EApply (go bound function) (go bound argument)
+      EMapC input mapper -> EMapC (go bound input) (go bound mapper)
+    bind pat bound = patternNames pat `Set.union` bound
 
 compileEntry
   :: Tables
@@ -1248,12 +1322,20 @@ buildCaps ((name, SomeTy ty) : rest) = case buildCaps rest of
     SomeCaps (SUProd ty restTy) (Bind name ty restEnv)
       (EPair (EVar name) restExpr)
 
--- Minimal type synthesis for apply heads: variables and definition calls.
+-- Minimal type synthesis for apply heads: variables, definition calls, and
+-- applications thereof (so chains like @f x y@ elaborate).
 synthType :: Tables -> Env c -> Expr -> Either CompileError SomeTy
 synthType _ env (EVar name) = envTypeOf name env
 synthType tables _ (ECall name _) = do
   SomeDef _ output _ <- lookupDef tables name
   pure (SomeTy output)
+synthType tables env (EApply function _) = do
+  SomeTy funTy <- synthType tables env function
+  case funTy of
+    SULolly _ result -> pure (SomeTy result)
+    _               -> bad "cannot apply a value that is not a function"
+synthType _ _ (ECon name) =
+  bad ("constructor " <> name <> " is not a function; enum constructors take no payload")
 synthType _ _ _ =
   bad "cannot infer the function here; bind it with an annotated let and apply the variable"
 
