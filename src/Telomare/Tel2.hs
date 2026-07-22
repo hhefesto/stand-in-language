@@ -106,7 +106,7 @@ type Parser = Parsec Void String
 spaceConsumer :: Parser ()
 spaceConsumer = L.space space1 lineComment blockComment
   where
-    lineComment = L.skipLineComment "--" <|> L.skipLineComment "#"
+    lineComment = L.skipLineComment "--"
     blockComment = L.skipBlockCommentNested "{-" "-}"
 
 lexeme :: Parser a -> Parser a
@@ -125,7 +125,7 @@ reservedWords = Set.fromList
   , "map", "mapc", "iterc", "foldc", "whilec", "iterate", "fold", "while"
   , "from", "with", "testing", "stepping"
   , "copy", "suc", "add", "cons", "onto", "prepend"
-  , "left", "right", "apply"
+  , "left", "right"
   ]
 
 identifier :: Parser String
@@ -171,7 +171,6 @@ patternParser = (symbol "_" $> PWild) <|> try pairPattern <|> (PVar <$> identifi
 exprParser :: Parser Expr
 exprParser = choice
   [ try lamExpr
-  , try applyExpr
   , try letExpr
   , try mapcExpr
   , try itercExpr
@@ -316,14 +315,6 @@ exprParser = choice
       void (symbol "->")
       body <- exprParser
       pure (foldr ELam body pats)
-    applyExpr = do
-      reserved "apply"
-      void (symbol "(")
-      function <- exprParser
-      void (symbol ",")
-      argument <- exprParser
-      void (symbol ")")
-      pure (EApply function argument)
     copyExpr = reserved "copy" *> (ECopy <$> exprParser)
     sucExpr = reserved "suc" *> (ESuc <$> exprParser)
     addExpr = reserved "add" *> (EAdd <$> exprParser)
@@ -341,7 +332,6 @@ exprParser = choice
       , between (symbol "(") (symbol ")") (try pairExpr <|> exprParser)
       , EText <$> stringLiteral
       , ENat <$> natural
-      , try callExpr
       , do name <- identifier
            pure (if startsUpper name then ECon name else EVar name)
       ]
@@ -352,9 +342,6 @@ exprParser = choice
       if length values < 2
         then fail "expected a tuple"
         else pure (foldr1 EPair values)
-    callExpr = do
-      name <- identifier
-      ECall name <$> between (symbol "(") (symbol ")") exprParser
 
 startsUpper :: String -> Bool
 startsUpper (c : _) = isAsciiUpper c

@@ -100,6 +100,10 @@ tel2Vectors = do
                 multiLetSource ["go"] "five\n"
             , rejects "tel2 rejects if without else"
                 (small "if 1 then (\"\",left ()) ")
+            , rejects "tel2 rejects legacy hash comments"
+                "type State = Nat; # legacy comment\ndef init(u: Unit): Reply State = (\"\",left ());\ndef step(x: Text * State): Reply State = (\"\",left ());"
+            , rejects "tel2 rejects the legacy apply keyword"
+                (small "let f: Nat -o Nat = \\x -> x in apply(f, (\"\",left ()))")
             ]
           syntaxApp =
             [ acceptsBehavior "tel2 juxtaposition calls a definition"
@@ -463,7 +467,7 @@ commentSource :: String
 commentSource = unlines
   [ "-- dash comment before declarations"
   , "{- block comment {- nested -} still a comment -}"
-  , "type State = Nat; # legacy hash comment"
+  , "type State = Nat;"
   , "def init(u: Unit): Reply State = (\"\",left ()); -- trailing dash comment"
   , "def step(x: Text * State): Reply State = {- inline -} (\"\",left ());"
   ]
@@ -496,7 +500,7 @@ multiArgLambdaSource :: String
 multiArgLambdaSource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in let g: Nat -o Nat = apply(f, 2) in matchNat apply(g, 3) of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in let g: Nat -o Nat = f 2 in matchNat g 3 of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
   ]
 
 multiLetSource :: String
@@ -525,7 +529,7 @@ nestedApplySource :: String
 nestedApplySource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in matchNat apply(apply(f, 2), 3) of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in matchNat (f 2) 3 of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
   ]
 
 shadowClosureSource :: String
@@ -622,21 +626,21 @@ flipNatUseSource :: String
 flipNatUseSource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat * Nat -o Nat = flipNat(\\p -> let (a,b): Nat * Nat = p in a) in matchNat apply(f, (0,n)) of { 7 -> (\"seven\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat * Nat -o Nat = flipNat(\\p -> let (a,b): Nat * Nat = p in a) in matchNat f (0,n) of { 7 -> (\"seven\\n\",left ()); m -> (\"bad\\n\",left ()); };"
   ]
 
 constNatUseSource :: String
 constNatUseSource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 9);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat = constNat(5) in matchNat apply(f, 0) of { 5 -> (\"five\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat = constNat(5) in matchNat f 0 of { 5 -> (\"five\\n\",left ()); m -> (\"bad\\n\",left ()); };"
   ]
 
 composeNatUseSource :: String
 composeNatUseSource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = composeNat((\\a -> suc a, \\b -> suc b)) in matchNat apply(f, n) of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = composeNat((\\a -> suc a, \\b -> suc b)) in matchNat f n of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
   ]
 
 mapcDemoSource :: String
@@ -659,7 +663,7 @@ makeAdderSource :: String
 makeAdderSource = unlines
   [ "type State = Nat;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
-  , "def step(request: Text * State): Reply State = let (input,amount): Text * State = request in let _: Text = input in let adder: Nat -o Nat = \\value -> add (amount,value) in matchNat apply(adder, 7) of { 12 -> (\"twelve\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,amount): Text * State = request in let _: Text = input in let adder: Nat -o Nat = \\value -> add (amount,value) in matchNat adder 7 of { 12 -> (\"twelve\\n\",left ()); m -> (\"bad\\n\",left ()); };"
   ]
 
 chooseOperationSource :: String
@@ -667,28 +671,28 @@ chooseOperationSource = unlines
   [ "type State = Nat;"
   , "def pick(flag: Nat): Nat -o Nat = matchNat flag of { 0 -> \\n -> suc n; _ -> \\n -> add (n,n) };"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = pick(n) in matchNat apply(f, n) of { 6 -> (\"six\\n\",right n); m -> (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = pick(n) in matchNat f n of { 6 -> (\"six\\n\",right n); m -> (\"bad\\n\",left ()); };"
   ]
 
 composeSource :: String
 composeSource = unlines
   [ "type State = Nat;"
-  , "def compose(fs: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat = let (first,second): (Nat -o Nat) * (Nat -o Nat) = fs in \\value -> apply(second, apply(first, value));"
+  , "def compose(fs: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat = let (first,second): (Nat -o Nat) * (Nat -o Nat) = fs in \\value -> second (first value);"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = compose((\\a -> suc a, \\b -> suc b)) in matchNat apply(f, n) of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = compose((\\a -> suc a, \\b -> suc b)) in matchNat f n of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
   ]
 
 closureReuseSource :: String
 closureReuseSource = unlines
   [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in (\"\",right add (apply(f, 1), apply(f, 2)));"
+  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in (\"\",right add (f 1, f 2));"
   , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
 closureCopySource :: String
 closureCopySource = unlines
   [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in let (g,h): (Nat -o Nat) * (Nat -o Nat) = copy f in (\"\",right add (apply(g, 1), apply(h, 2)));"
+  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in let (g,h): (Nat -o Nat) * (Nat -o Nat) = copy f in (\"\",right add (g 1, h 2));"
   , "def step(x: Text * State): Reply State = (\"\",left ());"
   ]
 
@@ -968,7 +972,7 @@ closureSeedSource = unlines
   [ "type State = Nat;"
   , "def stepc(f: Nat -o Nat): Nat -o Nat = f;"
   , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let f: Nat -o Nat = \\x -> add (x,n) in let g = iterate 2 from f with stepc in matchNat apply(g, 1) of { k -> let _ = k in (\"done\\n\",left ()); };"
+  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let f: Nat -o Nat = \\x -> add (x,n) in let g = iterate 2 from f with stepc in matchNat g 1 of { k -> let _ = k in (\"done\\n\",left ()); };"
   ]
 
 residualContextSource :: String

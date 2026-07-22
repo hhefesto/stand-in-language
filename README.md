@@ -48,16 +48,17 @@ tests, but the executable does not import or invoke them.
 
 ## Language
 
-Whitespace, `--` and `#` line comments, and nested `{- -}` block comments are
-ignored (`--` is preferred; see `design/SYNTAX.md` for the telomare0
-convergence plan). Identifiers start with a letter.
+Whitespace, `--` line comments, and nested `{- -}` block comments are
+ignored (see `design/SYNTAX.md` for the telomare0 convergence record; the
+legacy `#` comments and `apply` keyword are gone). Identifiers start with a
+letter.
 String escapes are Haskell-style. Module files begin with a header; imports
 precede declarations. Definitions are monomorphic and take exactly
 one argument. They may refer to definitions or type aliases declared later.
 Definition bodies are compiled in dependency order; dependency cycles are
 rejected. Functions are first-class: `A -o B` is an affine closure type,
-lambdas capture their free variables, `apply(f, x)` consumes a closure,
-and definitions may return or select closures at runtime. Source recursion
+lambdas capture their free variables, application `f x` consumes a
+closure, and definitions may return or select closures at runtime. Source recursion
 is restricted to manifestly bounded map, iteration, fold, while, and the
 higher-order `mapc`, `iterc`, `foldc`, and `whilec`, whose reusable
 closure bodies are selected among closed lambdas (dispatch by `matchNat`,
@@ -70,7 +71,8 @@ lambdas nest (lambdas curry). Application is by juxtaposition of atomic
 expressions, `f x y`, and is left-associative: a head naming a local binding
 applies that closure, an unshadowed definition name is a call — lexical scope
 wins. Keywords cannot be identifiers, so chains stop at `in`, `with`, `then`,
-and their kin. `f(x)` and `apply(f, x)` remain valid. `let` annotations may
+and their kin (`f(x)` still reads naturally: `f` applied to a parenthesized
+atom). `let` annotations may
 be omitted when the bound value's type is synthesizable (variables, literals,
 tuples, calls and applications, `suc`/`add`, `copy`, `prepend`, and loop
 results via their step definitions); lambdas, injections, and `[]`/`mapc`
@@ -97,7 +99,6 @@ atom      ::= "Unit" | "Nat" | "Text" | ID
 expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "[" (expr ("," expr)*)? "]" | "cons" expr "onto" expr
            |  "(" expr "," expr ("," expr)* ")"
-           |  ID "(" expr ")"
            |  atom atom+
            |  "let" binding (";" binding)* "in" expr
            |  "if" expr "then" expr "else" expr
@@ -105,7 +106,6 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "suc" expr
            |  "add" expr
            |  "\\" pattern+ "->" expr
-           |  "apply" "(" expr "," expr ")"
            |  "map" expr "with" ID
            |  "mapc" expr "with" expr
            |  "iterc" expr "from" expr "with" expr

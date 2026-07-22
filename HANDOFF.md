@@ -17,10 +17,14 @@ not ends.
 
 ## Standing Objectives
 
-- Tel2 surface syntax converges on telomare0 (the `.tel` language on `master`)
-  wherever the resource model permits. `design/SYNTAX.md` is the normative
-  mapping, including the deliberate `left`/`right` divergence (tel2 keeps
-  sum injections; telomare0 used them as pair projections).
+- Tel2 surface syntax converges on telomare0 (the `.tel` language on
+  `master`) wherever the resource model permits, and since 2026-07-21 the
+  convergent syntax is the ONLY syntax: `#` comments, the `apply` keyword,
+  and the dedicated `f(x)` call production are removed (juxtaposition
+  subsumes `f(x)`), and every shipped `.tel2` program is rewritten in the
+  new style with byte-identical behavior. `design/SYNTAX.md` is the
+  normative mapping, including the deliberate `left`/`right` divergence
+  (tel2 keeps sum injections; telomare0 used them as pair projections).
 - The space metric is retention-aware live-heap peak (`design/SPACE.md`).
   The streaming `spaceAlg` was not a memory bound and has been deleted;
   the certified replacement is M2.
@@ -63,7 +67,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (327 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (329 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
