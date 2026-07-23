@@ -193,19 +193,32 @@ with the user: fuel inferred by sizing (fuel-free surface), and a callable
   closure-cost-compositionality lemma `whileC-bound` lacks and waits for
   RT3's concrete fuel. Tested by a `min(fuel,input)` behaviour/cost
   vector + a v7 round-trip.
-- **RT2 (part 1 done, more remains)** — surface `{ test, rec, last }`
-  parses and elaborates to `recS` via `URec`, compiling directly (unboxed,
-  no placement); a default fuel (`defaultRecFuel = 1024`) is baked in.
-  Working for **closed slots** (no captured outer variables); two behaviour
-  vectors pin it (`idRec 7 = 7`, `oneStep 5 = 1`). Two larger pieces
-  discovered mid-build remain before the telomare0 examples work:
-  (a) **implicit capture threading** — `map`/`d2c`/`foldr` capture `f`,
-  which must be folded into the recursion state (reusable `!` captures
-  dup'd per level, Ground copied, and the `recur` calls auto-threaded);
-  (b) **surface peel eliminators** — tel2's `matchNat` default binds the
-  value not `n-1`, and there is no list uncons, so a genuinely decreasing
-  recursion needs new nat-predecessor / list-destructuring surface forms
-  (both erase to the existing core `NatOutS`/`UnconsS`).
+- **RT2 (deconstructors + calculated fuel done; captures remain)** —
+  surface `{ test, rec, last }` parses and elaborates to `recS` via `URec`,
+  compiling directly (unboxed, no placement).
+  - **Deconstructors (done)**: `case n of { 0 -> z; succ k -> s }` (pred
+    `k = n-1`), `case xs of { [] -> z; cons h t -> s }` (uncons), and
+    `case s of { left l -> …; right r -> … }` (sum) — new `Expr` forms
+    `EUnNat`/`EUncons`/`ECaseSum`, structural arms detected by the `case`
+    parser, erasing to `NatOutS`/`UnconsS`/`distRight`. tel2 had no list
+    destructuring before this.
+  - **Calculated fuel (done)**: the recursion fuel is derived from the
+    state's **nat measure** (a nat's own value, or the nat leading a pair;
+    `fuelMeasure`), copied so the fuel and recursion share it — directly
+    compilable, no fold. A list/other state has no directly-computable nat
+    measure (a length fold can't live in the direct `recS` closure), so it
+    is a **compile error** directing to `fold`/`map` for list recursion.
+    A nat-driven recursion peels via `succ` and reaches the base exactly on
+    the calculated fuel (`countId 5 = 5`).
+  - **Remaining**: (a) **Ground captures** — let triple slots reference
+    captured first-order outer vars, folded into the recursion state and
+    dup'd per level (intricate bundle/recur-threading; today, use top-level
+    **defs** in slots, which need no capture). (b) **Closure captures**
+    (`map`'s local `f`) are **blocked by EAL**: with no dereliction a
+    reusable `!(a⊸b)` can only be applied by a primitive (`mapc`/`foldc`) or
+    the boxed `BoxS ApplyS ∘ MergeS` trick (result `!b`, one level down),
+    which conflicts with `recS`'s unboxed output — so reused-closure map/
+    fold is what the closure loops are for; the triple uses defs.
 - **RT3** — the sizing pass computes each site's fuel from tel2's shape
   analysis (or raises `RecursionLimitError`), making the surface
   fuel-free and the certificate finite.
