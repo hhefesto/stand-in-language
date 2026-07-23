@@ -39,6 +39,12 @@ import Telomare.Surface
 newtype CompileError = CompileError String
   deriving (Eq, Show)
 
+-- | Temporary fuel baked into a recursion triple until RT3's sizing pass
+-- computes a per-site bound.  Large enough for the shipped programs; the
+-- @test@ slot stops the recursion early, so this is a cap, not a cost.
+defaultRecFuel :: Natural
+defaultRecFuel = 1024
+
 data Type
   = TName String
   | TUnit
@@ -87,6 +93,12 @@ data Expr
   | EIterC Expr Expr Expr
   | EFoldC Expr Expr Expr
   | EWhileC Expr Expr Expr Expr
+  -- | telomare0's recursion triple @{ test, rec, last }@ (RT2): a value of
+  -- function type @state -o b@ elaborating to the bounded-recursion core
+  -- primitive 'RecS'.  Slots (in order): the continue\/stop test, the
+  -- recursive body @\\recur x -> …@ (binds a callable @recur@), and the
+  -- finalizer.
+  | ERec Expr Expr Expr
   -- | Juxtaposition application @f x@. Exists only between parsing and
   -- 'resolveApps', which rewrites every occurrence to ECall or EApply.
   | EApp Expr Expr
@@ -188,6 +200,7 @@ exprParser :: Parser Expr
 exprParser = choice
   [ try lamExpr
   , try letExpr
+  , try recExpr
   , try mapcExpr
   , try itercExpr
   , try foldcExpr
@@ -204,6 +217,17 @@ exprParser = choice
   , appExpr
   ]
   where
+    -- telomare0's recursion triple @{ test, rec, last }@ — exactly three
+    -- comma-separated slots in braces.  Commas inside the slots are
+    -- grouped by parens/tuples, so the top-level commas separate slots.
+    recExpr = do
+      void (symbol "{")
+      scn
+      slots <- sepBy1 (exprParser <* scn) (symbol "," <* scn)
+      void (symbol "}")
+      case slots of
+        [test, rec, lastf] -> pure (ERec test rec lastf)
+        _ -> fail "a recursion triple has exactly three slots { test, rec, last }"
     -- Juxtaposition application is a line fold: arguments continue on
     -- later lines only when indented past the head of the application.
     -- That is what ends a declaration body — the next declaration starts
@@ -732,6 +756,10 @@ resolveApps defs = go
       EWhileC limit seed test step ->
         EWhileC (go bound limit) (go bound seed) (go bound test)
           (go bound step)
+      -- The slots are lambdas; their own binders (recur, x) are threaded
+      -- by the ELam recursion, so we just recurse into each slot.
+      ERec test rec lastf ->
+        ERec (go bound test) (go bound rec) (go bound lastf)
     bind pat bound = patternNames pat `Set.union` bound
     builtin bound name =
       not (name `Set.member` bound) && not (name `Set.member` defs)
@@ -1432,6 +1460,8 @@ exprCalls (EFoldC input seed mapper) =
   exprCalls input `Set.union` exprCalls seed `Set.union` exprCalls mapper
 exprCalls (EWhileC limit seed test step) = Set.unions
   [exprCalls limit, exprCalls seed, exprCalls test, exprCalls step]
+exprCalls (ERec test rec lastf) = Set.unions
+  [exprCalls test, exprCalls rec, exprCalls lastf]
 exprCalls _ = Set.empty
 
 branchCalls :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -1476,6 +1506,10 @@ iterSteps (EFoldC input seed mapper) =
 iterSteps (EWhileC limit seed test step) =
   Set.insert "mapc" (Set.unions
     [iterSteps limit, iterSteps seed, iterSteps test, iterSteps step])
+-- ERec compiles directly (unboxed RecS), so it does NOT mark recursion
+-- (no placement forced); still recurse to surface iteration in the slots.
+iterSteps (ERec test rec lastf) =
+  Set.unions [iterSteps test, iterSteps rec, iterSteps lastf]
 iterSteps _ = Set.empty
 
 branchIters :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -1513,6 +1547,8 @@ freeVars (EFoldC input seed mapper) = Set.unions
   [freeVars input, freeVars seed, freeVars mapper]
 freeVars (EWhileC limit seed test step) = Set.unions
   [freeVars limit, freeVars seed, freeVars test, freeVars step]
+freeVars (ERec test rec lastf) = Set.unions
+  [freeVars test, freeVars rec, freeVars lastf]
 freeVars _ = Set.empty
 
 branchVars :: Expr -> [(a, Expr)] -> Pattern -> Expr -> Set.Set String
@@ -1751,6 +1787,45 @@ elaborate tables env demand expected (EWhileC limit seed test step) = do
   Refl <- requireSame pairTy pairActual
   pure (Elab expected rest
     (((UWhileC expected :..: UAssoc :..: USwap) :****: UId) :..: pair))
+-- The recursion triple @{ test, rec, last }@ (RT2): a value of type
+-- @state -o b@ elaborating to the bounded-recursion primitive 'RecS' via
+-- 'URec'.  Slots are lambdas: @test = \\x -> …@, @rec = \\recur x -> …@
+-- (binds a callable @recur : state -o b@), @last = \\x -> …@.  RT2 (this
+-- version) requires CLOSED slots (no captured outer variables) and bakes a
+-- default fuel; captures and sizing arrive in later increments.
+elaborate tables env _ (SULolly stateTy b) (ERec test rec lastf) = do
+  (xT, testBody) <- peelUnary "test" test
+  (recurN, xR, recBody) <- peelRec rec
+  (xL, lastBody) <- peelUnary "last" lastf
+  testM <- unarySlot stateTy (SUSum SUUnit SUUnit) xT testBody
+  recM  <- recSlot recurN xR recBody
+  lastM <- unarySlot stateTy b xL lastBody
+  let recCore = URec stateTy b testM recM lastM
+      fueled = recCore :..: (UConst defaultRecFuel :****: UId) :..: ULunit
+      closedClosure = UCurry SUUnit (fueled :..: UExr)
+  pure (constant env (SULolly stateTy b) closedClosure)
+  where
+    peelUnary _ (ELam (PVar x) body) = Right (x, body)
+    peelUnary slotName _ =
+      bad ("the " <> slotName <> " slot of a recursion triple must be \\x -> ...")
+    peelRec (ELam (PVar recurName) (ELam (PVar x) body)) =
+      Right (recurName, x, body)
+    peelRec _ =
+      bad "the rec slot of a recursion triple must be \\recur x -> ..."
+    unarySlot :: SUTy inT -> SUTy outT -> String -> Expr
+              -> Either CompileError (UMorph inT outT)
+    unarySlot inTy outTy x body = do
+      Bound innerEnv reshape <- bindPattern (PVar x) inTy Empty
+      Elab actual leftover bodyU <- elaborate tables innerEnv Set.empty outTy body
+      Refl <- requireSame outTy actual
+      pure (finish leftover bodyU :..: reshape :..: URunit)
+    recSlot recurName x body = do
+      let prodTy = SUProd (SULolly stateTy b) stateTy
+      Bound innerEnv reshape <-
+        bindPattern (PTuple [recurName, x]) prodTy Empty
+      Elab actual leftover bodyU <- elaborate tables innerEnv Set.empty b body
+      Refl <- requireSame b actual
+      pure (finish leftover bodyU :..: reshape :..: URunit)
 elaborate tables env demand (SULolly a b) (ELam pat body) = do
   let captureNames = Set.toList (freeVars body Set.\\ patternNames pat)
   captures <- traverse (\name -> (,) name <$> envTypeOf name env) captureNames

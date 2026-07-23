@@ -216,6 +216,10 @@ tel2Vectors = do
                 layoutEnumSource [] "five\n"
             , acceptsBehavior "tel2 layout nested case ends at the outer arm column"
                 layoutNestedSource [] "two\n"
+            , acceptsBehavior "tel2 recursion triple stops immediately via last"
+                tripleIdSource [] "seven\n"
+            , acceptsBehavior "tel2 recursion triple recurses one level"
+                tripleOneStepSource [] "one\n"
             ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
@@ -950,6 +954,49 @@ layoutNestedSource = unlines
   , "               j -> case j of"
   , "                      2 -> (\"two\\n\", left ())"
   , "                      k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
+  ]
+
+-- RT2 closed-slot recursion triple: test stops at once, last returns the
+-- value (identity). No captures, no decrement.
+tripleIdSource :: String
+tripleIdSource = unlines
+  [ "type State = Nat"
+  , "stopNow : Nat -o Unit + Unit = \\m -> let _ = m in left ()"
+  , "idRec : Nat -o Nat = \\n ->"
+  , "  let f : Nat -o Nat = { \\m -> stopNow m, \\recur m -> succ (recur m), \\m -> m }"
+  , "   in f n"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let r = idRec 7"
+  , "              in case r of"
+  , "                   7 -> (\"seven\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
+  ]
+
+-- One genuine recursion level: test continues once, rec applies recur to a
+-- state whose next test stops, then wraps the base result in succ.
+tripleOneStepSource :: String
+tripleOneStepSource = unlines
+  [ "type State = Nat"
+  , "isNonzero : Nat -o Unit + Unit = \\m ->"
+  , "  case m of"
+  , "    0 -> left ()"
+  , "    w -> let _ = w in right ()"
+  , "oneStep : Nat -o Nat = \\n ->"
+  , "  let f : Nat -o Nat = { \\m -> isNonzero m, \\recur m -> let _ = m in succ (recur 0), \\m -> m }"
+  , "   in f n"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let r = oneStep 5"
+  , "              in case r of"
+  , "                   1 -> (\"one\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   , "        n -> let _ = n in (\"\", left ())"
   ]
 
