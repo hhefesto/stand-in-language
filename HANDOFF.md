@@ -79,7 +79,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (352 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (357 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -173,6 +173,32 @@ moved, since init and step now share one `main`).
    results, and the M5-era stdlib pass (Prelude `dTimes`/`dMinus`,
    possible ttt rewrite using the new forms — goldens deliberately
    untouched).
+
+## Recursion-triple milestones (RT1–RT3)
+
+telomare0's recursion-triple notation `{ test, rec, last }` is coming to
+tel2 as a **bounded, certified** primitive (design/RECURSION.md), decided
+with the user: fuel inferred by sizing (fuel-free surface), and a callable
+`recur`.
+
+- **RT1 (done)** — the core primitive `recS`/`RecS`: bounded
+  higher-order recursion, unboxed (`nat ⊗ a → b`) and linear
+  (`recur : a ⊸ b`, used ≤ once — multi-call bodies like `quicksort` are a
+  documented v1 gap), fuel as an explicit `Nat`. Certified end to end:
+  value/graded/exec semantics, value coherence (`recG-rel`), adequacy
+  (`rec-prec` — the fuel-machine precision proof), placement (`rec-rel`),
+  abstract soundness, transport **v7** (`NRec`). `costW`/`costD`/`spaceS`
+  report it **unbounded** in v1 (both Agda and Haskell), so soundness is
+  trivial; the finite `fuel × round` bound needs a
+  closure-cost-compositionality lemma `whileC-bound` lacks and waits for
+  RT3's concrete fuel. Tested by a `min(fuel,input)` behaviour/cost
+  vector + a v7 round-trip.
+- **RT2 (next)** — surface `{ test, rec, last }` parsing + elaboration to
+  `recS`. `recur` binds a callable `a ⊸ b`. Fuel via a temporary explicit
+  mechanism until RT3.
+- **RT3** — the sizing pass computes each site's fuel from tel2's shape
+  analysis (or raises `RecursionLimitError`), making the surface
+  fuel-free and the certificate finite.
 
 Every new core constructor remains a cross-stack change: Agda, Haskell,
 transport, budget analysis, Ops, and tests. No Bend and no game-specific
