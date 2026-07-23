@@ -54,6 +54,9 @@ data Type
 data Pattern = PVar String | PWild | PTuple [String]
   deriving (Eq, Show)
 
+-- | Shape of the first arm of a @case@, which picks its dispatch.
+data ArmShape = ArmText | ArmNat | ArmCon
+
 data Expr
   = EVar String
   | EUnit
@@ -124,7 +127,7 @@ reservedWords = Set.fromList
   , "matchText", "matchNat", "case", "of"
   , "map", "mapc", "iterc", "foldc", "whilec", "iterate", "fold", "while"
   , "from", "with", "testing", "stepping"
-  , "copy", "suc", "add", "cons", "onto", "prepend"
+  , "copy", "onto"
   , "left", "right"
   ]
 
@@ -136,7 +139,8 @@ identifier = lexeme . try $ do
     else pure name
 
 reserved :: String -> Parser ()
-reserved word = lexeme (string word *> notFollowedBy (alphaNumChar <|> char '_'))
+reserved word =
+  lexeme (try (string word *> notFollowedBy (alphaNumChar <|> char '_')))
 
 stringLiteral :: Parser String
 stringLiteral = lexeme (char '"' *> manyTill L.charLiteral (char '"'))
@@ -241,12 +245,44 @@ exprParser = choice
       void (optional (symbol ";"))
       void (symbol "}")
       pure (EMatchNat value arms pat fallback)
+    -- One case form, as in telomare0: the shape of the first arm picks the
+    -- dispatch — string literals match text, nat literals match naturals
+    -- (both keep the binding default arm), constructor tags eliminate a
+    -- data enum (exhaustive, no default).
     caseExpr = do
       reserved "case"
       value <- exprParser
       reserved "of"
-      arms <- between (symbol "{") (symbol "}") (some arm)
-      pure (ECase value arms)
+      void (symbol "{")
+      kind <- lookAhead armShape
+      result <- case kind of
+        ArmText -> do
+          arms <- many (try $ do key <- stringLiteral; void (symbol "->")
+                                 body <- exprParser; void (symbol ";"); pure (key, body))
+          pat <- patternParser
+          void (symbol "->")
+          fallback <- exprParser
+          void (optional (symbol ";"))
+          pure (EMatchText value arms pat fallback)
+        ArmNat -> do
+          arms <- many (try $ do key <- natural; void (symbol "->")
+                                 body <- exprParser; void (symbol ";"); pure (key, body))
+          pat <- patternParser
+          void (symbol "->")
+          fallback <- exprParser
+          void (optional (symbol ";"))
+          pure (EMatchNat value arms pat fallback)
+        ArmCon -> ECase value <$> some arm
+      void (symbol "}")
+      pure result
+    armShape = choice
+      [ ArmText <$ try stringLiteral
+      , ArmNat <$ try natural
+      , do name <- identifier
+           if startsUpper name
+             then pure ArmCon
+             else fail "case needs at least one literal or constructor arm"
+      ]
     arm = do
       con <- identifier
       void (symbol "->")
@@ -348,7 +384,7 @@ startsUpper (c : _) = isAsciiUpper c
 startsUpper []      = False
 
 declParser :: Parser Decl
-declParser = choice [dataDecl, typeDecl, defDecl]
+declParser = choice [dataDecl, typeDecl, defDecl, sigDefDecl]
   where
     typeDecl = reserved "type" *> (DType <$> identifier <* symbol "=" <*> typeParser <* symbol ";")
     dataDecl = do
@@ -371,6 +407,27 @@ declParser = choice [dataDecl, typeDecl, defDecl]
       body <- exprParser
       void (symbol ";")
       pure (DDef name arg input output body)
+    -- telomare0-style top level: @name : A -o B = \x -> body@ — the type
+    -- sits where telomare0 puts its refinement annotation, and the body is
+    -- a lambda whose first pattern becomes the definition argument.
+    sigDefDecl = do
+      name <- identifier
+      void (symbol ":")
+      ty <- typeParser
+      void (symbol "=")
+      body <- exprParser
+      void (symbol ";")
+      case ty of
+        TArrow input output -> case body of
+          ELam (PVar arg) inner -> pure (DDef name arg input output inner)
+          ELam pat inner ->
+            let arg = "%arg%" <> name
+            in pure (DDef name arg input output
+                 (ELet pat Nothing (EVar arg) inner))
+          _ -> fail ("top-level definition " <> name
+                 <> " must be a lambda; bind constants in a let")
+        _ -> fail ("top-level definition " <> name
+               <> " needs an arrow type; bind constants in a let")
 
 sourceParser :: Parser Source
 sourceParser = spaceConsumer *> (Source <$> optional moduleHeader <*> many importDecl <*> many declParser) <* eof
@@ -495,15 +552,41 @@ expandMain decls
   | not hasMain = Right decls
   | hasInit || hasStep =
       bad "main cannot be combined with init/step; pick one entry style"
+  | replyMain = do
+      startExpr <- generalStart
+      Right (decls <> [stateDecl | not hasState]
+        <> [initReplyDecl startExpr, stepReplyDecl])
   | otherwise = Right (decls <> [stateDecl | not hasState] <> [initDecl, stepDecl])
   where
     defined name = not (null [() | DDef current _ _ _ _ <- decls, current == name])
     hasMain = defined "main"
     hasInit = defined "init"
     hasStep = defined "step"
+    hasStart = defined "start"
     hasState = "State" `elem`
       ([name | DType name _ <- decls] <> [name | DData name _ <- decls])
     stateDecl = DType "State" TNat
+    -- The general entry: @main : Text * State -o Reply State@ for any
+    -- machine State. Freshness is encoded in State by the program itself
+    -- (telomare0's state-0 test), supplied by @start : Unit -o State@ —
+    -- defaulted to 0 when State is Nat. Halting is main's own left ().
+    replyMain = case [output | DDef "main" _ _ output _ <- decls] of
+      [TReply _] -> True
+      _          -> False
+    stateIsNat = not hasState || case [t | DType "State" t <- decls] of
+      [TNat] -> True
+      _      -> False
+    generalStart
+      | hasStart = Right (ECall "start" EUnit)
+      | stateIsNat = Right (ENat 0)
+      | otherwise =
+          bad "main returning Reply State needs start : Unit -o State"
+    bindCall body = ELet (PVar "pair") Nothing body (EVar "pair")
+    initReplyDecl startExpr = DDef "init" "u" TUnit (TReply (TName "State"))
+      (bindCall (ECall "main" (EPair (EText "") startExpr)))
+    stepReplyDecl = DDef "step" "request" (TProd TText (TName "State"))
+      (TReply (TName "State"))
+      (bindCall (ECall "main" (EVar "request")))
     reply body = ELet (PVar "pair") Nothing body
       (ELet (PTuple ["text", "s"]) Nothing (EVar "pair")
         (EPair (EVar "text")
@@ -551,6 +634,16 @@ resolveApps :: Set.Set String -> Set.Set String -> Expr -> Expr
 resolveApps defs = go
   where
     go bound expression = case expression of
+      -- Builtin functions, as in telomare0's Prelude names: ordinary
+      -- identifiers unless shadowed by a local binding or a definition.
+      EApp (EApp (EVar "cons") x) xs
+        | builtin bound "cons" -> ECons (go bound x) (go bound xs)
+      EApp (EApp (EVar "prepend") (EText prefix)) rest
+        | builtin bound "prepend" -> EPrepend prefix (go bound rest)
+      EApp (EVar "succ") argument
+        | builtin bound "succ" -> ESuc (go bound argument)
+      EApp (EVar "add") argument
+        | builtin bound "add" -> EAdd (go bound argument)
       EApp (EVar name) argument
         | name `Set.member` bound -> EApply (EVar name) (go bound argument)
         | name `Set.member` defs -> ECall name (go bound argument)
@@ -596,6 +689,8 @@ resolveApps defs = go
         EWhileC (go bound limit) (go bound seed) (go bound test)
           (go bound step)
     bind pat bound = patternNames pat `Set.union` bound
+    builtin bound name =
+      not (name `Set.member` bound) && not (name `Set.member` defs)
 
 compileEntry
   :: Tables

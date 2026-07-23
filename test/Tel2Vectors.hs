@@ -163,6 +163,30 @@ tel2Vectors = do
             , rejectsWith "tel2 rejects main alongside init/step"
                 mainAndInitSource "pick one entry style"
             ]
+          convergence =
+            [ acceptsBehavior "tel2 signature-style definition compiles"
+                sigDefSource [] "six\n"
+            , acceptsBehavior "tel2 signature-style tuple lambda destructures"
+                sigTupleSource [] "five\n"
+            , acceptsBehavior "tel2 case over a Nat scrutinee matches literals"
+                caseNatSource [] "two\n"
+            , acceptsBehavior "tel2 case over a Text scrutinee matches strings"
+                caseTextSource ["A"] "ask\nhit\n"
+            , rejects "tel2 rejects a case with only a default arm"
+                (small "case 1 of { w -> (\"\", left ()) }")
+            , acceptsBehavior "tel2 succ builtin applies by juxtaposition"
+                succBuiltinSource [] "five\n"
+            , acceptsBehavior "tel2 cons builtin builds a foldable list"
+                consBuiltinSource [] "three\n"
+            , acceptsBehavior "tel2 prepend builtin joins a literal onto text"
+                prependBuiltinSource [] "abc\n"
+            , acceptsBehavior "tel2 Reply main runs with a default Nat state"
+                mainReplySource ["go"] "start\ndone\n"
+            , acceptsBehavior "tel2 Reply main threads a structured state from start"
+                mainStartSource ["go"] "first\nsecond\n"
+            , rejectsWith "tel2 rejects Reply main without start for a structured state"
+                mainNoStartSource "needs start"
+            ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
             , accepts "tel2 accepts implicit duplication of a list" implicitListReuseSource
@@ -215,7 +239,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> openSeeds <> closureLoops <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> convergence <> openSeeds <> closureLoops <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -596,6 +620,76 @@ mainFoldSource :: String
 mainFoldSource = unlines
   [ "def plus(p: Nat * Nat): Nat = add p;"
   , "def main(io: Text * Nat): Text * Nat = let (input, count) = io in let _ = input in let _ = count in let total = fold [1, 2] from 0 with plus in matchNat total of { 3 -> (\"three\\n\", 0); k -> let _ = k in (\"bad\\n\", 0); };"
+  ]
+
+sigDefSource :: String
+sigDefSource = unlines
+  [ "type State = Nat;"
+  , "double : Nat -o Nat = \\n -> add (n, n);"
+  , "init : Unit -o Reply State = \\u -> let m = double 3 in matchNat m of { 6 -> (\"six\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
+  , "step : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  ]
+
+sigTupleSource :: String
+sigTupleSource = unlines
+  [ "type State = Nat;"
+  , "plus : Nat * Nat -o Nat = \\(a, b) -> add (a, b);"
+  , "init : Unit -o Reply State = \\u -> let m = plus (2, 3) in matchNat m of { 5 -> (\"five\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
+  , "step : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  ]
+
+caseNatSource :: String
+caseNatSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = case 2 of { 0 -> (\"zero\\n\", left ()); w -> let _ = w in (\"two\\n\", left ()); };"
+  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  ]
+
+caseTextSource :: String
+caseTextSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = (\"ask\\n\", right 0);"
+  , "def step(x: Text * State): Reply State = let (input, s) = x in let _ = s in case input of { \"A\" -> (\"hit\\n\", left ()); _ -> (\"miss\\n\", left ()); };"
+  ]
+
+succBuiltinSource :: String
+succBuiltinSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let m = succ 4 in matchNat m of { 5 -> (\"five\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
+  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  ]
+
+consBuiltinSource :: String
+consBuiltinSource = unlines
+  [ "type State = Nat;"
+  , "def plus(p: Nat * Nat): Nat = add p;"
+  , "def init(u: Unit): Reply State = let xs: List Nat = cons 1 (cons 2 []) in let total = fold xs from 0 with plus in matchNat total of { 3 -> (\"three\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
+  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  ]
+
+prependBuiltinSource :: String
+prependBuiltinSource = unlines
+  [ "type State = Nat;"
+  , "def init(u: Unit): Reply State = let t = prepend \"ab\" \"c\\n\" in (t, left ());"
+  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  ]
+
+mainReplySource :: String
+mainReplySource = unlines
+  [ "main : Text * State -o Reply State = \\io -> let (input, count) = io in let _ = input in case count of { 0 -> (\"start\\n\", right 1); k -> let _ = k in (\"done\\n\", left ()); };"
+  ]
+
+mainStartSource :: String
+mainStartSource = unlines
+  [ "type State = Nat * Nat;"
+  , "start : Unit -o State = \\u -> (0, 7);"
+  , "main : Text * State -o Reply State = \\io -> let (input, st) = io in let _ = input in let (flag, kept) = st in case flag of { 0 -> (\"first\\n\", right (1, kept)); k -> let _ = k in let _ = kept in (\"second\\n\", left ()); };"
+  ]
+
+mainNoStartSource :: String
+mainNoStartSource = unlines
+  [ "type State = Nat * Nat;"
+  , "main : Text * State -o Reply State = \\io -> let (input, st) = io in let _ = input in let (flag, kept) = st in case flag of { 0 -> (\"first\\n\", right (1, kept)); k -> let _ = k in let _ = kept in (\"second\\n\", left ()); };"
   ]
 
 mainAndInitSource :: String
