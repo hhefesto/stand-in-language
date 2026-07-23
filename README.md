@@ -50,45 +50,68 @@ tests, but the executable does not import or invoke them.
 
 Whitespace, `--` line comments, and nested `{- -}` block comments are
 ignored (see `design/SYNTAX.md` for the telomare0 convergence record; the
-legacy `#` comments and `apply` keyword are gone). Identifiers start with a
-letter.
-String escapes are Haskell-style. Module files begin with a header; imports
-precede declarations. Definitions are monomorphic and take exactly
-one argument. They may refer to definitions or type aliases declared later.
-Definition bodies are compiled in dependency order; dependency cycles are
-rejected. Functions are first-class: `A -o B` is an affine closure type,
-lambdas capture their free variables, application `f x` consumes a
-closure, and definitions may return or select closures at runtime. Source recursion
-is restricted to manifestly bounded map, iteration, fold, while, and the
-higher-order `mapc`, `iterc`, `foldc`, and `whilec`, whose reusable
-closure bodies are selected among closed lambdas (dispatch by `matchNat`,
-`matchText`, or `case` over an affine scrutinee); their seeds may be open
-first-order data (promoted at the loop boundary), and `whilec`'s stepping
-selector must be closed.
-`if c then t else e` is sugar for a `matchNat` taking `else` at `0`; list
-literals are sugar for `cons` chains; multi-binding `let`s and multi-argument
-lambdas nest (lambdas curry). Application is by juxtaposition of atomic
-expressions, `f x y`, and is left-associative: a head naming a local binding
-applies that closure, an unshadowed definition name is a call — lexical scope
-wins. Keywords cannot be identifiers, so chains stop at `in`, `with`, `then`,
-and their kin (`f(x)` still reads naturally: `f` applied to a parenthesized
-atom). `let` annotations may
-be omitted when the bound value's type is synthesizable (variables, literals,
-tuples, calls and applications, `suc`/`add`, `copy`, `prepend`, and loop
-results via their step definitions); lambdas, injections, and `[]`/`mapc`
-results still need one, and `def` signatures are always explicit. A module
-may declare a telomare0-style entry `def main(io: Text * State): Text * State`
-instead of `init`/`step`: both are synthesized, `State` defaults to `Nat`,
-`main` first runs with an empty input and state `0`, and the machine halts
-when the returned state is `0` (a priced `matchNat` performs the halt test).
-Declaring `main` alongside `init`/`step` is an error.
+legacy `#` comments, `apply`/`def`/`matchNat`/`matchText` keywords, and
+all semicolons and arm braces are gone). Identifiers start with a letter.
+String escapes are Haskell-style. Layout is telomare0's: declarations
+start at column 1, an expression continues on later lines only when
+indented (application arguments must be indented past the head of the
+application), `let` bindings separate by line, and `case` arms are
+aligned at one column — the first outdented token ends the block.
+Module files begin with a `module` header; `import`s precede declarations.
+
+A top-level definition is `name : A -o B = \x -> body` — the mandatory
+type sits where telomare0 puts its refinement annotation, and the body is
+a lambda whose first pattern becomes the definition argument. Definitions
+are monomorphic and take exactly one argument; they may refer to
+definitions or type aliases declared later. Bodies are compiled in
+dependency order; dependency cycles are rejected. Functions are
+first-class: `A -o B` is an affine closure type, lambdas capture their
+free variables, application `f x` consumes a closure, and definitions may
+return or select closures at runtime. Source recursion is restricted to
+manifestly bounded map, iteration, fold, while, and the higher-order
+`mapc`, `iterc`, `foldc`, and `whilec`, whose reusable closure bodies are
+selected among closed lambdas (dispatch by `case` over an affine
+scrutinee); their seeds may be open first-order data (promoted at the
+loop boundary), and `whilec`'s stepping selector must be closed.
+
+There is one `case e of` form; the shape of its first arm picks the
+dispatch. String-literal arms match text and nat-literal arms match
+naturals, both ending in a binding (or `_`) default arm; constructor arms
+eliminate a `data` enum exhaustively with no default. `if c then t else e`
+is sugar for a nat case taking `else` at `0`; list literals are sugar for
+`cons` chains; multi-binding `let`s and multi-argument lambdas nest
+(lambdas curry). `succ`, `add`, `cons`, and `prepend` are builtin
+functions applied by juxtaposition (`succ n`, `add (a, b)`,
+`cons x xs`, `prepend "lit" t` — prepend's first argument must be a text
+literal); a local binding or definition of the same name shadows them.
+Application is by juxtaposition of atomic expressions, `f x y`, and is
+left-associative: a head naming a local binding applies that closure, an
+unshadowed definition name is a call — lexical scope wins. Keywords
+cannot be identifiers, so chains stop at `in`, `with`, `then`, and their
+kin (`f(x)` still reads naturally: `f` applied to a parenthesized atom).
+`let` annotations may be omitted when the bound value's type is
+synthesizable (variables, literals, tuples, calls and applications,
+`succ`/`add`, `copy`, `prepend`, and loop results via their step
+definitions); lambdas, injections, and `[]`/`mapc` results still need
+one, and top-level signatures are always explicit.
+
+`main` is the entry point, in either of two shapes. The telomare0-exact
+shape `main : Text * State -o Text * State` (with `State` defaulting to
+`Nat`) first runs with an empty input and state `0` and halts when the
+returned state is `0` (a priced case performs the halt test). The general
+shape `main : Text * State -o Reply State` works for any first-order
+`State`: the fresh state comes from `start : Unit -o State` (defaulted to
+`0` when `State` is `Nat`), the program encodes freshness in its state
+exactly as telomare0's state-0 test, and halting is main's own `left ()`.
+The machine's `init`/`step` pair is synthesized from `main`; declaring
+`init` or `step` directly is an error.
 
 ```text
-program   ::= ("module" ID ";")? ("import" ID ";")* declaration*
+program   ::= ("module" ID)? ("import" ID)* declaration*
 declaration
-          ::= "type" ID "=" type ";"
-           |  "data" ID "=" ID ("|" ID)* ";"
-           |  "def" ID "(" ID ":" type ")" ":" type "=" expr ";"
+          ::= "type" ID "=" type
+           |  "data" ID "=" ID ("|" ID)*
+           |  ID ":" type "=" expr        -- type is an arrow, expr a lambda
 
 type      ::= sum ("-o" type)?
 sum       ::= product ("+" sum)?
@@ -97,14 +120,12 @@ atom      ::= "Unit" | "Nat" | "Text" | ID
            |  "List" atom | "Reply" atom | "(" type ")"
 
 expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
-           |  "[" (expr ("," expr)*)? "]" | "cons" expr "onto" expr
+           |  "[" (expr ("," expr)*)? "]"
            |  "(" expr "," expr ("," expr)* ")"
-           |  atom atom+
-           |  "let" binding (";" binding)* "in" expr
+           |  atom atom+                  -- includes succ/add/cons/prepend
+           |  "let" binding+ "in" expr
            |  "if" expr "then" expr "else" expr
            |  "copy" expr
-           |  "suc" expr
-           |  "add" expr
            |  "\\" pattern+ "->" expr
            |  "map" expr "with" ID
            |  "mapc" expr "with" expr
@@ -114,61 +135,69 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "iterate" expr "from" expr "with" ID
            |  "fold" expr "from" expr "with" ID
            |  "while" expr "from" expr "testing" ID "stepping" ID
-           |  "prepend" STRING expr
            |  "left" expr | "right" expr
-           |  "matchNat" expr "of" "{" natArm* pattern "->" expr ";"? "}"
-           |  "matchText" expr "of" "{" textArm* pattern "->" expr ";"? "}"
-           |  "case" expr "of" "{" constructorArm+ "}"
+           |  "case" expr "of" natArm* patternArm      -- nat dispatch
+           |  "case" expr "of" textArm* patternArm     -- text dispatch
+           |  "case" expr "of" constructorArm+         -- enum dispatch
 
 binding   ::= pattern (":" type)? "=" expr
 pattern   ::= ID | "_" | "(" ID ("," ID)+ ")"
-natArm    ::= NAT "->" expr ";"
-textArm   ::= STRING "->" expr ";"
-constructorArm ::= CONSTRUCTOR "->" expr ";"?
+natArm    ::= NAT "->" expr
+textArm   ::= STRING "->" expr
+patternArm ::= pattern "->" expr
+constructorArm ::= CONSTRUCTOR "->" expr
 ```
 
-The CLI requires a module header. `import Foo;` first checks `Foo.tel2` beside
+Case arms are layout-aligned: every arm of one `case` starts at the same
+column, and the block ends at the first token left of that column.
+
+The CLI requires a module header. `import Foo` first checks `Foo.tel2` beside
 the entry file, then asks Cabal for packaged `stdlib/Foo.tel2` data. A present
 sibling deliberately shadows the stdlib and remains authoritative even if its
 header is invalid; imports never silently fall through after selecting it. The
-selected file's header must be `module Foo;`. Imports are transitive, diamond
+selected file's header must be `module Foo`. Imports are transitive, diamond
 imports are loaded once, and cycles or missing modules are errors. Packaged
 stdlib resolution is independent of the process working directory.
 `compileTel2` remains a pure entrypoint for anonymous, import-free source used by
 small tests; `compileTel2File` is the module-aware IO entrypoint used by the CLI.
 Imported declarations currently share one unqualified namespace.
 
-Closed recursion is accepted as a prefix of whole-entry bindings:
+Closed recursion is accepted as a chain of bindings:
 
 ```text
-def init(u: Unit): Reply State =
-  let i: T = iterate N from closedSeed with iterStep in
-  let m: List B = map closedList with mapper in
-  let f: A = fold closedList from closedAccumulator with foldStep in
-  let w: W = while N from closedSeed testing test stepping whileStep in
-  closedResultUsingOnlyIAndFAndW;
+main : Text * State -o Reply State = \request ->
+  let (input, state) = request
+   in case state of
+        0 -> let _ = input
+                 i = iterate N from closedSeed with iterStep
+                 f = fold closedList from closedAccumulator with foldStep
+                 w = while N from closedSeed testing test stepping whileStep
+              in closedResultUsingOnlyIAndFAndW
+        s -> directArmUsing input s
 ```
 
-Any nonempty subset and order of these bindings is allowed for `init` or `step`,
-but the entry input must be weakened. Every bound and input expression is closed.
-The bound is a `Nat` expression, while map/iteration/while steps are directly
-compilable non-recursive named definitions. A mapper has type `A -> B`; map
+Any nonempty subset and order of these bindings is allowed, at the top of
+the entry body or inside a dispatch arm (the placed-dispatch path:
+recursive arms are placed independently, direct arms are promoted — their
+results are first-order). Everything else live must be consumed or
+dropped before the loops; the continuation may use only the loop results.
+Every bound and input expression is closed. The bound is a `Nat`
+expression, while map/iteration/while steps are directly compilable
+non-recursive named definitions. A mapper has type `A -> B`; map
 preserves ordinary list order. A fold step has type
 `Accumulator * Element -> Accumulator`; the closed input has type `List Element`.
 The current useful list literal is `Text`, or `List Nat`, so
 `fold "ABC" from 0 with natAdd` is representative. A while test has type
 `T -> Unit + Unit`: `left ()` stops and `right ()` takes a step, up to the bound.
 
-The first reusable affine-recursion slice also accepts a named helper whose
+The reusable affine-recursion slice also accepts a named helper whose
 fuel or list input is open, provided its seed is closed and no unboxed context
 remains live after the loop:
 
 ```text
-def repeat(n: Nat): Nat = iterate n from 0 with increment;
-def mapIncrement(values: List Nat): List Nat =
-  map values with increment;
-def listLength(values: List Nat): Nat =
-  fold values from 0 with countListElement;
+repeat : Nat -o Nat = \n -> iterate n from 0 with increment
+mapIncrement : List Nat -o List Nat = \values -> map values with increment
+listLength : List Nat -o Nat = \values -> fold values from 0 with countListElement
 ```
 
 Calls are retained at source level until these helpers are placed as
@@ -233,15 +262,16 @@ constructors, and cannot mix constructors from different declarations. Nominal
 enum separation is not yet retained after representation erasure. Exact Nat/Text
 matches have an explicit final fallback pattern.
 `prepend "literal" text` is finite text construction, not unrestricted list
-append. `suc n` and `add (m,n)` elaborate directly to the existing `USuc` and
+append. `succ n` and `add (m,n)` elaborate directly to the existing `USuc` and
 `UAdd` surface constructors, then to `SucS` and `AddS`; neither operation uses
 host arithmetic semantics.
 
-Every executable file declares `type State = ...` and these definitions:
+Every executable file declares a `main` entry (with `type State = ...`
+defaulting to `Nat`); the machine's `init`/`step` pair is synthesized:
 
 ```text
-def init(u: Unit): Reply State = ...;
-def step(x: Text * State): Reply State = ...;
+main : Text * State -o Reply State = \request -> ...
+start : Unit -o State = \u -> ...        -- required unless State is Nat
 ```
 
 Affinity is the default costing discipline, not a prohibition. Reusing a

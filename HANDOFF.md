@@ -18,13 +18,24 @@ not ends.
 ## Standing Objectives
 
 - Tel2 surface syntax converges on telomare0 (the `.tel` language on
-  `master`) wherever the resource model permits, and since 2026-07-21 the
-  convergent syntax is the ONLY syntax: `#` comments, the `apply` keyword,
-  and the dedicated `f(x)` call production are removed (juxtaposition
-  subsumes `f(x)`), and every shipped `.tel2` program is rewritten in the
-  new style with byte-identical behavior. `design/SYNTAX.md` is the
-  normative mapping, including the deliberate `left`/`right` divergence
-  (tel2 keeps sum injections; telomare0 used them as pair projections).
+  `master`) wherever the resource model permits, and the convergent syntax
+  is the ONLY syntax. Round 1 (2026-07-21) removed `#` comments, the
+  `apply` keyword, and the dedicated `f(x)` production (juxtaposition
+  subsumes `f(x)`). Round 2 (2026-07-22/23) closed the rest: top-level
+  definitions are `name : A -o B = \x -> body` (no `def`); there is one
+  `case e of` whose first-arm shape picks nat/text/enum dispatch (no
+  `matchNat`/`matchText`); layout replaces semicolons and arm braces;
+  `succ`/`add`/`cons`/`prepend` are builtin functions applied by
+  juxtaposition; and `main` is the only entry (telomare0-exact Nat shape,
+  or `main : Text * State -o Reply State` with `start : Unit -o State` for
+  any first-order state), with direct `init`/`step` an error. Every
+  shipped `.tel2` program is rewritten in the new style; ttt goldens are
+  byte-identical. `design/SYNTAX.md` is the normative mapping, including
+  the deliberate `left`/`right` divergence (tel2 keeps sum injections;
+  telomare0 used them as pair projections). The enabler for main-only is
+  **placed dispatch** (`compilePlacedBody` compiles a match whose arms
+  contain recursion: scrutinee direct, recursive arms placed, direct arms
+  promoted via `PromoteS`) — no new core constructors.
 - The space metric is retention-aware live-heap peak (`design/SPACE.md`).
   The streaming `spaceAlg` was not a memory bound and has been deleted;
   the certified replacement is M2.
@@ -51,12 +62,13 @@ constructor.
   where the type is genuinely lost — see `design/SPACE.md`).
 - `--certificate` prints per-entry work, duplication, and space bounds,
   refinable by `--assume-shape 'text<=N'` (runtime-validated by
-  `coversValue`). Tic-tac-toe is currently work `init <= 65`,
-  `step <= 779`; duplication `init <= 10`, step unbounded (its state
-  contains Text; the v1 flag bounds only the input text); space unbounded
-  (map/closure result shapes are `topS` in the certified analysis).
-  `--meter` prints the exact measured peak (`core peak space: 153` for
-  the 5-move win) beside the work line.
+  `coversValue`). Tic-tac-toe is now work `init <= 780`, `step <= 780`
+  (both entries route through the single `main`, so init's bound equals
+  step's rather than the pre-main `init <= 65` / `step <= 779`);
+  duplication unbounded (its state contains Text; the v1 flag bounds only
+  the input text); space unbounded (map/closure result shapes are `topS`
+  in the certified analysis). `--meter` prints the exact measured peak
+  beside the work line.
 
 Bounds are constants at a supplied `Shape`. Finite duplication bounds for
 variable-size inputs require a refined input shape; the all-top CLI entry shape
@@ -67,7 +79,7 @@ cannot provide one.
 The current milestone passes:
 
 - `cabal build all`
-- `cabal test telomare-test` (329 vectors, 15 QuickCheck laws)
+- `cabal test telomare-test` (352 vectors, 15 QuickCheck laws)
 - `(cd spec && agda --safe Everything.agda)`
 - `git diff --check`
 
@@ -76,9 +88,17 @@ next release or handoff.
 
 ## Next Milestones
 
-Syntax convergence first (S1–S4, all in `src/Telomare/Tel2.hs`, tracked in
-`design/SYNTAX.md`), then the resource milestones (M1–M5). Goldens
-`test/golden/tel2_ttt_*.txt` stay byte-identical through S1–M3.
+Syntax convergence (S1–S8, all in `src/Telomare/Tel2.hs`, tracked in
+`design/SYNTAX.md`) and the resource milestones (M1–M5) are all done.
+Round 1 was S1–S4; round 2 (S5 signature-style defs, S6 unified `case`,
+S7 layout, S8 builtin functions, and the main-only entry with placed
+dispatch) landed 2026-07-22/23 and removed every legacy form. Only two
+convergence candidates were deliberately deferred as future work if ever
+wanted — none are outstanding requirements: qualified imports and `let`
+list-assignments (both niche telomare0 forms). Goldens
+`test/golden/tel2_ttt_*.txt` stayed byte-identical throughout (the
+main-form rewrite preserved I/O exactly; only certificate *numbers*
+moved, since init and step now share one `main`).
 
 1. **S1 (done)** — lexical sugar: `--`/`{- -}` comments, `if/then/else`
    (desugars to `matchNat`, sound for Nat and declaration-ordered enums),

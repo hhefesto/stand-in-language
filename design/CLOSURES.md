@@ -104,7 +104,7 @@ that is milestone R3 (static budget ≥ actual work/space, on the
    G-val/adequacy/ε-factor with first-order corollaries — the long pole).
 5. **FC2** Haskell mirror (Core/Denotation/Surface/Direct/Machine).
 6. **FC3** transport v4 (`TLolly`, `NCurry`/`NApply`/`NMapC`).
-7. **FC4** Tel2 source: `-o` types, lambdas, `apply(f, x)`.
+7. **FC4** Tel2 source: `-o` types, lambdas, application `f x`.
 8. **FC5** `mapc` runtime-mapper placement template + demo.
 9. **FC6** docs (README/STORY/HANDOFF, this file finalized).
 

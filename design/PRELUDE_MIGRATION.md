@@ -40,7 +40,7 @@ name a current compatibility definition.
 | `times` | obsolete | Church multiplication is higher-order. |
 | `dPow` | deferred | Needs multiplication plus sound dynamic/nested iteration. |
 | `pow` | obsolete | Church exponentiation is higher-order. |
-| `dMinus` | unblocked (R2) | Open Ground seeds (`PromoteS`) carry the running value through iteration; predecessor via `matchNat`. Prelude wiring lands with the M5 stdlib pass. |
+| `dMinus` | unblocked (R2) | Open Ground seeds (`PromoteS`) carry the running value through iteration; predecessor via a nat `case`. Prelude wiring lands with the M5 stdlib pass. |
 | `minus` | obsolete | Church-facing subtraction wrapper has no modern interface. |
 | `range` | deferred | Source list construction and runtime bounds exist, but range still needs affine state that carries an open endpoint/index through iteration. |
 | `map` | specialized | Source `map input with mapper` is reusable, first-order, monomorphic, order-preserving, and backed by `MapS`; `Prelude.mapIncrement : List Nat -> List Nat` is concrete. `mapc input with mapper` additionally maps with a function value selected at runtime among closed lambdas (`MapCS`). The polymorphic interface remains unavailable. |
