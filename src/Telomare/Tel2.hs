@@ -39,11 +39,18 @@ import Telomare.Surface
 newtype CompileError = CompileError String
   deriving (Eq, Show)
 
--- | Temporary fuel baked into a recursion triple until RT3's sizing pass
--- computes a per-site bound.  Large enough for the shipped programs; the
--- @test@ slot stops the recursion early, so this is a cap, not a cost.
-defaultRecFuel :: Natural
-defaultRecFuel = 1024
+-- | The nat fuel that bounds a triple's recursion, read directly from the
+-- state's type: a nat's own value ('UId'), or the nat leading a pair
+-- ('UExl').  No fold is involved, so it compiles in the direct fragment.
+-- A list or other state has no directly-computable nat measure — that is a
+-- compile error (use fold\/map for list recursion).
+fuelMeasure :: SUTy s -> Either CompileError (UMorph s 'UNat)
+fuelMeasure SUNat = Right UId
+fuelMeasure (SUProd SUNat _) = Right UExl
+fuelMeasure _ =
+  Left (CompileError
+    ("cannot calculate recursion fuel: the recursion state must be a nat "
+      <> "(or a nat-led pair) to measure; use fold/map for list recursion"))
 
 data Type
   = TName String
@@ -62,6 +69,12 @@ data Pattern = PVar String | PWild | PTuple [String]
 
 -- | Shape of the first arm of a @case@, which picks its dispatch.
 data ArmShape = ArmText | ArmNat | ArmCon
+
+-- | A structural deconstructor arm pattern (nat/list/sum eliminators).
+data StructPat
+  = SPNil | SPZero
+  | SPCons String String | SPSucc String
+  | SPLeft String | SPRight String
 
 data Expr
   = EVar String
@@ -99,6 +112,13 @@ data Expr
   -- recursive body @\\recur x -> …@ (binds a callable @recur@), and the
   -- finalizer.
   | ERec Expr Expr Expr
+  -- | Structural deconstructors (each binds the eliminated payload).
+  -- Nat: @case n of { 0 -> z; succ k -> s }@ binds @k = n-1@.
+  | EUnNat Expr Expr String Expr
+  -- | List: @case xs of { [] -> z; cons h t -> s }@ binds head\/tail.
+  | EUncons Expr Expr String String Expr
+  -- | Sum: @case s of { left l -> a; right r -> b }@ eliminates @A + B@.
+  | ECaseSum Expr String Expr String Expr
   -- | Juxtaposition application @f x@. Exists only between parsing and
   -- 'resolveApps', which rewrites every occurrence to ECall or EApply.
   | EApp Expr Expr
@@ -276,6 +296,10 @@ exprParser = choice
       scn
       reserved "of"
       scn
+      -- Structural deconstructors (nat pred / list uncons / sum) take
+      -- priority; a plain literal/enum case backtracks to the literal path.
+      choice [try (structuralCase value), literalCase value]
+    literalCase value = do
       kind <- lookAhead armShape
       case kind of
         ArmText -> do
@@ -285,6 +309,35 @@ exprParser = choice
           (arms, pat, fallback) <- matchArms natural
           pure (EMatchNat value arms pat fallback)
         ArmCon -> ECase value <$> enumArms
+    -- Two exhaustive structural arms in either order; if they do not form a
+    -- nat / list / sum eliminator pair, fail so 'literalCase' takes over.
+    structuralCase value = do
+      lvl <- L.indentLevel
+      arms <- some (try (atLevel lvl *> structArm <* scn))
+      buildStructural value arms
+    structArm = do
+      p <- structPat
+      void (symbol "->")
+      scn
+      b <- exprParser
+      pure (p, b)
+    structPat = choice
+      [ SPNil <$ symbol "[]"
+      , try (do n <- natural
+                if n == 0 then pure SPZero else fail "structural zero")
+      , reserved "cons" *> (SPCons <$> identifier <*> identifier)
+      , reserved "succ" *> (SPSucc <$> identifier)
+      , reserved "left" *> (SPLeft <$> identifier)
+      , reserved "right" *> (SPRight <$> identifier)
+      ]
+    buildStructural value arms
+      | [(SPZero, z), (SPSucc k, s)] <- arms = pure (EUnNat value z k s)
+      | [(SPSucc k, s), (SPZero, z)] <- arms = pure (EUnNat value z k s)
+      | [(SPNil, z), (SPCons h t, s)] <- arms = pure (EUncons value z h t s)
+      | [(SPCons h t, s), (SPNil, z)] <- arms = pure (EUncons value z h t s)
+      | [(SPLeft l, lb), (SPRight r, rb)] <- arms = pure (ECaseSum value l lb r rb)
+      | [(SPRight r, rb), (SPLeft l, lb)] <- arms = pure (ECaseSum value l lb r rb)
+      | otherwise = fail "a structural case needs 0/succ, []/cons, or left/right arms"
     armShape = choice
       [ ArmText <$ try stringLiteral
       , ArmNat <$ try natural
@@ -760,6 +813,16 @@ resolveApps defs = go
       -- by the ELam recursion, so we just recurse into each slot.
       ERec test rec lastf ->
         ERec (go bound test) (go bound rec) (go bound lastf)
+      EUnNat scrut zBody predVar sBody ->
+        EUnNat (go bound scrut) (go bound zBody) predVar
+          (go (Set.insert predVar bound) sBody)
+      EUncons scrut nilBody h t consBody ->
+        EUncons (go bound scrut) (go bound nilBody) h t
+          (go (Set.insert t (Set.insert h bound)) consBody)
+      ECaseSum scrut l lBody r rBody ->
+        ECaseSum (go bound scrut)
+          l (go (Set.insert l bound) lBody)
+          r (go (Set.insert r bound) rBody)
     bind pat bound = patternNames pat `Set.union` bound
     builtin bound name =
       not (name `Set.member` bound) && not (name `Set.member` defs)
@@ -1462,6 +1525,12 @@ exprCalls (EWhileC limit seed test step) = Set.unions
   [exprCalls limit, exprCalls seed, exprCalls test, exprCalls step]
 exprCalls (ERec test rec lastf) = Set.unions
   [exprCalls test, exprCalls rec, exprCalls lastf]
+exprCalls (EUnNat scrut z _ s) = Set.unions
+  [exprCalls scrut, exprCalls z, exprCalls s]
+exprCalls (EUncons scrut z _ _ s) = Set.unions
+  [exprCalls scrut, exprCalls z, exprCalls s]
+exprCalls (ECaseSum scrut _ lb _ rb) = Set.unions
+  [exprCalls scrut, exprCalls lb, exprCalls rb]
 exprCalls _ = Set.empty
 
 branchCalls :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -1510,6 +1579,12 @@ iterSteps (EWhileC limit seed test step) =
 -- (no placement forced); still recurse to surface iteration in the slots.
 iterSteps (ERec test rec lastf) =
   Set.unions [iterSteps test, iterSteps rec, iterSteps lastf]
+iterSteps (EUnNat scrut z _ s) =
+  Set.unions [iterSteps scrut, iterSteps z, iterSteps s]
+iterSteps (EUncons scrut z _ _ s) =
+  Set.unions [iterSteps scrut, iterSteps z, iterSteps s]
+iterSteps (ECaseSum scrut _ lb _ rb) =
+  Set.unions [iterSteps scrut, iterSteps lb, iterSteps rb]
 iterSteps _ = Set.empty
 
 branchIters :: Expr -> [(a, Expr)] -> Expr -> Set.Set String
@@ -1549,6 +1624,12 @@ freeVars (EWhileC limit seed test step) = Set.unions
   [freeVars limit, freeVars seed, freeVars test, freeVars step]
 freeVars (ERec test rec lastf) = Set.unions
   [freeVars test, freeVars rec, freeVars lastf]
+freeVars (EUnNat scrut z predVar s) = Set.unions
+  [freeVars scrut, freeVars z, Set.delete predVar (freeVars s)]
+freeVars (EUncons scrut z h t s) = Set.unions
+  [freeVars scrut, freeVars z, Set.delete h (Set.delete t (freeVars s))]
+freeVars (ECaseSum scrut l lb r rb) = Set.unions
+  [freeVars scrut, Set.delete l (freeVars lb), Set.delete r (freeVars rb)]
 freeVars _ = Set.empty
 
 branchVars :: Expr -> [(a, Expr)] -> Pattern -> Expr -> Set.Set String
@@ -1715,6 +1796,48 @@ elaborate tables env demand expected (EMatchText value arms fallbackPat fallback
 elaborate tables env demand expected (EMatchNat value arms fallbackPat fallback) =
   elaborateMatches tables env demand expected SUNat partitionNatU id
     value arms fallbackPat fallback
+-- Structural deconstructors: eliminate the scrutinee into two branches and
+-- bind the payload (the predecessor / head+tail / summand), then dispatch
+-- with UCase over distRight — the raw eliminator, no literal re-add.
+elaborate tables env demand expected (EUnNat scrut zBody predVar sBody) = do
+  let armDemand = Set.unions
+        [freeVars zBody, Set.delete predVar (freeVars sBody)]
+  Elab actual rest input <- elaborate tables env
+    (demand `Set.union` armDemand) SUNat scrut
+  Refl <- requireSame SUNat actual
+  zeroBranch <- deconBranch tables PWild SUUnit rest expected zBody
+  predBranch <- deconBranch tables (PVar predVar) SUNat rest expected sBody
+  pure (Elab expected Empty
+    (UCase zeroBranch predBranch :..: distRight :..: (UNatOut :****: UId) :..: input))
+elaborate tables env demand expected (EUncons scrut nilBody h t consBody) = do
+  SomeTy scrutTy <- synthType tables env scrut
+  case scrutTy of
+    SUList element -> do
+      let armDemand = Set.unions
+            [freeVars nilBody, Set.delete h (Set.delete t (freeVars consBody))]
+      Elab actual rest input <- elaborate tables env
+        (demand `Set.union` armDemand) (SUList element) scrut
+      Refl <- requireSame (SUList element) actual
+      nilBranch <- deconBranch tables PWild SUUnit rest expected nilBody
+      consBranch <- deconBranch tables (PTuple [h, t])
+        (SUProd element (SUList element)) rest expected consBody
+      pure (Elab expected Empty
+        (UCase nilBranch consBranch :..: distRight :..: (UUncons :****: UId) :..: input))
+    _ -> bad "cons/[] deconstruction expects a list scrutinee"
+elaborate tables env demand expected (ECaseSum scrut l lBody r rBody) = do
+  SomeTy scrutTy <- synthType tables env scrut
+  case scrutTy of
+    SUSum a b -> do
+      let armDemand = Set.unions
+            [Set.delete l (freeVars lBody), Set.delete r (freeVars rBody)]
+      Elab actual rest input <- elaborate tables env
+        (demand `Set.union` armDemand) (SUSum a b) scrut
+      Refl <- requireSame (SUSum a b) actual
+      leftBranch <- deconBranch tables (PVar l) a rest expected lBody
+      rightBranch <- deconBranch tables (PVar r) b rest expected rBody
+      pure (Elab expected Empty
+        (UCase leftBranch rightBranch :..: distRight :..: input))
+    _ -> bad "left/right deconstruction expects a sum scrutinee"
 elaborate tables env demand expected (ECase value arms) = do
   tagged <- enumToNatArms tables arms
   elaborateMatches tables env demand expected SUNat partitionNatU id value
@@ -1790,9 +1913,9 @@ elaborate tables env demand expected (EWhileC limit seed test step) = do
 -- The recursion triple @{ test, rec, last }@ (RT2): a value of type
 -- @state -o b@ elaborating to the bounded-recursion primitive 'RecS' via
 -- 'URec'.  Slots are lambdas: @test = \\x -> …@, @rec = \\recur x -> …@
--- (binds a callable @recur : state -o b@), @last = \\x -> …@.  RT2 (this
--- version) requires CLOSED slots (no captured outer variables) and bakes a
--- default fuel; captures and sizing arrive in later increments.
+-- (binds a callable @recur : state -o b@), @last = \\x -> …@.  This version
+-- requires CLOSED slots and CALCULATES the fuel from the state's nat measure
+-- ('fuelMeasure') — no default, a compile error when it cannot be measured.
 elaborate tables env _ (SULolly stateTy b) (ERec test rec lastf) = do
   (xT, testBody) <- peelUnary "test" test
   (recurN, xR, recBody) <- peelRec rec
@@ -1800,8 +1923,12 @@ elaborate tables env _ (SULolly stateTy b) (ERec test rec lastf) = do
   testM <- unarySlot stateTy (SUSum SUUnit SUUnit) xT testBody
   recM  <- recSlot recurN xR recBody
   lastM <- unarySlot stateTy b xL lastBody
+  measureM <- fuelMeasure stateTy
   let recCore = URec stateTy b testM recM lastM
-      fueled = recCore :..: (UConst defaultRecFuel :****: UId) :..: ULunit
+      -- fuel = measure(state); copy the state so both the fuel and the
+      -- recursion get it.  Directly compilable (no fold): the nat measure
+      -- is the driving nat's own value.
+      fueled = recCore :..: (measureM :****: UId) :..: UDup stateTy
       closedClosure = UCurry SUUnit (fueled :..: UExr)
   pure (constant env (SULolly stateTy b) closedClosure)
   where
@@ -1969,6 +2096,20 @@ elaborateMatches tables env demand out keyTy partition convert value arms fallba
 
 finish :: Env r -> UMorph c (a ':**: r) -> UMorph c a
 finish _ morph = UExl :..: morph
+
+-- | One branch of a structural deconstructor: bind the eliminated payload
+-- (at @payloadTy@) on top of the surviving context @rest@, elaborate the
+-- arm body at @out@, and pad the surviving unit (mirrors the @branch@
+-- helper inside 'elaborateMatches').  The result morph is
+-- @(payloadTy ** rest) -> (out ** unit)@.
+deconBranch
+  :: Tables -> Pattern -> SUTy p -> Env r -> SUTy out -> Expr
+  -> Either CompileError (UMorph (p ':**: r) (out ':**: 'UUnit))
+deconBranch tables pat payloadTy rest out body = do
+  Bound branchEnv reshape <- bindPattern pat payloadTy rest
+  Elab actual leftovers compiled <- elaborate tables branchEnv Set.empty out body
+  Refl <- requireSame out actual
+  pure (URunit :..: finish leftovers compiled :..: reshape)
 
 data Taken c where
   Taken :: SUTy a -> Env r -> UMorph c (a ':**: r) -> Taken c

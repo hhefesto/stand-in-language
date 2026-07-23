@@ -220,6 +220,14 @@ tel2Vectors = do
                 tripleIdSource [] "seven\n"
             , acceptsBehavior "tel2 recursion triple recurses one level"
                 tripleOneStepSource [] "one\n"
+            , acceptsBehavior "tel2 structural deconstructors: succ and cons"
+                deconSource [] "eleven\n"
+            , acceptsBehavior "tel2 sum deconstructor picks left and right"
+                deconSumSource [] "both\n"
+            , acceptsBehavior "tel2 nat-driven recursion peels via succ, fuel = value"
+                natRecSource [] "five\n"
+            , rejectsWith "tel2 rejects a list-state triple (fuel not measurable)"
+                listStateRejectSource "cannot calculate recursion fuel"
             ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
@@ -994,6 +1002,106 @@ tripleOneStepSource = unlines
   , "      _ = input"
   , "   in case s of"
   , "        0 -> let r = oneStep 5"
+  , "              in case r of"
+  , "                   1 -> (\"one\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
+  ]
+
+-- Structural deconstructors: predecessor (succ k) and uncons (cons h t).
+deconSource :: String
+deconSource = unlines
+  [ "type State = Nat"
+  , "predOr0 : Nat -o Nat = \\n ->"
+  , "  case n of"
+  , "    0 -> 0"
+  , "    succ k -> k"
+  , "headOr0 : List Nat -o Nat = \\xs ->"
+  , "  case xs of"
+  , "    [] -> 0"
+  , "    cons h t -> let _ = t in h"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let a = predOr0 5"
+  , "                 b = headOr0 (cons 7 (cons 8 []))"
+  , "              in case add (a, b) of"
+  , "                   11 -> (\"eleven\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
+  ]
+
+-- Sum deconstructor: left/right elimination.
+deconSumSource :: String
+deconSumSource = unlines
+  [ "type State = Nat"
+  , "pick : Nat + Nat -o Nat = \\s ->"
+  , "  case s of"
+  , "    left l -> l"
+  , "    right r -> r"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let a = pick (left 3)"
+  , "                 b = pick (right 4)"
+  , "              in case add (a, b) of"
+  , "                   7 -> (\"both\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
+  ]
+
+-- Nat-driven recursion: peels the state nat via succ; the calculated fuel
+-- is the nat's own value, so it reaches the base exactly.
+natRecSource :: String
+natRecSource = unlines
+  [ "type State = Nat"
+  , "isNonzero : Nat -o Unit + Unit = \\m ->"
+  , "  case m of"
+  , "    0 -> left ()"
+  , "    w -> let _ = w in right ()"
+  , "countId : Nat -o Nat = \\n ->"
+  , "  let f : Nat -o Nat ="
+  , "        { \\m -> isNonzero m"
+  , "        , \\recur m -> case m of"
+  , "                        0 -> 0"
+  , "                        succ k -> succ (recur k)"
+  , "        , \\m -> let _ = m in 0 }"
+  , "   in f n"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let r = countId 5"
+  , "              in case r of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
+  ]
+
+-- A list-state triple cannot have its fuel measured directly (list length
+-- needs a fold); the compiler rejects it with guidance to use fold/map.
+listStateRejectSource :: String
+listStateRejectSource = unlines
+  [ "type State = Nat"
+  , "isEmpty : List Nat -o Unit + Unit = \\l ->"
+  , "  case l of"
+  , "    [] -> left ()"
+  , "    cons h t -> let _ = h in let _ = t in right ()"
+  , "listLen : List Nat -o Nat = \\xs ->"
+  , "  let f : List Nat -o Nat ="
+  , "        { \\l -> isEmpty l"
+  , "        , \\recur l -> case l of"
+  , "                        [] -> 0"
+  , "                        cons h t -> let _ = h in succ (recur t)"
+  , "        , \\l -> let _ = l in 0 }"
+  , "   in f xs"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let r = listLen (cons 7 [])"
   , "              in case r of"
   , "                   1 -> (\"one\\n\", left ())"
   , "                   k -> let _ = k in (\"bad\\n\", left ())"
