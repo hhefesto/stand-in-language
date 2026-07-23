@@ -101,9 +101,33 @@ tel2Vectors = do
             , rejects "tel2 rejects if without else"
                 (small "if 1 then (\"\",left ()) ")
             , rejects "tel2 rejects legacy hash comments"
-                "type State = Nat; # legacy comment\ndef init(u: Unit): Reply State = (\"\",left ());\ndef step(x: Text * State): Reply State = (\"\",left ());"
+                "type State = Nat\n# legacy comment\nmain : Text * State -o Reply State = \\io -> io"
             , rejects "tel2 rejects the legacy apply keyword"
                 (small "let f: Nat -o Nat = \\x -> x in apply(f, (\"\",left ()))")
+            ]
+          legacyRejections =
+            [ rejects "tel2 rejects the legacy def keyword"
+                "type State = Nat\ndef f(x: Nat): Nat = x\nmain : Text * State -o Reply State = \\io -> io"
+            , rejects "tel2 rejects the matchNat keyword"
+                (small "matchNat s of { 0 -> (\"\", left ()); k -> (\"\", left ()) }")
+            , rejects "tel2 rejects the matchText keyword"
+                (small "matchText input of { \"q\" -> (\"\", left ()); other -> (\"\", left ()) }")
+            , rejects "tel2 rejects a semicolon declaration terminator"
+                "type State = Nat;\nmain : Text * State -o Reply State = \\io -> io"
+            , rejects "tel2 rejects braced case arms"
+                (small "case s of { 0 -> (\"\", left ()); k -> (\"\", left ()) }")
+            , rejects "tel2 rejects the cons-onto keyword form"
+                (small "let xs : List Nat = cons 1 onto [] in let _ = xs in (\"\", left ())")
+            , rejects "tel2 rejects the suc keyword builtin"
+                (small "let m : Nat = suc 5 in let _ = m in (\"\", left ())")
+            , rejectsWith "tel2 rejects a direct init/step entry"
+                ("type State = Nat\n"
+                  <> "init : Unit -o Reply State = \\u -> let _ = u in (\"\", left ())\n"
+                  <> "step : Text * State -o Reply State = \\x -> let _ = x in (\"\", left ())")
+                "declare main"
+            , rejectsWith "tel2 requires a main entry"
+                "type State = Nat\nhelper : Nat -o Nat = \\n -> n"
+                "declare a main entry"
             ]
           syntaxApp =
             [ acceptsBehavior "tel2 juxtaposition calls a definition"
@@ -173,7 +197,7 @@ tel2Vectors = do
             , acceptsBehavior "tel2 case over a Text scrutinee matches strings"
                 caseTextSource ["A"] "ask\nhit\n"
             , rejects "tel2 rejects a case with only a default arm"
-                (small "case 1 of { w -> (\"\", left ()) }")
+                (small "case 1 of w -> (\"\", left ())")
             , acceptsBehavior "tel2 succ builtin applies by juxtaposition"
                 succBuiltinSource [] "five\n"
             , acceptsBehavior "tel2 cons builtin builds a foldable list"
@@ -245,7 +269,7 @@ tel2Vectors = do
       pure (compiled : explicit : namedData : forward : closedBounds : addition : packagedPrelude : packagedMap
         : cwdIndependent : localShadow : headerMismatch
         : needsPrelude : needsLegacy : mutation
-        : importCycle : missing : bounds <> closures <> syntaxSugar <> syntaxApp <> syntaxInfer <> syntaxMain <> convergence <> openSeeds <> closureLoops <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
+        : importCycle : missing : bounds <> closures <> syntaxSugar <> legacyRejections <> syntaxApp <> syntaxInfer <> syntaxMain <> convergence <> openSeeds <> closureLoops <> implicitCopy <> recursion <> reusableRecursion <> illegalRecursion <> malformed <> games)
 
 erases :: Program -> Bool
 erases (Program _ initial step _ _) =
@@ -458,244 +482,426 @@ anonymous = unlines . filter (not . header) . lines
 
 small :: String -> String
 small initial = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = " <> initial <> ";"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in " <> initial
   ]
 
 copySource :: String
 copySource = unlines
-  [ "type State = Nat * Nat;"
-  , "def init(u: Unit): Reply State = let p: Nat * Nat = copy 7 in (\"\",right p);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat * Nat"
+  , "start : Unit -o State = \\u -> let p : Nat * Nat = copy 7 in p"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
   ]
 
 duplicateSource :: String
 duplicateSource = unlines
-  [ "type State = Nat * Nat;"
-  , "def init(u: Unit): Reply State = let n: Nat = 7 in (\"\",right (n,n));"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat * Nat"
+  , "start : Unit -o State = \\u -> let n : Nat = 7 in (n, n)"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
   ]
 
 implicitListReuseSource :: String
 implicitListReuseSource = unlines
-  [ "type State = List Nat * List Nat;"
-  , "def dupList(xs: List Nat): List Nat * List Nat = (xs, xs);"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right dupList(cons 1 onto []));"
-  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let _: State = state in (\"\",left ());"
+  [ "type State = List Nat * List Nat"
+  , "dupList : List Nat -o List Nat * List Nat = \\xs -> (xs, xs)"
+  , "start : Unit -o State = \\u -> dupList (cons 1 [])"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
   ]
 
 implicitNatReuseSource :: String
 implicitNatReuseSource = unlines
-  [ "type State = Nat;"
-  , "def double(n: Nat): Nat = add (n,n);"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double(n) of { 10 -> (\"ten\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "double : Nat -o Nat = \\n -> add (n, n)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 5)"
+  , "        n -> let _ = input in"
+  , "             case double n of"
+  , "               10 -> (\"ten\\n\", left ())"
+  , "               m -> (\"bad\\n\", left ())"
   ]
 
 commentSource :: String
 commentSource = unlines
   [ "-- dash comment before declarations"
   , "{- block comment {- nested -} still a comment -}"
-  , "type State = Nat;"
-  , "def init(u: Unit): Reply State = (\"\",left ()); -- trailing dash comment"
-  , "def step(x: Text * State): Reply State = {- inline -} (\"\",left ());"
+  , "type State = Nat"
+  , "main : Text * State -o Reply State = \\x -> {- inline -} let (t, s) = x in let _ = t in let _ = s in (\"\", left ()) -- trailing dash comment"
   ]
 
 ifNatSource :: String -> String
 ifNatSource seed = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right " <> seed <> ");"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in (if n then \"yes\\n\" else \"no\\n\", left ());"
+  [ "type State = Nat * Nat"
+  , "start : Unit -o State = \\u -> (0, " <> seed <> ")"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, st) = x"
+  , "      (flag, n) = st"
+  , "   in case flag of"
+  , "        0 -> let _ = input in (\"\", right (1, n))"
+  , "        k -> let _ = k in let _ = input in (if n then \"yes\\n\" else \"no\\n\", left ())"
   ]
 
 ifBoolSource :: String
 ifBoolSource = unlines
-  [ "data Bool = False | True;"
-  , "type State = Nat;"
-  , "def toBool(n: Nat): Bool = matchNat n of { 0 -> False; _ -> True; };"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 1);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in (if toBool(n) then \"true\\n\" else \"false\\n\", left ());"
+  [ "data Bool = False | True"
+  , "type State = Nat"
+  , "toBool : Nat -o Bool = \\n ->"
+  , "  case n of"
+  , "    0 -> False"
+  , "    _ -> True"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in (if toBool n then \"true\\n\" else \"false\\n\", left ())"
   ]
 
 listLiteralSource :: String
 listLiteralSource = unlines
-  [ "type State = Nat;"
-  , "def plus(p: Nat * Nat): Nat = add p;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let total: Nat = fold [1, 2, 3] from 0 with plus in matchNat total of { 6 -> (\"six\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "plus : Nat * Nat -o Nat = \\p -> add p"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let total : Nat = fold [1, 2, 3] from 0 with plus"
+  , "              in case total of"
+  , "                   6 -> (\"six\\n\", left ())"
+  , "                   m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 multiArgLambdaSource :: String
 multiArgLambdaSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in let g: Nat -o Nat = f 2 in matchNat g 3 of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let f : Nat -o Nat -o Nat = \\a b -> add (a, b)"
+  , "                 g : Nat -o Nat = f 2"
+  , "              in case g 3 of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 multiLetSource :: String
 multiLetSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input; _: Nat = n; a: Nat = 2; b: Nat = 3 in matchNat add (a,b) of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input"
+  , "                 _ = n"
+  , "                 a : Nat = 2"
+  , "                 b : Nat = 3"
+  , "              in case add (a, b) of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 chainDefSource :: String
 chainDefSource = unlines
-  [ "type State = Nat;"
-  , "def double(n: Nat): Nat = add (n,n);"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat double n of { 10 -> (\"ten\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "double : Nat -o Nat = \\n -> add (n, n)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 5)"
+  , "        n -> let _ = input in"
+  , "             case double n of"
+  , "               10 -> (\"ten\\n\", left ())"
+  , "               m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 chainClosureSource :: String
 chainClosureSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in matchNat f 2 3 of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let f : Nat -o Nat -o Nat = \\a b -> add (a, b)"
+  , "              in case f 2 3 of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 nestedApplySource :: String
 nestedApplySource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat -o Nat = \\x y -> add (x,y) in matchNat (f 2) 3 of { 5 -> (\"five\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let f : Nat -o Nat -o Nat = \\a b -> add (a, b)"
+  , "              in case (f 2) 3 of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 shadowClosureSource :: String
 shadowClosureSource = unlines
-  [ "type State = Nat;"
-  , "def inc(n: Nat): Nat = suc n;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let inc: Nat -o Nat = \\x -> add (x,x) in matchNat inc 4 of { 8 -> (\"local\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "inc : Nat -o Nat = \\n -> succ n"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let inc : Nat -o Nat = \\a -> add (a, a)"
+  , "              in case inc 4 of"
+  , "                   8 -> (\"local\\n\", left ())"
+  , "                   m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 paramCallSource :: String
 paramCallSource = unlines
-  [ "type State = Nat;"
-  , "def useIt(f: Nat -o Nat): Nat = f(3);"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in matchNat useIt(\\x -> suc x) of { 4 -> (\"four\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "useIt : (Nat -o Nat) -o Nat = \\f -> f(3)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             case useIt(\\a -> succ a) of"
+  , "               4 -> (\"four\\n\", left ())"
+  , "               m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 keywordBoundarySource :: String
 keywordBoundarySource = unlines
-  [ "type State = Nat;"
-  , "def double(n: Nat): Nat = add (n,n);"
-  , "def plus(p: Nat * Nat): Nat = add p;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let total: Nat = fold [1, 2] from double 0 with plus in matchNat total of { 3 -> (\"three\\n\",left ()); m -> let _: Nat = m in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "double : Nat -o Nat = \\n -> add (n, n)"
+  , "plus : Nat * Nat -o Nat = \\p -> add p"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let total : Nat = fold [1, 2] from double 0 with plus"
+  , "              in case total of"
+  , "                   3 -> (\"three\\n\", left ())"
+  , "                   m -> let _ = m in (\"bad\\n\", left ())"
   ]
 
 inferLiteralSource :: String
 inferLiteralSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _ = input in let m = n in matchNat m of { 7 -> (\"seven\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 7)"
+  , "        n -> let _ = input in"
+  , "             let m = n"
+  , "              in case m of"
+  , "                   7 -> (\"seven\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 inferCallSource :: String
 inferCallSource = unlines
-  [ "type State = Nat;"
-  , "def double(n: Nat): Nat = add (n,n);"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _ = input in let _ = n in let d = double 5 in matchNat d of { 10 -> (\"ten\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "double : Nat -o Nat = \\n -> add (n, n)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let d = double 5"
+  , "              in case d of"
+  , "                   10 -> (\"ten\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 inferTupleSource :: String
 inferTupleSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in matchNat n of { 5 -> (\"five\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, n) = x"
+  , "   in case n of"
+  , "        0 -> let _ = input in (\"\", right 5)"
+  , "        m -> let _ = input in"
+  , "             case m of"
+  , "               5 -> (\"five\\n\", left ())"
+  , "               k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 inferFoldSource :: String
 inferFoldSource = unlines
-  [ "type State = Nat;"
-  , "def plus(p: Nat * Nat): Nat = add p;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let _ = n in let total = fold [1, 2] from 0 with plus in matchNat total of { 3 -> (\"three\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "plus : Nat * Nat -o Nat = \\p -> add p"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let total = fold [1, 2] from 0 with plus"
+  , "              in case total of"
+  , "                   3 -> (\"three\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 mainCounterSource :: String
 mainCounterSource = unlines
-  [ "def main(io: Text * Nat): Text * Nat = let (input, count) = io in let _ = input in matchNat count of { 0 -> (\"start\\n\", 1); 1 -> (\"done\\n\", 0); k -> let _ = k in (\"bad\\n\", 0); };"
+  [ "main : Text * Nat -o Text * Nat = \\io ->"
+  , "  let (input, count) = io"
+  , "      _ = input"
+  , "   in case count of"
+  , "        0 -> (\"start\\n\", 1)"
+  , "        1 -> (\"done\\n\", 0)"
+  , "        k -> let _ = k in (\"bad\\n\", 0)"
   ]
 
 mainFoldSource :: String
 mainFoldSource = unlines
-  [ "def plus(p: Nat * Nat): Nat = add p;"
-  , "def main(io: Text * Nat): Text * Nat = let (input, count) = io in let _ = input in let _ = count in let total = fold [1, 2] from 0 with plus in matchNat total of { 3 -> (\"three\\n\", 0); k -> let _ = k in (\"bad\\n\", 0); };"
+  [ "plus : Nat * Nat -o Nat = \\p -> add p"
+  , "main : Text * Nat -o Text * Nat = \\io ->"
+  , "  let (input, count) = io"
+  , "      _ = input"
+  , "      _ = count"
+  , "      total = fold [1, 2] from 0 with plus"
+  , "   in case total of"
+  , "        3 -> (\"three\\n\", 0)"
+  , "        k -> let _ = k in (\"bad\\n\", 0)"
   ]
 
 sigDefSource :: String
 sigDefSource = unlines
-  [ "type State = Nat;"
-  , "double : Nat -o Nat = \\n -> add (n, n);"
-  , "init : Unit -o Reply State = \\u -> let m = double 3 in matchNat m of { 6 -> (\"six\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
-  , "step : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  [ "type State = Nat"
+  , "double : Nat -o Nat = \\n -> add (n, n)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (t, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = t in"
+  , "             let m = double 3"
+  , "              in case m of"
+  , "                   6 -> (\"six\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = t in let _ = n in (\"\", left ())"
   ]
 
 sigTupleSource :: String
 sigTupleSource = unlines
-  [ "type State = Nat;"
-  , "plus : Nat * Nat -o Nat = \\(a, b) -> add (a, b);"
-  , "init : Unit -o Reply State = \\u -> let m = plus (2, 3) in matchNat m of { 5 -> (\"five\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
-  , "step : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  [ "type State = Nat"
+  , "plus : Nat * Nat -o Nat = \\(a, b) -> add (a, b)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (t, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = t in"
+  , "             let m = plus (2, 3)"
+  , "              in case m of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = t in let _ = n in (\"\", left ())"
   ]
 
 caseNatSource :: String
 caseNatSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = case 2 of { 0 -> (\"zero\\n\", left ()); w -> let _ = w in (\"two\\n\", left ()); };"
-  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (t, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = t in"
+  , "             case 2 of"
+  , "               0 -> (\"zero\\n\", left ())"
+  , "               w -> let _ = w in (\"two\\n\", left ())"
+  , "        n -> let _ = t in let _ = n in (\"\", left ())"
   ]
 
 caseTextSource :: String
 caseTextSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = (\"ask\\n\", right 0);"
-  , "def step(x: Text * State): Reply State = let (input, s) = x in let _ = s in case input of { \"A\" -> (\"hit\\n\", left ()); _ -> (\"miss\\n\", left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"ask\\n\", right 1)"
+  , "        n -> let _ = n in"
+  , "             case input of"
+  , "               \"A\" -> (\"hit\\n\", left ())"
+  , "               _ -> (\"miss\\n\", left ())"
   ]
 
 succBuiltinSource :: String
 succBuiltinSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let m = succ 4 in matchNat m of { 5 -> (\"five\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
-  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (t, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = t in"
+  , "             let m = succ 4"
+  , "              in case m of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = t in let _ = n in (\"\", left ())"
   ]
 
 consBuiltinSource :: String
 consBuiltinSource = unlines
-  [ "type State = Nat;"
-  , "def plus(p: Nat * Nat): Nat = add p;"
-  , "def init(u: Unit): Reply State = let xs: List Nat = cons 1 (cons 2 []) in let total = fold xs from 0 with plus in matchNat total of { 3 -> (\"three\\n\", left ()); k -> let _ = k in (\"bad\\n\", left ()); };"
-  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  [ "type State = Nat"
+  , "plus : Nat * Nat -o Nat = \\p -> add p"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (t, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = t in"
+  , "             let xs : List Nat = cons 1 (cons 2 [])"
+  , "                 total = fold xs from 0 with plus"
+  , "              in case total of"
+  , "                   3 -> (\"three\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = t in let _ = n in (\"\", left ())"
   ]
 
 prependBuiltinSource :: String
 prependBuiltinSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let t = prepend \"ab\" \"c\\n\" in (t, left ());"
-  , "def step(x: Text * State): Reply State = let (t, s) = x in let _ = t in let _ = s in (\"\", left ());"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in"
+  , "             let t = prepend \"ab\" \"c\\n\""
+  , "              in (t, left ())"
+  , "        n -> let _ = input in let _ = n in (\"\", left ())"
   ]
 
 mainReplySource :: String
 mainReplySource = unlines
-  [ "main : Text * State -o Reply State = \\io -> let (input, count) = io in let _ = input in case count of { 0 -> (\"start\\n\", right 1); k -> let _ = k in (\"done\\n\", left ()); };"
+  [ "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, count) = io"
+  , "      _ = input"
+  , "   in case count of"
+  , "        0 -> (\"start\\n\", right 1)"
+  , "        k -> let _ = k in (\"done\\n\", left ())"
   ]
 
 mainStartSource :: String
 mainStartSource = unlines
-  [ "type State = Nat * Nat;"
-  , "start : Unit -o State = \\u -> (0, 7);"
-  , "main : Text * State -o Reply State = \\io -> let (input, st) = io in let _ = input in let (flag, kept) = st in case flag of { 0 -> (\"first\\n\", right (1, kept)); k -> let _ = k in let _ = kept in (\"second\\n\", left ()); };"
+  [ "type State = Nat * Nat"
+  , "start : Unit -o State = \\u -> (0, 7)"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, st) = io"
+  , "      _ = input"
+  , "      (flag, kept) = st"
+  , "   in case flag of"
+  , "        0 -> (\"first\\n\", right (1, kept))"
+  , "        k -> let _ = k in let _ = kept in (\"second\\n\", left ())"
   ]
 
 mainNoStartSource :: String
 mainNoStartSource = unlines
-  [ "type State = Nat * Nat;"
-  , "main : Text * State -o Reply State = \\io -> let (input, st) = io in let _ = input in let (flag, kept) = st in case flag of { 0 -> (\"first\\n\", right (1, kept)); k -> let _ = k in let _ = kept in (\"second\\n\", left ()); };"
+  [ "type State = Nat * Nat"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, st) = io"
+  , "      _ = input"
+  , "      (flag, kept) = st"
+  , "   in case flag of"
+  , "        0 -> (\"first\\n\", right (1, kept))"
+  , "        k -> let _ = k in let _ = kept in (\"second\\n\", left ())"
   ]
 
 layoutSource :: String
@@ -720,51 +926,46 @@ layoutEnumSource = unlines
   , "    No -> 3"
   , "    Yes -> 5"
   , ""
-  , "init : Unit -o Reply State = \\u ->"
-  , "  let m = pick Yes"
-  , "   in case m of"
-  , "        5 -> (\"five\\n\", left ())"
-  , "        k -> let _ = k in (\"bad\\n\", left ())"
-  , ""
-  , "step : Text * State -o Reply State = \\x ->"
-  , "  let (t, s) = x"
-  , "      _ = t"
-  , "      _ = s"
-  , "   in (\"\", left ())"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let m = pick Yes"
+  , "              in case m of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
   ]
 
 layoutNestedSource :: String
 layoutNestedSource = unlines
   [ "type State = Nat"
   , ""
-  , "init : Unit -o Reply State = \\u ->"
-  , "  case 2 of"
-  , "    0 -> (\"zero\\n\", left ())"
-  , "    j -> case j of"
-  , "           2 -> (\"two\\n\", left ())"
-  , "           k -> let _ = k in (\"bad\\n\", left ())"
-  , ""
-  , "step : Text * State -o Reply State = \\x ->"
-  , "  let (t, s) = x"
-  , "      _ = t"
-  , "      _ = s"
-  , "   in (\"\", left ())"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> case 2 of"
+  , "               0 -> (\"zero\\n\", left ())"
+  , "               j -> case j of"
+  , "                      2 -> (\"two\\n\", left ())"
+  , "                      k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
   ]
 
 mainAndInitSource :: String
 mainAndInitSource = unlines
-  [ "type State = Nat;"
-  , "def main(io: Text * Nat): Text * Nat = io;"
-  , "def init(u: Unit): Reply State = (\"\",left ());"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "main : Text * State -o Text * State = \\io -> io"
+  , "init : Unit -o Reply State = \\u -> let _ = u in (\"\", left ())"
+  , "step : Text * State -o Reply State = \\x -> let _ = x in (\"\", left ())"
   ]
 
 conApplySource :: String
 conApplySource = unlines
-  [ "data Answer = No | Yes;"
-  , "type State = Nat;"
-  , "def init(u: Unit): Reply State = let b: Nat = Yes 5 in let _: Nat = b in (\"\",left ());"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "data Answer = No | Yes"
+  , "type State = Nat"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in let b : Nat = Yes 5 in let _ : Nat = b in (\"\", left ())"
   ]
 
 preludeBehavior :: String -> String -> String -> Bool
@@ -777,362 +978,559 @@ preludeBehavior prelude source expected =
 
 flipNatUseSource :: String
 flipNatUseSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat * Nat -o Nat = flipNat(\\p -> let (a,b): Nat * Nat = p in a) in matchNat f (0,n) of { 7 -> (\"seven\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 7)"
+  , "        n -> let _ = input in"
+  , "             let f : Nat * Nat -o Nat = flipNat(\\p -> let (a, b) : Nat * Nat = p in a)"
+  , "              in case f (0, n) of"
+  , "                   7 -> (\"seven\\n\", left ())"
+  , "                   m -> (\"bad\\n\", left ())"
   ]
 
 constNatUseSource :: String
 constNatUseSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 9);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let _: Nat = n in let f: Nat -o Nat = constNat(5) in matchNat f 0 of { 5 -> (\"five\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 9)"
+  , "        n -> let _ = input in let _ = n in"
+  , "             let f : Nat -o Nat = constNat(5)"
+  , "              in case f 0 of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   m -> (\"bad\\n\", left ())"
   ]
 
 composeNatUseSource :: String
 composeNatUseSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = composeNat((\\a -> suc a, \\b -> suc b)) in matchNat f n of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 7)"
+  , "        n -> let _ = input in"
+  , "             let f : Nat -o Nat = composeNat((\\a -> succ a, \\b -> succ b))"
+  , "              in case f n of"
+  , "                   9 -> (\"nine\\n\", left ())"
+  , "                   m -> (\"bad\\n\", left ())"
   ]
 
 mapcDemoSource :: String
 mapcDemoSource = unlines
-  [ "type State = Unit;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
-  , "def transform(input: Nat * Text): Text = let (flag,text): Nat * Text = input in mapc text with (matchNat flag of { 0 -> \\n -> suc n; _ -> \\n -> add (n,n) });"
-  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Text = transform((0,input)) in matchText result of { \"BCD\" -> (\"chosen\\n\",left ()); other -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "transform : Nat * Text -o Text = \\input ->"
+  , "  let (flag, text) = input"
+  , "   in mapc text with"
+  , "        case flag of"
+  , "          0 -> \\n -> succ n"
+  , "          _ -> \\n -> add (n, n)"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = n in"
+  , "             let result : Text = transform (0, input)"
+  , "              in case result of"
+  , "                   \"BCD\" -> (\"chosen\\n\", left ())"
+  , "                   other -> (\"bad\\n\", left ())"
   ]
 
 mapcOpenLambdaSource :: String
 mapcOpenLambdaSource = unlines
-  [ "type State = Unit;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
-  , "def addToAll(input: Nat * Text): Text = let (amount,text): Nat * Text = input in mapc text with \\n -> add (amount,n);"
-  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Text = addToAll((1,input)) in (\"done\\n\",left ());"
+  [ "type State = Nat"
+  , "addToAll : Nat * Text -o Text = \\input ->"
+  , "  let (amount, text) = input"
+  , "   in mapc text with \\n -> add (amount, n)"
+  , "main : Text * State -o Reply State = \\x -> let (input, s) = x in let _ = s in let result : Text = addToAll (1, input) in (\"done\\n\", left ())"
   ]
 
 makeAdderSource :: String
 makeAdderSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
-  , "def step(request: Text * State): Reply State = let (input,amount): Text * State = request in let _: Text = input in let adder: Nat -o Nat = \\value -> add (amount,value) in matchNat adder 7 of { 12 -> (\"twelve\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 5)"
+  , "        amount -> let _ = input in"
+  , "                  let adder : Nat -o Nat = \\value -> add (amount, value)"
+  , "                   in case adder 7 of"
+  , "                        12 -> (\"twelve\\n\", left ())"
+  , "                        m -> (\"bad\\n\", left ())"
   ]
 
 chooseOperationSource :: String
 chooseOperationSource = unlines
-  [ "type State = Nat;"
-  , "def pick(flag: Nat): Nat -o Nat = matchNat flag of { 0 -> \\n -> suc n; _ -> \\n -> add (n,n) };"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = pick(n) in matchNat f n of { 6 -> (\"six\\n\",right n); m -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "pick : Nat -o Nat -o Nat = \\flag ->"
+  , "  case flag of"
+  , "    0 -> \\n -> succ n"
+  , "    _ -> \\n -> add (n, n)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 3)"
+  , "        n -> let _ = input in"
+  , "             let f : Nat -o Nat = pick n"
+  , "              in case f n of"
+  , "                   6 -> (\"six\\n\", right n)"
+  , "                   m -> (\"bad\\n\", left ())"
   ]
 
 composeSource :: String
 composeSource = unlines
-  [ "type State = Nat;"
-  , "def compose(fs: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat = let (first,second): (Nat -o Nat) * (Nat -o Nat) = fs in \\value -> second (first value);"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 7);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in let f: Nat -o Nat = compose((\\a -> suc a, \\b -> suc b)) in matchNat f n of { 9 -> (\"nine\\n\",left ()); m -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "compose : (Nat -o Nat) * (Nat -o Nat) -o Nat -o Nat = \\fs ->"
+  , "  let (first, second) : (Nat -o Nat) * (Nat -o Nat) = fs"
+  , "   in \\value -> second (first value)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 7)"
+  , "        n -> let _ = input in"
+  , "             let f : Nat -o Nat = compose((\\a -> succ a, \\b -> succ b))"
+  , "              in case f n of"
+  , "                   9 -> (\"nine\\n\", left ())"
+  , "                   m -> (\"bad\\n\", left ())"
   ]
 
 closureReuseSource :: String
 closureReuseSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in (\"\",right add (f 1, f 2));"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in let f : Nat -o Nat = \\n -> succ n in (\"\", right add (f 1, f 2))"
   ]
 
 closureCopySource :: String
 closureCopySource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in let f: Nat -o Nat = \\n -> suc n in let (g,h): (Nat -o Nat) * (Nat -o Nat) = copy f in (\"\",right add (g 1, h 2));"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in let f : Nat -o Nat = \\n -> succ n in let (g, h) : (Nat -o Nat) * (Nat -o Nat) = copy f in (\"\", right add (g 1, h 2))"
   ]
 
 closureStateSource :: String
 closureStateSource = unlines
-  [ "type State = Nat -o Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right \\n -> suc n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat -o Nat"
+  , "start : Unit -o State = \\u -> \\n -> succ n"
+  , "main : Text * State -o Reply State = \\io -> let (input, f) = io in let _ = input in (\"\", right f)"
   ]
 
 scrutineeReuseSource :: String
 scrutineeReuseSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
-  , "def step(request: Text * State): Reply State = let (input,n): Text * State = request in let _: Text = input in matchNat n of { 0 -> (\"zero\\n\",left ()); _ -> (\"sum\\n\",right add (n,n)); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 3)"
+  , "        n -> let _ = input in"
+  , "             case n of"
+  , "               0 -> (\"zero\\n\", left ())"
+  , "               _ -> (\"sum\\n\", right add (n, n))"
   ]
 
 dataSource :: String
 dataSource = unlines
-  [ "data Flag = No | Yes;"
-  , "type State = Nat;"
-  , "def choose(f: Flag): Nat = case f of { No -> 0; Yes -> 1; };"
-  , "def init(u: Unit): Reply State = (\"\",right choose(Yes));"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "data Flag = No | Yes"
+  , "type State = Nat"
+  , "choose : Flag -o Nat = \\f ->"
+  , "  case f of"
+  , "    No -> 0"
+  , "    Yes -> 1"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", right (choose Yes))"
   ]
 
 cyclicAliasSource :: String
 cyclicAliasSource = unlines
-  [ "type A = B;"
-  , "type B = A;"
-  , "type State = A;"
-  , "def init(u: Unit): Reply State = (\"\",left ());"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type A = B"
+  , "type B = A"
+  , "type State = Nat"
+  , "useA : A -o Nat = \\x -> let _ = x in 0"
+  , "main : Text * State -o Reply State = \\io -> let (input, s) = io in let _ = input in let _ = s in (\"\", left ())"
   ]
 
 incompleteCaseSource :: String
 incompleteCaseSource = unlines
-  [ "data Flag = No | Yes;"
-  , "type State = Nat;"
-  , "def choose(f: Flag): Nat = case f of { No -> 0; };"
-  , "def init(u: Unit): Reply State = (\"\",right choose(No));"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "data Flag = No | Yes"
+  , "type State = Nat"
+  , "choose : Flag -o Nat = \\f ->"
+  , "  case f of"
+  , "    No -> 0"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", right (choose No))"
   ]
 
 duplicateBinderSource :: String
 duplicateBinderSource = unlines
-  [ "type State = Nat;"
-  , "def bad(p: Nat * Nat): Nat = let (x,x): Nat * Nat = p in x;"
-  , "def init(u: Unit): Reply State = (\"\",right 0);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "bad : Nat * Nat -o Nat = \\p -> let (x, x) : Nat * Nat = p in x"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
   ]
 
 forwardReferenceSource :: String
 forwardReferenceSource = unlines
-  [ "type State = Later;"
-  , "def init(u: Unit): Reply State = (\"\",right make(u));"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
-  , "def make(u: Unit): Later = 7;"
-  , "type Later = Nat;"
+  [ "type State = Later"
+  , "start : Unit -o State = \\u -> make u"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
+  , "make : Unit -o Later = \\u -> let _ = u in 7"
+  , "type Later = Nat"
   ]
 
 cyclicDefinitionSource :: String
 cyclicDefinitionSource = unlines
-  [ "type State = Nat;"
-  , "def a(n: Nat): Nat = b(n);"
-  , "def b(n: Nat): Nat = a(n);"
-  , "def init(u: Unit): Reply State = (\"\",right 0);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "a : Nat -o Nat = \\n -> b n"
+  , "b : Nat -o Nat = \\n -> a n"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
+  ]
+
+-- A main whose fresh arm runs a two-binding closed-loop chain. That chain
+-- is the path that still requires every bound, seed, and input to be
+-- closed (compileClosedLoop); a lone open Ground seed is instead promoted
+-- (M4), so the chain is where an offending first loop is rejected. `k` is
+-- an in-scope Nat the offending loop can capture.
+closedChainMain :: String -> String
+closedChainMain offending = unlines
+  [ "type State = Nat"
+  , "inc : Nat -o Nat = \\n -> succ n"
+  , "sum : Nat * Nat -o Nat = \\p -> add p"
+  , "stop : Nat -o Unit + Unit = \\n -> let _ = n in left ()"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let k : Nat = 5"
+  , "              in let a : Nat = " <> offending
+  , "                     b : Nat = iterate 1 from 0 with inc"
+  , "                     _ = a"
+  , "                     _ = b"
+  , "                  in (\"\", right 1)"
+  , "        n -> let _ = n in (\"\", left ())"
   ]
 
 capturedSeedSource :: String
-capturedSeedSource = unlines
-  [ "type State = Nat;"
-  , "def keepUnit(x: Unit): Unit = x;"
-  , "def init(u: Unit): Reply State = let x: Unit = iterate 1 from u with keepUnit in (\"\",right 0);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
-  ]
+capturedSeedSource = closedChainMain "iterate 1 from k with inc"
 
 capturedBoundSource :: String
-capturedBoundSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def init(u: Unit): Reply State = let n: Nat = iterate let z: Unit = u in 1 from 0 with increment in (\"\",right n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
-  ]
+capturedBoundSource = closedChainMain "iterate k from 0 with inc"
 
 capturedContinuationSource :: String
 capturedContinuationSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def init(u: Unit): Reply State = let n: Nat = iterate 1 from 0 with increment in let z: Unit = u in (\"\",right n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "inc : Nat -o Nat = \\n -> succ n"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let k : Nat = 5"
+  , "              in let a : Nat = iterate 1 from 0 with inc"
+  , "                     b : Nat = iterate 1 from 0 with inc"
+  , "                     _ = a"
+  , "                     _ = b"
+  , "                  in (\"\", right k)"
+  , "        n -> let _ = n in (\"\", left ())"
   ]
 
 helperIterationSource :: String
 helperIterationSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def count(u: Unit): Reply State = let n: Nat = iterate 2 from 0 with increment in (\"\",right n);"
-  , "def init(u: Unit): Reply State = count(u);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "increment : Nat -o Nat = \\n -> succ n"
+  , "count : Unit -o Reply State = \\u -> let _ = u in let n : Nat = iterate 2 from 0 with increment in (\"\", right n)"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in count ()"
   ]
 
 capturedFoldInputSource :: String
-capturedFoldInputSource = unlines
-  [ "type State = Nat;"
-  , "def sum(p: Nat * Nat): Nat = add p;"
-  , "def init(u: Unit): Reply State = let n: Nat = fold let z: Unit = u in \"A\" from 0 with sum in (\"\",right n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
-  ]
+capturedFoldInputSource = closedChainMain "fold (cons k []) from 0 with sum"
 
 capturedFoldSeedSource :: String
-capturedFoldSeedSource = unlines
-  [ "type State = Nat;"
-  , "def sum(p: Nat * Nat): Nat = add p;"
-  , "def init(u: Unit): Reply State = let n: Nat = fold \"A\" from let z: Unit = u in 0 with sum in (\"\",right n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
-  ]
+capturedFoldSeedSource = closedChainMain "fold \"A\" from k with sum"
 
 capturedWhileSeedSource :: String
-capturedWhileSeedSource = unlines
-  [ "type State = Nat;"
-  , "def stop(n: Nat): Unit + Unit = left ();"
-  , "def inc(n: Nat): Nat = suc n;"
-  , "def init(u: Unit): Reply State = let n: Nat = while 2 from let z: Unit = u in 0 testing stop stepping inc in (\"\",right n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
-  ]
+capturedWhileSeedSource = closedChainMain "while 1 from k testing stop stepping inc"
 
 nestedRecursionSource :: String
 nestedRecursionSource = unlines
-  [ "type State = Nat;"
-  , "def sum(p: Nat * Nat): Nat = add p;"
-  , "def inc(n: Nat): Nat = suc n;"
-  , "def init(u: Unit): Reply State = let n: Nat = iterate 1 from fold \"A\" from 0 with sum with inc in (\"\",right n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "sum : Nat * Nat -o Nat = \\p -> add p"
+  , "inc : Nat -o Nat = \\n -> succ n"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let a : Nat = iterate 1 from fold \"A\" from 0 with sum with inc"
+  , "                 b : Nat = iterate 1 from 0 with inc"
+  , "                 _ = a"
+  , "                 _ = b"
+  , "              in (\"\", right 1)"
+  , "        n -> let _ = n in (\"\", left ())"
   ]
 
 helperFoldSource :: String
 helperFoldSource = unlines
-  [ "type State = Nat;"
-  , "def sum(p: Nat * Nat): Nat = add p;"
-  , "def folded(u: Unit): Reply State = let n: Nat = fold \"A\" from 0 with sum in (\"\",right n);"
-  , "def init(u: Unit): Reply State = folded(u);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "sum : Nat * Nat -o Nat = \\p -> add p"
+  , "folded : Unit -o Reply State = \\u -> let _ = u in let n : Nat = fold \"A\" from 0 with sum in (\"\", right n)"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in folded ()"
   ]
 
 additionSource :: String
 additionSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = (\"\",right add (4,7));"
-  , "def step(x: Text * State): Reply State = let (input,state): Text * State = x in matchNat state of { 11 -> (\"eleven\\n\",left ()); n -> (\"wrong\\n\",left ()) };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> (\"\", right add (4, 7))"
+  , "        11 -> (\"eleven\\n\", left ())"
+  , "        n -> let _ = n in (\"wrong\\n\", left ())"
   ]
 
 closedBoundExpressionSource :: String
 closedBoundExpressionSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def init(u: Unit): Reply State = let n: Nat = iterate add (2,3) from 0 with increment in (\"\",right n);"
-  , "def step(x: Text * State): Reply State = (\"\",left ());"
+  [ "type State = Nat"
+  , "increment : Nat -o Nat = \\n -> succ n"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in let n : Nat = iterate add (2, 3) from 0 with increment in (\"\", right n)"
   ]
 
 runtimeIterationSource :: String
 runtimeIterationSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def repeat(n: Nat): Nat = iterate n from 0 with increment;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 2);"
-  , "def step(request: Text * State): Reply State = let (input,fuel): Text * State = request in let _: Text = input in let result: Nat = repeat(fuel) in matchNat result of { 2 -> (\"two\\n\",left ()); n -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "increment : Nat -o Nat = \\n -> succ n"
+  , "repeat : Nat -o Nat = \\n -> iterate n from 0 with increment"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 2)"
+  , "        fuel -> let _ = input in"
+  , "                let result : Nat = repeat fuel"
+  , "                 in case result of"
+  , "                      2 -> (\"two\\n\", left ())"
+  , "                      n -> (\"bad\\n\", left ())"
   ]
 
 runtimeFoldSource :: String
 runtimeFoldSource = unlines
-  [ "type State = Unit;"
-  , "def sum(pair: Nat * Nat): Nat = add pair;"
-  , "def sumText(input: Text): Nat = fold input from 0 with sum;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
-  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Nat = sumText(input) in matchNat result of { 198 -> (\"sum\\n\",left ()); n -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "sum : Nat * Nat -o Nat = \\pair -> add pair"
+  , "sumText : Text -o Nat = \\input -> fold input from 0 with sum"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = n in"
+  , "             let result : Nat = sumText input"
+  , "              in case result of"
+  , "                   198 -> (\"sum\\n\", left ())"
+  , "                   m -> (\"bad\\n\", left ())"
   ]
 
 listConstructorSource :: String
 listConstructorSource = unlines
-  [ "type State = List Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right cons 1 onto cons 2 onto []);"
-  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let _: State = state in (\"\",left ());"
+  [ "type State = List Nat"
+  , "start : Unit -o State = \\u -> cons 1 (cons 2 [])"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
   ]
 
 runtimeMapSource :: String
 runtimeMapSource = unlines
-  [ "type State = Unit;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def incrementText(input: Text): Text = map input with increment;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
-  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: State = state in let result: Text = incrementText(input) in matchText result of { \"BCD\" -> (\"mapped\\n\",left ()); other -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "increment : Nat -o Nat = \\n -> succ n"
+  , "incrementText : Text -o Text = \\input -> map input with increment"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = n in"
+  , "             let result : Text = incrementText input"
+  , "              in case result of"
+  , "                   \"BCD\" -> (\"mapped\\n\", left ())"
+  , "                   other -> (\"bad\\n\", left ())"
   ]
 
 wrongMapResultSource :: String
 wrongMapResultSource = unlines
-  [ "type State = Unit;"
-  , "def discardNat(n: Nat): Unit = let _: Nat = n in ();"
-  , "def bad(input: Text): Text = map input with discardNat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right ());"
-  , "def step(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let _: State = state in (\"\",left ());"
+  [ "type State = Nat"
+  , "discardNat : Nat -o Unit = \\n -> let _ : Nat = n in ()"
+  , "bad : Text -o Text = \\input -> map input with discardNat"
+  , "main : Text * State -o Reply State = \\x -> let (t, s) = x in let _ = t in let _ = s in (\"\", left ())"
   ]
 
 runtimeWhileSource :: String
 runtimeWhileSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def reachedThree(n: Nat): Unit + Unit = matchNat n of { 3 -> left (); n -> right (); };"
-  , "def capped(fuel: Nat): Nat = while fuel from 0 testing reachedThree stepping increment;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 10);"
-  , "def step(request: Text * State): Reply State = let (input,fuel): Text * State = request in let _: Text = input in let result: Nat = capped(fuel) in matchNat result of { 3 -> (\"three\\n\",left ()); n -> (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "increment : Nat -o Nat = \\n -> succ n"
+  , "reachedThree : Nat -o Unit + Unit = \\n ->"
+  , "  case n of"
+  , "    3 -> left ()"
+  , "    _ -> right ()"
+  , "capped : Nat -o Nat = \\fuel -> while fuel from 0 testing reachedThree stepping increment"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 10)"
+  , "        fuel -> let _ = input in"
+  , "                let result : Nat = capped fuel"
+  , "                 in case result of"
+  , "                      3 -> (\"three\\n\", left ())"
+  , "                      n -> (\"bad\\n\", left ())"
   ]
 
 openSeedSource :: String
 openSeedSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
-  , "def step(request: Text * State): Reply State = let (input,state) = request in let _ = input in let (fuel,seed) = copy state in let result = iterate fuel from seed with increment in matchNat result of { 6 -> (\"six\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "increment : Nat -o Nat = \\n -> succ n"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 3)"
+  , "        n -> let _ = input in"
+  , "             let (fuel, seed) = copy n"
+  , "                 result = iterate fuel from seed with increment"
+  , "              in case result of"
+  , "                   6 -> (\"six\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 openFoldSeedSource :: String
 openFoldSeedSource = unlines
-  [ "type State = Nat;"
-  , "def double(n: Nat): Nat = add (n,n);"
-  , "def plus(p: Nat * Nat): Nat = add p;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let seed = suc n in let total = fold [1, 2, 3] from double seed with plus in matchNat total of { 8 -> (\"eight\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "double : Nat -o Nat = \\n -> add (n, n)"
+  , "plus : Nat * Nat -o Nat = \\p -> add p"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        seed -> let _ = input in"
+  , "                let total = fold [1, 2, 3] from double seed with plus"
+  , "                 in case total of"
+  , "                      8 -> (\"eight\\n\", left ())"
+  , "                      k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 multiplySource :: String
 multiplySource = unlines
-  [ "type State = Nat;"
-  , "def timesStep(p: Nat * Nat): Nat * Nat = let (acc, a) = p in let (a1, a2) = copy a in (add (acc, a1), a2);"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 4);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let pair = iterate 3 from (0, n) with timesStep in let (result, rest) = pair in let _ = rest in matchNat result of { 12 -> (\"twelve\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "timesStep : Nat * Nat -o Nat * Nat = \\p ->"
+  , "  let (acc, a) = p"
+  , "      (a1, a2) = copy a"
+  , "   in (add (acc, a1), a2)"
+  , "main : Text * State -o Reply State = \\x ->"
+  , "  let (input, s) = x"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 4)"
+  , "        n -> let _ = input in"
+  , "             let pair = iterate 3 from (0, n) with timesStep"
+  , "                 (result, rest) = pair"
+  , "                 _ = rest"
+  , "              in case result of"
+  , "                   12 -> (\"twelve\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 itercSource :: String
 itercSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 5);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let total = iterc n from 0 with \\x -> suc x in matchNat total of { 5 -> (\"five\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 5)"
+  , "        n -> let _ = input in"
+  , "             let total = iterc n from 0 with \\y -> succ y"
+  , "              in case total of"
+  , "                   5 -> (\"five\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 foldcSource :: String
 foldcSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 2);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let total = foldc [1, 2, 3] from n with \\(acc, x) -> add (acc, x) in matchNat total of { 8 -> (\"eight\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 2)"
+  , "        n -> let _ = input in"
+  , "             let total = foldc [1, 2, 3] from n with \\(acc, y) -> add (acc, y)"
+  , "              in case total of"
+  , "                   8 -> (\"eight\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 whilecSource :: String
 whilecSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let total = whilec 9 from n testing \\x -> matchNat x of { 0 -> left (); k -> let _ = k in right (); } stepping \\x -> let _ = x in 0 in matchNat total of { 0 -> (\"zero\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 3)"
+  , "        n -> let _ = input in"
+  , "             let total = whilec 9 from n"
+  , "                           testing \\y ->"
+  , "                             case y of"
+  , "                               0 -> left ()"
+  , "                               k -> let _ = k in right ()"
+  , "                           stepping \\y -> let _ = y in 0"
+  , "              in case total of"
+  , "                   0 -> (\"zero\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 mapcTextSource :: String
 mapcTextSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = n in let ys: List Nat = mapc cons 65 onto [] with matchText input of { \"ABC\" -> \\x -> suc x; _ -> \\x -> x; } in matchText ys of { \"B\" -> (\"picked\\n\",left ()); k -> let _ = k in (\"bad\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 1)"
+  , "        n -> let _ = n in"
+  , "             let ys : List Nat = mapc (cons 65 []) with"
+  , "                                   case input of"
+  , "                                     \"ABC\" -> \\y -> succ y"
+  , "                                     _ -> \\y -> y"
+  , "              in case ys of"
+  , "                   \"B\" -> (\"picked\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
   ]
 
 whilecOpenStepSource :: String
 whilecOpenStepSource = unlines
-  [ "type State = Nat;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 3);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let (a, b) = copy n in let total = whilec 9 from a testing \\x -> matchNat x of { 0 -> left (); k -> let _ = k in right (); } stepping \\x -> let _ = x in b in matchNat total of { k -> let _ = k in (\"done\\n\",left ()); };"
+  [ "type State = Nat"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 3)"
+  , "        n -> let _ = input in"
+  , "             let (a, b) = copy n"
+  , "                 total = whilec 9 from a"
+  , "                           testing \\y ->"
+  , "                             case y of"
+  , "                               0 -> left ()"
+  , "                               k -> let _ = k in right ()"
+  , "                           stepping \\y -> let _ = y in b"
+  , "              in let _ = total in (\"done\\n\", left ())"
   ]
 
 closureSeedSource :: String
 closureSeedSource = unlines
-  [ "type State = Nat;"
-  , "def stepc(f: Nat -o Nat): Nat -o Nat = f;"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = let (input,n) = request in let _ = input in let f: Nat -o Nat = \\x -> add (x,n) in let g = iterate 2 from f with stepc in matchNat g 1 of { k -> let _ = k in (\"done\\n\",left ()); };"
+  [ "type State = Nat"
+  , "stepc : (Nat -o Nat) -o Nat -o Nat = \\f -> f"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "   in case s of"
+  , "        0 -> let _ = input in (\"\", right 0)"
+  , "        n -> let _ = input in"
+  , "             let f : Nat -o Nat = \\y -> add (y, n)"
+  , "                 g = iterate 2 from f with stepc"
+  , "              in let _ = g 1 in (\"done\\n\", left ())"
   ]
 
 residualContextSource :: String
 residualContextSource = unlines
-  [ "type State = Nat;"
-  , "def increment(n: Nat): Nat = suc n;"
-  , "def bad(request: Text * State): Reply State = let (input,state): Text * State = request in let _: Text = input in let (fuel,extra): Nat * Nat = copy state in let result: Nat = iterate fuel from 0 with increment in (\"\",right add (result,extra));"
-  , "def init(u: Unit): Reply State = let _: Unit = u in (\"\",right 0);"
-  , "def step(request: Text * State): Reply State = bad(request);"
+  [ "type State = Nat"
+  , "increment : Nat -o Nat = \\n -> succ n"
+  , "main : Text * State -o Reply State = \\request ->"
+  , "  let (input, s) = request"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> (\"\", right 3)"
+  , "        n -> let (fuel, extra) = copy n"
+  , "              in let result : Nat = iterate fuel from 0 with increment"
+  , "                  in (\"\", right add (result, extra))"
   ]

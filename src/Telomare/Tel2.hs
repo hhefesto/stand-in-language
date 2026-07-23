@@ -134,12 +134,12 @@ symbol = L.symbol spaceConsumer
 -- (otherwise @let a: T = f x in ...@ would consume @in@ as an argument).
 reservedWords :: Set.Set String
 reservedWords = Set.fromList
-  [ "module", "import", "type", "data", "def"
+  [ "module", "import", "type", "data"
   , "let", "in", "if", "then", "else"
-  , "matchText", "matchNat", "case", "of"
+  , "case", "of"
   , "map", "mapc", "iterc", "foldc", "whilec", "iterate", "fold", "while"
   , "from", "with", "testing", "stepping"
-  , "copy", "onto"
+  , "copy"
   , "left", "right"
   ]
 
@@ -192,8 +192,6 @@ exprParser = choice
   , try itercExpr
   , try foldcExpr
   , try whilecExpr
-  , try matchTextExpr
-  , try matchNatExpr
   , try caseExpr
   , try ifExpr
   , try mapExpr
@@ -201,10 +199,6 @@ exprParser = choice
   , try foldExpr
   , try whileExpr
   , try copyExpr
-  , try sucExpr
-  , try addExpr
-  , try consExpr
-  , try prependExpr
   , try leftExpr
   , try rightExpr
   , appExpr
@@ -233,8 +227,6 @@ exprParser = choice
       scn
       value <- exprParser
       scn
-      void (optional (symbol ";"))
-      scn
       pure (pat, ty, value)
     ifExpr = do
       reserved "if"
@@ -249,24 +241,6 @@ exprParser = choice
       scn
       whenFalse <- exprParser
       pure (EMatchNat condition [(0, whenFalse)] PWild whenTrue)
-    matchTextExpr = do
-      reserved "matchText"
-      scn
-      value <- exprParser
-      scn
-      reserved "of"
-      scn
-      (arms, pat, fallback) <- matchArms stringLiteral
-      pure (EMatchText value arms pat fallback)
-    matchNatExpr = do
-      reserved "matchNat"
-      scn
-      value <- exprParser
-      scn
-      reserved "of"
-      scn
-      (arms, pat, fallback) <- matchArms natural
-      pure (EMatchNat value arms pat fallback)
     -- One case form, as in telomare0: the shape of the first arm picks the
     -- dispatch — string literals match text, nat literals match naturals
     -- (both keep the binding default arm), constructor tags eliminate a
@@ -278,7 +252,7 @@ exprParser = choice
       scn
       reserved "of"
       scn
-      kind <- lookAhead (optional (symbol "{") *> scn *> armShape)
+      kind <- lookAhead armShape
       case kind of
         ArmText -> do
           (arms, pat, fallback) <- matchArms stringLiteral
@@ -295,68 +269,36 @@ exprParser = choice
              then pure ArmCon
              else fail "case needs at least one literal or constructor arm"
       ]
-    -- Keyed arms plus a binding default, either braced with semicolons
-    -- (transitional) or layout-aligned like telomare0.
+    -- Keyed arms plus a binding default, layout-aligned like telomare0:
+    -- every arm at one column, the block ending at the first outdented
+    -- token.
     matchArms :: Parser key -> Parser ([(key, Expr)], Pattern, Expr)
-    matchArms keyParser = bracedArms <|> alignedArms
-      where
-        bracedArms = do
-          void (symbol "{")
-          scn
-          arms <- many (try $ do key <- keyParser; void (symbol "->"); scn
-                                 body <- exprParser; scn; void (symbol ";"); scn
-                                 pure (key, body))
-          pat <- patternParser
-          void (symbol "->")
-          scn
-          fallback <- exprParser
-          scn
-          void (optional (symbol ";"))
-          scn
-          void (symbol "}")
-          pure (arms, pat, fallback)
-        alignedArms = do
-          lvl <- L.indentLevel
-          arms <- many (try $ do
-            atLevel lvl
-            key <- keyParser
-            void (symbol "->")
-            scn
-            body <- exprParser
-            scn
-            void (optional (symbol ";"))
-            scn
-            pure (key, body))
-          atLevel lvl
-          pat <- patternParser
-          void (symbol "->")
-          scn
-          fallback <- exprParser
-          pure (arms, pat, fallback)
-    enumArms = bracedEnum <|> alignedEnum
-      where
-        bracedEnum = between (symbol "{" <* scn) (symbol "}") (some bracedArm)
-        bracedArm = do
-          con <- identifier
-          void (symbol "->")
-          scn
-          body <- exprParser
-          scn
-          void (optional (symbol ";"))
-          scn
-          pure (con, body)
-        alignedEnum = do
-          lvl <- L.indentLevel
-          some (try $ do
-            atLevel lvl
-            con <- identifier
-            void (symbol "->")
-            scn
-            body <- exprParser
-            scn
-            void (optional (symbol ";"))
-            scn
-            pure (con, body))
+    matchArms keyParser = do
+      lvl <- L.indentLevel
+      arms <- many (try $ do
+        atLevel lvl
+        key <- keyParser
+        void (symbol "->")
+        scn
+        body <- exprParser
+        scn
+        pure (key, body))
+      atLevel lvl
+      pat <- patternParser
+      void (symbol "->")
+      scn
+      fallback <- exprParser
+      pure (arms, pat, fallback)
+    enumArms = do
+      lvl <- L.indentLevel
+      some (try $ do
+        atLevel lvl
+        con <- identifier
+        void (symbol "->")
+        scn
+        body <- exprParser
+        scn
+        pure (con, body))
     atLevel lvl = do
       pos <- L.indentLevel
       if pos == lvl then pure () else fail "expected an arm at the same indentation"
@@ -464,17 +406,6 @@ exprParser = choice
       body <- exprParser
       pure (foldr ELam body pats)
     copyExpr = reserved "copy" *> (ECopy <$> exprParser)
-    sucExpr = reserved "suc" *> (ESuc <$> exprParser)
-    addExpr = reserved "add" *> (EAdd <$> exprParser)
-    consExpr = do
-      reserved "cons"
-      scn
-      value <- exprParser
-      scn
-      reserved "onto"
-      scn
-      ECons value <$> exprParser
-    prependExpr = reserved "prepend" *> (EPrepend <$> stringLiteral <*> exprParser)
     leftExpr = reserved "left" *> (ELeft <$> exprParser)
     rightExpr = reserved "right" *> (ERight <$> exprParser)
     atomExpr = choice
@@ -507,31 +438,16 @@ startsUpper (c : _) = isAsciiUpper c
 startsUpper []      = False
 
 declParser :: Parser Decl
-declParser = choice [dataDecl, typeDecl, defDecl, sigDefDecl]
+declParser = choice [dataDecl, typeDecl, sigDefDecl]
   where
     typeDecl = reserved "type" *> (DType <$> identifier <* symbol "="
-      <*> typeParser <* optional (symbol ";"))
+      <*> typeParser)
     dataDecl = do
       reserved "data"
       name <- identifier
       void (symbol "=")
       names <- sepBy1 identifier (symbol "|")
-      void (optional (symbol ";"))
       pure (DData name names)
-    defDecl = do
-      reserved "def"
-      name <- identifier
-      (arg, input) <- between (symbol "(") (symbol ")") $ do
-        arg <- identifier
-        void (symbol ":")
-        (,) arg <$> typeParser
-      void (symbol ":")
-      output <- typeParser
-      void (symbol "=")
-      scn
-      body <- exprParser
-      void (optional (symbol ";"))
-      pure (DDef name arg input output body)
     -- telomare0-style top level: @name : A -o B = \x -> body@ — the type
     -- sits where telomare0 puts its refinement annotation, and the body is
     -- a lambda whose first pattern becomes the definition argument.
@@ -542,7 +458,6 @@ declParser = choice [dataDecl, typeDecl, defDecl, sigDefDecl]
       void (symbol "=")
       scn
       body <- exprParser
-      void (optional (symbol ";"))
       case ty of
         TArrow input output -> case body of
           ELam (PVar arg) inner -> pure (DDef name arg input output inner)
@@ -559,8 +474,8 @@ sourceParser :: Parser Source
 sourceParser = scn *> (Source <$> optional moduleHeader <*> many importDecl
   <*> many (declParser <* scn)) <* eof
   where
-    moduleHeader = reserved "module" *> identifier <* optional (symbol ";") <* scn
-    importDecl = reserved "import" *> identifier <* optional (symbol ";") <* scn
+    moduleHeader = reserved "module" *> identifier <* scn
+    importDecl = reserved "import" *> identifier <* scn
 
 data SomeTy where
   SomeTy :: SUTy a -> SomeTy
@@ -676,9 +591,11 @@ compileDecls parsedDecls = expandMain parsedDecls >>= compileExpanded
 -- matches the placement path.
 expandMain :: [Decl] -> Either CompileError [Decl]
 expandMain decls
-  | not hasMain = Right decls
-  | hasInit || hasStep =
+  | hasMain && (hasInit || hasStep) =
       bad "main cannot be combined with init/step; pick one entry style"
+  | hasInit || hasStep =
+      bad "init and step are synthesized from main; declare main"
+  | not hasMain = bad "tel2 programs declare a main entry"
   | replyMain = do
       startExpr <- generalStart
       Right (decls <> [stateDecl | not hasState]
