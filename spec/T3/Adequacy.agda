@@ -190,6 +190,58 @@ private
                 (proj₁ (proj₂ resr)))
        , proj₂ (proj₂ resr))
 
+  -- Bounded recursion: the machine runs the test then the body, and the
+  -- body's own recur applications re-enter one fuel lower — so the whole
+  -- recursion is carried by the recur closure's precision (rec-prec at n),
+  -- not an outer tail recursion.  Exactly two fuel segments per unfold.
+  rec-prec : (A B : Ty)
+             (kt : KVal A →K (⊤ ⊎ ⊤)) (gt : GVal ℕ A → ℕ × (⊤ ⊎ ⊤))
+             (kr : ((KVal A →K KVal B) × KVal A) →K KVal B)
+             (gr : ((GVal ℕ A → ℕ × GVal ℕ B) × GVal ℕ A) → ℕ × GVal ℕ B)
+             (kl : KVal A →K KVal B) (gl : GVal ℕ A → ℕ × GVal ℕ B)
+           → (∀ kx gx → ≈P A kx gx → PreciseAt (unit ⊕ unit) (kt kx) (gt gx))
+           → (∀ krec grec kx gx → ≈P (A ⊸ B) krec grec → ≈P A kx gx
+              → PreciseAt B (kr (krec , kx)) (gr (grec , gx)))
+           → (∀ kx gx → ≈P A kx gx → PreciseAt B (kl kx) (gl gx))
+           → ∀ n ka ga → ≈P A ka ga
+           → PreciseAt B (recT n kt kr kl ka) (recGW A B n gt gr gl ga)
+  rec-prec A B kt gt kr gr kl gl ht hr hl zero    ka ga rel extra =
+    hl ka ga rel extra
+  rec-prec A B kt gt kr gr kl gl ht hr hl (suc n) ka ga rel extra
+    with proj₂ (gt ga)
+       | ht ka ga rel (proj₁ (gl ga) + extra)
+       | ht ka ga rel
+           (proj₁ (gr ((λ y → recGW A B n gt gr gl y) , ga)) + extra)
+  ... | inj₁ _ | (inj₁ _ , eqt , _) | _ =
+    let mt   = proj₁ (gt ga)
+        ml   = proj₁ (gl ga)
+        eqt' = subst (λ tel → kt ka tel ≡ just (inj₁ _ , ml + extra))
+                     (sym (+-assoc mt ml extra)) eqt
+        resl = hl ka ga rel extra
+    in ( proj₁ resl
+       , trans (cong (λ (mx : Maybe ((⊤ ⊎ ⊤) × Tel)) → mx >>= λ { (r , t') →
+                        recGoT n kt kr kl ka r t' }) eqt')
+               (proj₁ (proj₂ resl))
+       , proj₂ (proj₂ resl))
+  ... | inj₁ _ | (inj₂ _ , _ , ()) | _
+  ... | inj₂ _ | _ | (inj₁ _ , _ , ())
+  ... | inj₂ _ | _ | (inj₂ _ , eqt , _) =
+    let mt   = proj₁ (gt ga)
+        grec = λ y → recGW A B n gt gr gl y
+        krec = λ y → recT n kt kr kl y
+        mr   = proj₁ (gr (grec , ga))
+        eqt' = subst (λ tel → kt ka tel ≡ just (inj₂ _ , mr + extra))
+                     (sym (+-assoc mt mr extra)) eqt
+        recPrec : ≈P (A ⊸ B) krec grec
+        recPrec = λ ky gy rely →
+                    rec-prec A B kt gt kr gr kl gl ht hr hl n ky gy rely
+        resr = hr krec grec ka ga recPrec rel extra
+    in ( proj₁ resr
+       , trans (cong (λ (mx : Maybe ((⊤ ⊎ ⊤) × Tel)) → mx >>= λ { (r , t') →
+                        recGoT n kt kr kl ka r t' }) eqt')
+               (proj₁ (proj₂ resr))
+       , proj₂ (proj₂ resr))
+
 -- ── The fundamental lemma ───────────────────────────────────────────────────
 
 precise : {A B : Ty} (f : A ⇨ B) → Precise f
@@ -308,6 +360,12 @@ precise (whileS {A} t s) (kn , ka) (.kn , ga) (refl , relA) extra =
   while-prec A ⟦ t ⟧K ⟦ t ⟧C ⟦ s ⟧K ⟦ s ⟧C
     (λ kx gx rx → precise t kx gx rx)
     (λ kx gx rx → precise s kx gx rx)
+    kn ka ga relA extra
+precise (recS {A} {B} t r l) (kn , ka) (.kn , ga) (refl , relA) extra =
+  rec-prec A B ⟦ t ⟧K ⟦ t ⟧C ⟦ r ⟧K ⟦ r ⟧C ⟦ l ⟧K ⟦ l ⟧C
+    (λ kx gx rx → precise t kx gx rx)
+    (λ krec grec kx gx relF relX → precise r (krec , kx) (grec , gx) (relF , relX))
+    (λ kx gx rx → precise l kx gx rx)
     kn ka ga relA extra
 
 -- ── ADEQUACY: run with the computed budget ⇒ finish with 0 left ────────────

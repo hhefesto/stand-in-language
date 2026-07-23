@@ -53,6 +53,19 @@ whileV-go n t s a (inj₂ _) = whileV n t s (s a)
 whileV zero    t s a = a
 whileV (suc n) t s a = whileV-go n t s a (t a)
 
+-- bounded higher-order recursion.  recur is the semantic function `recV n`
+-- (this recursion one fuel lower); termination is the structural decrease
+-- of the fuel, even though recur is handed to the arbitrary body `r`.
+recV-go : {A B : Set} → ℕ → (A → ⊤ ⊎ ⊤) → ((A → B) × A → B) → (A → B)
+        → A → ⊤ ⊎ ⊤ → B
+recV : {A B : Set} → ℕ → (A → ⊤ ⊎ ⊤) → ((A → B) × A → B) → (A → B) → A → B
+
+recV-go n t r l a (inj₁ _) = l a
+recV-go n t r l a (inj₂ _) = r ((λ y → recV n t r l y) , a)
+
+recV zero    t r l a = l a
+recV (suc n) t r l a = recV-go n t r l a (t a)
+
 ⟦_⟧V : {A B : Ty} → A ⇨ B → ⟦ A ⟧T → ⟦ B ⟧T
 ⟦ idS        ⟧V a = a
 ⟦ g ∘S f     ⟧V a = ⟦ g ⟧V (⟦ f ⟧V a)
@@ -98,3 +111,4 @@ whileV (suc n) t s a = whileV-go n t s a (t a)
 ⟦ iterS f    ⟧V (n , a) = iterV n ⟦ f ⟧V a
 ⟦ foldS f    ⟧V (xs , b) = foldV xs ⟦ f ⟧V b
 ⟦ whileS t s ⟧V (n , a) = whileV n ⟦ t ⟧V ⟦ s ⟧V a
+⟦ recS t r l ⟧V (n , a) = recV n ⟦ t ⟧V ⟦ r ⟧V ⟦ l ⟧V a

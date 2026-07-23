@@ -373,6 +373,10 @@ transfer (whileS t st) s =
       let (b , r) = aiter step n a0
       in (recB (just n) b , bangS r)
     loop nothing  a0 = (recB nothing (topBD _) , topS)
+-- v1: bounded recursion abstracts conservatively (unknown rounds, top
+-- output), like the closure loops — the body-chosen recur argument makes
+-- a precise shape transfer untrackable.
+transfer (recS t r l) s = (recB nothing (topBD _) , topS)
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- § 4  Soundness: the logical relation
@@ -503,6 +507,7 @@ sound mapCS s h = tt
 sound iterCS s h = tt
 sound foldCS s h = tt
 sound whileCS s h = tt
+sound (recS t r l) s h = tt
 sound (guardS t) s {a} h with ⟦ t ⟧V a
 ... | inj₁ _ = h
 ... | inj₂ _ = tt

@@ -64,3 +64,6 @@ data _⇨U_ : UTy → UTy → Set where
   iterU    : {A : UTy} → A ⇨U A → (natᵤ ⊗ᵤ A) ⇨U A
   foldU    : {A B : UTy} → (B ⊗ᵤ A) ⇨U B → (listᵤ A ⊗ᵤ B) ⇨U B
   whileU   : {A : UTy} → A ⇨U (unitᵤ ⊕ᵤ unitᵤ) → A ⇨U A → (natᵤ ⊗ᵤ A) ⇨U A
+  -- bounded higher-order recursion (box-free mirror of recS)
+  recU     : {A B : UTy} → A ⇨U (unitᵤ ⊕ᵤ unitᵤ) → ((A ⊸ᵤ B) ⊗ᵤ A) ⇨U B
+           → A ⇨U B → (natᵤ ⊗ᵤ A) ⇨U B

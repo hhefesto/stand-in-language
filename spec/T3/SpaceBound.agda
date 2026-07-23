@@ -199,6 +199,7 @@ spaceS (mapCS {A} {B}) s =
 spaceS iterCS       s = (nothing , topS)
 spaceS foldCS       s = (nothing , topS)
 spaceS whileCS      s = (nothing , topS)
+spaceS (recS t r l) s = (nothing , topS)   -- v1: unbounded, like the closure loops
 spaceS (promoteS _) s = (sizeS s , bangS s)
 spaceS dupS         s = (sizeS s +∞ sizeS s , pairS s s)
 spaceS (boxS f)     s = let (c , r) = spaceS f (unbang s) in (c , bangS r)
@@ -545,6 +546,7 @@ spaceS-sound (mapCS {A} {B}) (pairS (bangS (lollyS mc)) (listS n es))
   ( ≤∞-suc _ (mapSp-bound A B es (topS {B}) mc gf
       (λ x _ → (relF x , tt)) n gxs hlen hall)
   , tt)
+spaceS-sound (recS t r l) s h = (tt , tt)
 spaceS-sound iterCS s h = (tt , tt)
 spaceS-sound foldCS s h = (tt , tt)
 spaceS-sound whileCS s h = (tt , tt)

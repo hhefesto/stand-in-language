@@ -128,10 +128,10 @@ boundVectors =
   , ("rec-min-full-fuel", evalV recMinExample (5, 3) == 3)
   , ("rec-min-fuel-limited", evalV recMinExample (2, 3) == 2)
   , ("rec-min-base-zero", evalV recMinExample (5, 0) == 0)
-  , ("rec-min-bound-finite", isJust (fst (costW recMinExample recMinBoundedShape)))
-  , ("rec-min-unbounded-fuel", isNothing (fst (costW recMinExample (PairSh TopS TopS))))
-  , ("rec-min-bound-holds", maybe False (work recMinExample (5, 3) <=)
-      (fst (costW recMinExample recMinBoundedShape)))
+  -- v1: bounded recursion reports unbounded work (mirrors the Agda
+  -- costW (recS …) = nothing); RT3's sizing supplies the concrete fuel.
+  , ("rec-min-work-unbounded", isNothing (fst (costW recMinExample recMinBoundedShape)))
+  , ("rec-min-dup-unbounded", isNothing (fst (costD recMinExample recMinBoundedShape)))
   , ("applyInc-dup-bound", fst (costD applyInc TopS) == Just 0)
   , ("applyInc-dup-bound-holds", dupGrade applyInc 5 <= 0)
   ]

@@ -413,19 +413,12 @@ costW (WhileS _ t st) s =
        NatLE n -> let (c, r) = aiterC stepC n (unbangS a0)
                   in (c, BangSh r)
        _       -> (Nothing, TopS)
--- Work is structural, so the uniform per-round bound (test + rec + last,
--- with the recur closure costed at 0 — its ApplyS is the per-step charge)
--- times the fuel is finite whenever the fuel shape is known, exactly like
--- 'WhileCS'.  (Dup and space stay v1-unbounded: they scale with per-round
--- value sizes the body-chosen recur argument makes untrackable.)
-costW (RecS _ _ test rec lastM) s =
-  let (fu, x)    = splitP s
-      testCost   = fst (costW test x)
-      lastCost   = fst (costW lastM x)
-      recCost    = fst (costW rec (PairSh (LollySh (Just 0)) x))
-  in ( mulC (fuelOfS fu)
-        (addC (Just 1) (addC testCost (addC recCost lastCost)))
-     , TopS)
+-- v1: the recur closure's own cost is the recursion itself, unknown to
+-- this static pass, so bounded recursion reports unbounded work (mirrors
+-- the Agda @costW (recS …) = (nothing , topS)@).  The finite
+-- fuel-times-round bound waits for RT3's sizing, which supplies the
+-- concrete fuel — see design/RECURSION.md.
+costW (RecS _ _ _ _ _) _ = (Nothing, TopS)
 
 -- | Partial core-type representation threaded through 'costSp' so the
 -- typed view of sizes survives composite traversal: an atomic @TopS@

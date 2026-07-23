@@ -110,6 +110,7 @@ open import T3.Surface.Sem
 ε (iterS f)    = iterU (ε f)
 ε (foldS f)    = foldU (ε f)
 ε (whileS t s) = whileU (ε t) (ε s)
+ε (recS t r l) = recU (ε t) (ε r) (ε l)
 
 -- First-order (arrow-free) types: where erasure is a value identity and
 -- the factorization theorem is propositional.  Recursive ⊤/⊥ so concrete
@@ -204,6 +205,26 @@ private
   ... | inj₂ _ | .(inj₂ _) | refl =
     while-rel A n tv tu sv su ht hs (sv a) (su u) (hs a u rel)
 
+  rec-rel : (A B : Ty) (n : ℕ)
+            (tv : ⟦ A ⟧T → ⊤ ⊎ ⊤) (tu : ⟦ strip A ⟧U → ⊤ ⊎ ⊤)
+            (rv : ((⟦ A ⟧T → ⟦ B ⟧T) × ⟦ A ⟧T) → ⟦ B ⟧T)
+            (ru : ((⟦ strip A ⟧U → ⟦ strip B ⟧U) × ⟦ strip A ⟧U) → ⟦ strip B ⟧U)
+            (lv : ⟦ A ⟧T → ⟦ B ⟧T) (lu : ⟦ strip A ⟧U → ⟦ strip B ⟧U)
+          → (∀ x u → ≈ε A x u → tv x ≡ tu u)
+          → (∀ fv fu x u → ≈ε (A ⊸ B) fv fu → ≈ε A x u
+             → ≈ε B (rv (fv , x)) (ru (fu , u)))
+          → (∀ x u → ≈ε A x u → ≈ε B (lv x) (lu u))
+          → ∀ a u → ≈ε A a u
+          → ≈ε B (recV n tv rv lv a) (recV n tu ru lu u)
+  rec-rel A B zero    tv tu rv ru lv lu ht hr hl a u rel = hl a u rel
+  rec-rel A B (suc n) tv tu rv ru lv lu ht hr hl a u rel
+    with tv a | tu u | ht a u rel
+  ... | inj₁ _ | .(inj₁ _) | refl = hl a u rel
+  ... | inj₂ _ | .(inj₂ _) | refl =
+    hr (λ y → recV n tv rv lv y) (λ y → recV n tu ru lu y) a u
+       (λ y uy rely → rec-rel A B n tv tu rv ru lv lu ht hr hl y uy rely)
+       rel
+
 -- FACTORIZATION, fundamental lemma: the value semantics respects erasure
 -- up to the relation.
 ε-rel : {A B : Ty} (f : A ⇨ B) {a : ⟦ A ⟧T} {u : ⟦ strip A ⟧U}
@@ -280,6 +301,12 @@ private
   while-rel A n ⟦ t ⟧V ⟦ ε t ⟧VS ⟦ s ⟧V ⟦ ε s ⟧VS
     (λ x u r → ≈ε-verdict (⟦ t ⟧V x) (⟦ ε t ⟧VS u) (ε-rel t {x} {u} r))
     (λ x u r → ε-rel s {x} {u} r)
+    a ua relA
+ε-rel (recS {A} {B} t r l) {n , a} {un , ua} (refl , relA) =
+  rec-rel A B n ⟦ t ⟧V ⟦ ε t ⟧VS ⟦ r ⟧V ⟦ ε r ⟧VS ⟦ l ⟧V ⟦ ε l ⟧VS
+    (λ x u rx → ≈ε-verdict (⟦ t ⟧V x) (⟦ ε t ⟧VS u) (ε-rel t {x} {u} rx))
+    (λ fv fu x u relF relX → ε-rel r {fv , x} {fu , u} (relF , relX))
+    (λ x u rx → ε-rel l {x} {u} rx)
     a ua relA
 
 -- First-order recovery: stripping IS the relation at arrow-free types.
@@ -455,6 +482,7 @@ skelOf (mapU f)     = rec (skelOf f)
 skelOf (iterU f)    = rec (skelOf f)
 skelOf (foldU f)    = rec (skelOf f)
 skelOf (whileU t s) = rec (bin (skelOf t) (skelOf s))
+skelOf (recU t r l) = rec (bin (skelOf t) (bin (skelOf r) (skelOf l)))
 
 -- Read a core term's level structure off its box/loop nesting: the
 -- decoration a typed decoration ACTUALLY carries, at ambient depth d.
@@ -503,6 +531,9 @@ skelOfCore (iterS f)    d = recD d (skelOfCore f (suc d))
 skelOfCore (foldS f)    d = recD d (skelOfCore f (suc d))
 skelOfCore (whileS t s) d =
   recD d (binD (skelOfCore t (suc d)) (skelOfCore s (suc d)))
+skelOfCore (recS t r l) d =
+  recD d (binD (skelOfCore t (suc d))
+            (binD (skelOfCore r (suc d)) (skelOfCore l (suc d))))
 
 -- Well-typed core terms stratify: their level structure is a solution.
 core-solves : {A B : Ty} (f : A ⇨ B) (d : ℕ) → Solves d (skelOfCore f d)
@@ -549,6 +580,9 @@ core-solves (iterS f)    d = (≤-refl , core-solves f (suc d))
 core-solves (foldS f)    d = (≤-refl , core-solves f (suc d))
 core-solves (whileS t s) d =
   (≤-refl , (core-solves t (suc d) , core-solves s (suc d)))
+core-solves (recS t r l) d =
+  (≤-refl , (core-solves t (suc d)
+    , (core-solves r (suc d) , core-solves l (suc d))))
 
 -- THE GALOIS-INSERTION CONTENT: the structural placement of a core
 -- term's erasure is a lower bound on the term's own level structure.

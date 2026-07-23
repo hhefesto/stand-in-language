@@ -79,6 +79,20 @@ whileGoT n t s a (inj₂ _) = step-tel (bind-tel (s a) (whileT n t s))
 whileT zero    t s a = return-tel a
 whileT (suc n) t s a = bind-tel (t a) (whileGoT n t s a)
 
+-- bounded higher-order recursion: recur is the fuel-monadic function
+-- `recT n …`; the per-step fuel is consumed by the applyS the body pays
+-- when it applies recur, so recGoT consumes none of its own.
+recGoT : {A B : Set} → ℕ → (A →K (⊤ ⊎ ⊤))
+       → (((A →K B) × A) →K B) → (A →K B) → A → ⊤ ⊎ ⊤ → TelM B
+recT   : {A B : Set} → ℕ → (A →K (⊤ ⊎ ⊤))
+       → (((A →K B) × A) →K B) → (A →K B) → A →K B
+
+recGoT n t r l a (inj₁ _) = l a
+recGoT n t r l a (inj₂ _) = r ((λ y → recT n t r l y) , a)
+
+recT zero    t r l a = l a
+recT (suc n) t r l a = bind-tel (t a) (recGoT n t r l a)
+
 -- Machine values: fuel-monadic at arrows, structural elsewhere.
 KVal : Ty → Set
 KVal unit      = ⊤
@@ -136,3 +150,4 @@ KVal (A ⊸ B)   = KVal A → TelM (KVal B)
 ⟦ iterS f    ⟧K (n , a) = iterT n ⟦ f ⟧K a
 ⟦ foldS f    ⟧K (xs , b) = foldT xs ⟦ f ⟧K b
 ⟦ whileS t s ⟧K (n , a) = whileT n ⟦ t ⟧K ⟦ s ⟧K a
+⟦ recS t r l ⟧K (n , a) = recT n ⟦ t ⟧K ⟦ r ⟧K ⟦ l ⟧K a

@@ -119,6 +119,15 @@ data _⇨_ : Ty → Ty → Set where
     -- test convention: inj₁ = stop, inj₂ = continue.  At most `fuel`
     -- probes; charges per taken step (T3.Sem.Graded chargeStep) plus a
     -- probe charge per test (the implicit copy of the loop state).
+  -- bounded higher-order recursion — telomare0's {test, rec, last} triple
+  -- made total by an explicit nat fuel (design/RECURSION.md).  On each
+  -- unfold `test` probes the input (inj₁ stops with `last`, inj₂ runs
+  -- `rec` with the affine recursion continuation `recur : A ⊸ B` — this
+  -- morphism one fuel lower — and the input).  Unboxed and linear: a boxed
+  -- result would need the absent der to build `recur`, and `recur` is
+  -- applied at most once (applyS consumes it).
+  recS     : {A B : Ty} → A ⇨ (unit ⊕ unit) → ((A ⊸ B) ⊗ A) ⇨ B → A ⇨ B
+           → (nat ⊗ A) ⇨ B
 
 -- Box depth: the static number whose fixedness is both theorems (design
 -- doc §6).  iterS/foldS/whileS bodies run one level down, hence the suc.
@@ -166,6 +175,7 @@ depth (mapS f)      = suc (depth f)
 depth (iterS f)     = suc (depth f)
 depth (foldS f)     = suc (depth f)
 depth (whileS t s)  = suc (depth t ⊔ depth s)
+depth (recS t r l)  = suc (depth t ⊔ (depth r ⊔ depth l))
 
 -- towerHeight: the coarse, honest cost report ("worst case is a
 -- depth-high tower in the size of the level-0 data") [cited: Girard,

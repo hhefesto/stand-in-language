@@ -163,6 +163,29 @@ module Interp (R : CostAlgebra) where
   whileG A zero    t s a = (chargeBase (! A) (sz A a) , a)
   whileG A (suc n) t s a = let (mt , r) = t a in whileGo A n t s a mt r
 
+  -- bounded higher-order recursion: the recur closure `λ y → recG n …` is
+  -- handed to the body `r`; the per-step work charge is the applyT the
+  -- body pays when it applies recur (so recGo adds only the probe).
+  recGo : (A B : Ty) → ℕ
+        → (GVal ℳ A → ℳ × (⊤ ⊎ ⊤))
+        → ((GVal ℳ (A ⊸ B) × GVal ℳ A) → ℳ × GVal ℳ B)
+        → (GVal ℳ A → ℳ × GVal ℳ B)
+        → GVal ℳ A → ℳ → ⊤ ⊎ ⊤ → ℳ × GVal ℳ B
+  recG  : (A B : Ty) → ℕ
+        → (GVal ℳ A → ℳ × (⊤ ⊎ ⊤))
+        → ((GVal ℳ (A ⊸ B) × GVal ℳ A) → ℳ × GVal ℳ B)
+        → (GVal ℳ A → ℳ × GVal ℳ B)
+        → GVal ℳ A → ℳ × GVal ℳ B
+
+  recGo A B n t r l a mt (inj₁ _) =
+    let (ml , b) = l a in (chargeProbe A (sz A a) ⋄ (mt ⋄ ml) , b)
+  recGo A B n t r l a mt (inj₂ _) =
+    let (mr , b) = r ((λ y → recG A B n t r l y) , a)
+    in (chargeProbe A (sz A a) ⋄ (mt ⋄ mr) , b)
+
+  recG A B zero    t r l a = l a
+  recG A B (suc n) t r l a = let (mt , v) = t a in recGo A B n t r l a mt v
+
   ⟦_⟧G : {A B : Ty} → A ⇨ B → GVal ℳ A → ℳ × GVal ℳ B
   ⟦_⟧G {A} idS a = (chargePrim A A idT (sz A a) (sz A a) , a)
   ⟦_⟧G {A} (promoteS _) a = (chargePrim A (! A) idT (sz A a) (sz A a) , a)
@@ -261,6 +284,7 @@ module Interp (R : CostAlgebra) where
   ⟦ foldS {A} {B} f ⟧G (xs , b) =
     foldG (λ x → chargeBase (! B) (sz B x)) xs ⟦ f ⟧G b
   ⟦ whileS {A} t s ⟧G (n , a) = whileG A n ⟦ t ⟧G ⟦ s ⟧G a
+  ⟦ recS {A} {B} t r l ⟧G (n , a) = recG A B n ⟦ t ⟧G ⟦ r ⟧G ⟦ l ⟧G a
 
   -- Value coherence: the fundamental lemma of ≈G, proved once for every
   -- algebra.  The graded semantics computes the specification's value
@@ -327,6 +351,45 @@ module Interp (R : CostAlgebra) where
       with proj₂ (tg ga) | ≈G-verdict ℳ (proj₂ (tg ga)) (tv a) (ht ga a rel)
     ... | _ | refl =
       whileGo-rel A n tg tv sg sv ht hs ga a rel (proj₁ (tg ga)) (tv a)
+
+    recGo-rel : (A B : Ty) (n : ℕ)
+                (tg : GVal ℳ A → ℳ × (⊤ ⊎ ⊤)) (tv : ⟦ A ⟧T → ⊤ ⊎ ⊤)
+                (rg : (GVal ℳ (A ⊸ B) × GVal ℳ A) → ℳ × GVal ℳ B)
+                (rv : ((⟦ A ⟧T → ⟦ B ⟧T) × ⟦ A ⟧T) → ⟦ B ⟧T)
+                (lg : GVal ℳ A → ℳ × GVal ℳ B) (lv : ⟦ A ⟧T → ⟦ B ⟧T)
+              → (∀ gx x → ≈G ℳ A gx x
+                 → ≈G ℳ (unit ⊕ unit) (proj₂ (tg gx)) (tv x))
+              → (∀ grf rf gx x → ≈G ℳ (A ⊸ B) grf rf → ≈G ℳ A gx x
+                 → ≈G ℳ B (proj₂ (rg (grf , gx))) (rv (rf , x)))
+              → (∀ gx x → ≈G ℳ A gx x → ≈G ℳ B (proj₂ (lg gx)) (lv x))
+              → ∀ ga a → ≈G ℳ A ga a → (mt : ℳ) (v : ⊤ ⊎ ⊤)
+              → ≈G ℳ B (proj₂ (recGo A B n tg rg lg ga mt v))
+                     (recV-go n tv rv lv a v)
+    recG-rel  : (A B : Ty) (n : ℕ)
+                (tg : GVal ℳ A → ℳ × (⊤ ⊎ ⊤)) (tv : ⟦ A ⟧T → ⊤ ⊎ ⊤)
+                (rg : (GVal ℳ (A ⊸ B) × GVal ℳ A) → ℳ × GVal ℳ B)
+                (rv : ((⟦ A ⟧T → ⟦ B ⟧T) × ⟦ A ⟧T) → ⟦ B ⟧T)
+                (lg : GVal ℳ A → ℳ × GVal ℳ B) (lv : ⟦ A ⟧T → ⟦ B ⟧T)
+              → (∀ gx x → ≈G ℳ A gx x
+                 → ≈G ℳ (unit ⊕ unit) (proj₂ (tg gx)) (tv x))
+              → (∀ grf rf gx x → ≈G ℳ (A ⊸ B) grf rf → ≈G ℳ A gx x
+                 → ≈G ℳ B (proj₂ (rg (grf , gx))) (rv (rf , x)))
+              → (∀ gx x → ≈G ℳ A gx x → ≈G ℳ B (proj₂ (lg gx)) (lv x))
+              → ∀ ga a → ≈G ℳ A ga a
+              → ≈G ℳ B (proj₂ (recG A B n tg rg lg ga)) (recV n tv rv lv a)
+
+    recGo-rel A B n tg tv rg rv lg lv ht hr hl ga a rel mt (inj₁ _) =
+      hl ga a rel
+    recGo-rel A B n tg tv rg rv lg lv ht hr hl ga a rel mt (inj₂ _) =
+      hr (λ y → recG A B n tg rg lg y) (λ y → recV n tv rv lv y) ga a
+         (λ gy y rely → recG-rel A B n tg tv rg rv lg lv ht hr hl gy y rely)
+         rel
+
+    recG-rel A B zero    tg tv rg rv lg lv ht hr hl ga a rel = hl ga a rel
+    recG-rel A B (suc n) tg tv rg rv lg lv ht hr hl ga a rel
+      with proj₂ (tg ga) | ≈G-verdict ℳ (proj₂ (tg ga)) (tv a) (ht ga a rel)
+    ... | _ | refl =
+      recGo-rel A B n tg tv rg rv lg lv ht hr hl ga a rel (proj₁ (tg ga)) (tv a)
 
   G-val : {A B : Ty} (f : A ⇨ B) {ga : GVal ℳ A} {a : ⟦ A ⟧T}
         → ≈G ℳ A ga a → ≈G ℳ B (proj₂ (⟦ f ⟧G ga)) (⟦ f ⟧V a)
@@ -403,6 +466,12 @@ module Interp (R : CostAlgebra) where
       (λ gx x rx → G-val t {gx} {x} rx)
       (λ gx x rx → G-val s {gx} {x} rx)
       ga a relA
+  G-val (recS {A} {B} t r l) {gn , ga} {n , a} (refl , relA) =
+    recG-rel A B n ⟦ t ⟧G ⟦ t ⟧V ⟦ r ⟧G ⟦ r ⟧V ⟦ l ⟧G ⟦ l ⟧V
+      (λ gx x rx → G-val t {gx} {x} rx)
+      (λ grf rf gx x relf relx → G-val r {grf , gx} {rf , x} (relf , relx))
+      (λ gx x rx → G-val l {gx} {x} rx)
+      ga a relA
 
 -- ── The two measured instances ──────────────────────────────────────────────
 --
@@ -452,7 +521,8 @@ dupAlg = record
 open Interp workAlg  public using ()
   renaming (⟦_⟧G to ⟦_⟧C; G-val to C-val;
             mapG to mapGW; iterG to iterGW; foldG to foldGW;
-            whileGo to whileGoW; whileG to whileGW)
+            whileGo to whileGoW; whileG to whileGW;
+            recGo to recGoW; recG to recGW)
 open Interp dupAlg   public using () renaming (⟦_⟧G to ⟦_⟧D)
 
 work : {A B : Ty} → A ⇨ B → GVal ℕ A → ℕ

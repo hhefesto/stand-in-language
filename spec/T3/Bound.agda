@@ -345,6 +345,10 @@ costW (whileS t st) s =
       let (c , r) = aiterC stepC n a0
       in (c , bangS r)
     loopC nothing  a0 = (nothing , topS)
+-- v1: the recur closure's own cost is the recursion itself — unknown to
+-- this static pass — so bounded recursion reports unbounded work.  The
+-- finite fuel-times-round bound waits for RT3's sizing (concrete fuel).
+costW (recS t r l) s = (nothing , topS)
 
 -- Duplication mirrors dupAlg exactly: only dupNatS, copyS, dupS and
 -- guard/while probes charge; closure bodies contribute when applied.
@@ -485,6 +489,7 @@ costD (whileS t st) s =
     loop : Maybe ℕ → Shape _ → ℕ∞ × Shape _
     loop (just n) a0 = let (c , r) = aiterD round n a0 in (c , bangS r)
     loop nothing  a0 = (nothing , topS)
+costD (recS t r l) s = (nothing , topS)
 
 -- ── The work relation ──────────────────────────────────────────────────────
 
@@ -1102,6 +1107,8 @@ costW-sound (whileS {A} t st) (pairS (natLE N) a0) {gn , ga} (hn , ha) =
                   (λ x {gx} rel → costW-sound st x {gx} rel)
                   N gn (unbang a0) {ga} hn (unbang-γW a0 ha)
   in (c , r)
+-- unbounded work bound (nothing) is vacuously sound; topS output dominates.
+costW-sound (recS t r l) s h = (tt , tt)
 
 -- ── THE THEOREM: static duplication bound ──────────────────────────────────
 
@@ -1364,6 +1371,7 @@ costD-sound (whileS {A} t st) (pairS (natLE N) a0) {gn , ga} (hn , ha) =
                  (λ x {gx} rel → costD-sound st x {gx} rel)
                  N gn (unbang a0) {ga} hn (unbang-γW a0 ha)
   in (c , r)
+costD-sound (recS t r l) s h = (tt , tt)
 
 -- ── Entry-point corollaries ────────────────────────────────────────────────
 

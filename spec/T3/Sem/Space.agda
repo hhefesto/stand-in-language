@@ -85,6 +85,24 @@ whileSpGo A n t s a pt (inj₂ _) =
 whileSp A zero    t s a = (sz A a , a)
 whileSp A (suc n) t s a = let (pt , r) = t a in whileSpGo A n t s a pt r
 
+recSpGo : (A B : Ty) → ℕ
+        → (GVal ℕ A → ℕ × (⊤ ⊎ ⊤))
+        → ((GVal ℕ (A ⊸ B) × GVal ℕ A) → ℕ × GVal ℕ B)
+        → (GVal ℕ A → ℕ × GVal ℕ B)
+        → GVal ℕ A → ℕ → ⊤ ⊎ ⊤ → ℕ × GVal ℕ B
+recSp   : (A B : Ty) → ℕ
+        → (GVal ℕ A → ℕ × (⊤ ⊎ ⊤))
+        → ((GVal ℕ (A ⊸ B) × GVal ℕ A) → ℕ × GVal ℕ B)
+        → (GVal ℕ A → ℕ × GVal ℕ B)
+        → GVal ℕ A → ℕ × GVal ℕ B
+
+recSpGo A B n t r l a pt (inj₁ _) = let (pl , b) = l a in (pt ⊔ pl , b)
+recSpGo A B n t r l a pt (inj₂ _) =
+  let (pr , b) = r ((λ y → recSp A B n t r l y) , a) in (pt ⊔ pr , b)
+
+recSp A B zero    t r l a = l a
+recSp A B (suc n) t r l a = let (pt , v) = t a in recSpGo A B n t r l a pt v
+
 ⟦_⟧S : {A B : Ty} → A ⇨ B → GVal ℕ A → ℕ × GVal ℕ B
 ⟦_⟧S {A} idS a = (sz A a , a)
 ⟦ g ∘S f ⟧S a =
@@ -156,6 +174,8 @@ whileSp A (suc n) t s a = let (pt , r) = t a in whileSpGo A n t s a pt r
   in ((sz (listT A) xs + sz B b) ⊔ p , c)
 ⟦_⟧S (whileS {A} t s) (n , a) =
   let (p , c) = whileSp A n ⟦ t ⟧S ⟦ s ⟧S a in (suc p , c)
+⟦_⟧S (recS {A} {B} t r l) (n , a) =
+  let (p , c) = recSp A B n ⟦ t ⟧S ⟦ r ⟧S ⟦ l ⟧S a in (suc p , c)
 
 -- The space reading of a run.
 spacePeak : {A B : Ty} → A ⇨ B → GVal ℕ A → ℕ
