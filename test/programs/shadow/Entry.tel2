@@ -1,8 +1,12 @@
-module ShadowEntry;
-import Prelude;
+module ShadowEntry
+import Prelude
 
-type State = Nat;
-def init(u: Unit): Reply State = ("",right (shadowValue u));
-def step(x: Text * State): Reply State =
-  let (input,state) = x in
-  matchNat state of { 9 -> ("local\n",left ()); n -> ("wrong\n",left ()) };
+type State = Nat
+
+main : Text * State -o Reply State = \x ->
+  let (input, state) = x
+      _ = input
+   in case state of
+        0 -> ("", right (shadowValue ()))
+        9 -> ("local\n", left ())
+        n -> let _ = n in ("wrong\n", left ())

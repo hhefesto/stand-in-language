@@ -1,2 +1,2 @@
-module CycleB;
-import CycleA;
+module CycleB
+import CycleA

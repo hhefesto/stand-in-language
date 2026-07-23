@@ -1,11 +1,11 @@
-module LegacyPrelude;
-import Prelude;
+module LegacyPrelude
+import Prelude
 
 -- Honest monomorphic compatibility names. Tuple arguments replace historical
--- currying; Church/list/partial APIs are intentionally absent.
-def id(value: Nat): Nat = natIdentity value;
-def not(value: Bool): Bool = boolNot value;
-def and(values: Bool * Bool): Bool = boolAnd values;
-def or(values: Bool * Bool): Bool = boolOr values;
-def succ(value: Nat): Nat = increment value;
-def dPlus(values: Nat * Nat): Nat = natAdd values;
+-- currying; Church/list/partial APIs are intentionally absent. succ needs
+-- no compatibility name: the succ builtin is already telomare0's spelling.
+id : Nat -o Nat = \value -> natIdentity value
+not : Bool -o Bool = \value -> boolNot value
+and : Bool * Bool -o Bool = \values -> boolAnd values
+or : Bool * Bool -o Bool = \values -> boolOr values
+dPlus : Nat * Nat -o Nat = \values -> natAdd values

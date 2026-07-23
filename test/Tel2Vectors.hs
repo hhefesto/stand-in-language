@@ -271,7 +271,7 @@ recursionVectors (Right program) =
         Left _ -> False)
   , ("tel2 closed recursion has exact formal work",
       runProgramScript program [] == Right
-        (exampleIntroduction, 21))
+        (exampleIntroduction, 22))
   ]
 
 modalShape :: Program -> Bool
@@ -281,7 +281,7 @@ modalShape program =
     && count isFold == 1
     && count isWhile == 1
     && count isMerge == 3
-    && count isBox == 1
+    && count isBox == 2
     && count isDup == 0
   where
     initial = artifactNode (programArtifactInitial (exportProgram program))

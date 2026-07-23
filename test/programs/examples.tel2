@@ -1,62 +1,73 @@
-module examples;
+module examples
 
 -- Prelude is found in the packaged standard library. LegacyPrelude demonstrates
 -- that compatibility names are ordinary imported definitions, not compiler
 -- built-ins.
-import Prelude;
-import LegacyPrelude;
+import Prelude
+import LegacyPrelude
 
--- This state records the four results computed by init:
+-- This state records the four results computed by the fresh arm of main:
 --   iterate result * fold result * while result * addition result
-type State = Nat * Nat * Nat * Nat;
+-- A zero iterate slot marks the fresh state; the computed slot is always 5.
+type State = Nat * Nat * Nat * Nat
+
+start : Unit -o State = \u -> (0, 0, 0, 0)
 
 -- Fold consumes one list element at a time. For Text, each element is a Unicode
 -- code point, so folding natAdd over "ABC" computes 65 + 66 + 67 = 198.
-def sumStep(values: Nat * Nat): Nat = natAdd values;
+sumStep : Nat * Nat -o Nat = \values -> natAdd values
 
 -- While tests use left () to stop and right () to continue. The loop also has
 -- explicit fuel, so it remains total even if a test never asks it to stop.
-def reachedThree(n: Nat): Unit + Unit =
-  matchNat n of { 3 -> left (); _ -> right () };
+reachedThree : Nat -o Unit + Unit = \n ->
+  case n of
+    3 -> left ()
+    _ -> right ()
 
--- These loops are closed: their inputs and seeds capture no affine variables.
--- The compiler promotes each result with BoxValS, realizes the loops as IterS,
--- FoldS, and WhileS, merges the boxed results, then runs this continuation in
--- one BoxS. No host-language loop or implicit unboxing is involved.
-def init(u: Unit): Reply State =
-  -- Apply increment five times, starting from zero: 5.
-  let total = iterate 5 from 0 with increment in
-  -- Fold the code points of a closed Text value: 198.
-  let ascii = fold "ABC" from 0 with sumStep in
-  -- Stop at 3, with a maximum of ten tests/steps: 3.
-  let stopped = while 10 from 0 testing reachedThree stepping increment in
-  -- Affine variables cannot be used twice. copy makes the two uses of total
-  -- explicit: one is retained for checking and one is consumed by addition.
-  let copies = copy total in
-  let (exact,forSum) = copies in
-  let sum = dPlus (forSum,10) in
-  ("Telomare typed-core tour:\n- iterate: increment 0 five times = 5\n- fold: sum the code points in ABC = 198\n- while: increment until 3, with fuel 10 = 3\n- add: explicitly copy 5, then add 10 = 15\nEnter anything to verify the stored results, or q to stop.\n",
-    right (exact,ascii,stopped,sum));
-
--- step consumes the complete request and state exactly once. A non-q input
--- checks every stored result; reaching the success message therefore confirms
--- that the boxed core result was stripped back to the expected source shape.
-def step(request: Text * State): Reply State =
-  let (input,state) = request in
-  matchText input of {
-    "q" -> ("Stopped.\n",left ());
-    _ -> let (exact,ascii,stopped,sum) = state in
-         matchNat exact of {
-           5 -> matchNat ascii of {
-             198 -> matchNat stopped of {
-               3 -> matchNat sum of {
-                  15 -> ("Verified: all four typed-core results are exact.\n",left ());
-                  n -> ("Verification failed: addition did not produce 15.\n",left ())
-                };
-                n -> ("Verification failed: while did not stop at 3.\n",left ())
-              };
-              n -> ("Verification failed: folding ABC did not produce 198.\n",left ())
-            };
-           n -> ("Verification failed: iteration did not produce 5.\n",left ())
-         }
-  };
+-- main is the entry: a fresh state (zero iterate slot) runs the tour, any
+-- later request verifies the stored results. The loops are closed: their
+-- inputs and seeds capture no affine variables, so the compiler promotes
+-- each result, realizes the loops as IterS, FoldS, and WhileS, and boxes
+-- the continuations. No host-language loop or implicit unboxing is involved.
+main : Text * State -o Reply State = \request ->
+  let (input, state) = request
+      (exact, ascii, stopped, sum) = state
+   in case exact of
+        0 ->
+          -- Apply increment five times, starting from zero: 5.
+          let _ = input
+              _ = ascii
+              _ = stopped
+              _ = sum
+              total = iterate 5 from 0 with increment
+              -- Fold the code points of a closed Text value: 198.
+              folded = fold "ABC" from 0 with sumStep
+              -- Stop at 3, with a maximum of ten tests/steps: 3.
+              halted = while 10 from 0 testing reachedThree stepping increment
+              -- Affine variables cannot be used twice. copy makes the two
+              -- uses of total explicit: one is retained for checking and
+              -- one is consumed by addition.
+              copies = copy total
+              (kept, forSum) = copies
+              added = dPlus (forSum, 10)
+           in ("Telomare typed-core tour:\n- iterate: increment 0 five times = 5\n- fold: sum the code points in ABC = 198\n- while: increment until 3, with fuel 10 = 3\n- add: explicitly copy 5, then add 10 = 15\nEnter anything to verify the stored results, or q to stop.\n",
+                right (kept, folded, halted, added))
+        e ->
+          -- A non-q input checks every stored result; reaching the success
+          -- message confirms the boxed core results were stripped back to
+          -- the expected source shapes.
+          case input of
+            "q" -> ("Stopped.\n", left ())
+            _ ->
+              case e of
+                5 ->
+                  case ascii of
+                    198 ->
+                      case stopped of
+                        3 ->
+                          case sum of
+                            15 -> ("Verified: all four typed-core results are exact.\n", left ())
+                            n -> ("Verification failed: addition did not produce 15.\n", left ())
+                        n -> ("Verification failed: while did not stop at 3.\n", left ())
+                    n -> ("Verification failed: folding ABC did not produce 198.\n", left ())
+                n -> ("Verification failed: iteration did not produce 5.\n", left ())

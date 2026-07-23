@@ -887,6 +887,25 @@ compilePlacedBody
   -> Expr
   -> Either CompileError (Morph (Lift c) ('Bang (Lift output)))
 compilePlacedBody tables decls env output expression = case expression of
+  -- A chain of closed loop bindings compiles through the same
+  -- bindings-and-merge path as a whole closed entry; whatever remains of
+  -- the local context is unused (the continuation may only consume the
+  -- binders) and is weakened away.
+  body | Just (bindings, continuation) <- closedEntry body
+       , length bindings > 1 -> do
+      let names = Set.fromList [binder | BindingSpec binder _ _ <- bindings]
+      if length bindings == Set.size names
+        then Right ()
+        else bad "recursive bindings must have unique names"
+      if freeVars continuation `Set.isSubsetOf` names
+        then Right ()
+        else bad "recursive continuation cannot capture the entry context"
+      CompiledBindings bindingEnv _ bindingCore <- compileBindings tables bindings
+      Elab result continuationRest continuationU <- elaborate tables
+        bindingEnv Set.empty output continuation
+      Refl <- requireSame output result
+      fromDirect (Closed.closedContinueFrom
+        (finish continuationRest continuationU) WeakS bindingCore)
   ELet (PVar binder) annotation loop body | isClosedLoop loop -> do
     SomeTy resultTy <- resolveAnnotation tables env annotation loop
     SomePlacedLoop actualTy loopCore <- compileAffineLoop tables env resultTy loop
@@ -920,11 +939,97 @@ compilePlacedBody tables decls env output expression = case expression of
     Refl <- requireSame inputTy argumentTy
     argumentCore <- fromDirect (compileDirect (finish rest argumentU))
     pure (callee :.: argumentCore)
+  -- Dispatch with recursion in the arms: the scrutinee compiles directly,
+  -- each recursive arm is placed on its own, and each direct arm enters
+  -- the modality through PromoteS (entry results are Ground). This is what
+  -- lets a single main entry both dispatch on its state and loop.
+  EMatchNat value arms fallbackPat fallback ->
+    placedMatches tables decls env output SUNat partitionNatU id
+      value arms fallbackPat fallback
+  EMatchText value arms fallbackPat fallback ->
+    placedMatches tables decls env output (SUList SUNat) partitionTextU encode
+      value arms fallbackPat fallback
+  ECase value arms -> do
+    tagged <- enumToNatArms tables arms
+    placedMatches tables decls env output SUNat partitionNatU id
+      value (init tagged) PWild (snd (last tagged))
   loop | isClosedLoop loop -> do
     SomePlacedLoop resultTy loopCore <- compileAffineLoop tables env output loop
     Refl <- requireSame output resultTy
     pure loopCore
   _ -> bad "recursion placement requires an affine controller, a closed seed, and no live context after the loop"
+
+-- | Resolve enum case arms to declaration-ordered Nat keys, checking
+-- exhaustiveness — shared by the direct and placed case paths.
+enumToNatArms :: Tables -> [(String, Expr)] -> Either CompileError [(Natural, Expr)]
+enumToNatArms tables arms = do
+  resolved <- traverse resolveArm arms
+  let typeNames = [typeName | (typeName, _, _) <- resolved]
+      armNames = fmap fst arms
+  case resolved of
+    [] -> bad "case has no arms"
+    ((typeName, _, _) : _)
+      | any (/= typeName) typeNames ->
+          bad "case mixes constructors from different data types"
+      | not (unique armNames) -> bad "case repeats a constructor"
+      | length resolved /= constructorCount tables typeName ->
+          bad ("case is not exhaustive for " <> typeName)
+      | otherwise -> Right [(tag, body) | (_, tag, body) <- resolved]
+  where
+    resolveArm (name, body) = case Map.lookup name (constructors tables) of
+      Nothing              -> bad ("unknown constructor " <> name)
+      Just (typeName, tag) -> Right (typeName, tag, body)
+
+-- | The placed mirror of 'elaborateMatches': dispatch whose arms may
+-- contain placed recursion. Arms without recursion elaborate directly and
+-- are promoted (their result is Ground); arms with recursion recurse into
+-- 'compilePlacedBody'. The dispatch itself is the certified core
+-- vocabulary: partition, DistlS, CaseS.
+placedMatches
+  :: Tables
+  -> [Decl]
+  -> Env c
+  -> SUTy output
+  -> SUTy keyTy
+  -> (key -> UMorph keyTy (keyTy ':++: keyTy))
+  -> (literal -> key)
+  -> Expr
+  -> [(literal, Expr)]
+  -> Pattern
+  -> Expr
+  -> Either CompileError (Morph (Lift c) ('Bang (Lift output)))
+placedMatches tables decls env output keyTy partition convert value arms fallbackPat fallback = do
+  let armDemand = Set.unions
+        ((freeVars fallback Set.\\ patternNames fallbackPat)
+          : fmap (freeVars . snd) arms)
+  Elab actual rest input <- elaborate tables env armDemand keyTy value
+  Refl <- requireSame keyTy actual
+  inputCore <- fromDirect (compileDirect input)
+  let branch pat body = do
+        Bound branchEnv reshape <- bindPattern pat keyTy rest
+        reshapeCore <- fromDirect (compileDirect reshape)
+        armCore <-
+          if containsIter body || callsRecursiveDef decls body
+            then compilePlacedBody tables decls branchEnv output body
+            else do
+              Elab actual' leftovers compiled <- elaborate tables branchEnv
+                Set.empty output body
+              Refl <- requireSame output actual'
+              directCore <- fromDirect
+                (compileDirect (finish leftovers compiled))
+              ground <- case groundOfSTy (liftSTy output) of
+                Just evidence -> Right evidence
+                Nothing -> bad "dispatch arms around recursion need a first-order result"
+              pure (PromoteS ground :.: directCore)
+        pure (armCore :.: reshapeCore)
+      armStep (literal, body) miss = do
+        hit <- branch PWild body
+        partCore <- fromDirect (compileDirect (partition (convert literal)))
+        pure (CaseS (hit :.: SwapS) (miss :.: SwapS)
+          :.: DistlS :.: SwapS :.: (partCore :***: IdS))
+  fallbackCore <- branch fallbackPat fallback
+  dispatch <- foldrM armStep fallbackCore arms
+  pure (dispatch :.: inputCore)
 
 compilePlacedContinuation
   :: Tables
@@ -1658,24 +1763,9 @@ elaborate tables env demand expected (EMatchNat value arms fallbackPat fallback)
   elaborateMatches tables env demand expected SUNat partitionNatU id
     value arms fallbackPat fallback
 elaborate tables env demand expected (ECase value arms) = do
-  resolved <- traverse resolveArm arms
-  let typeNames = [typeName | (typeName, _, _) <- resolved]
-      armNames = fmap fst arms
-  case resolved of
-    [] -> bad "case has no arms"
-    ((typeName, _, _) : _)
-      | any (/= typeName) typeNames -> bad "case mixes constructors from different data types"
-      | not (unique armNames) -> bad "case repeats a constructor"
-      | length resolved /= constructorCount tables typeName ->
-          bad ("case is not exhaustive for " <> typeName)
-      | otherwise ->
-          let tagged = [(tag, body) | (_, tag, body) <- resolved]
-          in elaborateMatches tables env demand expected SUNat partitionNatU id value
-               (init tagged) PWild (snd (last tagged))
-  where
-    resolveArm (name, body) = case Map.lookup name (constructors tables) of
-      Nothing              -> bad ("unknown constructor " <> name)
-      Just (typeName, tag) -> Right (typeName, tag, body)
+  tagged <- enumToNatArms tables arms
+  elaborateMatches tables env demand expected SUNat partitionNatU id value
+    (init tagged) PWild (snd (last tagged))
 elaborate tables env demand expected@(SUList b) (EMapC input mapper) = do
   SomeTy inputListTy <- synthType tables env input
   case inputListTy of

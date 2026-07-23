@@ -1,131 +1,164 @@
-module tictactoe;
-import Prelude;
+module tictactoe
+import Prelude
 
 -- Tic-tac-toe in the general affine language. 0 is empty, 1 is X, 2 is O.
 -- Data reuse is implicit (each extra use is a priced copy); closures serve
--- as cell lenses and as the renderer's label/separator callbacks.
-type Triple = Nat * Nat * Nat;
-type Board = Nat * Nat * Nat * Nat * Nat * Nat * Nat * Nat * Nat;
-type State = Board * Nat;
-type Cell = Nat * (Nat -o Board);
+-- as cell lenses and as the renderer's label/separator callbacks. main is
+-- the whole entry: a zero turn marks the fresh state from start.
+type Triple = Nat * Nat * Nat
+type Board = Nat * Nat * Nat * Nat * Nat * Nat * Nat * Nat * Nat
+type State = Board * Nat
+type Cell = Nat * (Nat -o Board)
 
-def line(t: Triple): Nat =
-  let (a,b,c) = t in
-  matchNat a of {
-    1 -> matchNat b of { 1 -> matchNat c of { 1 -> 1; _ -> 0 }; _ -> 0 };
-    2 -> matchNat b of { 2 -> matchNat c of { 2 -> 2; _ -> 0 }; _ -> 0 };
-    _ -> 0
-  };
+line : Triple -o Nat = \t ->
+  let (a, b, c) = t
+   in case a of
+        1 -> case b of
+               1 -> case c of
+                      1 -> 1
+                      _ -> 0
+               _ -> 0
+        2 -> case b of
+               2 -> case c of
+                      2 -> 2
+                      _ -> 0
+               _ -> 0
+        _ -> 0
 
-def orElse(x: Nat * Nat): Nat =
-  let (a,b) = x in matchNat a of { 0 -> b; w -> w };
+orElse : Nat * Nat -o Nat = \(a, b) ->
+  case a of
+    0 -> b
+    w -> w
 
-def winner(b: Board): Nat =
-  let (a,b2,c,d,e,f,g,h,i) = b in
-  orElse (line (a,b2,c), orElse (line (d,e,f), orElse (line (g,h,i),
-  orElse (line (a,d,g), orElse (line (b2,e,h), orElse (line (c,f,i),
-  orElse (line (a,e,i), line (c,e,g))))))));
+winner : Board -o Nat = \b ->
+  let (a, b2, c, d, e, f, g, h, i) = b
+   in orElse (line (a,b2,c), orElse (line (d,e,f), orElse (line (g,h,i),
+      orElse (line (a,d,g), orElse (line (b2,e,h), orElse (line (c,f,i),
+      orElse (line (a,e,i), line (c,e,g))))))))
 
-def full(b: Board): Nat =
-  let (a,b,c,d,e,f,g,h,i) = b in
-  matchNat a of { 0 -> 0; _ -> matchNat b of { 0 -> 0; _ -> matchNat c of {
-    0 -> 0; _ -> matchNat d of { 0 -> 0; _ -> matchNat e of {
-      0 -> 0; _ -> matchNat f of { 0 -> 0; _ -> matchNat g of {
-        0 -> 0; _ -> matchNat h of { 0 -> 0; _ -> matchNat i of {
-          0 -> 0; _ -> 1 } } } } } } } } };
+full : Board -o Nat = \board ->
+  let (a, b, c, d, e, f, g, h, i) = board
+   in if a
+      then if b
+           then if c
+                then if d
+                     then if e
+                          then if f
+                               then if g
+                                    then if h
+                                         then if i then 1 else 0
+                                         else 0
+                                    else 0
+                               else 0
+                          else 0
+                     else 0
+                else 0
+           else 0
+      else 0
 
-def outcome(s: State): Nat =
-  let (board,turn) = s in
-  let w = winner board in
-  case natIsZero w of {
-    True -> if full board then 3 else 0;
-    False -> w;
-  };
+outcome : State -o Nat = \s ->
+  let (board, turn) = s
+      _ = turn
+      w = winner board
+   in case natIsZero w of
+        True -> if full board then 3 else 0
+        False -> w
 
 -- One renderer for all nine squares: the empty-cell label and the
 -- separator arrive as one-shot callbacks; marks prepend before the separator.
-def cellText(x: (Nat * Text) * ((Text -o Text) * (Text -o Text))): Text =
-  let (ct,fs) = x in
-  let (c,t) = ct in
-  let (label,sep) = fs in
-  matchNat c of { 0 -> label (sep t);
-    1 -> prepend "X" (sep t); 2 -> prepend "O" (sep t);
-    _ -> prepend "?" (sep t) };
+cellText : (Nat * Text) * ((Text -o Text) * (Text -o Text)) -o Text = \x ->
+  let (ct, fs) = x
+      (c, t) = ct
+      (label, sep) = fs
+   in case c of
+        0 -> label (sep t)
+        1 -> prepend "X" (sep t)
+        2 -> prepend "O" (sep t)
+        _ -> prepend "?" (sep t)
 
-def render(x: Board * Text): Text =
-  let (board,suffix) = x in
-  let (a,b,c,d,e,f,g,h,i) = board in
-  let t9 = cellText ((i,suffix),(\t -> prepend "9" t, \t -> prepend "\n" t)) in
-  let t8 = cellText ((h,t9),(\t -> prepend "8" t, \t -> prepend "|" t)) in
-  let t7 = cellText ((g,t8),(\t -> prepend "7" t, \t -> prepend "|" t)) in
-  let t6 = cellText ((f,t7),(\t -> prepend "6" t, \t -> prepend "\n-+-+-\n" t)) in
-  let t5 = cellText ((e,t6),(\t -> prepend "5" t, \t -> prepend "|" t)) in
-  let t4 = cellText ((d,t5),(\t -> prepend "4" t, \t -> prepend "|" t)) in
-  let t3 = cellText ((c,t4),(\t -> prepend "3" t, \t -> prepend "\n-+-+-\n" t)) in
-  let t2 = cellText ((b,t3),(\t -> prepend "2" t, \t -> prepend "|" t)) in
-  cellText ((a,t2),(\t -> prepend "1" t, \t -> prepend "|" t));
+render : Board * Text -o Text = \x ->
+  let (board, suffix) = x
+      (a, b, c, d, e, f, g, h, i) = board
+      t9 = cellText ((i,suffix),(\t -> prepend "9" t, \t -> prepend "\n" t))
+      t8 = cellText ((h,t9),(\t -> prepend "8" t, \t -> prepend "|" t))
+      t7 = cellText ((g,t8),(\t -> prepend "7" t, \t -> prepend "|" t))
+      t6 = cellText ((f,t7),(\t -> prepend "6" t, \t -> prepend "\n-+-+-\n" t))
+      t5 = cellText ((e,t6),(\t -> prepend "5" t, \t -> prepend "|" t))
+      t4 = cellText ((d,t5),(\t -> prepend "4" t, \t -> prepend "|" t))
+      t3 = cellText ((c,t4),(\t -> prepend "3" t, \t -> prepend "\n-+-+-\n" t))
+      t2 = cellText ((b,t3),(\t -> prepend "2" t, \t -> prepend "|" t))
+   in cellText ((a,t2),(\t -> prepend "1" t, \t -> prepend "|" t))
 
-def turnText(turn: Nat): Text = matchNat turn of {
-  1 -> "Player 1/X to move.\nMove (1-9 or q): ";
-  _ -> "Player 2/O to move.\nMove (1-9 or q): "
-};
+turnText : Nat -o Text = \turn ->
+  case turn of
+    1 -> "Player 1/X to move.\nMove (1-9 or q): "
+    _ -> "Player 2/O to move.\nMove (1-9 or q): "
 
-def keep(s: State): Reply State =
-  let (board,turn) = s in
-  (render (board, turnText turn), right (board,turn));
+keep : State -o Reply State = \s ->
+  let (board, turn) = s
+   in (render (board, turnText turn), right (board, turn))
 
-def invalid(s: State): Reply State =
-  let (t,rest) = keep s in
-  (prepend "Invalid input; enter 1-9 or q.\n" t, rest);
+invalid : State -o Reply State = \s ->
+  let (t, rest) = keep s
+   in (prepend "Invalid input; enter 1-9 or q.\n" t, rest)
 
-def occupied(s: State): Reply State =
-  let (t,rest) = keep s in
-  (prepend "That square is occupied.\n" t, rest);
+occupied : State -o Reply State = \s ->
+  let (t, rest) = keep s
+   in (prepend "That square is occupied.\n" t, rest)
 
-def next(s: State): Reply State =
-  let (board,turn) = s in
-  keep (board, otherPlayer turn);
+next : State -o Reply State = \s ->
+  let (board, turn) = s
+   in keep (board, otherPlayer turn)
 
-def endGame(x: State * Text): Reply State =
-  let (s,message) = x in
-  let (board,turn) = s in
-  (render (board,message), left ());
+endGame : State * Text -o Reply State = \x ->
+  let (s, message) = x
+      (board, turn) = s
+      _ = turn
+   in (render (board, message), left ())
 
-def finish(s: State): Reply State =
-  let result = outcome s in
-  matchNat result of { 0 -> next s;
-    1 -> endGame (s,"Player 1/X wins!\n");
-    2 -> endGame (s,"Player 2/O wins!\n");
-    _ -> endGame (s,"Tie game.\n") };
+finish : State -o Reply State = \s ->
+  let result = outcome s
+   in case result of
+        0 -> next s
+        1 -> endGame (s, "Player 1/X wins!\n")
+        2 -> endGame (s, "Player 2/O wins!\n")
+        _ -> endGame (s, "Tie game.\n")
 
 -- A cell lens splits the board into the inspected square and a one-shot
 -- rebuild closure capturing the other eight.
-def c1(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (a, \x -> (x,b2,c,d,e,f,g,h,i));
-def c2(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (b2, \x -> (a,x,c,d,e,f,g,h,i));
-def c3(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (c, \x -> (a,b2,x,d,e,f,g,h,i));
-def c4(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (d, \x -> (a,b2,c,x,e,f,g,h,i));
-def c5(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (e, \x -> (a,b2,c,d,x,f,g,h,i));
-def c6(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (f, \x -> (a,b2,c,d,e,x,g,h,i));
-def c7(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (g, \x -> (a,b2,c,d,e,f,x,h,i));
-def c8(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (h, \x -> (a,b2,c,d,e,f,g,x,i));
-def c9(b: Board): Cell = let (a,b2,c,d,e,f,g,h,i) = b in (i, \x -> (a,b2,c,d,e,f,g,h,x));
+c1 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (a, \x -> (x,b2,c,d,e,f,g,h,i))
+c2 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (b2, \x -> (a,x,c,d,e,f,g,h,i))
+c3 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (c, \x -> (a,b2,x,d,e,f,g,h,i))
+c4 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (d, \x -> (a,b2,c,x,e,f,g,h,i))
+c5 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (e, \x -> (a,b2,c,d,x,f,g,h,i))
+c6 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (f, \x -> (a,b2,c,d,e,x,g,h,i))
+c7 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (g, \x -> (a,b2,c,d,e,f,x,h,i))
+c8 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (h, \x -> (a,b2,c,d,e,f,g,x,i))
+c9 : Board -o Cell = \b -> let (a,b2,c,d,e,f,g,h,i) = b in (i, \x -> (a,b2,c,d,e,f,g,h,x))
 
-def moveAt(x: Cell * Nat): Reply State =
-  let (lens,turn) = x in
-  let (cell,put) = lens in
-  matchNat cell of { 0 -> finish (put turn, turn);
-                     y -> occupied (put y, turn) };
+moveAt : Cell * Nat -o Reply State = \x ->
+  let (lens, turn) = x
+      (cell, put) = lens
+   in case cell of
+        0 -> finish (put turn, turn)
+        y -> occupied (put y, turn)
 
-def init(u: Unit): Reply State = keep ((0,0,0,0,0,0,0,0,0),1);
-def step(x: Text * State): Reply State =
-  let (input,state) = x in
-  let (board,turn) = state in
-  matchText input of {
-    "q" -> ("Goodbye.\n",left ());
-    "1" -> moveAt (c1 board, turn); "2" -> moveAt (c2 board, turn);
-    "3" -> moveAt (c3 board, turn); "4" -> moveAt (c4 board, turn);
-    "5" -> moveAt (c5 board, turn); "6" -> moveAt (c6 board, turn);
-    "7" -> moveAt (c7 board, turn); "8" -> moveAt (c8 board, turn);
-    "9" -> moveAt (c9 board, turn);
-    _ -> invalid (board,turn)
-  };
+start : Unit -o State = \u -> ((0,0,0,0,0,0,0,0,0), 0)
+
+main : Text * State -o Reply State = \x ->
+  let (input, state) = x
+      (board, turn) = state
+   in case turn of
+        0 -> keep (board, 1)
+        t -> case input of
+               "q" -> ("Goodbye.\n", left ())
+               "1" -> moveAt (c1 board, t)
+               "2" -> moveAt (c2 board, t)
+               "3" -> moveAt (c3 board, t)
+               "4" -> moveAt (c4 board, t)
+               "5" -> moveAt (c5 board, t)
+               "6" -> moveAt (c6 board, t)
+               "7" -> moveAt (c7 board, t)
+               "8" -> moveAt (c8 board, t)
+               "9" -> moveAt (c9 board, t)
+               _ -> invalid (board, t)

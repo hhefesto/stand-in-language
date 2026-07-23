@@ -1,6 +1,10 @@
-module HeaderMismatchEntry;
-import Prelude;
+module HeaderMismatchEntry
+import Prelude
 
-type State = Nat;
-def init(u: Unit): Reply State = ("",right 0);
-def step(x: Text * State): Reply State = ("",left ());
+type State = Nat
+
+main : Text * State -o Reply State = \x ->
+  let (input, state) = x
+      _ = input
+      _ = state
+   in ("", left ())

@@ -1,69 +1,78 @@
-module Prelude;
+module Prelude
 
 -- A monomorphic, total foundation over the direct and affine-recursion fragments.
-data Bool = False | True;
+data Bool = False | True
 
-def natIdentity(n: Nat): Nat = n;
-def boolIdentity(value: Bool): Bool = value;
+natIdentity : Nat -o Nat = \n -> n
 
-def boolNot(value: Bool): Bool = case value of {
-  False -> True;
-  True -> False;
-};
+boolIdentity : Bool -o Bool = \value -> value
 
-def boolAnd(values: Bool * Bool): Bool =
-  let (a,b) = values in
-  case a of { False -> False; True -> b; };
+boolNot : Bool -o Bool = \value ->
+  case value of
+    False -> True
+    True -> False
 
-def boolOr(values: Bool * Bool): Bool =
-  let (a,b) = values in
-  case a of { False -> b; True -> True; };
+boolAnd : Bool * Bool -o Bool = \(a, b) ->
+  case a of
+    False -> False
+    True -> b
 
-def boolXor(values: Bool * Bool): Bool =
-  let (a,b) = values in
-  case a of { False -> b; True -> boolNot b; };
+boolOr : Bool * Bool -o Bool = \(a, b) ->
+  case a of
+    False -> b
+    True -> True
 
-def boolToNat(value: Bool): Nat = case value of {
-  False -> 0;
-  True -> 1;
-};
+boolXor : Bool * Bool -o Bool = \(a, b) ->
+  case a of
+    False -> b
+    True -> boolNot b
 
-def natIsZero(n: Nat): Bool = matchNat n of { 0 -> True; _ -> False };
-def natIsPositive(n: Nat): Bool = boolNot (natIsZero n);
-def natAdd(values: Nat * Nat): Nat = add values;
-def otherPlayer(player: Nat): Nat = matchNat player of { 1 -> 2; _ -> 1 };
-def increment(n: Nat): Nat = suc n;
+boolToNat : Bool -o Nat = \value ->
+  case value of
+    False -> 0
+    True -> 1
+
+natIsZero : Nat -o Bool = \n -> if n then False else True
+
+natIsPositive : Nat -o Bool = \n -> boolNot (natIsZero n)
+
+natAdd : Nat * Nat -o Nat = \values -> add values
+
+otherPlayer : Nat -o Nat = \player ->
+  case player of
+    1 -> 2
+    _ -> 1
+
+increment : Nat -o Nat = \n -> succ n
+
 -- Reuse is implicit: the second n is a priced copy.
-def natDouble(n: Nat): Nat = natAdd (n,n);
+natDouble : Nat -o Nat = \n -> natAdd (n, n)
 
-def countListElement(values: Nat * Nat): Nat =
-  let (count,value) = values in
-  let _ = value in
-  increment count;
+countListElement : Nat * Nat -o Nat = \(count, value) ->
+  let _ = value in increment count
 
-def listLength(values: List Nat): Nat =
-  fold values from 0 with countListElement;
+listLength : List Nat -o Nat = \values ->
+  fold values from 0 with countListElement
 
 -- First-order specializations of the historical higher-order list vocabulary.
 -- The mapper and fold step are named source definitions, never runtime values.
-def mapIncrement(values: List Nat): List Nat =
-  map values with increment;
+mapIncrement : List Nat -o List Nat = \values ->
+  map values with increment
 
-def listSum(values: List Nat): Nat =
-  fold values from 0 with natAdd;
+listSum : List Nat -o Nat = \values ->
+  fold values from 0 with natAdd
 
 -- First-class closures: an affine function value is applied at most once.
 -- composeNat consumes both closures into one; the historical higher-order
 -- `con` returns as an honest monomorphic composition.
-def composeNat(functions: (Nat -o Nat) * (Nat -o Nat)): Nat -o Nat =
-  let (first,second) = functions in
-  \value -> second (first value);
+composeNat : (Nat -o Nat) * (Nat -o Nat) -o Nat -o Nat = \(first, second) value ->
+  second (first value)
 
 -- flipNat swaps the pair argument of an affine binary closure; the
 -- historical `flip` returns for uncurried monomorphic functions.
-def flipNat(f: Nat * Nat -o Nat): Nat * Nat -o Nat =
-  \p -> let (a,b) = p in f (b,a);
+flipNat : (Nat * Nat -o Nat) -o Nat * Nat -o Nat = \f p ->
+  let (a, b) = p in f (b, a)
 
 -- constNat discards its argument and returns the captured value; the
 -- priced capture is the only cost.
-def constNat(k: Nat): Nat -o Nat = \_ -> k;
+constNat : Nat -o Nat -o Nat = \k _ -> k

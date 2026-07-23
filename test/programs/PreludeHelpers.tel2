@@ -1,11 +1,15 @@
-module PreludeHelpers;
-import Prelude;
+module PreludeHelpers
+import Prelude
 
-type State = Nat;
-def init(u: Unit): Reply State =
-  ("",right (boolToNat (boolAnd (True, boolNot False))));
-def step(x: Text * State): Reply State =
-  let (input,state) = x in
-  let _ = state in
-  let length = listLength input in
-  matchNat length of { 5 -> ("true\n",left ()); n -> ("false\n",left ()) };
+type State = Nat
+
+main : Text * State -o Reply State = \x ->
+  let (input, state) = x
+   in case state of
+        0 -> let _ = input
+              in ("", right (boolToNat (boolAnd (True, boolNot False))))
+        n -> let _ = n
+                 length = listLength input
+              in case length of
+                   5 -> ("true\n", left ())
+                   k -> let _ = k in ("false\n", left ())

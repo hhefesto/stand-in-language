@@ -1,16 +1,14 @@
-module PreludeMap;
-import Prelude;
+module PreludeMap
+import Prelude
 
-type State = Unit;
+type State = Nat
 
-def init(u: Unit): Reply State =
-  let _ = u in ("",right ());
-
-def step(request: Text * State): Reply State =
-  let (input,state) = request in
-  let _ = state in
-  let output = mapIncrement input in
-  matchText output of {
-    "BCD" -> ("mapped\n",left ());
-    other -> ("bad\n",left ());
-  };
+main : Text * State -o Reply State = \request ->
+  let (input, state) = request
+   in case state of
+        0 -> let _ = input in ("", right 1)
+        n -> let _ = n
+                 output = mapIncrement input
+              in case output of
+                   "BCD" -> ("mapped\n", left ())
+                   other -> let _ = other in ("bad\n", left ())
