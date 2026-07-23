@@ -106,11 +106,23 @@ data Source = Source
 
 type Parser = Parsec Void String
 
+-- | Within-line space: spaces, tabs, and comments — never a newline.
+-- Every token consumes this as trailing space, so a token at the start of
+-- a line is only reached through an explicit layout point ('scn'). That is
+-- what lets indentation delimit declarations, let bindings, and case arms.
 spaceConsumer :: Parser ()
-spaceConsumer = L.space space1 lineComment blockComment
-  where
-    lineComment = L.skipLineComment "--"
-    blockComment = L.skipBlockCommentNested "{-" "-}"
+spaceConsumer =
+  L.space (void (some (char ' ' <|> char '\t'))) lineComment blockComment
+
+-- | A layout point: whitespace including newlines.
+scn :: Parser ()
+scn = L.space space1 lineComment blockComment
+
+lineComment :: Parser ()
+lineComment = L.skipLineComment "--"
+
+blockComment :: Parser ()
+blockComment = L.skipBlockCommentNested "{-" "-}"
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme spaceConsumer
@@ -198,52 +210,62 @@ exprParser = choice
   , appExpr
   ]
   where
-    appExpr = foldl EApp <$> atomExpr <*> many atomExpr
+    -- Juxtaposition application is a line fold: arguments continue on
+    -- later lines only when indented past the head of the application.
+    -- That is what ends a declaration body — the next declaration starts
+    -- at column 1 and cannot be a continuation argument.
+    appExpr = L.lineFold scn $ \sc' -> do
+      function <- atomExpr
+      args <- many (try (sc' *> atomExpr))
+      pure (foldl EApp function args)
     letExpr = do
       reserved "let"
-      bindings <- sepBy1 letBinding (symbol ";")
+      scn
+      bindings <- some letBinding
       reserved "in"
+      scn
       body <- exprParser
       pure (foldr (\(pat, ty, value) rest -> ELet pat ty value rest) body bindings)
-    letBinding = do
+    letBinding = try $ do
       pat <- patternParser
       ty <- optional (symbol ":" *> typeParser)
       void (symbol "=")
+      scn
       value <- exprParser
+      scn
+      void (optional (symbol ";"))
+      scn
       pure (pat, ty, value)
     ifExpr = do
       reserved "if"
+      scn
       condition <- exprParser
+      scn
       reserved "then"
+      scn
       whenTrue <- exprParser
+      scn
       reserved "else"
+      scn
       whenFalse <- exprParser
       pure (EMatchNat condition [(0, whenFalse)] PWild whenTrue)
     matchTextExpr = do
       reserved "matchText"
+      scn
       value <- exprParser
+      scn
       reserved "of"
-      void (symbol "{")
-      arms <- many (try $ do key <- stringLiteral; void (symbol "->")
-                             body <- exprParser; void (symbol ";"); pure (key, body))
-      pat <- patternParser
-      void (symbol "->")
-      fallback <- exprParser
-      void (optional (symbol ";"))
-      void (symbol "}")
+      scn
+      (arms, pat, fallback) <- matchArms stringLiteral
       pure (EMatchText value arms pat fallback)
     matchNatExpr = do
       reserved "matchNat"
+      scn
       value <- exprParser
+      scn
       reserved "of"
-      void (symbol "{")
-      arms <- many (try $ do key <- natural; void (symbol "->")
-                             body <- exprParser; void (symbol ";"); pure (key, body))
-      pat <- patternParser
-      void (symbol "->")
-      fallback <- exprParser
-      void (optional (symbol ";"))
-      void (symbol "}")
+      scn
+      (arms, pat, fallback) <- matchArms natural
       pure (EMatchNat value arms pat fallback)
     -- One case form, as in telomare0: the shape of the first arm picks the
     -- dispatch — string literals match text, nat literals match naturals
@@ -251,30 +273,20 @@ exprParser = choice
     -- data enum (exhaustive, no default).
     caseExpr = do
       reserved "case"
+      scn
       value <- exprParser
+      scn
       reserved "of"
-      void (symbol "{")
-      kind <- lookAhead armShape
-      result <- case kind of
+      scn
+      kind <- lookAhead (optional (symbol "{") *> scn *> armShape)
+      case kind of
         ArmText -> do
-          arms <- many (try $ do key <- stringLiteral; void (symbol "->")
-                                 body <- exprParser; void (symbol ";"); pure (key, body))
-          pat <- patternParser
-          void (symbol "->")
-          fallback <- exprParser
-          void (optional (symbol ";"))
+          (arms, pat, fallback) <- matchArms stringLiteral
           pure (EMatchText value arms pat fallback)
         ArmNat -> do
-          arms <- many (try $ do key <- natural; void (symbol "->")
-                                 body <- exprParser; void (symbol ";"); pure (key, body))
-          pat <- patternParser
-          void (symbol "->")
-          fallback <- exprParser
-          void (optional (symbol ";"))
+          (arms, pat, fallback) <- matchArms natural
           pure (EMatchNat value arms pat fallback)
-        ArmCon -> ECase value <$> some arm
-      void (symbol "}")
-      pure result
+        ArmCon -> ECase value <$> enumArms
     armShape = choice
       [ ArmText <$ try stringLiteral
       , ArmNat <$ try natural
@@ -283,72 +295,172 @@ exprParser = choice
              then pure ArmCon
              else fail "case needs at least one literal or constructor arm"
       ]
-    arm = do
-      con <- identifier
-      void (symbol "->")
-      body <- exprParser
-      void (optional (symbol ";"))
-      pure (con, body)
+    -- Keyed arms plus a binding default, either braced with semicolons
+    -- (transitional) or layout-aligned like telomare0.
+    matchArms :: Parser key -> Parser ([(key, Expr)], Pattern, Expr)
+    matchArms keyParser = bracedArms <|> alignedArms
+      where
+        bracedArms = do
+          void (symbol "{")
+          scn
+          arms <- many (try $ do key <- keyParser; void (symbol "->"); scn
+                                 body <- exprParser; scn; void (symbol ";"); scn
+                                 pure (key, body))
+          pat <- patternParser
+          void (symbol "->")
+          scn
+          fallback <- exprParser
+          scn
+          void (optional (symbol ";"))
+          scn
+          void (symbol "}")
+          pure (arms, pat, fallback)
+        alignedArms = do
+          lvl <- L.indentLevel
+          arms <- many (try $ do
+            atLevel lvl
+            key <- keyParser
+            void (symbol "->")
+            scn
+            body <- exprParser
+            scn
+            void (optional (symbol ";"))
+            scn
+            pure (key, body))
+          atLevel lvl
+          pat <- patternParser
+          void (symbol "->")
+          scn
+          fallback <- exprParser
+          pure (arms, pat, fallback)
+    enumArms = bracedEnum <|> alignedEnum
+      where
+        bracedEnum = between (symbol "{" <* scn) (symbol "}") (some bracedArm)
+        bracedArm = do
+          con <- identifier
+          void (symbol "->")
+          scn
+          body <- exprParser
+          scn
+          void (optional (symbol ";"))
+          scn
+          pure (con, body)
+        alignedEnum = do
+          lvl <- L.indentLevel
+          some (try $ do
+            atLevel lvl
+            con <- identifier
+            void (symbol "->")
+            scn
+            body <- exprParser
+            scn
+            void (optional (symbol ";"))
+            scn
+            pure (con, body))
+    atLevel lvl = do
+      pos <- L.indentLevel
+      if pos == lvl then pure () else fail "expected an arm at the same indentation"
     mapExpr = do
       reserved "map"
+      scn
       input <- exprParser
+      scn
       reserved "with"
+      scn
       EMap input <$> identifier
     mapcExpr = do
       reserved "mapc"
+      scn
       input <- exprParser
+      scn
       reserved "with"
+      scn
       EMapC input <$> exprParser
     itercExpr = do
       reserved "iterc"
+      scn
       count <- exprParser
+      scn
       reserved "from"
+      scn
       seed <- exprParser
+      scn
       reserved "with"
+      scn
       EIterC count seed <$> exprParser
     foldcExpr = do
       reserved "foldc"
+      scn
       input <- exprParser
+      scn
       reserved "from"
+      scn
       seed <- exprParser
+      scn
       reserved "with"
+      scn
       EFoldC input seed <$> exprParser
     whilecExpr = do
       reserved "whilec"
+      scn
       limit <- exprParser
+      scn
       reserved "from"
+      scn
       seed <- exprParser
+      scn
       reserved "testing"
+      scn
       test <- exprParser
+      scn
       reserved "stepping"
+      scn
       EWhileC limit seed test <$> exprParser
     iterExpr = do
       reserved "iterate"
+      scn
       count <- exprParser
+      scn
       reserved "from"
+      scn
       seed <- exprParser
+      scn
       reserved "with"
+      scn
       EIter count seed <$> identifier
     foldExpr = do
       reserved "fold"
+      scn
       input <- exprParser
+      scn
       reserved "from"
+      scn
       seed <- exprParser
+      scn
       reserved "with"
+      scn
       EFold input seed <$> identifier
     whileExpr = do
       reserved "while"
+      scn
       limit <- exprParser
+      scn
       reserved "from"
+      scn
       seed <- exprParser
+      scn
       reserved "testing"
+      scn
       test <- identifier
+      scn
       reserved "stepping"
+      scn
       EWhile limit seed test <$> identifier
     lamExpr = do
       void (symbol "\\")
       pats <- some patternParser
       void (symbol "->")
+      scn
       body <- exprParser
       pure (foldr ELam body pats)
     copyExpr = reserved "copy" *> (ECopy <$> exprParser)
@@ -356,8 +468,11 @@ exprParser = choice
     addExpr = reserved "add" *> (EAdd <$> exprParser)
     consExpr = do
       reserved "cons"
+      scn
       value <- exprParser
+      scn
       reserved "onto"
+      scn
       ECons value <$> exprParser
     prependExpr = reserved "prepend" *> (EPrepend <$> stringLiteral <*> exprParser)
     leftExpr = reserved "left" *> (ELeft <$> exprParser)
@@ -365,19 +480,27 @@ exprParser = choice
     atomExpr = choice
       [ try (symbol "()" $> EUnit)
       , listExpr
-      , between (symbol "(") (symbol ")") (try pairExpr <|> exprParser)
+      , parensExpr
       , EText <$> stringLiteral
       , ENat <$> natural
       , do name <- identifier
            pure (if startsUpper name then ECon name else EVar name)
       ]
-    listExpr = between (symbol "[") (symbol "]") $
-      foldr ECons ENil <$> sepBy exprParser (symbol ",")
-    pairExpr = do
-      values <- sepBy1 exprParser (symbol ",")
-      if length values < 2
-        then fail "expected a tuple"
-        else pure (foldr1 EPair values)
+    listExpr = do
+      void (symbol "[")
+      scn
+      values <- sepBy (exprParser <* scn) (symbol "," <* scn)
+      void (symbol "]")
+      pure (foldr ECons ENil values)
+    -- Parentheses group and build tuples; newlines are free inside them.
+    parensExpr = do
+      void (symbol "(")
+      scn
+      values <- sepBy1 (exprParser <* scn) (symbol "," <* scn)
+      void (symbol ")")
+      case values of
+        [single] -> pure single
+        more     -> pure (foldr1 EPair more)
 
 startsUpper :: String -> Bool
 startsUpper (c : _) = isAsciiUpper c
@@ -386,13 +509,14 @@ startsUpper []      = False
 declParser :: Parser Decl
 declParser = choice [dataDecl, typeDecl, defDecl, sigDefDecl]
   where
-    typeDecl = reserved "type" *> (DType <$> identifier <* symbol "=" <*> typeParser <* symbol ";")
+    typeDecl = reserved "type" *> (DType <$> identifier <* symbol "="
+      <*> typeParser <* optional (symbol ";"))
     dataDecl = do
       reserved "data"
       name <- identifier
       void (symbol "=")
       names <- sepBy1 identifier (symbol "|")
-      void (symbol ";")
+      void (optional (symbol ";"))
       pure (DData name names)
     defDecl = do
       reserved "def"
@@ -404,8 +528,9 @@ declParser = choice [dataDecl, typeDecl, defDecl, sigDefDecl]
       void (symbol ":")
       output <- typeParser
       void (symbol "=")
+      scn
       body <- exprParser
-      void (symbol ";")
+      void (optional (symbol ";"))
       pure (DDef name arg input output body)
     -- telomare0-style top level: @name : A -o B = \x -> body@ — the type
     -- sits where telomare0 puts its refinement annotation, and the body is
@@ -415,8 +540,9 @@ declParser = choice [dataDecl, typeDecl, defDecl, sigDefDecl]
       void (symbol ":")
       ty <- typeParser
       void (symbol "=")
+      scn
       body <- exprParser
-      void (symbol ";")
+      void (optional (symbol ";"))
       case ty of
         TArrow input output -> case body of
           ELam (PVar arg) inner -> pure (DDef name arg input output inner)
@@ -430,10 +556,11 @@ declParser = choice [dataDecl, typeDecl, defDecl, sigDefDecl]
                <> " needs an arrow type; bind constants in a let")
 
 sourceParser :: Parser Source
-sourceParser = spaceConsumer *> (Source <$> optional moduleHeader <*> many importDecl <*> many declParser) <* eof
+sourceParser = scn *> (Source <$> optional moduleHeader <*> many importDecl
+  <*> many (declParser <* scn)) <* eof
   where
-    moduleHeader = reserved "module" *> identifier <* symbol ";"
-    importDecl = reserved "import" *> identifier <* symbol ";"
+    moduleHeader = reserved "module" *> identifier <* optional (symbol ";") <* scn
+    importDecl = reserved "import" *> identifier <* optional (symbol ";") <* scn
 
 data SomeTy where
   SomeTy :: SUTy a -> SomeTy

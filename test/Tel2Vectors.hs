@@ -186,6 +186,12 @@ tel2Vectors = do
                 mainStartSource ["go"] "first\nsecond\n"
             , rejectsWith "tel2 rejects Reply main without start for a structured state"
                 mainNoStartSource "needs start"
+            , acceptsBehavior "tel2 layout program parses without semicolons or braces"
+                layoutSource ["go"] "start\ndone\n"
+            , acceptsBehavior "tel2 layout enum case aligns its arms"
+                layoutEnumSource [] "five\n"
+            , acceptsBehavior "tel2 layout nested case ends at the outer arm column"
+                layoutNestedSource [] "two\n"
             ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
@@ -690,6 +696,59 @@ mainNoStartSource :: String
 mainNoStartSource = unlines
   [ "type State = Nat * Nat;"
   , "main : Text * State -o Reply State = \\io -> let (input, st) = io in let _ = input in let (flag, kept) = st in case flag of { 0 -> (\"first\\n\", right (1, kept)); k -> let _ = k in let _ = kept in (\"second\\n\", left ()); };"
+  ]
+
+layoutSource :: String
+layoutSource = unlines
+  [ "type State = Nat"
+  , ""
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, count) = io"
+  , "      _ = input"
+  , "   in case count of"
+  , "        0 -> (\"start\\n\", right 1)"
+  , "        k -> let _ = k in (\"done\\n\", left ())"
+  ]
+
+layoutEnumSource :: String
+layoutEnumSource = unlines
+  [ "data Answer = No | Yes"
+  , "type State = Nat"
+  , ""
+  , "pick : Answer -o Nat = \\a ->"
+  , "  case a of"
+  , "    No -> 3"
+  , "    Yes -> 5"
+  , ""
+  , "init : Unit -o Reply State = \\u ->"
+  , "  let m = pick Yes"
+  , "   in case m of"
+  , "        5 -> (\"five\\n\", left ())"
+  , "        k -> let _ = k in (\"bad\\n\", left ())"
+  , ""
+  , "step : Text * State -o Reply State = \\x ->"
+  , "  let (t, s) = x"
+  , "      _ = t"
+  , "      _ = s"
+  , "   in (\"\", left ())"
+  ]
+
+layoutNestedSource :: String
+layoutNestedSource = unlines
+  [ "type State = Nat"
+  , ""
+  , "init : Unit -o Reply State = \\u ->"
+  , "  case 2 of"
+  , "    0 -> (\"zero\\n\", left ())"
+  , "    j -> case j of"
+  , "           2 -> (\"two\\n\", left ())"
+  , "           k -> let _ = k in (\"bad\\n\", left ())"
+  , ""
+  , "step : Text * State -o Reply State = \\x ->"
+  , "  let (t, s) = x"
+  , "      _ = t"
+  , "      _ = s"
+  , "   in (\"\", left ())"
   ]
 
 mainAndInitSource :: String
