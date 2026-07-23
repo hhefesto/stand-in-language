@@ -177,6 +177,18 @@ evalSp (FoldS f) (DPair (DList xs) b) =
   in (max (dSize (DList xs) + dSize b) p, c)
 evalSp (WhileS _ t s) (DPair (DNat n) a) =
   let (p, c) = whileSp (evalSp t) (evalSp s) n a in (1 + p, c)
+evalSp self@(RecS _ _ test rec lastM) (DPair (DNat n) x) =
+  let (p, c) = go n x in (1 + p, c)
+  where
+    go 0 y = evalSp lastM y
+    go k y =
+      let (pt, r) = evalSp test y
+      in case r of
+           DSum False _ -> let (pl, z) = evalSp lastM y in (max pt pl, z)
+           DSum True _  ->
+             let (pr, z) = evalSp rec (DPair (DClo self (DNat (k - 1))) y)
+             in (max pt pr, z)
+           _ -> error "space meter: rec test returned a non-verdict"
 evalSp _ _ = error "space meter: ill-shaped value for this morphism"
 
 -- | Peak live words of a typed run.

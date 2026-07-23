@@ -144,6 +144,13 @@ data UMorph (a :: UTy) (b :: UTy) where
   UFold    :: UMorph (b ':**: a) b -> UMorph ('UList a ':**: b) b
   UWhile   :: SUTy a -> UMorph a ('UUnit ':++: 'UUnit) -> UMorph a a
            -> UMorph ('UNat ':**: a) a
+  -- box-free mirror of the core 'RecS': bounded higher-order recursion,
+  -- @recur : a ⊸ b@ affine (used once), unboxed @Nat ⊗ a → b@.
+  URec     :: SUTy a -> SUTy b
+           -> UMorph a ('UUnit ':++: 'UUnit)
+           -> UMorph ('ULolly a b ':**: a) b
+           -> UMorph a b
+           -> UMorph ('UNat ':**: a) b
 
 infixr 9 :..:
 infixr 3 :****:
@@ -191,6 +198,12 @@ evalU (UMap f) xs                     = fmap (evalU f) xs
 evalU (UIter f) (n, a)                = iterU n (evalU f) a
 evalU (UFold f) (xs, b)               = foldU xs (evalU f) b
 evalU (UWhile _ t s) (n, a)           = whileU n (evalU t) (evalU s) a
+evalU self@(URec _ _ test rec lastM) (n, x) = go n x
+  where
+    go 0 y = evalU lastM y
+    go k y = case evalU test y of
+      Left _  -> evalU lastM y
+      Right _ -> evalU rec (UClosure SUNat self (k - 1), y)
 
 guardU :: a -> Either () () -> Either a ()
 guardU a (Left ())  = Left a
@@ -223,6 +236,7 @@ data UShape
   | ShNil | ShCons | ShUncons | ShNatOut | ShSuc | ShAdd | ShConst Natural
   | ShGuard UShape | ShMap UShape | ShIter UShape | ShFold UShape | ShWhile UShape UShape
   | ShCurry UShape | ShApply | ShMapC | ShIterC | ShFoldC | ShWhileC
+  | ShRec UShape UShape UShape
   deriving (Eq, Show)
 
 shapeU :: UMorph a b -> UShape
@@ -260,3 +274,4 @@ shapeU (UMap f)       = ShMap (shapeU f)
 shapeU (UIter f)      = ShIter (shapeU f)
 shapeU (UFold f)      = ShFold (shapeU f)
 shapeU (UWhile _ t s) = ShWhile (shapeU t) (shapeU s)
+shapeU (URec _ _ t r l) = ShRec (shapeU t) (shapeU r) (shapeU l)

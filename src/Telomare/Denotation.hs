@@ -85,6 +85,12 @@ evalV (MapS f) xs                    = fmap (evalV f) xs
 evalV (IterS f) (n, a)               = iterV n (evalV f) a
 evalV (FoldS f) (xs, b)              = foldV xs (evalV f) b
 evalV (WhileS _ t s) (n, a)          = whileV n (evalV t) (evalV s) a
+evalV self@(RecS _ _ test rec lastM) (n, x) = go n x
+  where
+    go 0 y = evalV lastM y
+    go k y = case evalV test y of
+      Left _  -> evalV lastM y
+      Right _ -> evalV rec (Closure SNat self (k - 1), y)
 
 iterV :: Natural -> (a -> a) -> a -> a
 iterV 0 _ a = a
@@ -202,6 +208,20 @@ evalG alg (IterS f) (n, a)     = iterG alg (evalG alg f) n a
 evalG alg (FoldS f) (xs, b)    = foldG alg (evalG alg f) xs b
 evalG alg (WhileS sa t s) (n, a) =
   whileG alg sa (evalG alg t) (evalG alg s) n a
+-- The recursion re-enters through @rec@ applying its @recur@ closure
+-- (whose body is this same morphism one fuel lower): the 'caApply' that
+-- charge carries is the per-step charge, so this clause adds none of its
+-- own beyond the probe.  Total because @recur@ only reduces the fuel.
+evalG alg self@(RecS sa _ test rec lastM) (n, x)
+  | n == 0    = evalG alg lastM x
+  | otherwise =
+      let (mt, r) = evalG alg test x
+          probe   = caProbe alg (sizeVal sa x)
+      in case r of
+           Left _  -> let (ml, y) = evalG alg lastM x
+                      in (caSeq alg probe (caSeq alg mt ml), y)
+           Right _ -> let (mr, y) = evalG alg rec (Closure SNat self (n - 1), x)
+                      in (caSeq alg probe (caSeq alg mt mr), y)
 
 mapG :: CostAlgebra m -> (a -> (m, b)) -> [a] -> (m, [b])
 mapG alg _ [] = (caZero alg, [])
@@ -302,6 +322,11 @@ evalK (MapS f) xs g              = mapK (evalK f) xs g
 evalK (IterS f) (n, a) g         = iterK (evalK f) n a g
 evalK (FoldS f) (xs, b) g        = foldK (evalK f) xs b g
 evalK (WhileS _ t s) (n, a) g    = whileK (evalK t) (evalK s) n a g
+evalK self@(RecS _ _ test rec lastM) (n, x) g
+  | n == 0    = evalK lastM x g
+  | otherwise = evalK test x g >>= \(r, g') -> case r of
+      Left _  -> evalK lastM x g'
+      Right _ -> evalK rec (Closure SNat self (n - 1), x) g'
 
 mapK :: (a -> Natural -> Maybe (b, Natural)) -> [a] -> Natural
      -> Maybe ([b], Natural)

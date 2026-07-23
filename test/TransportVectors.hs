@@ -68,7 +68,17 @@ constructorNodes =
   , exportMorph (SProd SNat (SBang SNat)) (SBang SNat) (IterS SucS)
   , exportMorph (SProd (SList SNat) (SBang SNat)) (SBang SNat) (FoldS AddS)
   , exportMorph (SProd SNat (SBang SNat)) (SBang SNat) allConstructors
+  , exportMorph (SProd SNat SNat) SNat recMin
   ]
+
+-- | Bounded recursion (RT1): @min fuel input@.
+recMin :: Morph ('Nat ':*: 'Nat) 'Nat
+recMin = RecS SNat SNat test rec lastM
+  where
+    test = CaseS InlS (InrS :.: WeakS) :.: NatOutS
+    pred' = CaseS (ConstS 0) IdS :.: NatOutS
+    rec  = SucS :.: ApplyS :.: (IdS :***: pred')
+    lastM = ConstS 0
 
 transportVectors :: [(String, Bool)]
 transportVectors =

@@ -41,7 +41,7 @@ import Telomare.Surface (liftSTy)
 -- closures ('TLolly', 'NCurry', 'NApply', 'NMapC').  Closure VALUES are
 -- never transported — only morphisms are.
 transportVersion :: Int
-transportVersion = 6
+transportVersion = 7
 
 -- | Runtime representation of every core object, including the exponential.
 data TyCode
@@ -96,6 +96,7 @@ data Node
   | NIter Node
   | NFold Node
   | NWhile TyCode Node Node
+  | NRec TyCode TyCode Node Node Node
   deriving (Eq, Show)
 
 -- | A complete morph transport unit.  Endpoints are mandatory because many
@@ -192,6 +193,8 @@ exportNode (MapS f)       = NMap (exportNode f)
 exportNode (IterS f)      = NIter (exportNode f)
 exportNode (FoldS f)      = NFold (exportNode f)
 exportNode (WhileS a t s) = NWhile (styCode a) (exportNode t) (exportNode s)
+exportNode (RecS a b t r l) =
+  NRec (styCode a) (styCode b) (exportNode t) (exportNode r) (exportNode l)
 
 data IType
   = IVar Int
@@ -408,6 +411,19 @@ inferNode node = case node of
     unify "while step input" si a
     unify "while step output" so a
     pure (IProd INat (IBang a), IBang a)
+  NRec wa wb test rec lastN -> do
+    let a = fromCode wa
+        b = fromCode wb
+    (ti, to) <- inferNode test
+    unify "rec predicate input" ti a
+    unify "rec predicate output" to (ISum IUnit IUnit)
+    (ri, ro) <- inferNode rec
+    unify "rec body input" ri (IProd (ILolly a b) a)
+    unify "rec body output" ro b
+    (li, lo) <- inferNode lastN
+    unify "rec last input" li a
+    unify "rec last output" lo b
+    pure (IProd INat a, b)
 
 -- | Canonical whitespace-free S-expression wire format.
 renderArtifact :: Artifact -> String
@@ -444,6 +460,8 @@ renderNode node = case node of
   NIter body -> unary "iter" body
   NFold body -> unary "fold" body
   NWhile ty test step -> list ["while", renderType ty, renderNode test, renderNode step]
+  NRec a b test rec lastN ->
+    list ["rec", renderType a, renderType b, renderNode test, renderNode rec, renderNode lastN]
   where
     atom name = list [name]
     unary name child = list [name, renderNode child]
@@ -494,6 +512,7 @@ nodeP = parens $ choice
   , unary "box" NBox, unary "box-val" NBoxVal, nullary "merge" NMerge
   , unary "map" NMap, unary "iter" NIter, unary "fold" NFold
   , symbol "while" >> NWhile <$> typeP <*> nodeP <*> nodeP
+  , symbol "rec" >> NRec <$> typeP <*> typeP <*> nodeP <*> nodeP <*> nodeP
   ]
   where
     nullary name value = symbol name >> pure value

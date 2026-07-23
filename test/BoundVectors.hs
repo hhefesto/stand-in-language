@@ -70,6 +70,22 @@ isPositive = CaseS InrS (InlS :.: WeakS) :.: NatOutS
 positive :: Morph 'Nat ('Nat ':+: 'Unit)
 positive = GuardS SNat isPositive
 
+-- | Bounded recursion (the @{test, rec, last}@ triple, RT1): with fuel n
+-- and input x it computes @min n x@ — @rec@ applies @recur@ to the
+-- predecessor and wraps the result in a successor, @last@ returns 0, and
+-- @test@ recurses while the input is positive.  Exercises the affine
+-- @recur@ and the fuel cap.
+recMinExample :: Morph ('Nat ':*: 'Nat) 'Nat
+recMinExample = RecS SNat SNat recTest recBody recLast
+  where
+    recTest = CaseS InlS (InrS :.: WeakS) :.: NatOutS
+    recPred = CaseS (ConstS 0) IdS :.: NatOutS
+    recBody = SucS :.: ApplyS :.: (IdS :***: recPred)
+    recLast = ConstS 0
+
+recMinBoundedShape :: ShapeH
+recMinBoundedShape = PairSh (NatLE 5) (NatLE 3)
+
 sumShape :: ShapeH
 sumShape = SumSh (Just UnitS) (Just UnitS)
 
@@ -109,6 +125,13 @@ boundVectors =
   , ("positive-dup-bound-holds", dupGrade positive 5 <= 1)
   , ("countDown-dup-bound", fst (costD countDown (NatLE 5)) == Just 5)
   , ("countDown-dup-bound-holds", dupGrade countDown 5 <= 5)
+  , ("rec-min-full-fuel", evalV recMinExample (5, 3) == 3)
+  , ("rec-min-fuel-limited", evalV recMinExample (2, 3) == 2)
+  , ("rec-min-base-zero", evalV recMinExample (5, 0) == 0)
+  , ("rec-min-bound-finite", isJust (fst (costW recMinExample recMinBoundedShape)))
+  , ("rec-min-unbounded-fuel", isNothing (fst (costW recMinExample (PairSh TopS TopS))))
+  , ("rec-min-bound-holds", maybe False (work recMinExample (5, 3) <=)
+      (fst (costW recMinExample recMinBoundedShape)))
   , ("applyInc-dup-bound", fst (costD applyInc TopS) == Just 0)
   , ("applyInc-dup-bound-holds", dupGrade applyInc 5 <= 0)
   ]

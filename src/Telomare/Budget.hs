@@ -240,6 +240,7 @@ transferB (WhileS _ t st) s =
          let (b, r) = aiterB (BinT (skelBot t) (skelBot st)) stepB n (unbangS a0)
          in (RecT (Just n) b, BangSh r)
        _ -> (RecT Nothing (BinT (skelTop t) (skelTop st)), TopS)
+transferB (RecS _ _ _ _ _) _ = (RecT Nothing TipT, TopS)
 
 predN :: Natural -> Natural
 predN 0 = 0
@@ -412,6 +413,19 @@ costW (WhileS _ t st) s =
        NatLE n -> let (c, r) = aiterC stepC n (unbangS a0)
                   in (c, BangSh r)
        _       -> (Nothing, TopS)
+-- Work is structural, so the uniform per-round bound (test + rec + last,
+-- with the recur closure costed at 0 — its ApplyS is the per-step charge)
+-- times the fuel is finite whenever the fuel shape is known, exactly like
+-- 'WhileCS'.  (Dup and space stay v1-unbounded: they scale with per-round
+-- value sizes the body-chosen recur argument makes untrackable.)
+costW (RecS _ _ test rec lastM) s =
+  let (fu, x)    = splitP s
+      testCost   = fst (costW test x)
+      lastCost   = fst (costW lastM x)
+      recCost    = fst (costW rec (PairSh (LollySh (Just 0)) x))
+  in ( mulC (fuelOfS fu)
+        (addC (Just 1) (addC testCost (addC recCost lastCost)))
+     , TopS)
 
 -- | Partial core-type representation threaded through 'costSp' so the
 -- typed view of sizes survives composite traversal: an atomic @TopS@
@@ -689,6 +703,7 @@ costSp r (WhileS _ t st) s =
          let (c, r') = aiterSp racc step n (unbangS a0)
          in (addC (Just 1) c, BangSh r', RBang racc)
        _ -> (Nothing, TopS, RBang racc)
+costSp _ (RecS _ sb _ _ _) _ = (Nothing, TopS, tyROf sb)
 
 -- | Runtime input validation: the value-level mirror of the Agda
 -- coverage relation @γW@ (closures are conservatively rejected — a
@@ -842,6 +857,10 @@ costD (WhileS sa t st) s =
        NatLE n -> let (c, r) = aiterD roundD n (unbangS a0)
                   in (c, BangSh r)
        _       -> (Nothing, TopS)
+-- v1: the per-round probe/copy sizes vary with the body-chosen recur
+-- argument, which this static pass cannot track, so duplication is
+-- reported unbounded (as for the closure loops).
+costD (RecS _ _ _ _ _) _ = (Nothing, TopS)
 
 fuelOfS :: ShapeH -> Maybe Natural
 fuelOfS (NatLE n) = Just n

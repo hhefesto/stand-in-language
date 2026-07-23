@@ -238,6 +238,22 @@ data Morph (a :: Ty) (b :: Ty) where
   FoldS    :: Morph (b ':*: a) b -> Morph ('ListT a ':*: 'Bang b) ('Bang b)
   WhileS   :: STy a -> Morph a ('Unit ':+: 'Unit) -> Morph a a
            -> Morph ('Nat ':*: 'Bang a) ('Bang a)
+  -- | Bounded higher-order recursion — the telomare0 triple @{test, rec,
+  -- last}@ made total by an explicit @Nat@ fuel (spec: @recS@,
+  -- design\/RECURSION.md).  Each unfold on @x@ runs @test@ (a probe, so
+  -- @x@ survives, priced like 'WhileS'\/'GuardS'): 'Left' stops with
+  -- @last x@, 'Right' runs @rec@ with the affine recursion continuation
+  -- @recur : a ⊸ b@ (the same triple one fuel lower) and @x@.  Unboxed and
+  -- linear by construction: @recur@ is a defunctionalized closure whose
+  -- body is this very morphism, which type-checks only at @Nat ':*: a → b@
+  -- (a boxed result would need the absent @!b → b@ dereliction), and it is
+  -- applied at most once per body (a reusable recur can't be applied
+  -- without dereliction either).
+  RecS     :: STy a -> STy b
+           -> Morph a ('Unit ':+: 'Unit)
+           -> Morph ('Lolly a b ':*: a) b
+           -> Morph a b
+           -> Morph ('Nat ':*: a) b
 
 infixr 9 :.:
 infixr 3 :***:
@@ -288,6 +304,7 @@ depth (MapS f)       = 1 + depth f
 depth (IterS f)      = 1 + depth f
 depth (FoldS f)      = 1 + depth f
 depth (WhileS _ t s) = 1 + max (depth t) (depth s)
+depth (RecS _ _ t r l) = 1 + max (depth t) (max (depth r) (depth l))
 
 -- | Coarse cost report (spec: @T3.Core.Syntax.towerHeight@).
 towerHeight :: Morph a b -> Natural

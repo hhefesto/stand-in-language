@@ -113,6 +113,12 @@ compileDirect (UMap _)       = Left (RecursionRequiresPlacement Mapping)
 compileDirect (UIter _)      = Left (RecursionRequiresPlacement Iteration)
 compileDirect (UFold _)      = Left (RecursionRequiresPlacement Fold)
 compileDirect (UWhile _ _ _) = Left (RecursionRequiresPlacement While)
+-- Unlike the boxed loops, bounded recursion is unboxed (@Nat ⊗ a → b@),
+-- so it needs no placement/merge machinery and compiles in the direct
+-- fragment directly.
+compileDirect (URec sa sb t r l) =
+  RecS (liftSTy sa) (liftSTy sb)
+    <$> compileDirect t <*> compileDirect r <*> compileDirect l
 
 -- | Erase every core exponential back to the cartesian surface syntax.
 eraseMorph :: Morph a b -> UMorph (Strip a) (Strip b)
@@ -157,6 +163,8 @@ eraseMorph (IterS f)      = UIter (eraseMorph f)
 eraseMorph (FoldS f)      = UFold (eraseMorph f)
 eraseMorph (WhileS sa t s) =
   UWhile (stripSTy sa) (eraseMorph t) (eraseMorph s)
+eraseMorph (RecS sa sb t r l) =
+  URec (stripSTy sa) (stripSTy sb) (eraseMorph t) (eraseMorph r) (eraseMorph l)
 
 -- | Independent structural check of the direct compiler's erasure law.
 erasureMatches :: UMorph a b -> Either DirectError Bool
