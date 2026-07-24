@@ -1,0 +1,35 @@
+module fuelNotMeasurable
+
+-- LIMIT: the recursion triple `{ test, rec, last }` is total because its fuel
+--   is CALCULATED at compile time from a nat measure of the state. `Nat` and a
+--   nat-led pair `Nat * _` can be measured; a `List` cannot (its length needs a
+--   fold), so recursing on list structure with the triple is a compile error.
+-- EXPECTED: compile error naming the fuel it cannot calculate.
+-- OBSERVED: cannot calculate recursion fuel: the recursion state must be a
+--   nat (or a nat-led pair) to measure; use fold/map for list recursion
+-- WORKAROUND: `fold` is structural recursion over a list and terminates on the
+--   list itself, no fuel measure required:
+--     count : Nat * Nat -o Nat = \(c, x) -> let _ = x in succ c
+--     listLen : List Nat -o Nat = \xs -> fold xs from 0 with count
+type State = Nat
+
+isEmpty : List Nat -o Unit + Unit = \l ->
+  case l of
+    [] -> left ()
+    cons h t -> let _ = h in let _ = t in right ()
+
+listLen : List Nat -o Nat = \xs ->
+  let f : List Nat -o Nat =
+        { \l -> isEmpty l
+        , \recur l -> case l of
+                        [] -> 0
+                        cons h t -> let _ = h in succ (recur t)
+        , \l -> let _ = l in 0 }
+   in f xs
+
+main : Text * State -o Reply State = \io ->
+  let (input, s) = io
+      _ = input
+   in case s of
+        0 -> let r = listLen (cons 7 []) in let _ = r in ("done\n", left ())
+        n -> let _ = n in ("", left ())

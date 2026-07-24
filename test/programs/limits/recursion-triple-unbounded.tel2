@@ -1,0 +1,43 @@
+module recursionTripleUnbounded
+
+-- LIMIT (a soft one — this file COMPILES and RUNS): the `{ test, rec, last }`
+--   recursion triple is total, but its CERTIFIED static bound is not yet
+--   finite. `countId` peels a nat down to zero with calculated fuel, so it
+--   always terminates — yet `--certificate` reports its work/depth/space as
+--   `unbounded`, whereas `iterate` / `fold` / `while` all get finite caps.
+--   So today you pay for the triple's expressiveness by losing the finite
+--   work certificate that the other loop forms give you.
+-- RUN:  cabal run -v0 telomare -- test/programs/limits/recursion-triple-unbounded.tel2 --certificate
+-- OBSERVED (triple, this file): compiles and prints `five`; --certificate says
+--   "static work bound: init unbounded, step unbounded" (same for duplication
+--   and space).
+-- OBSERVED (iterate equivalent, `iterate 5 from 0 with succ`): --certificate
+--   says "static work bound: init <= 12, step <= 12" — finite, for contrast.
+-- WORKAROUND: if you need the finite certificate, express the loop with
+--   `iterate` (`\n -> iterate n from 0 with succ`) when the shape allows it;
+--   reserve the triple for the recursions the bounded forms cannot express.
+type State = Nat
+
+isNonzero : Nat -o Unit + Unit = \m ->
+  case m of
+    0 -> left ()
+    w -> let _ = w in right ()
+
+countId : Nat -o Nat = \n ->
+  let f : Nat -o Nat =
+        { \m -> isNonzero m
+        , \recur m -> case m of
+                        0 -> 0
+                        succ k -> succ (recur k)
+        , \m -> let _ = m in 0 }
+   in f n
+
+main : Text * State -o Reply State = \io ->
+  let (input, s) = io
+      _ = input
+   in case s of
+        0 -> let r = countId 5
+              in case r of
+                   5 -> ("five\n", left ())
+                   k -> let _ = k in ("bad\n", left ())
+        n -> let _ = n in ("", left ())

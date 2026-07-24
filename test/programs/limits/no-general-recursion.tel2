@@ -1,0 +1,30 @@
+module noGeneralRecursion
+
+-- LIMIT: tel2 is total. There is no `fix` and no general recursion; a
+--   definition may not refer to itself (dependency cycles are rejected).
+--   `countdown` below is exactly the recursion you would write in Haskell,
+--   and that is precisely what tel2 refuses.
+-- EXPECTED: compile error.
+-- OBSERVED: cyclic definitions: countdown, init, main, step
+--   (main/init/step are the synthesized machine entries; `countdown` calling
+--    itself closes the cycle the compiler refuses.)
+-- WORKAROUND: use a manifestly-bounded form instead:
+--     iterate n from 0 with step        -- repeat `n` times
+--     fold xs from acc with step        -- consume a whole list
+--     while N from seed testing t stepping s   -- early stop, capped by N
+--     { \m -> test m, \recur m -> ..recur.., \m -> last m }  -- nat-fuelled triple
+--   For a countdown-to-zero the triple works, because the state is a Nat and
+--   its own value is the fuel (see recursion-triple-unbounded.tel2).
+type State = Nat
+
+countdown : Nat -o Nat = \n ->
+  case n of
+    0 -> 0
+    succ k -> countdown k
+
+main : Text * State -o Reply State = \io ->
+  let (input, s) = io
+      _ = input
+   in case s of
+        0 -> let r = countdown 5 in let _ = r in ("done\n", left ())
+        n -> let _ = n in ("", left ())

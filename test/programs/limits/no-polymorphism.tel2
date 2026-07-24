@@ -1,0 +1,20 @@
+module noPolymorphism
+
+-- LIMIT: tel2 is monomorphic. There are no type variables and no generics, so
+--   a single generic `id : a -o a` cannot be written — `a` is just an unknown
+--   type name. Every definition is one concrete type.
+-- EXPECTED: compile error about the unknown type `a`.
+-- OBSERVED: unknown type a
+-- WORKAROUND: write one monomorphic copy per type you need:
+--     natId  : Nat  -o Nat  = \x -> x
+--     boolId : Bool -o Bool = \x -> x
+type State = Nat
+
+id : a -o a = \x -> x
+
+main : Text * State -o Reply State = \io ->
+  let (input, s) = io
+      _ = input
+   in case s of
+        0 -> let r : Nat = id 5 in let _ = r in ("done\n", left ())
+        n -> let _ = n in ("", left ())

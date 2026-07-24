@@ -1,0 +1,26 @@
+module closureUsedTwice
+
+-- LIMIT: closures are AFFINE — a function value is applied at most once and can
+--   never be copied (there is no dereliction). `applyTwice` uses its function
+--   argument `f` twice, which tel2 rejects. Note the asymmetry: first-order
+--   DATA may be reused freely (each extra use is a silently-priced copy), so
+--   `\n -> add (n, n)` compiles fine — the wall is closures only.
+-- EXPECTED: compile error about copying a closure. (`copy f` fails too, with a
+--   second message — see WORKAROUND.)
+-- OBSERVED: function f cannot be implicitly copied; a closure is applied at most once
+-- WORKAROUND: consume the closure once, or thread the value through data.
+--   To apply "the same computation" twice, make it a named top-level
+--   definition (defs are reusable) and call it twice by name, rather than
+--   passing it as an affine closure argument.
+type State = Nat
+
+double : Nat -o Nat = \n -> succ n
+
+applyTwice : (Nat -o Nat) -o Nat = \f -> add (f 1, f 2)
+
+main : Text * State -o Reply State = \io ->
+  let (input, s) = io
+      _ = input
+   in case s of
+        0 -> let r = applyTwice double in let _ = r in ("done\n", left ())
+        n -> let _ = n in ("", left ())

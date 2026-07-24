@@ -1,0 +1,37 @@
+module impoverishedPrimitives
+
+-- LIMIT: the primitive vocabulary is deliberately tiny.
+--   * Nat has only `succ` and `add`. There is no `*`, `-`, `/`, `<`, or `==`.
+--     Predecessor exists only structurally (`case n of { 0 -> ..; succ k -> ..}`),
+--     and the only test is zero-vs-nonzero (`if n`).
+--   * Text (= List Nat of code points) can only be extended by a LITERAL prefix
+--     via `prepend "lit" rest`; there is no runtime append of two Text values,
+--     no comparison beyond whole-literal `case`, and no length/substring.
+--   The two definitions below each hit one wall.
+-- EXPECTED (product):  compile error — `mul` is not a primitive (nothing binds it).
+-- OBSERVED (product):  unknown variable mul          (product alone)
+-- EXPECTED (joinText): compile error — `prepend`'s prefix must be a literal.
+-- OBSERVED (joinText): unknown variable prepend       (joinText alone)
+-- NOTE: as shipped, both defs fail; the compiler reports the first wall it
+--   reaches, which happens to be `unknown variable prepend`. Comment out
+--   `joinText` to see `unknown variable mul`.
+-- WORKAROUND:
+--   * Multiplying by a CONSTANT is a bounded loop (the step adds the constant):
+--       addThree : Nat -o Nat = \acc -> add (acc, 3)
+--       triple   : Nat -o Nat = \n   -> iterate n from 0 with addThree
+--     Multiplying two RUNTIME nats cannot be hand-rolled either: a closed loop
+--     step cannot capture the other factor.
+--   * Build Text with literal `prepend` / `cons` chains, as the tic-tac-toe
+--     renderer does (test/programs/tictactoe.tel2).
+type State = Nat
+
+product : Nat * Nat -o Nat = \(a, b) -> mul (a, b)
+
+joinText : Text * Text -o Text = \(a, b) -> prepend a b
+
+main : Text * State -o Reply State = \io ->
+  let (input, s) = io
+      _ = input
+   in case s of
+        0 -> let r = product (3, 4) in let _ = r in ("done\n", left ())
+        n -> let _ = n in ("", left ())
