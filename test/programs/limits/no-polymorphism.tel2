@@ -5,12 +5,14 @@ module noPolymorphism
 --   type name. Every definition is one concrete type.
 -- EXPECTED: compile error about the unknown type `a`.
 -- OBSERVED: unknown type a
--- WORKAROUND: write one monomorphic copy per type you need:
---     natId  : Nat  -o Nat  = \x -> x
---     boolId : Bool -o Bool = \x -> x
+-- FIX: see the commented workaround below the faulty code.
 type State = Nat
 
 id : a -o a = \x -> x
+
+-- WORKAROUND (compiles): write one monomorphic copy per type you need
+-- (add a separate boolId : Bool -o Bool with Prelude's Bool, and so on):
+-- natId : Nat -o Nat = \x -> x
 
 main : Text * State -o Reply State = \io ->
   let (input, s) = io

@@ -15,19 +15,22 @@ module impoverishedPrimitives
 -- NOTE: as shipped, both defs fail; the compiler reports the first wall it
 --   reaches, which happens to be `unknown variable prepend`. Comment out
 --   `joinText` to see `unknown variable mul`.
--- WORKAROUND:
---   * Multiplying by a CONSTANT is a bounded loop (the step adds the constant):
---       addThree : Nat -o Nat = \acc -> add (acc, 3)
---       triple   : Nat -o Nat = \n   -> iterate n from 0 with addThree
---     Multiplying two RUNTIME nats cannot be hand-rolled either: a closed loop
---     step cannot capture the other factor.
---   * Build Text with literal `prepend` / `cons` chains, as the tic-tac-toe
---     renderer does (test/programs/tictactoe.tel2).
+-- FIX: see the commented workarounds beside each faulty def below.
 type State = Nat
 
 product : Nat * Nat -o Nat = \(a, b) -> mul (a, b)
 
+-- WORKAROUND (compiles): multiply by a CONSTANT with a bounded loop (the step
+-- adds the constant). Two RUNTIME nats can't be hand-rolled: a closed loop step
+-- can't capture the other factor.
+-- addThree : Nat -o Nat = \acc -> add (acc, 3)
+-- triple   : Nat -o Nat = \n   -> iterate n from 0 with addThree   -- n * 3
+
 joinText : Text * Text -o Text = \(a, b) -> prepend a b
+
+-- WORKAROUND (compiles): extend Text with a LITERAL prefix (there is no runtime
+-- append of two Text values; build longer text with prepend / cons chains):
+-- greet : Text -o Text = \name -> prepend "Hello, " name
 
 main : Text * State -o Reply State = \io ->
   let (input, s) = io

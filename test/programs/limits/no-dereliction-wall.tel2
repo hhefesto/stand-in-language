@@ -7,9 +7,7 @@ module noDerelictionWall
 --   rejects: the pre-loop context must be gone by the time the loop runs.
 -- EXPECTED: compile error about live context after recursion.
 -- OBSERVED: unboxed context cannot remain live after recursion
--- WORKAROUND: consume or drop everything unboxed BEFORE the loop; the
---   continuation may use only the loop's (boxed) results. e.g. move the work
---   that needs `extra` before the loop, or fold `extra` into the loop's seed.
+-- FIX: see the commented workaround below the faulty code.
 type State = Nat
 
 increment : Nat -o Nat = \n -> succ n
@@ -22,3 +20,8 @@ main : Text * State -o Reply State = \request ->
         n -> let (fuel, extra) = copy n
               in let result : Nat = iterate fuel from 0 with increment
                   in ("", right add (result, extra))
+
+-- WORKAROUND (compiles): consume `n` once as the fuel and let the continuation
+-- use only the loop's result, so nothing unboxed survives the loop:
+--         n -> let result : Nat = iterate n from 0 with increment
+--               in ("", right result)

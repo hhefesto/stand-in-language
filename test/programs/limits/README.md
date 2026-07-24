@@ -2,9 +2,10 @@
 
 Small tel2 programs that each hit **one boundary** of the language, so the
 edges are concrete rather than abstract. Seven of them are *meant to fail to
-compile* — the rejection is the lesson, and each file's header records the
-exact message the compiler prints today plus the idiomatic workaround. The
-eighth compiles and runs but shows a *degraded certificate*.
+compile* — the rejection is the lesson. Each file's header records the exact
+message the compiler prints today, and the idiomatic workaround sits commented
+out right next to the offending code. The eighth compiles and runs but shows a
+*degraded certificate*.
 
 These are exploratory. They are **not** wired into the test suite (the cabal
 `test/programs/*.tel2` glob is single-level and does not reach this

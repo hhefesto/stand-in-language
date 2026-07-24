@@ -13,9 +13,7 @@ module recursionTripleUnbounded
 --   and space).
 -- OBSERVED (iterate equivalent, `iterate 5 from 0 with succ`): --certificate
 --   says "static work bound: init <= 12, step <= 12" — finite, for contrast.
--- WORKAROUND: if you need the finite certificate, express the loop with
---   `iterate` (`\n -> iterate n from 0 with succ`) when the shape allows it;
---   reserve the triple for the recursions the bounded forms cannot express.
+-- FIX: see the commented workaround below the faulty code.
 type State = Nat
 
 isNonzero : Nat -o Unit + Unit = \m ->
@@ -31,6 +29,12 @@ countId : Nat -o Nat = \n ->
                         succ k -> succ (recur k)
         , \m -> let _ = m in 0 }
    in f n
+
+-- WORKAROUND (finite certificate): when the fuel is a closed constant, iterate
+-- yields a finite --certificate (the triple never does):
+-- increment : Nat -o Nat = \n -> succ n
+-- countTo5  : Nat -o Nat = \n -> let _ = n in iterate 5 from 0 with increment
+-- (--certificate then reports a finite work bound, not the triple's `unbounded`)
 
 main : Text * State -o Reply State = \io ->
   let (input, s) = io

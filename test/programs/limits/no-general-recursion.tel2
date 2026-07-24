@@ -8,19 +8,19 @@ module noGeneralRecursion
 -- OBSERVED: cyclic definitions: countdown, init, main, step
 --   (main/init/step are the synthesized machine entries; `countdown` calling
 --    itself closes the cycle the compiler refuses.)
--- WORKAROUND: use a manifestly-bounded form instead:
---     iterate n from 0 with step        -- repeat `n` times
---     fold xs from acc with step        -- consume a whole list
---     while N from seed testing t stepping s   -- early stop, capped by N
---     { \m -> test m, \recur m -> ..recur.., \m -> last m }  -- nat-fuelled triple
---   For a countdown-to-zero the triple works, because the state is a Nat and
---   its own value is the fuel (see recursion-triple-unbounded.tel2).
+-- FIX: see the commented workaround below the faulty code.
 type State = Nat
 
 countdown : Nat -o Nat = \n ->
   case n of
     0 -> 0
     succ k -> countdown k
+
+-- WORKAROUND (compiles): bounded recursion. Over a Nat the fuel is the nat's
+-- own value, so use iterate (below), or the { test, rec, last } triple for the
+-- general shape (see recursion-triple-unbounded.tel2):
+-- increment : Nat -o Nat = \n -> succ n
+-- countUp : Nat -o Nat = \n -> iterate n from 0 with increment
 
 main : Text * State -o Reply State = \io ->
   let (input, s) = io

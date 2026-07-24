@@ -8,10 +8,12 @@ module noRecursiveAdt
 -- OBSERVED: a parse error at the payload -- "unexpected 'T'  /  expecting ':'"
 --   (the parser reads `Leaf` and `Node` as tags, then has nowhere to put the
 --    `Tree` fields, so it demands the `:` of the next declaration.)
--- WORKAROUND: the built-ins cover the common cases:
---     - sums:   the `+` type with `left` / `right`
---     - the one built-in recursive type: `List T` (and `Text = List Nat`)
---     - records / fixed-shape structs: product aliases,
---         e.g.  type Board = Nat * Nat * Nat * Nat * Nat * Nat * Nat * Nat * Nat
+-- FIX: see the commented workaround below the faulty code.
 
 data Tree = Leaf | Node Tree Tree
+
+-- WORKAROUND (compiles): the built-ins cover what `data` cannot —
+-- data Shape = Circle | Square    -- nullary enum is fine
+-- type Pair = Nat * Nat           -- record via a product alias
+-- a runtime-recursive collection is `List Nat` (or `Text`); a two-way choice
+-- is the built-in sum `Nat + Text`, taken apart with `left` / `right`.

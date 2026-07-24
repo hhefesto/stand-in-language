@@ -7,10 +7,7 @@ module fuelNotMeasurable
 -- EXPECTED: compile error naming the fuel it cannot calculate.
 -- OBSERVED: cannot calculate recursion fuel: the recursion state must be a
 --   nat (or a nat-led pair) to measure; use fold/map for list recursion
--- WORKAROUND: `fold` is structural recursion over a list and terminates on the
---   list itself, no fuel measure required:
---     count : Nat * Nat -o Nat = \(c, x) -> let _ = x in succ c
---     listLen : List Nat -o Nat = \xs -> fold xs from 0 with count
+-- FIX: see the commented workaround below the faulty code.
 type State = Nat
 
 isEmpty : List Nat -o Unit + Unit = \l ->
@@ -26,6 +23,11 @@ listLen : List Nat -o Nat = \xs ->
                         cons h t -> let _ = h in succ (recur t)
         , \l -> let _ = l in 0 }
    in f xs
+
+-- WORKAROUND (compiles): fold is structural recursion over the list, so it
+-- terminates on the list itself — no fuel measure required:
+-- count : Nat * Nat -o Nat = \(c, x) -> let _ = x in succ c
+-- listLen : List Nat -o Nat = \xs -> fold xs from 0 with count
 
 main : Text * State -o Reply State = \io ->
   let (input, s) = io

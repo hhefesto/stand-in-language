@@ -8,15 +8,16 @@ module closureUsedTwice
 -- EXPECTED: compile error about copying a closure. (`copy f` fails too, with a
 --   second message — see WORKAROUND.)
 -- OBSERVED: function f cannot be implicitly copied; a closure is applied at most once
--- WORKAROUND: consume the closure once, or thread the value through data.
---   To apply "the same computation" twice, make it a named top-level
---   definition (defs are reusable) and call it twice by name, rather than
---   passing it as an affine closure argument.
+-- FIX: see the commented workaround below the faulty code.
 type State = Nat
 
 double : Nat -o Nat = \n -> succ n
 
 applyTwice : (Nat -o Nat) -o Nat = \f -> add (f 1, f 2)
+
+-- WORKAROUND (compiles): a named def is reusable — call it twice by name
+-- instead of passing an affine closure. `double` is used twice here:
+-- applyDoubleTwice : Unit -o Nat = \u -> let _ = u in add (double 1, double 2)
 
 main : Text * State -o Reply State = \io ->
   let (input, s) = io
