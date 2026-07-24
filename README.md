@@ -77,7 +77,13 @@ loop boundary), and `whilec`'s stepping selector must be closed.
 There is one `case e of` form; the shape of its first arm picks the
 dispatch. String-literal arms match text and nat-literal arms match
 naturals, both ending in a binding (or `_`) default arm; constructor arms
-eliminate a `data` enum exhaustively with no default. `if c then t else e`
+eliminate a `data` enum exhaustively with no default. **Structural
+deconstructors** bind the eliminated payload: `case n of { 0 -> …; succ k ->
+… }` binds the predecessor `k = n-1`, `case xs of { [] -> …; cons h t -> … }`
+binds head and tail, and `case s of { left l -> …; right r -> … }`
+eliminates a sum. **Tuple-literal arms** dispatch on every component at once:
+`case (a,b,c) of { (1,1,1) -> …; (2,2,2) -> …; _ -> … }` (nat literals, with
+a mandatory `_` default). `if c then t else e`
 is sugar for a nat case taking `else` at `0`; list literals are sugar for
 `cons` chains; multi-binding `let`s and multi-argument lambdas nest
 (lambdas curry). `succ`, `add`, `cons`, and `prepend` are builtin
@@ -139,6 +145,11 @@ expr      ::= ID | NAT | STRING | "()" | CONSTRUCTOR
            |  "case" expr "of" natArm* patternArm      -- nat dispatch
            |  "case" expr "of" textArm* patternArm     -- text dispatch
            |  "case" expr "of" constructorArm+         -- enum dispatch
+           |  "case" expr "of" tupleArm+ "_" "->" expr -- tuple-literal dispatch
+           |  "case" expr "of" "0" "->" expr "succ" ID "->" expr  -- nat pred
+           |  "case" expr "of" "[]" "->" expr "cons" ID ID "->" expr  -- uncons
+           |  "case" expr "of" "left" ID "->" expr "right" ID "->" expr  -- sum
+tupleArm  ::= "(" NAT ("," NAT)* ")" "->" expr
 
 binding   ::= pattern (":" type)? "=" expr
 pattern   ::= ID | "_" | "(" ID ("," ID)+ ")"
