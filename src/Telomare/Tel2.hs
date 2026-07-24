@@ -16,7 +16,7 @@ import Control.Monad (foldM, void)
 import Data.Char (isAsciiUpper, ord)
 import Data.Foldable (traverse_)
 import Data.Functor (($>))
-import Data.List (intercalate)
+import Data.List (intercalate, nub)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
@@ -296,9 +296,33 @@ exprParser = choice
       scn
       reserved "of"
       scn
-      -- Structural deconstructors (nat pred / list uncons / sum) take
-      -- priority; a plain literal/enum case backtracks to the literal path.
-      choice [try (structuralCase value), literalCase value]
+      -- Tuple-literal arms @(l1,…,ln) -> …@ first (a leading @(@ is unique to
+      -- them), then structural deconstructors, then the literal path.
+      choice [try (tupleCase value), try (structuralCase value), literalCase value]
+    -- @case scrut of { (l1,…,ln) -> b; …; _ -> d }@: nat-literal tuple
+    -- patterns dispatched by a nested matchNat decision tree.  Pure sugar —
+    -- desugars to an ELet destructure plus nested EMatchNat.
+    tupleCase value = do
+      lvl <- L.indentLevel
+      arms <- some (try (atLevel lvl *> tupleArm <* scn))
+      atLevel lvl
+      void (symbol "_")
+      void (symbol "->")
+      scn
+      def <- exprParser
+      case arms of
+        [] -> fail "a tuple case needs at least one (…) arm"
+        ((firstLits, _) : _) -> do
+          let n = length firstLits
+          if all ((== n) . length . fst) arms
+            then pure (buildTupleCase n value arms def)
+            else fail "tuple case arms must all have the same arity"
+    tupleArm = do
+      lits <- between (symbol "(") (symbol ")") (sepBy1 natural (symbol ","))
+      void (symbol "->")
+      scn
+      b <- exprParser
+      pure (lits, b)
     literalCase value = do
       kind <- lookAhead armShape
       case kind of
@@ -513,6 +537,26 @@ exprParser = choice
 startsUpper :: String -> Bool
 startsUpper (c : _) = isAsciiUpper c
 startsUpper []      = False
+
+-- | Desugar a tuple-literal @case@ into an ELet destructure plus a nested
+-- 'EMatchNat' decision tree over the @n@ components.  @%tc@-prefixed binders
+-- cannot clash with user identifiers, and each tuple case consumes its
+-- binders immediately, so a nested one shadowing them is harmless.
+buildTupleCase :: Int -> Expr -> [([Natural], Expr)] -> Expr -> Expr
+buildTupleCase n scrut arms def =
+  let genVars = ["%tc" <> show i | i <- [0 .. n - 1]]
+  in ELet (PTuple genVars) Nothing scrut (buildTupleTree genVars arms def)
+
+buildTupleTree :: [String] -> [([Natural], Expr)] -> Expr -> Expr
+buildTupleTree [] arms def =
+  case [body | ([], body) <- arms] of
+    (body : _) -> body
+    []         -> def
+buildTupleTree (v : vs) arms def =
+  EMatchNat (EVar v)
+    [ (lit, buildTupleTree vs [(rest, body) | (l : rest, body) <- arms, l == lit] def)
+    | lit <- nub [l | (l : _, _) <- arms] ]
+    PWild def
 
 declParser :: Parser Decl
 declParser = choice [dataDecl, typeDecl, sigDefDecl]

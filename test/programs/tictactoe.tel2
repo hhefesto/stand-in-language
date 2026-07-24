@@ -11,19 +11,10 @@ type State = Board * Nat
 type Cell = Nat * (Nat -o Board)
 
 line : Triple -o Nat = \t ->
-  let (a, b, c) = t
-   in case a of
-        1 -> case b of
-               1 -> case c of
-                      1 -> 1
-                      _ -> 0
-               _ -> 0
-        2 -> case b of
-               2 -> case c of
-                      2 -> 2
-                      _ -> 0
-               _ -> 0
-        _ -> 0
+  case t of
+    (1,1,1) -> 1
+    (2,2,2) -> 2
+    _ -> 0
 
 orElse : Nat * Nat -o Nat = \(a, b) ->
   case a of
@@ -38,23 +29,12 @@ winner : Board -o Nat = \b ->
 
 full : Board -o Nat = \board ->
   let (a, b, c, d, e, f, g, h, i) = board
-   in if a
-      then if b
-           then if c
-                then if d
-                     then if e
-                          then if f
-                               then if g
-                                    then if h
-                                         then if i then 1 else 0
-                                         else 0
-                                    else 0
-                               else 0
-                          else 0
-                     else 0
-                else 0
-           else 0
-      else 0
+   in boolToNat
+        (boolAnd (natIsPositive a, boolAnd (natIsPositive b,
+         boolAnd (natIsPositive c, boolAnd (natIsPositive d,
+         boolAnd (natIsPositive e, boolAnd (natIsPositive f,
+         boolAnd (natIsPositive g, boolAnd (natIsPositive h,
+                  natIsPositive i)))))))))
 
 outcome : State -o Nat = \s ->
   let (board, turn) = s

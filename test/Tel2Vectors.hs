@@ -228,6 +228,8 @@ tel2Vectors = do
                 natRecSource [] "five\n"
             , rejectsWith "tel2 rejects a list-state triple (fuel not measurable)"
                 listStateRejectSource "cannot calculate recursion fuel"
+            , acceptsBehavior "tel2 tuple-literal case dispatches on all components"
+                tupleCaseSource [] "three\n"
             ]
           implicitCopy =
             [ accepts "tel2 accepts implicit duplication of a Nat" duplicateSource
@@ -1104,6 +1106,28 @@ listStateRejectSource = unlines
   , "        0 -> let r = listLen (cons 7 [])"
   , "              in case r of"
   , "                   1 -> (\"one\\n\", left ())"
+  , "                   k -> let _ = k in (\"bad\\n\", left ())"
+  , "        n -> let _ = n in (\"\", left ())"
+  ]
+
+-- Tuple-literal case: matches all components, nested-matchNat desugaring.
+tupleCaseSource :: String
+tupleCaseSource = unlines
+  [ "type State = Nat"
+  , "line : Nat * Nat * Nat -o Nat = \\t ->"
+  , "  case t of"
+  , "    (1,1,1) -> 1"
+  , "    (2,2,2) -> 2"
+  , "    _ -> 0"
+  , "main : Text * State -o Reply State = \\io ->"
+  , "  let (input, s) = io"
+  , "      _ = input"
+  , "   in case s of"
+  , "        0 -> let a = line (1, 1, 1)"
+  , "                 b = line (2, 2, 2)"
+  , "                 c = line (1, 2, 1)"
+  , "              in case add (a, add (b, c)) of"
+  , "                   3 -> (\"three\\n\", left ())"
   , "                   k -> let _ = k in (\"bad\\n\", left ())"
   , "        n -> let _ = n in (\"\", left ())"
   ]
