@@ -238,9 +238,11 @@ getReport = SizingReport . SizedRecursion
   <*> getMap getToken getLocTag
   <*> getInt'
   <*> getSpace
+  <*> pure Nothing -- the walk's statistics are not stored, only its bound
 
--- The space bound. Paths and coefficients fit an Int for any input a machine
--- could hold.
+-- The space bound. Paths grow as 2^depth and a unary character is a hundred
+-- deep, so paths, coefficients and constants are written as numbers of any
+-- size rather than machine words.
 
 putSpace :: Either String SpaceBound -> Put
 putSpace = \case

@@ -14,22 +14,30 @@
 -- precision but never to lose soundness: pruning only drops affines another
 -- affine dominates pointwise, and widening replaces a set of affines with
 -- their pointwise maximum, which bounds each of them. The one non-value is
--- `sbTop`, the bound that says nothing; it arises from widening or fuel
--- exhaustion in the static pass, never from a program being input-dependent —
--- input dependence stays symbolic.
+-- `sbTop`, the bound that says nothing. Nothing in the static pass produces
+-- it today — that pass reports what it could not do as a failure instead —
+-- but every operation here absorbs it, so a producer may use it. Input
+-- dependence never collapses to it: it stays symbolic.
+--
+-- Bounds are accumulated over millions of machine transitions, so they are
+-- built strict all the way down: strict fields, a strict map, and `norm`
+-- forces every affine before wrapping them. Left lazy, each accumulation is a
+-- thunk retaining the state it was made from, and a walk's memory grows with
+-- its history instead of its live set.
 module Telomare.SpaceBound where
 
 import Data.List (intercalate, sort)
-import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
 -- |One affine expression: Σ coeff_p · |p| + constant.
 data Affine = Affine
-  { affCoeffs :: Map Integer Natural
-  -- ^Per-path coefficients; a path absent here has coefficient zero.
-  , affConst  :: Natural
+  { affCoeffs :: !(Map Integer Natural)
+  -- ^Per-path coefficients; a path absent here has coefficient zero, and no
+  -- path is stored with one — `norm` drops them.
+  , affConst  :: !Natural
   }
   deriving (Eq, Ord, Show)
 
@@ -49,15 +57,6 @@ sbInput p = SpaceBound (Just [Affine (Map.singleton p 1) 0])
 -- |The bound that says nothing.
 sbTop :: SpaceBound
 sbTop = SpaceBound Nothing
-
--- |Force a bound all the way down. The static walk accumulates bounds over
--- millions of transitions; left lazy, each accumulation is a thunk retaining
--- the machine state it was made from, and the walk's memory grows with its
--- history instead of its live set.
-sbForce :: SpaceBound -> SpaceBound
-sbForce b@(SpaceBound Nothing)   = b
-sbForce b@(SpaceBound (Just as)) = foldr forceAff b as
-  where forceAff (Affine cs k) r = Map.foldr' seq (k `seq` r) cs
 
 -- |Whether the second affine is everywhere at least the first.
 dominates :: Affine -> Affine -> Bool
@@ -87,9 +86,16 @@ sbWiden cap b@(SpaceBound (Just affs))
     pointwiseMax (Affine cs k) (Affine cs' k') =
       Affine (Map.unionWith max cs cs') (max k k')
 
--- |Sorted so that equal bounds compare equal however they were put together.
+-- |Canonical form: zero coefficients dropped, dominated affines pruned, the
+-- rest sorted so that equal bounds compare equal however they were put
+-- together, and everything forced (see the module header). An empty list has
+-- no maximum; it reads as the bound that holds nothing.
 norm :: [Affine] -> SpaceBound
-norm = sbWiden defaultWidth . SpaceBound . Just . sort . prune
+norm [] = sbConst 0
+norm xs =
+  let affs = sort (prune (fmap tidy xs))
+      tidy (Affine cs k) = Affine (Map.filter (/= 0) cs) k
+  in foldr seq () affs `seq` sbWiden defaultWidth (SpaceBound (Just affs))
 
 -- |Both at once: cells held by co-live values sum.
 sbAdd :: SpaceBound -> SpaceBound -> SpaceBound

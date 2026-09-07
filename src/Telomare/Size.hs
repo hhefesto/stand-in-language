@@ -25,7 +25,6 @@ import qualified Data.Map.Strict as Map
 import Control.Exception (Exception)
 import Control.Exception.Base (throw)
 import Data.Functor.Identity (Identity, runIdentity)
-import Data.Set (Set)
 import qualified Data.Set as Set
 import Debug.Trace
 import Telomare.Error
@@ -35,6 +34,7 @@ import Telomare.IR.Loc
 import Telomare.Machine hiding (debug, debugTrace)
 import Telomare.PrettyPrint
 import Telomare.Size.IR
+import Telomare.Space.Static (StaticSpaceFailure, StaticSpaceStats)
 import Telomare.SpaceBound (SpaceBound)
 
 debug :: Bool
@@ -47,15 +47,6 @@ data SizingSettings = SizingSettings
   { maxSizingSize :: Int
   , doCap         :: Bool
   } deriving (Eq, Ord, Show)
-
-data InputRestrictions
-  = InputRestrictions {zeroes :: Set Integer, pairs :: Set Integer}
-  deriving Show
-
-instance Semigroup InputRestrictions where
-  (<>) (InputRestrictions za pa) (InputRestrictions zb pb) = InputRestrictions (za <> zb) (pa <> pb)
-instance Monoid InputRestrictions where
-  mempty = InputRestrictions mempty mempty
 
 extractInputRestrictions :: InputSizingExpr -> InputRestrictions
 extractInputRestrictions = cleanup . f Nothing where
@@ -250,16 +241,20 @@ evalStaticCheck shouldCap t =
 -- counts are the numbers the compiler already relies on to claim a program is
 -- total; reporting them asserts nothing new.
 data SizingReport = SizingReport
-  { sizingReportCounts :: SizedRecursion
+  { sizingReportCounts     :: SizedRecursion
   -- ^Per recursion site, the iteration count inferred over every input.
-  , sizingReportLocs   :: Map UnsizedRecursionToken LocTag
+  , sizingReportLocs       :: Map UnsizedRecursionToken LocTag
   -- ^Where each site is in the source.
-  , sizingReportBudget :: Int
+  , sizingReportBudget     :: Int
   -- ^The unrolling budget the search was allowed.
-  , sizingReportSpace  :: Either String SpaceBound
+  , sizingReportSpace      :: Either String SpaceBound
   -- ^A bound on the live-heap peak, in cells over input sizes, or why none
   -- was found. Deliberately lazy: computing it walks the sized program, and
   -- a plain run never asks.
+  , sizingReportSpaceStats :: Maybe (Either StaticSpaceFailure StaticSpaceStats)
+  -- ^What the walk did — transitions, allocations, widenings, dead worlds —
+  -- when it ran in this process. An artifact stores the bound alone, so a
+  -- report read back from one has none. Lazy, and sharing the bound's thunk.
   }
 
 -- |Every recursion site's source location, recovered from the `Term3`

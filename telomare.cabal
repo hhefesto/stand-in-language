@@ -190,7 +190,8 @@ test-suite telomare-sizing-test
                      , RunModeTests
                      , SizingTests
                      , SpaceTests
-  build-depends:       base
+  build-depends:       QuickCheck
+                     , base
                      , bytestring
                      , containers
                      , hspec

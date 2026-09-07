@@ -25,16 +25,20 @@
 -- world), so a later test of the same part — the same `AInputN`, or a
 -- superposition tagged with it — dispatches to the committed side instead of
 -- forking again. Without this, k tests of one unknown cost 2^k worlds; with
--- it they cost two.
+-- it they cost two. A fork about a widened node — one that kept only its
+-- bound — is tagged by that node's id for the same reason: it is one value,
+-- however little is known of it.
 --
 -- Where the concrete machine's every figure is a number, here it is a
 -- `SpaceBound`. A node's bound is fixed at allocation: one cell for concrete
 -- constructors, @|p|@ for a symbolic input, and for a superposition the
 -- maximum of its sides' reachable subgraphs, frozen — the store is immutable,
 -- so the sides never change. A sweep then sums the bounds of the distinct
--- reachable nodes without entering superpositions. Sharing that crosses a
--- superposition boundary is counted on both sides; documented looseness, not
--- a soundness hole.
+-- reachable nodes without entering superpositions, crediting every input
+-- part to the outermost reachable path above it (@|p|@ already counts all of
+-- path p's subtree) and every projection of a widened node to the whole it
+-- came from. Sharing that crosses a superposition boundary is counted on
+-- both sides; documented looseness, not a soundness hole.
 --
 -- Superpositions nest as unknown-driven choices pile up; shallow-equal sides
 -- collapse (as the sizing pass's @mergeShallow@ does), and past a nesting
@@ -56,7 +60,7 @@ import Telomare.Eval.Meter (identityFunction)
 import Telomare.IR.Base
 import Telomare.IR.Core
 import Telomare.Machine (appB, decendant, doLeft, doRight)
-import Telomare.Size (InputRestrictions (..))
+import Telomare.Size.IR (InputRestrictions (..))
 import Telomare.SpaceBound
 
 -- |Why no bound came out. Neither is a compile failure; the certificate
@@ -79,9 +83,16 @@ defaultStaticSpaceFuel = 4194304
 
 type NodeId = Int
 
--- |Which side of a split the current world has committed to: True when the
--- input part a tag names is zero, False when it is a pair.
-type World = Map Integer Bool
+-- |What a fork is about. A fork on an input part splits on whether the part
+-- at that path is zero or a pair; a fork on a widened node — one that kept
+-- only its bound — splits that one value, which never changes, so its id is
+-- the name. A world commits to one side per tag.
+data Tag = TagPath !Integer | TagNode !NodeId
+  deriving (Eq, Ord, Show)
+
+-- |Which side of each split the current world has committed to: True for the
+-- zero side, False for the pair side.
+type World = Map Tag Bool
 
 -- |An abstract value. The concrete constructors mirror
 -- `Telomare.Eval.Space.Node`; the rest is what "abstract" adds.
@@ -95,12 +106,13 @@ data ANode
   -- ^The payload's size is in the stored bound.
   | AInputN !Integer
   -- ^The input part at a path, unexamined: @|p|@ cells.
-  | ASupN !Int !(Maybe Integer) !NodeId !NodeId
-  -- ^Either side, from a fork: nesting depth, what the fork was about (the
-  -- input path whose zero/pair split chose between them, when it was about
-  -- one), the zero-world side, the pair-world side.
-  | AOpaqueN
-  -- ^A widened superposition: only its bound remains.
+  | ASupN !Int !(Maybe Tag) !NodeId !NodeId
+  -- ^Either side, from a fork: nesting depth, what the fork was about (when
+  -- it was about one thing), the zero-world side, the pair-world side.
+  | AOpaqueN !NodeId
+  -- ^A widened superposition: only its bound remains. Carries its family —
+  -- the id widening produced — because a part projected out of it is a view
+  -- of the same whole, and a sweep charges the whole once.
   | ADeadN
   -- ^An impossible world. A typechecked, sized program never gets stuck, so
   -- a stuck configuration can only come from an over-approximated fork whose
@@ -130,13 +142,13 @@ data AFrame
   | FRight
   | FSetEnv
   | FRestoreEnv !(Maybe NodeId)
-  | FBothRight !(Maybe Integer) !World CompiledExpr
+  | FBothRight !(Maybe Tag) !World CompiledExpr
   -- ^A gate could not choose: its zero branch's value is coming back,
   -- evaluate the pair branch next, under the other commitment.
-  | FJoinSup !(Maybe Integer) !World !NodeId
+  | FJoinSup !(Maybe Tag) !World !NodeId
   -- ^The zero-world value, held while the pair world finishes; restore the
   -- world and join into a superposition.
-  | FOpFork !PendOp !(Maybe Integer) !World !NodeId
+  | FOpFork !PendOp !(Maybe Tag) !World !NodeId
   -- ^An operation over a superposed operand: the zero side's result is
   -- coming back, run the same operation on the held pair side.
 
@@ -193,28 +205,55 @@ data AState = AState
   , aPins      :: ![NodeId]
   -- ^Ids held in machine internals mid-transition (a join's first half, a
   -- two-part allocation) that no frame roots yet; sweeps must keep them.
-  , aJoinMemo  :: !(Map (Maybe Integer, NodeId, NodeId) NodeId)
+  , aJoinMemo  :: !(Map (Maybe Tag, NodeId, NodeId) NodeId)
   -- ^Joins already made: the store is immutable, so the same two sides
   -- under the same tag always join to the same node. Loops re-joining the
   -- same alternatives hit this instead of re-walking their subgraphs.
+  , aWidened   :: !Int
+  -- ^Superpositions widened to their bound alone.
+  , aDead      :: !Int
+  -- ^Impossible worlds closed. A typechecked, sized program never gets
+  -- stuck, so on a sound walk this stays zero; a nonzero count means the
+  -- bound rests on worlds the analysis could not follow.
   }
 
 -- |Bound the peak live heap of the sized program applied to the abstract
 -- input, or say why that could not be done.
 evalSpaceStatic :: Int -> InputRestrictions -> CompiledExpr
                 -> Either StaticSpaceFailure SpaceBound
-evalSpaceStatic fuel irs prog = (\(b, _, _) -> b) <$> evalSpaceStatic' fuel irs prog
+evalSpaceStatic fuel irs prog = ssBound <$> evalSpaceStatic' fuel irs prog
 
--- |`evalSpaceStatic` with the run's transition and allocation counts, for
--- calibrating against the concrete meter.
+-- |What the abstract run did, for calibration against the concrete meter and
+-- for tests: the bound, the transitions it took, the nodes it allocated, the
+-- superpositions it widened, and the impossible worlds it closed.
+data StaticSpaceStats = StaticSpaceStats
+  { ssBound       :: SpaceBound
+  , ssTransitions :: !Int
+  , ssAllocations :: !Int
+  , ssWidenings   :: !Int
+  , ssDeadWorlds  :: !Int
+  }
+  deriving (Eq, Show)
+
+-- |`evalSpaceStatic` with the run's statistics.
 evalSpaceStatic' :: Int -> InputRestrictions -> CompiledExpr
-                 -> Either StaticSpaceFailure (SpaceBound, Int, Int)
+                 -> Either StaticSpaceFailure StaticSpaceStats
 evalSpaceStatic' fuel irs prog =
   let (inputId, st0) = buildInput irs
-      st1 = st0 { aEnv = Just inputId }
+      -- Measured before the first transition: the amortized upper bound is
+      -- "what was live at the last sweep plus what was allocated since", and
+      -- the input graph was never allocated, so it has to be in that first
+      -- live figure or every early upper bound would omit it.
+      st1 = sweep [] (st0 { aEnv = Just inputId })
       settle (st, root) =
         let final = sweep [root] st
-        in (aPeak final, fuel - aFuel final, aNext final)
+        in StaticSpaceStats
+             { ssBound = aPeak final
+             , ssTransitions = fuel - aFuel final
+             , ssAllocations = aNext final
+             , ssWidenings = aWidened final
+             , ssDeadWorlds = aDead final
+             }
   in settle <$> evalC st1 (appB prog EnvB)
   where
     look st i = let (n, _, _) = aStore st IntMap.! i in n
@@ -234,16 +273,28 @@ evalSpaceStatic' fuel irs prog =
           ins node b st =
             (aNext st, st { aStore = IntMap.insert (aNext st) (node, b, False) (aStore st)
                           , aNext = aNext st + 1 })
-      in go 0 (AState IntMap.empty 0 Nothing [] Map.empty mempty fuel (sbConst 0) 0 (sbConst 0) 0 0 [] Map.empty)
+      in go 0 (AState IntMap.empty 0 Nothing [] Map.empty mempty fuel (sbConst 0) 0 (sbConst 0) 0 0 [] Map.empty 0 0)
 
-    -- What the current world already knows about the input part at a path:
-    -- committed zero (a zero has only zeroes under it, so an ancestor's zero
-    -- commitment covers it), committed pair, or nothing.
-    worldSide st p = case Map.lookup p (aWorld st) of
+    -- What the current world already knows about a tag: committed zero,
+    -- committed pair, or nothing. Input paths carry structure: a zero has
+    -- only zeroes under it, so an ancestor's zero commitment covers a part,
+    -- and a part committed to be a pair makes every ancestor a pair.
+    worldSide st about = case Map.lookup about (aWorld st) of
       Just s -> Just s
-      Nothing
-        | any (\(t, s) -> s && p `decendant` t) (Map.toList (aWorld st)) -> Just True
-        | otherwise -> Nothing
+      Nothing -> case about of
+        TagPath p
+          | any (\a -> Map.lookup (TagPath a) (aWorld st) == Just True) (ancestors p) -> Just True
+          | any (\(t, s) -> not s && below t p) (Map.toList (aWorld st)) -> Just False
+          | otherwise -> Nothing
+        TagNode _ -> Nothing
+      where
+        below (TagPath t) p = t /= p && t `decendant` p
+        below (TagNode _) _ = False
+
+    -- The paths above a path, nearest first; the whole input is path 0.
+    ancestors :: Integer -> [Integer]
+    ancestors 0 = []
+    ancestors p = let a = (p - 1) `div` 2 in a : ancestors a
 
     commitW t s st = case t of
       Just p  -> st { aWorld = Map.insert p s (aWorld st) }
@@ -252,37 +303,52 @@ evalSpaceStatic' fuel irs prog =
     -- The reachable bound from some roots: distinct nodes, superpositions
     -- contributing their frozen bound and not their sides. Concrete cells
     -- are counted in one Int; only symbolic nodes pay bound arithmetic.
+    --
+    -- Two kinds of node are views of something rather than cells of their
+    -- own. An input part is the subtree of the input at its path, so
+    -- @|p| = 1 + |2p+1| + |2p+2|@: a part whose ancestor is also reachable
+    -- is already counted, and one path is one part however many nodes were
+    -- allocated to view it — what remains are disjoint subtrees, exactly the
+    -- distinct cells the concrete input shares among those views. A widened
+    -- node's projections are parts of one whole, and the whole's bound
+    -- covers them together, so a family is charged once.
     reachBound st = fst . reachBoundCounted st
 
-    reachBoundCounted st = go IntSet.empty (0 :: Int) [] where
-      go visited !plain specials = \case
-        [] -> ( foldr sbAdd (sbConst (fromIntegral plain)) specials
-              , IntSet.size visited )
+    reachBoundCounted st = go IntSet.empty (0 :: Int) Set.empty IntMap.empty [] where
+      go visited !plain parts families specials = \case
+        [] ->
+          let outermost = [ p | p <- Set.toList parts
+                              , not (any (`Set.member` parts) (ancestors p)) ]
+              symbolic = fmap sbInput outermost <> IntMap.elems families <> specials
+          in ( foldr sbAdd (sbConst (fromIntegral plain)) symbolic
+             , IntSet.size visited )
         (i : rest)
-          | IntSet.member i visited -> go visited plain specials rest
+          | IntSet.member i visited -> go visited plain parts families specials rest
           | otherwise ->
               let (node, b, _) = aStore st IntMap.! i
                   visited' = IntSet.insert i visited
                   next = aChildren node <> rest
               in case node of
-                AZeroN      -> go visited' (plain + 1) specials next
-                APairN _ _  -> go visited' (plain + 1) specials next
-                ADeferN _ _ -> go visited' (plain + 1) specials next
-                AGateN      -> go visited' (plain + 1) specials next
-                AAbortN     -> go visited' (plain + 1) specials next
-                _           -> go visited' plain (b : specials) next
+                AZeroN       -> go visited' (plain + 1) parts families specials next
+                APairN _ _   -> go visited' (plain + 1) parts families specials next
+                ADeferN _ _  -> go visited' (plain + 1) parts families specials next
+                AGateN       -> go visited' (plain + 1) parts families specials next
+                AAbortN      -> go visited' (plain + 1) parts families specials next
+                AInputN p    -> go visited' plain (Set.insert p parts) families specials next
+                AOpaqueN fam -> go visited' plain parts (IntMap.insert fam b families) specials next
+                _            -> go visited' plain parts families (b : specials) next
 
     sweep extra st =
       let roots = extra <> aPins st <> foldMap pure (aEnv st)
             <> concatMap aFrameRoots (aFrames st)
           (live0, liveCount) = reachBoundCounted st roots
-          -- Forced here and now: an unforced accumulation retains the store
-          -- it was measured over, and the walk's memory grows with every
-          -- allocation it ever made instead of with its live set.
-          !live = sbForce live0
+          -- Forced here and now — bounds are strict all the way down, see
+          -- `Telomare.SpaceBound` — so the walk's memory tracks its live set
+          -- rather than every allocation it ever made.
+          !live = live0
           -- What the store could have held at its worst since the last look.
-          !upper = sbForce (sbAdd (aLastLive st) (aDebt st))
-          !peak = sbForce (sbMax (sbMax (aPeak st) upper) live)
+          !upper = sbAdd (aLastLive st) (aDebt st)
+          !peak = sbMax (sbMax (aPeak st) upper) live
           st' = st { aPeak = peak
                    , aLastLive = live
                    , aLiveCount = liveCount
@@ -326,16 +392,16 @@ evalSpaceStatic' fuel irs prog =
           -- Stored bounds are folded at every sweep; keeping each one a
           -- single affine (the pointwise maximum of its alternatives) makes
           -- that fold one cheap merge per node instead of a cross product.
-          !b = sbForce (sbWiden 1 b0)
+          !b = sbWiden 1 b0
           -- A join-produced node's frozen bound subsumes structure that is
           -- mostly already alive; letting it into the debt would double
           -- count wildly, so those measure on the spot. A concrete cell or
           -- a symbolic input part is genuinely fresh content.
           subsuming = case node of
-            ASupN {}  -> True
-            AOpaqueN  -> True
-            AAbortedN -> True
-            _         -> False
+            ASupN {}    -> True
+            AOpaqueN {} -> True
+            AAbortedN   -> True
+            _           -> False
           !funInside = case node of
             ADeferN _ _   -> True
             AGateN        -> True
@@ -343,7 +409,7 @@ evalSpaceStatic' fuel irs prog =
             APairN x y    -> hasFun st x || hasFun st y
             ASupN _ _ x y -> hasFun st x || hasFun st y
             _             -> False
-          !debt = if subsuming then aDebt st else sbForce (sbAdd (aDebt st) b)
+          !debt = if subsuming then aDebt st else sbAdd (aDebt st) b
           st1 = st { aStore = IntMap.insert i (node, b, funInside) (aStore st)
                    , aNext = i + 1
                    , aDebt = debt
@@ -449,14 +515,15 @@ evalSpaceStatic' fuel irs prog =
       APairN _ _  -> evalC st r
       AAbortedN   -> retC st v
       ADeadN      -> retC st v
-      AInputN p -> case worldSide st p of
-        Just True  -> evalC st l
-        Just False -> evalC st r
-        Nothing    -> forkGate (Just p)
-      AOpaqueN -> forkGate Nothing
+      AInputN p  -> gateOn (TagPath p)
+      AOpaqueN _ -> gateOn (TagNode v)
       ASupN _ t a b -> onSup st t a b (OpGate l r) (\st' side -> gateD st' l r side)
       _ -> dead st
       where
+        gateOn t = case worldSide st t of
+          Just True  -> evalC st l
+          Just False -> evalC st r
+          Nothing    -> forkGate (Just t)
         forkGate t =
           evalC (commitW t True (push (FBothRight t (aWorld st) r) st)) l
 
@@ -467,14 +534,14 @@ evalSpaceStatic' fuel irs prog =
       AZeroN      -> retC st v
       AAbortedN   -> retC st v
       AInputN p
-        | worldSide st p == Just True -> allocRet st AZeroN (sbConst 1)
+        | worldSide st (TagPath p) == Just True -> allocRet st AZeroN (sbConst 1)
         | otherwise ->
             let c = if takeLeft then p * 2 + 1 else p * 2 + 2
             in if Set.member c (zeroes irs)
                then allocRet st AZeroN (sbConst 1)
                else allocRet st (AInputN c) (sbInput c)
       ADeadN      -> retC st v
-      AOpaqueN    -> allocRet st AOpaqueN (boundOf st v)
+      AOpaqueN fam -> allocRet st (AOpaqueN fam) (boundOf st v)
       ASupN _ t a b -> onSup st t a b (OpProj takeLeft) (`projD` takeLeft)
       _           -> dead st
 
@@ -485,7 +552,7 @@ evalSpaceStatic' fuel irs prog =
       ASupN _ t a b -> onSup st t a b OpSetEnv setEnvD
       -- A widened pair has lost its function; that is a real limitation,
       -- not an impossible world.
-      AOpaqueN      -> unsupported "SetEnv of a widened value"
+      AOpaqueN _    -> unsupported "SetEnv of a widened value"
       _             -> dead st
 
     applyD st f e = case (look st f, look st e) of
@@ -498,53 +565,61 @@ evalSpaceStatic' fuel irs prog =
         allocRet st AAbortedN (sbAdd (sbConst 1) (reachBound st [e]))
       -- The assert fires exactly when the part is a pair, so the fork is
       -- about the part and carries its tag.
-      (AAbortN, AInputN p) -> case worldSide st p of
-        Just True  -> allocRet st (aDefer identityFunction) (sbConst 1)
-        Just False -> allocRet st AAbortedN (sbAdd (sbConst 1) (reachBound st [e]))
-        Nothing -> do
-          let (i1, st1) = allocPinned [e] (aDefer identityFunction) (sbConst 1) st
-              (i2, st2) = allocPinned [i1] AAbortedN (sbAdd (sbConst 1) (reachBound st1 [e])) st1
-          joinSup st2 (Just p) i1 i2 >>= uncurry retC
+      (AAbortN, AInputN p) -> assertOn (TagPath p)
       (AAbortN, ASupN _ t a b) -> onSup st t a b (OpArgOf f) (applyTo f)
-      (AAbortN, _) -> do
-        let (i1, st1) = allocPinned [e] (aDefer identityFunction) (sbConst 1) st
-            (i2, st2) = allocPinned [i1] AAbortedN (sbAdd (sbConst 1) (reachBound st1 [e])) st1
-        joinSup st2 Nothing i1 i2 >>= uncurry retC
+      -- Anything else an assert can see is a widened value: one value,
+      -- tested here, so the fork is about that node.
+      (AAbortN, _) -> assertOn (TagNode e)
       (AGateN, AZeroN) -> allocRet st (aDefer doLeft) (sbConst 1)
       (AGateN, APairN _ _) -> allocRet st (aDefer doRight) (sbConst 1)
       -- A gate selector splits on the same zero-or-pair question.
-      (AGateN, AInputN p) -> case worldSide st p of
-        Just True  -> allocRet st (aDefer doLeft) (sbConst 1)
-        Just False -> allocRet st (aDefer doRight) (sbConst 1)
-        Nothing -> do
-          let (i1, st1) = alloc (aDefer doLeft) (sbConst 1) st
-              (i2, st2) = allocPinned [i1] (aDefer doRight) (sbConst 1) st1
-          joinSup st2 (Just p) i1 i2 >>= uncurry retC
+      (AGateN, AInputN p) -> selectOn (TagPath p)
       (AGateN, ASupN _ t a b) -> onSup st t a b (OpArgOf f) (applyTo f)
-      (AGateN, _) -> do
-        let (i1, st1) = alloc (aDefer doLeft) (sbConst 1) st
-            (i2, st2) = allocPinned [i1] (aDefer doRight) (sbConst 1) st1
-        joinSup st2 Nothing i1 i2 >>= uncurry retC
+      (AGateN, _) -> selectOn (TagNode e)
       (ADeferN _ body, _) ->
         evalC ((push (FRestoreEnv (aEnv st)) st) { aEnv = Just e }) body
       (ASupN _ t a b, _) -> onSup st t a b (OpApply e) (\st' side -> applyD st' side e)
       -- A widened value may well have held a function; refusing is honest,
       -- inventing a body is not.
-      (AOpaqueN, _) -> unsupported "application of a widened value"
+      (AOpaqueN _, _) -> unsupported "application of a widened value"
       _ -> dead st
       where
         applyTo g st' = applyD st' g
+
+        -- `assert` on an unknown: the identity in the zero world, the
+        -- retained message in the pair world — unless the world already
+        -- knows which.
+        assertOn t = case worldSide st t of
+          Just True  -> allocRet st (aDefer identityFunction) (sbConst 1)
+          Just False -> allocRet st AAbortedN (sbAdd (sbConst 1) (reachBound st [e]))
+          Nothing -> do
+            let (i1, st1) = allocPinned [e] (aDefer identityFunction) (sbConst 1) st
+                (i2, st2) = allocPinned [i1] AAbortedN (sbAdd (sbConst 1) (reachBound st1 [e])) st1
+            joinSup st2 (Just t) i1 i2 >>= uncurry retC
+
+        -- A gate selector on an unknown: left in the zero world, right in
+        -- the pair world.
+        selectOn t = case worldSide st t of
+          Just True  -> allocRet st (aDefer doLeft) (sbConst 1)
+          Just False -> allocRet st (aDefer doRight) (sbConst 1)
+          Nothing -> do
+            let (i1, st1) = alloc (aDefer doLeft) (sbConst 1) st
+                (i2, st2) = allocPinned [i1] (aDefer doRight) (sbConst 1) st1
+            joinSup st2 (Just t) i1 i2 >>= uncurry retC
 
     isDead st i = case look st i of
       ADeadN -> True
       _      -> False
 
-    dead st = allocRet st ADeadN (sbConst 0)
+    dead st = allocRet (st { aDead = aDead st + 1 }) ADeadN (sbConst 0)
 
     -- Join two alternatives: same id or same shallow shape collapse, a dead
     -- world vanishes, two pairs join pointwise, past the depth cap only the
-    -- bound survives.
-    joinSup st t a b
+    -- bound survives. A join spends fuel like any transition: the pointwise
+    -- merge recurses through a pair's whole shape.
+    joinSup st0 t a b = spend st0 >>= \st -> joinSup' st t a b
+
+    joinSup' st t a b
       | a == b = pure (st, a)
       | isDead st a = pure (st, b)
       | isDead st b = pure (st, a)
@@ -574,7 +649,8 @@ evalSpaceStatic' fuel irs prog =
               widen = depth > supDepthCap
                 && not (hasFun st a) && not (hasFun st b)
           in if widen
-             then let (i, st') = alloc AOpaqueN joined st in pure (remember st' i, i)
+             then let (i, st') = alloc (AOpaqueN (aNext st)) joined (st { aWidened = aWidened st + 1 })
+                  in pure (remember st' i, i)
              else let (i, st') = alloc (ASupN depth t a b) joined st in pure (remember st' i, i)
       where
         remember st' i = st' { aJoinMemo = Map.insert (t, a, b) i (aJoinMemo st') }
@@ -590,4 +666,5 @@ evalSpaceStatic' fuel irs prog =
       (AGateN, AGateN)           -> True
       (AAbortN, AAbortN)         -> True
       (AInputN n, AInputN m)     -> n == m
+      (AOpaqueN f, AOpaqueN g)   -> f == g
       _                          -> False

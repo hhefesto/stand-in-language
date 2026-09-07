@@ -98,7 +98,8 @@ nodes built (measured): 13577
 live heap peak (measured): 9430..9887 cells
 ```
 
-The peak is a real memory figure, and the reason it took until now is worth a
+The peak is a memory figure in the language's own units — a cell is one
+value node, not a byte — and the reason it took until now is worth a
 sentence: telomare's evaluator shares environments rather than copying them,
 so counting the term it holds as a tree counts shared structure once per
 reference — for `tictactoe.tel` that reads about 1.2TB for a run that fits in
@@ -108,15 +109,17 @@ a bracket — a figure the run reached and one it never exceeded — because the
 measuring sweep is amortized rather than run at every allocation.
 
 The certificate's `space` line is the static side of the same figure: the
-identical machine walked at compile time over a symbolic input, reporting the
-peak as an expression over input sizes. The two are tested against each other:
-on every corpus program, the bound with the actual input sizes substituted
-must stand at or above the exactly measured peak of every refinement-valid
-iteration. On `tictactoe.tel` the walk converges in about eight seconds after
-sizing: the bound is a maximum of thirteen affines whose constants top out
-around ninety thousand cells — about four times the measured peak of a
-completed game, loose where a deep superposition is widened to its bound
-alone, but finite and sound.
+same machine, written over abstract values, walked at compile time over a
+symbolic input and reporting the peak as an expression over input sizes. The
+two are tested against each other: on `simpleplus.tel` and
+`tc_ultra_minimal.tel`, the bound with the actual input sizes substituted must
+stand at or above the exactly measured peak of every refinement-valid
+iteration, and small programs built to fork, widen and refuse pin the walk's
+behaviour directly. On `tictactoe.tel` the walk converges in about eight
+seconds after sizing: the bound is a maximum of thirteen affines whose
+constants top out under seventy thousand cells — about three times the
+measured peak of a completed game, loose where a deep superposition is
+widened to its bound alone, but finite and sound.
 
 When sizing fails, the error names the recursion, where it is, and which of the
 two failures it is — a budget that was too small, or an input that nothing

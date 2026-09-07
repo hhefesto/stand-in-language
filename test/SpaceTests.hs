@@ -7,22 +7,29 @@
 -- scrutiny as a changed step count.
 module SpaceTests where
 
-import Control.Monad (unless)
+import Control.Monad (forM_, unless)
 import Data.Char (ord)
 import Data.Functor.Foldable (cata, project)
+import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 import Numeric.Natural (Natural)
 import Test.Hspec
+import Test.Hspec.QuickCheck (prop)
+import Test.QuickCheck
 
 import ConformanceTests (corpus)
 import SizingTests (loadWith)
 
 import Telomare.Driver (compileModules)
+import Telomare.Eval.Meter (Meter (..), evalMeter)
 import Telomare.Eval.Space (SpaceMeter (..), SweepPolicy (..), evalSpace)
 import Telomare.IR.Base
 import Telomare.IR.Core (CompiledExpr)
 import Telomare.Machine (appB, deferB)
 import Telomare.Size (SizingReport (..))
+import Telomare.Space.Static (StaticSpaceFailure (..), StaticSpaceStats (..),
+                              defaultStaticSpaceFuel, evalSpaceStatic')
 import Telomare.SpaceBound
 
 measure :: SweepPolicy -> CompiledExpr -> SpaceMeter
@@ -147,6 +154,12 @@ checkOn (path, name, inputs) = it name $ do
     Right (report, sized) -> case sizingReportSpace report of
       Left why -> expectationFailure $ "no static bound: " <> why
       Right bound -> do
+        -- A world the walk closed as impossible is a world it did not
+        -- follow; a bound over any of those is weaker evidence, so none may
+        -- occur on the corpus.
+        case sizingReportSpaceStats report of
+          Just (Right stats) -> ssDeadWorlds stats `shouldBe` 0
+          other -> expectationFailure $ "no walk statistics: " <> show other
         checked <- loop sized bound ZeroB inputs 0
         checked `shouldSatisfy` (> 0)
   where
@@ -196,3 +209,154 @@ sizeAtPath v p = cells (walk v (pathSteps p)) where
     BasicFW ZeroSF       -> 1
     BasicFW (PairSF a b) -> 1 + a + b
     _                    -> 1
+
+-- |Tick parity and the adaptive bracket, across a whole session on the real
+-- inputs — the conformance suite checks the first, empty-input iteration only.
+sessionParitySpec :: Spec
+sessionParitySpec = describe "the space meter across a session" $
+  mapM_ parityOn corpus
+
+parityOn :: (FilePath, String, [String]) -> Spec
+parityOn (path, name, inputs) = it name $ do
+  modules <- loadWith path name
+  case compileModules modules name of
+    Left err         -> expectationFailure $ "failed to compile:\n" <> err
+    Right (_, sized) -> loop sized ZeroB inputs (0 :: Int)
+  where
+    loop sized st inps iterations = do
+      let applied = appB sized st
+          (metered, result) = evalMeter applied
+          (exact, result') = evalSpace SweepEveryAlloc applied
+          (adaptive, _) = evalSpace SweepAdaptive applied
+      fmap show result' `shouldBe` fmap show result
+      spSteps exact `shouldBe` meterSteps metered
+      spBuilt exact `shouldBe` meterBuilt metered
+      -- The bracket holds the pinned peak, on a real program.
+      spPeakLower adaptive `shouldSatisfy` (<= spPeakLower exact)
+      spPeakUpper adaptive `shouldSatisfy` (>= spPeakUpper exact)
+      case result' of
+        Right v | BasicFW (PairSF _ newState) <- project v
+                , BasicFW (PairSF _ _) <- project newState
+                , (i : rest) <- inps
+                -> loop sized (PairB (str2b i) newState) rest (iterations + 1)
+        _ -> iterations `shouldSatisfy` (>= 0)
+
+-- |Programs small enough to reason about, run through the abstract walk.
+staticFixtureSpec :: Spec
+staticFixtureSpec = describe "the abstract walk" $ do
+  it "forks on an unknown input, joins, and bounds both sides" $
+    case evalSpaceStatic' defaultStaticSpaceFuel mempty oneGate of
+      Left why -> expectationFailure $ "no bound: " <> show why
+      Right stats -> do
+        ssDeadWorlds stats `shouldBe` 0
+        ssWidenings stats `shouldBe` 0
+        -- The bound is in the whole input and nothing else.
+        sbPaths (ssBound stats) `shouldBe` [0]
+        forM_ [ZeroB, PairB ZeroB ZeroB, PairB (unary 3) (unary 2)] $ \input -> do
+          let (m, _) = evalSpace SweepEveryAlloc (appB oneGate input)
+          sbAtLeast (spPeakUpper m) (Map.singleton 0 (sizeAtPath input 0)) (ssBound stats)
+            `shouldBe` True
+
+  it "widens a superposition nested past the cap, and still bounds every run" $
+    case evalSpaceStatic' defaultStaticSpaceFuel mempty nestedGates of
+      Left why -> expectationFailure $ "no bound: " <> show why
+      Right stats -> do
+        ssDeadWorlds stats `shouldBe` 0
+        ssWidenings stats `shouldSatisfy` (> 0)
+        forM_ [ZeroB, str2b "ab", str2b "abcdefgh"] $ \input -> do
+          let (m, _) = evalSpace SweepEveryAlloc (appB nestedGates input)
+              sizes = Map.fromList [ (p, sizeAtPath input p) | p <- sbPaths (ssBound stats) ]
+          sbAtLeast (spPeakUpper m) sizes (ssBound stats) `shouldBe` True
+
+  it "refuses to apply a widened value rather than guess" $
+    case evalSpaceStatic' defaultStaticSpaceFuel mempty (closure (FillFunctionEE nestedBody ZeroB)) of
+      Left (SpaceUnsupported _) -> pure ()
+      other -> expectationFailure $ "expected an unsupported report, got " <> show other
+
+  it "keeps simpleplus at its recorded bound" $ do
+    -- A golden: a change here is a change to the bound's precision, up or
+    -- down, and deserves the same look as a changed iteration count.
+    modules <- loadWith "simpleplus.tel" "simpleplus"
+    case compileModules modules "simpleplus" of
+      Left err -> expectationFailure $ "failed to compile:\n" <> err
+      Right (report, _) -> case sizingReportSpace report of
+        Left why -> expectationFailure $ "no static bound: " <> why
+        Right bound -> renderSpaceBoundBrief bound
+          `shouldBe` "sizes of 116 input parts (116 weighted) + 4337 cells"
+
+-- |A program as the machine applies one: a closure is a pair of code and its
+-- captured environment, and once applied the argument is the left part of
+-- the environment its body sees. The captured part is a zero here, as the
+-- sizing pass leaves a program with nothing to capture.
+closure :: CompiledExpr -> CompiledExpr
+closure body = PairB (deferB 7 body) ZeroB
+
+-- |The argument, inside a `closure` body.
+arg :: CompiledExpr
+arg = LeftB EnvB
+
+-- |A program that tests its whole input: zero or a pair.
+oneGate :: CompiledExpr
+oneGate = closure (GateSwitchEE ZeroB (PairB ZeroB ZeroB) arg)
+
+-- |The head of the k-th element of the input list: @left (right^k input)@.
+element :: Int -> CompiledExpr
+element k = LeftB (iterate RightB arg !! k)
+
+-- |Tests on six independent input parts, nested, every leaf a different
+-- number: each join is a genuine superposition of the joins below it, so
+-- the nesting outgrows the widening cap.
+nestedBody :: CompiledExpr
+nestedBody = go 0 0 where
+  go :: Int -> Int -> CompiledExpr
+  go k acc
+    | k == 6 = unary acc
+    | otherwise = GateSwitchEE (go (k + 1) (2 * acc)) (go (k + 1) (2 * acc + 1)) (element k)
+
+nestedGates :: CompiledExpr
+nestedGates = closure nestedBody
+
+-- |Laws of the bound language, checked at random sizes: the language is a
+-- max-plus algebra and widening only ever loosens.
+boundLawSpec :: Spec
+boundLawSpec = describe "the bound language's laws" $ do
+  prop "a maximum evaluates to the larger side" $ \(Few a) (Few b) ->
+    forAll sizes $ \s -> at s (sbMax a b) === max (at s a) (at s b)
+  prop "a sum evaluates to the sum" $ \(Few a) (Few b) ->
+    forAll sizes $ \s -> at s (sbAdd a b) === at s a + at s b
+  prop "addition distributes over the maximum" $ \(Few a) (Few b) (Few c) ->
+    forAll sizes $ \s -> at s (sbAdd a (sbMax b c)) === at s (sbMax (sbAdd a b) (sbAdd a c))
+  prop "the maximum is idempotent and commutative" $ \(Few a) (Few b) ->
+    sbMax a a === a .&&. sbMax a b === sbMax b a
+  prop "widening stands above what it replaced" $ \(Few a) (Few b) ->
+    forAll sizes $ \s -> at s (sbWiden 1 (sbMax a b)) >= max (at s a) (at s b)
+  prop "substituting in two steps is substituting at once" $ \(Few a) ->
+    forAll sizes $ \s ->
+      let (front, back) = Map.partitionWithKey (\p _ -> even p) s
+      in at back (sbSubstitute front a) === at s a
+  where
+    sizes :: Gen (Map Integer Natural)
+    sizes = Map.fromList <$> mapM (\p -> (,) p . fromIntegral <$> chooseInt (0, 9)) [0 .. 5]
+    at :: Map Integer Natural -> SpaceBound -> Natural
+    at s b = fromMaybe (error "still symbolic after substitution")
+      (sbConcrete (sbSubstitute s b))
+
+-- |A bound of a few affines over paths 0..5, so that every law is exercised
+-- without widening getting in the way.
+newtype Few = Few SpaceBound
+  deriving Show
+
+instance Arbitrary Few where
+  arbitrary = do
+    n <- chooseInt (1, 3)
+    Few . foldr1 sbMax <$> vectorOf n affine
+    where
+      affine = do
+        k <- chooseInt (0, 6)
+        terms <- listOf term
+        pure $ foldr (\(p, c) b -> sbAdd (sbScale c (sbInput p)) b)
+          (sbConst (fromIntegral k)) (take 3 terms)
+      term = do
+        p <- chooseInt (0, 5)
+        c <- chooseInt (0, 4)
+        pure (toInteger p, fromIntegral c :: Natural)

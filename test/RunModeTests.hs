@@ -24,6 +24,7 @@ import Telomare.Levels (LevelsInfo (..), levelsInfo)
 import Telomare.Machine (appB)
 import Telomare.Size (SizingReport (..))
 import Telomare.Size.IR (SizedRecursion (..))
+import Telomare.SpaceBound (sbAdd, sbConst, sbInput, sbScale)
 
 runModeSpec :: Spec
 runModeSpec = do
@@ -57,6 +58,16 @@ runModeSpec = do
               -- The space bound too: reporting it from an artifact must not
               -- need the abstract walk again.
               sizingReportSpace (artifactReport back) `shouldBe` sizingReportSpace report
+
+    it "carries a space bound whose numbers exceed a machine word" $ do
+      -- Paths grow as 2^depth and a unary character is a hundred deep, so
+      -- the encoding must not go through an Int.
+      let deep = sbAdd (sbScale (2 ^ (70 :: Int)) (sbInput (2 ^ (100 :: Int)))) (sbConst 12)
+          report = SizingReport (SizedRecursion Map.empty) Map.empty 0 (Right deep) Nothing
+          artifact = Artifact "deep" "hash" report "" ZeroB
+      case decodeArtifact (encodeArtifact artifact) of
+        Left err   -> expectationFailure $ "failed to decode:\n" <> err
+        Right back -> sizingReportSpace (artifactReport back) `shouldBe` Right deep
 
     it "evaluates to what the program it came from evaluates to" $ do
       modules <- loadWith "tc_ultra_minimal.tel" "tc_ultra_minimal"

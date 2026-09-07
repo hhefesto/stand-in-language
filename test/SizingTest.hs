@@ -12,5 +12,8 @@ main = hspec $ do
   runModeSpec
   conformanceSpec
   spaceSpec
+  sessionParitySpec
   boundSpec
+  boundLawSpec
+  staticFixtureSpec
   staticVsMeasuredSpec
