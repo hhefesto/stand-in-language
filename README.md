@@ -32,6 +32,9 @@ This project is in active development. Do expect bugs and general trouble, and p
    $ cachix use telomare
    $ cachix use ekala-corepkgs
    ```
+   (`nix run .#push-cachix`, the maintainers' tool that fills the cache, uses this
+   installed `cachix` rather than building one. It publishes both development
+   shells, including the full shell's HLS and editor tools.)
    The build comes from [ekapkgs](https://github.com/ekala-project/ekapkgs-roadmap)
    rather than nixpkgs: `corepkgs` for the base system and the GHC 9.10.3
    bindist, `haskell-pkgs` for the Hackage snapshot. `telomare` caches

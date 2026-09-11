@@ -79,7 +79,11 @@
   stylish-haskell and ghcid (haskell-language-server needs its closure in
   one Cabal-syntax 3.14 scope; `nix/haskell.nix` carries that override until
   ekala-project/haskell-pkgs#4 or its corepkgs equivalent lands), and hoogle
-  is no longer built for either. `systems` is `x86_64-linux` until
+  is no longer built for either. `nix run .#push-cachix` uses the cachix
+  on PATH (the snapshot's cachix does not build: its amazonka 2.0 predates
+  GHC 9.8), publishes every declared development shell and its environment
+  closure, and is built and shellchecked by `nix flake check`.
+  `systems` is `x86_64-linux` until
   corepkgs marks aarch64-linux supported.
 
 ## 0.1.0.0 -- YYYY-mm-dd

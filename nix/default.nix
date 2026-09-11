@@ -13,6 +13,11 @@ let
     inherit pkgs src;
     hsPkgs = hs.hsPkgs;
   };
+  devShells = import ./devshell.nix {
+    inherit telomare;
+    hsPkgs = hs.hsPkgs;
+    tools = hs.tools;
+  };
   tools = import ./tools.nix {
     inherit
       pkgs
@@ -22,6 +27,7 @@ let
       ;
     tools = hs.tools;
     executables = hs.executables;
+    devShellNames = builtins.attrNames devShells;
   };
   packages = {
     inherit telomare;
@@ -29,13 +35,7 @@ let
   };
 in
 {
-  inherit packages;
-
-  devShells = import ./devshell.nix {
-    inherit telomare;
-    hsPkgs = hs.hsPkgs;
-    tools = hs.tools;
-  };
+  inherit packages devShells;
 
   # One app per executable under its own name (`nix run .#telomare-repl`, as
   # CI does), plus the short names and the tooling.
@@ -55,5 +55,6 @@ in
   # verifies formatting and linting.
   checks = packages // {
     format-lint = tools.formatLintCheck;
+    push-cachix = tools.pushCachix;
   };
 }

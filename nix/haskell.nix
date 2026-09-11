@@ -79,11 +79,14 @@ in
       )
     );
   };
-  # Executables the shell apps need, from the same set: haskell-pkgs exposes
-  # them at the top level too, but built with the default (9.8.4) compiler,
-  # which would mean building a second GHC and its closure just for these.
+  # shellcheck, which every shell app's check phase runs, from the same set:
+  # haskell-pkgs exposes it at the top level too, but built with the default
+  # (9.8.4) compiler, which would mean a second GHC and its closure for one
+  # executable. (cachix is not built here at all: on this snapshot its
+  # amazonka 2.0 dependencies do not compile with GHC 9.8 or 9.10 — the
+  # Hackage release predates both — so `nix run .#push-cachix` takes cachix
+  # from the caller's PATH; see nix/tools.nix.)
   executables = {
     shellcheck = compose.justStaticExecutables hsPkgs.ShellCheck;
-    cachix = compose.justStaticExecutables hsPkgs.cachix;
   };
 }

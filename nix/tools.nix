@@ -11,6 +11,7 @@
   telomare,
   tools,
   executables,
+  devShellNames,
 }:
 let
   inherit (pkgs) lib;
@@ -134,14 +135,21 @@ let
         touch $out
       '';
 
+  # cachix itself is not pinned: the ekapkgs snapshot has no cachix that
+  # builds (its amazonka 2.0 dependencies predate GHC 9.8), and this is a
+  # maintainer's tool, so it uses the cachix already installed for
+  # `cachix use telomare`.
   pushCachix = mkScript {
     name = "telomare-push-cachix";
     runtimeInputs = [
-      executables.cachix
       pkgs.jq
       pkgs.nixVersions.nix_2_31
     ];
     text = ''
+      if ! command -v cachix >/dev/null; then
+        echo "cachix not found on PATH: install it (https://docs.cachix.org) and log in first" >&2
+        exit 1
+      fi
       cache_name=telomare
       tmp_dir="$(mktemp -d)"
       trap 'rm -rf "$tmp_dir"' EXIT
@@ -163,14 +171,19 @@ let
 
       build_target ".#packages.${system}.default"
       build_target ".#checks.${system}.default"
-      build_target ".#devShells.${system}.default"
 
-      printf 'Building nix develop environment closure\n'
-      dev_env_profile="$tmp_dir/dev-env-profile"
-      nix print-dev-env --profile "$dev_env_profile" ".#devShells.${system}.default" >/dev/null
-      dev_env_path="$(nix path-info "$dev_env_profile")"
-      printf '%s\n' "$dev_env_path" >> "$direct_paths"
-      printf '%s\n' "$dev_env_path" >> "$key_paths"
+      # Include every declared shell and the environment used by nix develop.
+      # In particular, the full shell carries HLS and the editor tools.
+      for shell_name in ${lib.escapeShellArgs devShellNames}; do
+        shell_target=".#devShells.${system}.$shell_name"
+        build_target "$shell_target"
+        printf 'Building nix develop environment closure for %s\n' "$shell_name"
+        dev_env_profile="$tmp_dir/dev-env-profile-$shell_name"
+        nix print-dev-env --profile "$dev_env_profile" "$shell_target" >/dev/null
+        dev_env_path="$(nix path-info "$dev_env_profile")"
+        printf '%s\n' "$dev_env_path" >> "$direct_paths"
+        printf '%s\n' "$dev_env_path" >> "$key_paths"
+      done
 
       printf 'Building legacy default.nix with nix-build\n'
       legacy_build_path="$(nix-build --no-out-link)"
