@@ -15,6 +15,7 @@ import Data.Functor.Classes (Eq1 (..), Show1 (liftShowsPrec))
 import Data.Functor.Foldable
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Set (Set)
 import Data.Validity (Validity (..), trivialValidation)
 import GHC.Generics (Generic)
 
@@ -28,6 +29,19 @@ import Telomare.PrettyPrint.Indent (indentWithOneChild', indentWithTwoChildren')
 
 debug' :: Bool
 debug' = False
+
+-- |What the refinements guarantee about the input, by path: the parts known
+-- to be zero and the parts known to be pairs. Paths index the input the way
+-- `IndexedInputF` does: the whole input is 0, and path n has its left part at
+-- 2n+1 and its right part at 2n+2.
+data InputRestrictions
+  = InputRestrictions {zeroes :: Set Integer, pairs :: Set Integer}
+  deriving Show
+
+instance Semigroup InputRestrictions where
+  (<>) (InputRestrictions za pa) (InputRestrictions zb pb) = InputRestrictions (za <> zb) (pa <> pb)
+instance Monoid InputRestrictions where
+  mempty = InputRestrictions mempty mempty
 
 debugTrace' :: String -> a -> a
 debugTrace' s x = if debug' then trace s x else x

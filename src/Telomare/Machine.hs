@@ -25,7 +25,7 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Telomare.IR.Base
 import Telomare.PrettyPrint
-import Telomare.Size.IR
+import Telomare.Size.IR hiding (InputRestrictions (..))
 
 debug :: Bool
 debug = False

@@ -45,6 +45,8 @@ library
                      , Telomare.PrettyPrint.Indent
                      , Telomare.Resolve
                      , Telomare.Size
+                     , Telomare.SpaceBound
+                     , Telomare.Space.Static
                      , Telomare.Size.IR
                      , Telomare.TypeCheck
                      , Telomare.Util
@@ -188,7 +190,8 @@ test-suite telomare-sizing-test
                      , RunModeTests
                      , SizingTests
                      , SpaceTests
-  build-depends:       base
+  build-depends:       QuickCheck
+                     , base
                      , bytestring
                      , containers
                      , hspec

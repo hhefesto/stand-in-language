@@ -13,3 +13,7 @@ main = hspec $ do
   conformanceSpec
   spaceSpec
   sessionParitySpec
+  boundSpec
+  boundLawSpec
+  staticFixtureSpec
+  staticVsMeasuredSpec

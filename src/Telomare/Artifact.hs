@@ -33,6 +33,7 @@ module Telomare.Artifact
   , isArtifactPath
   ) where
 
+import Control.Monad (replicateM)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.Binary.Get (Get, getInt64le, getLazyByteString, getWord8,
                         runGetOrFail)
@@ -43,6 +44,7 @@ import Data.Functor.Foldable (cata, embed, project)
 import Data.List (sortOn)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Numeric.Natural (Natural)
 import System.FilePath (takeExtension)
 
 import Telomare.IR.Base
@@ -50,6 +52,7 @@ import Telomare.IR.Core
 import Telomare.IR.Loc
 import Telomare.Size (SizingReport (..))
 import Telomare.Size.IR (SizedRecursion (..))
+import Telomare.SpaceBound (Affine (..), SpaceBound (..))
 
 -- |A program with its sizing already done.
 data Artifact = Artifact
@@ -71,7 +74,7 @@ artifactMagic = BL.pack [0x54, 0x45, 0x4C, 0x43] -- "TELC"
 -- |Bumped whenever the encoding changes, which invalidates older files rather
 -- than misreading them.
 artifactVersion :: Int
-artifactVersion = 2
+artifactVersion = 3
 
 telcExtension :: String
 telcExtension = ".telc"
@@ -227,12 +230,68 @@ putReport r = do
   putMap putToken (putMaybe putInt') (unSizedRecursion (sizingReportCounts r))
   putMap putToken putLocTag (sizingReportLocs r)
   putInt' (sizingReportBudget r)
+  putSpace (sizingReportSpace r)
 
 getReport :: Get SizingReport
 getReport = SizingReport . SizedRecursion
   <$> getMap getToken (getMaybe getInt')
   <*> getMap getToken getLocTag
   <*> getInt'
+  <*> getSpace
+  <*> pure Nothing -- the walk's statistics are not stored, only its bound
+
+-- The space bound. Paths grow as 2^depth and a unary character is a hundred
+-- deep, so paths, coefficients and constants are written as numbers of any
+-- size rather than machine words.
+
+putSpace :: Either String SpaceBound -> Put
+putSpace = \case
+  Left why -> putWord8 0 >> putString why
+  Right (SpaceBound affines) -> putWord8 1 >> putMaybe (putList putAffine) affines
+
+getSpace :: Get (Either String SpaceBound)
+getSpace = getWord8 >>= \case
+  0 -> Left <$> getString
+  1 -> Right . SpaceBound <$> getMaybe (getList getAffine)
+  n -> fail $ "unknown space bound tag " <> show n
+
+putAffine :: Affine -> Put
+putAffine a = do
+  putMap putInteger putNatural (affCoeffs a)
+  putNatural (affConst a)
+
+getAffine :: Get Affine
+getAffine = Affine <$> getMap getInteger getNatural <*> getNatural
+
+-- |A natural of any size: its big-endian base-256 digits, length-prefixed.
+putNatural :: Natural -> Put
+putNatural n = do
+  let bytes = digits n []
+  putInt' (length bytes)
+  mapM_ putWord8 bytes
+  where
+    digits 0 acc = acc
+    digits m acc = digits (m `div` 256) (fromIntegral (m `mod` 256) : acc)
+
+getNatural :: Get Natural
+getNatural = do
+  n <- getInt'
+  assemble 0 <$> replicateM n getWord8
+  where
+    assemble acc []       = acc
+    assemble acc (w : ws) = assemble (acc * 256 + fromIntegral w) ws
+
+-- |A sign byte, then the magnitude.
+putInteger :: Integer -> Put
+putInteger i = do
+  putWord8 (if i < 0 then 1 else 0)
+  putNatural (fromInteger (abs i))
+
+getInteger :: Get Integer
+getInteger = do
+  negative <- (== 1) <$> getWord8
+  n <- toInteger <$> getNatural
+  pure $ if negative then negate n else n
 
 -- Terms.
 
