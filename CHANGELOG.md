@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+* Telomare is being ported to Bend 2. The Haskell implementation was
+  removed after the tag `haskell-final`: the library, the `telomare`,
+  `telomare-repl` and `telomare-lsp` executables, the test suites, the
+  benches, `telomare.cabal` and the Haskell tooling (hlint, stylish-haskell,
+  HLS, the `format`/`format-lint`/`lsp`/`repl` apps, the haddock release job).
+  What haskell-final printed for each example program and mode is recorded in
+  `test/golden/` (`run.sh record|check`), and the port is checked against it.
+  The port keeps the interaction-net runtime only; the reference evaluator,
+  the non-IC `--meter` and `--fast` are not ported.
+* The flake builds Bend instead of Haskell: `bend` comes from
+  `github:bendlang/bend`, the rest still from corepkgs (`haskell-pkgs` left
+  the lock). `nix flake check` checks every module under `bend/` and runs
+  `bend/tests/` as native binaries; the pre-commit hook runs the same module
+  check. `bend/Lexical.bend` is the first ported module.
 * Reorganized the library into compiler-stage modules: `Telomare.Parse`,
   `Telomare.Expand`, `Telomare.Desugar`, `Telomare.Resolve`,
   `Telomare.TypeCheck`, `Telomare.Size` (+ `.IR`) with the shared

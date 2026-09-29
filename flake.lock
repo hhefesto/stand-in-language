@@ -1,5 +1,23 @@
 {
   "nodes": {
+    "bend": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1790702137,
+        "narHash": "sha256-hz1lL1gzrq0poo5J7kpDU91uFsz97cMKzNvbKsv8WwQ=",
+        "owner": "bendlang",
+        "repo": "bend",
+        "rev": "018751270e800bc222a93dad7f257083ee53a5f7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bendlang",
+        "repo": "bend",
+        "type": "github"
+      }
+    },
     "corepkgs": {
       "inputs": {
         "nix-lib": "nix-lib",
@@ -20,22 +38,6 @@
         "type": "github"
       }
     },
-    "haskell-pkgs": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1790439774,
-        "narHash": "sha256-upEaNx9c9/7NPy56IyVTHTCYPjJRzTpHe4Y8H6I7g90=",
-        "owner": "ekala-project",
-        "repo": "haskell-pkgs",
-        "rev": "b466fca502c60fb53d19fb7dbd958c44cb4c03f2",
-        "type": "github"
-      },
-      "original": {
-        "owner": "ekala-project",
-        "repo": "haskell-pkgs",
-        "type": "github"
-      }
-    },
     "nix-lib": {
       "locked": {
         "lastModified": 1787401631,
@@ -51,10 +53,26 @@
         "type": "github"
       }
     },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1790578696,
+        "narHash": "sha256-ZoxIApko70jCdbH3l20HWXOBaT2HZd87orzd2yJ9dVE=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "7a0f122f5090cf4c2ade2a13a0e229d4e19ba71f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
-        "corepkgs": "corepkgs",
-        "haskell-pkgs": "haskell-pkgs"
+        "bend": "bend",
+        "corepkgs": "corepkgs"
       }
     },
     "systems": {

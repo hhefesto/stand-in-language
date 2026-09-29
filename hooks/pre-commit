@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Format and lint exactly what CI checks: the tracked Haskell files.
-# `nix run .#format` applies stylish-haskell in place and fails on hlint
-# hints, so a lint failure aborts the commit here via `set -e`.
-echo "Formatting and linting (nix run .#format):"
-diff_before="$(git diff)"
-nix run .#format
-diff_after="$(git diff)"
-
-if [ "$diff_before" != "$diff_after" ]; then
-    echo ""
-    echo "stylish-haskell reformatted files that were staged for this commit."
-    echo "Review and re-stage them, then commit again:"
-    git diff --name-only -- '*.hs'
-    exit 1
-fi
-echo "Finished formatting and linting"
+# Check every Bend module before it is committed: types, termination and
+# laws, the same check `nix flake check` runs. Bend has no formatter yet.
+echo "Checking the Bend modules (bend bend/Everything.bend --check-only):"
+BEND_NO_TELEMETRY=1 nix run .#bend -- bend/Everything.bend --check-only

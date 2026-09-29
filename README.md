@@ -15,6 +15,26 @@ A virtual machine with a simple grammar evolved from simply typed lambda calculu
 ## Warning
 This project is in active development. Do expect bugs and general trouble, and please let us know if you run into any by creating a new issue if one does not already exist.
 
+## Status: moving to Bend
+
+Telomare is being rewritten in [Bend 2](https://github.com/bendlang/bend). The
+Haskell implementation was removed after the tag `haskell-final`, the last
+commit that has it. The port keeps one runtime, the interaction-net runtime
+(`--ic`). haskell-final's other three runtimes are not coming back: the
+reference evaluator behind the plain run, the REPL and the LSP; the metered
+evaluator behind `--meter` without `--ic`; and `--fast`.
+
+Until the Bend `telomare` command lands, the sections below describe what
+haskell-final does. `test/golden/` records exactly what it printed for each
+example program and mode, and the port is checked against those recordings.
+To run haskell-final itself:
+
+```sh
+$ git worktree add ../telomare-haskell-final haskell-final
+$ cd ../telomare-haskell-final && nix build --accept-flake-config .#telomare
+$ ./result/bin/telomare tictactoe.tel
+```
+
 ## Quick Start
 
 1. Clone this repository and change directory to it:
@@ -33,31 +53,30 @@ This project is in active development. Do expect bugs and general trouble, and p
    $ cachix use ekala-corepkgs
    ```
    The build comes from [ekapkgs](https://github.com/ekala-project/ekapkgs-roadmap)
-   rather than nixpkgs: `corepkgs` for the base system and the GHC 9.10.3
-   bindist, `haskell-pkgs` for the Hackage snapshot. `telomare` caches
-   everything the flake builds, the compiler included; `ekala-corepkgs` holds
-   the base system. The flake names both caches in its `nixConfig`, so
-   accepting that when Nix asks does the same job. (Maintainers fill the
-   `telomare` cache with `nix run .#push-cachix`, which publishes the package,
-   its checks and apps, and both development shells, and uses the `cachix`
-   and `nix` already on your PATH.)
-4. Enter a Nix shell. This will setup an environment where all external dependencies will be available (such as `cabal` for building):
+   rather than nixpkgs: `corepkgs` supplies the base system. The one
+   exception is `bend`, which comes from Bend's own flake and brings that
+   flake's nixpkgs, so its closure comes from cache.nixos.org. `telomare`
+   caches everything this flake builds; `ekala-corepkgs` holds the base
+   system. The flake names both caches in its `nixConfig`, so accepting that
+   when Nix asks does the same job. (Maintainers fill the `telomare` cache
+   with `nix run .#push-cachix`, which publishes the package, its checks and
+   apps, and the development shell, and uses the `cachix` and `nix` already
+   on your PATH.)
+4. Enter a Nix shell. It provides `bend`, pinned by the flake:
    ```sh
    $ nix develop # or nix develop -c zsh
-   $ nix develop .#full # the same plus haskell-language-server, hlint, stylish-haskell and ghcid
    ```
    (`nix develop` takes its interactive bash from whatever your flake registry
-   calls `nixpkgs`; that is Nix's doing, not this flake's, which has no nixpkgs
-   input.)
-5. Build the project:
+   calls `nixpkgs`. That is Nix's doing, not this flake's, which has no
+   nixpkgs input of its own.)
+5. Check the port. Every module under `bend/` is type-checked, checked for
+   termination and has its laws proven, and every test under `bend/tests/` is
+   compiled to a native binary and run:
    ```sh
-   $ cabal build # or nix build
+   $ bend bend/Everything.bend   # prints ALL PROOFS CHECK
+   $ nix flake check
    ```
-6. Run the tictactoe example and start playing with a friend (or run your own telomare file):
-   ```sh
-   $ cabal run telomare -- tictactoe.tel # or nix run . -- tictactoe.tel
-   ```
-7. Profit!
+6. Profit!
 
 ## Resource reporting
 
@@ -72,7 +91,7 @@ knows without running the program, and `--meter`, which says what one run
 actually cost.
 
 ```sh
-$ cabal run telomare -- --certificate simpleplus.tel
+$ telomare --certificate simpleplus.tel
 recursion sites (iterations, over every input):
   Prelude:30:18 (#0)     <= 11
   Prelude:48:23 (#1)     <= 7
@@ -102,7 +121,7 @@ term nodes built. Those are measurements of one run, not predictions about the
 next:
 
 ```sh
-$ printf '3 4\n' | cabal run telomare -- --meter simpleplus.tel
+$ printf '3 4\n' | telomare --meter simpleplus.tel
 steps (measured): 46652
 nodes built (measured): 13660
 ```
@@ -126,8 +145,8 @@ the same answer every time, because it runs the program over a *symbolic*
 input. So it need only happen once:
 
 ```sh
-$ cabal run telomare -- tictactoe.tel --compile      # ~70s, writes tictactoe.telc
-$ cabal run telomare -- tictactoe.telc               # starts immediately
+$ telomare tictactoe.tel --compile      # ~70s, writes tictactoe.telc
+$ telomare tictactoe.telc               # starts immediately
 ```
 
 A `.telc` file holds the sized program together with its counts and its
@@ -144,7 +163,7 @@ immediately, plays `tictactoe.tel` identically, and will even run programs the
 sizing pass rejects:
 
 ```sh
-$ printf '3 4\n' | cabal run telomare -- simpleplus.tel --fast --meter
+$ printf '3 4\n' | telomare simpleplus.tel --fast --meter
 enter two digits separated by a space
 3 plus 4 is 7
 function applications (measured): 2,560
@@ -170,19 +189,18 @@ it (default 16777216 applications and unrollings per iteration of `main`,
 why sizing remains the default.
 
 ## Telomare REPL
-1. Run:
-   ```sh
-   $ cd <your/local/proyect/location>/telomare
-   $ nix develop -c zsh
-   $ cabal run telomare-repl -- --haskell # or nix run .#repl
-   ```
-2. Profit!
+
+haskell-final ships `telomare-repl` (`result/bin/telomare-repl`, run beside
+`Prelude.tel`). The Bend port brings it back on the IC runtime, after the
+`telomare` command.
 
 ## Editor Support (LSP)
 
-Telomare ships a language server (`telomare-lsp`) and an Emacs major mode
+haskell-final ships a language server (`telomare-lsp`); the Emacs major mode
 under [`emacs-telomare-mode/`](emacs-telomare-mode/), with variants for
-Spacemacs, Doom, and vanilla Emacs.
+Spacemacs, Doom, and vanilla Emacs, is still here. The flake has no `lsp` app
+until the port brings the server back, so the setup below needs a
+haskell-final checkout for now.
 
 ### LSP capabilities
 
@@ -309,7 +327,8 @@ Telomare LSP version: 2026-05-22T10:14Z
 
 ## Git Hooks
 
-You can setup your git configuration to automatically format and look for lint suggestions. Just run:
+You can set up git to check every Bend module before each commit (`bend
+bend/Everything.bend --check-only`, the check `nix flake check` runs). Just run:
 
 ``` sh
 $ git config core.hooksPath hooks
@@ -370,27 +389,28 @@ name is the generated validator. This classification is not parser behavior.
 
 ## Compiler stages
 
-The library is organized so that modules delimit the standard stages of the
-pipeline. In pipeline order:
+The port follows haskell-final's stages, bottom-up, under `bend/`. Each stage
+is checked against the haskell-final tests it can answer and against the
+goldens in `test/golden/`.
 
-| Stage | Modules | What happens |
+| Stage | haskell-final modules | Status |
 | --- | --- | --- |
-| Parse | `Telomare.Parse` | megaparsec grammar producing raw `ParsedSurfaceTerm` trees: no expansion, resolving, or semantic checks. Modules use `ModuleItem`; multi-pattern lambdas, refinement annotations, and list definitions remain as written. Complete public runners reject trailing input. |
-| Expand | `Telomare.Expand` | removes the `SugarTermF` fragment (`ParsedSurfaceTerm -> ExpandedSurfaceTerm`), eliminating `LamPatF`/`LetSugarF` by type: multi-pattern lambdas become nested lambdas with hygienic case destructuring, list definitions and UDT conventions expand into bindings, and refinement annotations fold into `CheckF`. Module imports remain typed `ImportDecl` values in `ExpandedModuleItem`. |
-| Desugar | `Telomare.Desugar` | binds and optimizes builtins and removes the case capability (`ExpandedSurfaceTerm -> DesugaredSurfaceTerm`), lowering cases to nested conditionals before resolution. |
-| Resolve | `Telomare.Resolve` | resolves typed module imports, scope-checks only `DesugaredSurfaceTerm`, performs de Bruijn conversion and hash folding, and lowers core terms (`splitExpr`: `Term2 -> Term3`). Documents the dual `process`/`processWlet` pipeline. |
-| Certify | `Telomare.EAL` | defer lifting and elementary-affine certification of `Term3`; publishes advisory capture layouts for the IC runtime. |
-| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, `Telomare.Machine` | telomare's distinguishing stage: `sizeTermM` abstractly interprets the program over symbolic input and infers a finite iteration count for every recursion site, then bakes the counts in (`Term3 -> CompiledExpr`). A program that cannot be sized does not compile. `Machine` is the shared step-algebra the sizing pass and the evaluators are assembled from. |
-| Evaluate | `Telomare.Eval.Reference`, `Telomare.Eval.Meter`, `Telomare.Fast` | the reference interpreter, the step-counting meter, and the fuel-based fast path (which skips sizing). |
-| Drive | `Telomare.Driver`, `Telomare.Artifact`, `Telomare.Certificate`, `Telomare.Levels` | orchestration (`compileModules`, `evalLoop`), `.telc` artifacts, and the static report. |
+| Lexical facts | `Telomare.Lexical` | ported: `bend/Lexical.bend` |
+| Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar`, `Telomare.PrettyPrint` | next |
+| Resolve | `Telomare.Resolve` | |
+| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | |
+| Static report | `Telomare.Levels`, `Telomare.Certificate` | |
+| Certify | `Telomare.EAL` | |
+| IC runtime and storage bounds | `Telomare.IC`, `Telomare.IC.*`, `Telomare.SpaceBound` | |
+| Drive | `Telomare.Artifact`, `Telomare.Driver`, the `telomare` command | |
+| REPL and LSP | `app/Repl.hs`, `app/LSP.hs`, on the IC runtime | |
 
-The IR vocabulary shared by all stages lives under `Telomare.IR.*`
-(`Loc`, `Base`, `Types`, `Surface`, `Core`, `Builder`), with the error
-types in `Telomare.Error` and pretty-printing in `Telomare.PrettyPrint`.
-`Telomare.Lexical` holds the lexical facts of the language — the reserved
-words, the identifier character classes, the comment delimiters — so that the
-parser and the language server cannot disagree about them, and
-`Telomare.Util` holds the few helpers that depend on no other Telomare module.
+Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and
+`Telomare.Fast`.
+
+`bend/Lexical.bend` holds the lexical facts of the language (the reserved
+words, the identifier character classes, the comment delimiters), so that the
+parser and the language server cannot disagree about them.
 
 ## Contributing
 If you'd like to contribute, please fork the repository and use a feature branch. Pull requests are warmly welcome.
@@ -417,12 +437,12 @@ duplication strategy the runtime was designed around; where the EAL pass has
 no layout for a body, that body copies generically.
 
 ```sh
-cabal run telomare -- simpleplus.tel --ic                     # run on the net
-cabal run telomare -- simpleplus.tel --ic --meter             # plus peaks and interactions
-cabal run telomare -- simpleplus.tel --ic --certificate       # bound or estimate, any input
-cabal run telomare -- simpleplus.tel --ic --compile -o /tmp/sp.telc
-cabal run telomare -- /tmp/sp.telc --ic --certificate         # the stored certificate
-cabal run telomare -- simpleplus.tel --ic --draw-net          # net and templates, as SVG
+telomare simpleplus.tel --ic                     # run on the net
+telomare simpleplus.tel --ic --meter             # plus peaks and interactions
+telomare simpleplus.tel --ic --certificate       # bound or estimate, any input
+telomare simpleplus.tel --ic --compile -o /tmp/sp.telc
+telomare /tmp/sp.telc --ic --certificate         # the stored certificate
+telomare simpleplus.tel --ic --draw-net          # net and templates, as SVG
 ```
 
 `--ic --draw-net` draws the prepared program as an SVG figure
