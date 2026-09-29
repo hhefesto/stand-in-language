@@ -1,0 +1,36 @@
+status 0
+--- stdout
+IC space estimate
+
+  What this estimates: the net's logical storage when this program runs
+  on the interaction-net runtime (--ic) on any finite Zero/Pair input.
+  The figures are an estimate, not a guarantee (see below). |input| is
+  the number of constructor cells (Zero and Pair nodes) of that input.
+
+  How it was computed: compositionally. The walk of the runtime's own
+  rules did not finish here (IC transition budget exhausted).
+  These figures instead charge every allocation the program's templates
+  allow, in any order of firing, times an estimated multiplier for
+  copying. Figures like these exist for every program, but they are
+  loose — often by many orders of magnitude — and not a proven bound:
+  the copy multiplier can undercount programs that copy code heavily,
+  such as towers of Church numerals. Read them as an order-of-growth
+  estimate, not as a guarantee or a prediction of the actual peak.
+
+  Estimated peak storage of one evaluation (a session of several
+  evaluations peaks at the largest of them):
+
+    agents         ≤ 4.78×10^11·|input| + 1.57×10^534
+    port entries   ≤ 1.44×10^12·|input| + 4.08×10^534
+    pending pairs  ≤ 1.44×10^12·|input| + 4.08×10^534
+
+  Agents are the nodes resident in the net, port entries the wire
+  endpoints it stores (stale ones included), and pending pairs the
+  interactions waiting on the worklist.
+
+  Figures over six digits are shown rounded up to three significant
+  figures; rounding up never shows less than the analysis computed.
+
+  Not counted: preparation workspace, readback of the result, Haskell
+  runtime overhead, GC and process memory.
+--- stderr

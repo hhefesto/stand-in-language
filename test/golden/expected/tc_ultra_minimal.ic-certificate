@@ -1,0 +1,56 @@
+status 0
+--- stdout
+IC space certificate
+
+  What this bounds: run this program on the interaction-net runtime
+  (--ic) on any finite Zero/Pair input, and the net's logical storage
+  stays within the figures below. |input| is the number of constructor
+  cells (Zero and Pair nodes) of that input.
+
+  How it was computed: a net walk. The analysis replayed the runtime's own
+  rules over a symbolic input, splitting wherever control depends on the
+  input's shape, and kept the worst peak over every split, plus a fixed
+  allowance for each unknown part of the input. Where the walk finishes,
+  as it did here, the figures are usually close to the real peak.
+
+  Peak storage of one evaluation (a session of several evaluations
+  peaks at the largest of them):
+
+    agents         ≤ 36·|input| + 1130
+    port entries   ≤ 108·|input| + 2894
+    pending pairs  ≤ 36·|input| + 647
+
+  Agents are the nodes resident in the net, port entries the wire
+  endpoints it stores (stale ones included), and pending pairs the
+  interactions waiting on the worklist.
+
+  The figures above fold every part of the input into the whole;
+  by part, where |input.left| counts only the cells of the input's
+  left subtree and input.left×63 folds 63 left steps, the analysis
+  established the tighter:
+
+    agents, the largest of 6 cases:
+      4·|input| + 559
+      4·|input.left| + 4·|input.right| + 505
+      4·|input.left.left| + 4·|input.left.right| + 503
+      12·|input.left.left| + 1130
+      12·|input.left.left| + 4·|input.left.left.left| + 4·|input.left.left.right| + 834
+      36·|input.left.left| + 535
+    port entries, the largest of 6 cases:
+      12·|input| + 1140
+      12·|input.left| + 12·|input.right| + 1016
+      12·|input.left.left| + 12·|input.left.right| + 1012
+      36·|input.left.left| + 2894
+      36·|input.left.left| + 12·|input.left.left.left| + 12·|input.left.left.right| + 1998
+      108·|input.left.left| + 1088
+    pending pairs, the largest of 6 cases:
+      4·|input| + 11
+      4·|input.left| + 4·|input.right| + 10
+      4·|input.left.left| + 4·|input.left.right| + 10
+      12·|input.left.left| + 647
+      12·|input.left.left| + 4·|input.left.left.left| + 4·|input.left.left.right| + 349
+      36·|input.left.left| + 45
+
+  Not counted: preparation workspace, readback of the result, Haskell
+  runtime overhead, GC and process memory.
+--- stderr

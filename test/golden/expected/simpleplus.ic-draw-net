@@ -1,0 +1,6 @@
+status 0
+--- stdout
+--- stderr
+wrote simpleplus.net.svg (entry 17 agents; 27 of 90 templates, 399 of 14,917 agents; --draw-limit 400)
+--- files
+0c159b20d7de4886f25e24e87fd50ec505d996f8328cd62d2cd6d8ea33628c92 147901 simpleplus.net.svg

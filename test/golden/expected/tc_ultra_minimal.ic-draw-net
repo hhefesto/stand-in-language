@@ -1,0 +1,6 @@
+status 0
+--- stdout
+--- stderr
+wrote tc_ultra_minimal.net.svg (entry 9 agents; 12 of 13 templates, 158 of 653 agents; --draw-limit 400)
+--- files
+15f465d19c3cf848ddedde95dd0040e087259aa62071c8fd94833b256cd31afa 57965 tc_ultra_minimal.net.svg

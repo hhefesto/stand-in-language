@@ -1,0 +1,43 @@
+status 0
+--- stdout
+1|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|2|3
+-+-+-
+4|5|6
+-+-+-
+7|8|9
+Player 1's turn
+please input number of square: 
+O|2|3
+-+-+-
+X|5|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+O|O|3
+-+-+-
+X|5|6
+-+-+-
+7|8|9
+Player 1's turn
+please input number of square: 
+O|O|3
+-+-+-
+X|X|6
+-+-+-
+7|8|9
+Player 2's turn
+please input number of square: 
+Player 2 wins!
+--- stderr
+IC interactions: 15168230
+IC logical storage peak: Resources {resourceAgents = 265483, resourcePorts = 579888, resourceWork = 342}
+IC static templates: Resources {resourceAgents = 45801, resourcePorts = 94592, resourceWork = 0}
+Excludes preparation workspace, readback, Haskell overhead, GC and RSS.

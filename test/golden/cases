@@ -1,0 +1,63 @@
+# The golden cases, read by run.sh (a bash file, sourced).
+#
+#   case_ NAME PROGRAM STDIN [ARGS...]   telomare ARGS on PROGRAM, fed STDIN
+#   repl_ NAME EXPR                      telomare-repl --expr EXPR
+#
+# STDIN takes printf %b escapes, one line per input the program asks for. The
+# port keeps the IC runtime only, so the cases are the interaction-net ones
+# plus the plain sized run, whose output is the semantics IC must reproduce,
+# and the static report. A program's cases share one directory, in order: its
+# `--ic --compile` writes the .telc the `telc` cases then run.
+
+# The smallest recursion: no input, one answer.
+case_ tc_ultra_minimal.run tc_ultra_minimal.tel ''
+case_ tc_ultra_minimal.certificate tc_ultra_minimal.tel '' --certificate
+case_ tc_ultra_minimal.ic tc_ultra_minimal.tel '' --ic
+case_ tc_ultra_minimal.ic-meter tc_ultra_minimal.tel '' --ic --meter
+case_ tc_ultra_minimal.ic-certificate tc_ultra_minimal.tel '' --ic --certificate
+case_ tc_ultra_minimal.ic-draw-net tc_ultra_minimal.tel '' --ic --draw-net
+case_ tc_ultra_minimal.ic-compile tc_ultra_minimal.tel '' --ic --compile
+case_ tc_ultra_minimal.telc-ic tc_ultra_minimal.telc '' --ic
+case_ tc_ultra_minimal.telc-ic-certificate tc_ultra_minimal.telc '' --ic --certificate
+
+# testchar.tel uses `not` without importing the Prelude, so the command line
+# rejects it; the test suite prepended the Prelude to reach its parity cases
+# ('A' odd, 'B' even: haskell-final's test/Spec.hs). One case keeps the error.
+case_ testchar.run testchar.tel 'A\n'
+
+# Two digits in, their sum out, over the Prelude; bad input aborts.
+case_ simpleplus.run simpleplus.tel '3 4\n'
+case_ simpleplus.run-carry simpleplus.tel '9 9\n'
+case_ simpleplus.run-abort simpleplus.tel '9 a\n'
+case_ simpleplus.certificate simpleplus.tel '' --certificate
+case_ simpleplus.ic simpleplus.tel '3 4\n' --ic
+case_ simpleplus.ic-carry simpleplus.tel '9 9\n' --ic
+case_ simpleplus.ic-abort simpleplus.tel '9 a\n' --ic
+case_ simpleplus.ic-meter simpleplus.tel '3 4\n' --ic --meter
+case_ simpleplus.ic-certificate simpleplus.tel '' --ic --certificate
+case_ simpleplus.ic-draw-net simpleplus.tel '' --ic --draw-net
+case_ simpleplus.ic-compile simpleplus.tel '' --ic --compile
+case_ simpleplus.telc-ic simpleplus.telc '3 4\n' --ic
+case_ simpleplus.telc-ic-certificate simpleplus.telc '' --ic --certificate
+
+# A whole game, player 1 taking the top row.
+case_ tictactoe.run tictactoe.tel '1\n4\n2\n5\n3\n'
+case_ tictactoe.certificate tictactoe.tel '' --certificate
+case_ tictactoe.ic tictactoe.tel '1\n4\n2\n5\n3\n' --ic
+case_ tictactoe.ic-meter tictactoe.tel '1\n4\n2\n5\n3\n' --ic --meter
+case_ tictactoe.ic-certificate tictactoe.tel '' --ic --certificate
+case_ tictactoe.ic-draw-net tictactoe.tel '' --ic --draw-net
+case_ tictactoe.ic-compile tictactoe.tel '' --ic --compile
+case_ tictactoe.telc-ic tictactoe.telc '1\n4\n2\n5\n3\n' --ic
+case_ tictactoe.telc-ic-certificate tictactoe.telc '' --ic --certificate
+
+# Where sizing stops (test/programs/limits/README.md).
+case_ unbounded-input-recursion.certificate test/programs/limits/unbounded-input-recursion.tel '' --certificate
+case_ unbounded-input-recursion.ic test/programs/limits/unbounded-input-recursion.tel '' --ic
+case_ over-budget-recursion.certificate test/programs/limits/over-budget-recursion.tel '' --certificate
+case_ over-budget-recursion.ic-certificate test/programs/limits/over-budget-recursion.tel '' --ic --certificate
+
+# The REPL over the Prelude (CI's smoke test is the first).
+repl_ repl.succ 'succ 7'
+repl_ repl.factorial 'c2d (factorial 4)'
+repl_ repl.pair '(4, 5)'

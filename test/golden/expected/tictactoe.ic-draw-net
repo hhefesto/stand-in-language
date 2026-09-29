@@ -1,0 +1,6 @@
+status 0
+--- stdout
+--- stderr
+wrote tictactoe.net.svg (entry 17 agents; 28 of 190 templates, 400 of 45,794 agents; --draw-limit 400)
+--- files
+2f001deb649f83c3ffc2ab38b016df3150f4d31664bf355078ed105a561c0ee8 148332 tictactoe.net.svg

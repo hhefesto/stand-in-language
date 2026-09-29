@@ -1,0 +1,5 @@
+status 0
+--- stdout
+enter two digits separated by a space
+9 plus 9 is 18
+--- stderr

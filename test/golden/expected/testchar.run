@@ -1,0 +1,4 @@
+status 1
+--- stdout
+--- stderr
+RE (missing definition "not" at line 2, column 52)

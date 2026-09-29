@@ -1,0 +1,65 @@
+status 0
+--- stdout
+static report: what the compiler knows without running the program
+
+recursion sites (iterations, over every input):
+  Prelude:30:18 (#0)     <= 79
+  Prelude:48:23 (#1)     <= 32
+  Prelude:62:24 (#2)     <= 10
+  Prelude:67:42 (#3)     <= 127
+  tictactoe:31:50 (#4)   <= 9
+  tictactoe:31:28 (#5)   <= 10
+  tictactoe:59:65 (#6)   <= 9
+  tictactoe:59:43 (#7)   <= 4
+  tictactoe:60:57 (#8)   <= 4
+  tictactoe:61:57 (#9)   <= 4
+  tictactoe:74:45 (#10)  <= 78
+  tictactoe:77:63 (#11)  <= 78
+  tictactoe:88:51 (#12)  <= 2
+  tictactoe:96:45 (#13)  <= 2
+
+sizing budget in force: 65536 unrollings
+
+recursion nesting (structural, approximate):
+  triple         function               levels
+  Prelude:11:17  Prelude.d2c            0, 1, 2
+  Prelude:39:13  Prelude.map            0, 1
+  Prelude:44:32  Prelude.foldr.fixed    0, 1, 2
+  Prelude:56:33  Prelude.zipWith.fixed  0, 1
+
+maximum nesting depth: 3
+
+bindings used below the level they were bound at:
+  tictactoe.main.input           !!  (2 levels below its binding)
+  tictactoe.main.placeString     !!  (2 levels below its binding)
+  tictactoe.whoWon.board         !!  (2 levels below its binding)
+  Prelude.d2c.b                  !  (1 level below its binding)
+  Prelude.d2c.f                  !  (1 level below its binding)
+  Prelude.dEqual.b               !  (1 level below its binding)
+  Prelude.dMinus.a               !  (1 level below its binding)
+  Prelude.foldr.f                !  (1 level below its binding)
+  Prelude.map.f                  !  (1 level below its binding)
+  Prelude.zipWith.f              !  (1 level below its binding)
+  tictactoe.fullBoard.board      !  (1 level below its binding)
+  tictactoe.main.boardIn         !  (1 level below its binding)
+  tictactoe.main.newBoard        !  (1 level below its binding)
+  tictactoe.main.oldBoard        !  (1 level below its binding)
+  tictactoe.main.oldState        !  (1 level below its binding)
+  tictactoe.main.place           !  (1 level below its binding)
+  tictactoe.main.placeOccupied   !  (1 level below its binding)
+  tictactoe.main.playerIn        !  (1 level below its binding)
+  tictactoe.main.validPlace      !  (1 level below its binding)
+  tictactoe.processInput.string  !  (1 level below its binding)
+  tictactoe.whoWon.combineRow    !  (1 level below its binding)
+  tictactoe.whoWon.doRow         !  (1 level below its binding)
+
+The two lists index differently: a count above is per instantiation (a
+recursion reached from two places is sized separately at each), while a
+row below is one {t, r, b} as written. They do not line up row by row.
+
+A site at level d has its test, recursion and last one level deeper.
+Several levels for one triple mean it is reached from several places.
+Levels are structural: a parameter applied as a function whose shape is
+unknown counts as level 0, so a level can be reported too shallow. They
+are not bounds, and not a termination argument -- the counts are.
+--- stderr

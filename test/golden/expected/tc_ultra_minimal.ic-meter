@@ -1,0 +1,8 @@
+status 0
+--- stdout
+O
+--- stderr
+IC interactions: 524
+IC logical storage peak: Resources {resourceAgents = 559, resourcePorts = 1140, resourceWork = 10}
+IC static templates: Resources {resourceAgents = 660, resourcePorts = 1348, resourceWork = 0}
+Excludes preparation workspace, readback, Haskell overhead, GC and RSS.

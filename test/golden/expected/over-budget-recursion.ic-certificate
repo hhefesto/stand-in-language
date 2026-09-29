@@ -1,0 +1,86 @@
+status 0
+--- stdout
+IC space certificate
+
+  What this bounds: run this program on the interaction-net runtime
+  (--ic) on any finite Zero/Pair input, and the net's logical storage
+  stays within the figures below. |input| is the number of constructor
+  cells (Zero and Pair nodes) of that input.
+
+  How it was computed: a net walk. The analysis replayed the runtime's own
+  rules over a symbolic input, splitting wherever control depends on the
+  input's shape, and kept the worst peak over every split, plus a fixed
+  allowance for each unknown part of the input. Where the walk finishes,
+  as it did here, the figures are usually close to the real peak.
+
+  Peak storage of one evaluation (a session of several evaluations
+  peaks at the largest of them):
+
+    agents         ≤ 724·|input| + 9572
+    port entries   ≤ 2172·|input| + 25216
+    pending pairs  ≤ 724·|input| + 6020
+
+  Agents are the nodes resident in the net, port entries the wire
+  endpoints it stores (stale ones included), and pending pairs the
+  interactions waiting on the worklist.
+
+  The figures above fold every part of the input into the whole;
+  by part, where |input.left| counts only the cells of the input's
+  left subtree and input.left×63 folds 63 left steps, the analysis
+  established the tighter:
+
+    agents, the largest of 16 cases:
+      (a sum over 71 input parts, coefficients totalling 724) + 9502
+      4·|input.left.left| + 9572
+      4·|input.left.left| + 4·|input.left×36| + 4·|input.left×35.right| + 6607
+      (a sum over 30 input parts, coefficients totalling 456) + 993
+      (a sum over 31 input parts, coefficients totalling 472) + 1011
+      (a sum over 32 input parts, coefficients totalling 488) + 1029
+      (a sum over 33 input parts, coefficients totalling 504) + 1047
+      (a sum over 34 input parts, coefficients totalling 520) + 1065
+      (a sum over 35 input parts, coefficients totalling 536) + 1083
+      (a sum over 34 input parts, coefficients totalling 548) + 1095
+      (a sum over 33 input parts, coefficients totalling 532) + 1077
+      (a sum over 32 input parts, coefficients totalling 516) + 1059
+      (a sum over 31 input parts, coefficients totalling 500) + 1041
+      (a sum over 30 input parts, coefficients totalling 484) + 1023
+      (a sum over 29 input parts, coefficients totalling 468) + 1005
+      (a sum over 28 input parts, coefficients totalling 452) + 987
+    port entries, the largest of 16 cases:
+      (a sum over 71 input parts, coefficients totalling 2172) + 25078
+      12·|input.left.left| + 25216
+      12·|input.left.left| + 12·|input.left×36| + 12·|input.left×35.right| + 13352
+      (a sum over 30 input parts, coefficients totalling 1368) + 2278
+      (a sum over 31 input parts, coefficients totalling 1416) + 2322
+      (a sum over 32 input parts, coefficients totalling 1464) + 2366
+      (a sum over 33 input parts, coefficients totalling 1512) + 2410
+      (a sum over 34 input parts, coefficients totalling 1560) + 2454
+      (a sum over 35 input parts, coefficients totalling 1608) + 2498
+      (a sum over 34 input parts, coefficients totalling 1644) + 2526
+      (a sum over 33 input parts, coefficients totalling 1596) + 2482
+      (a sum over 32 input parts, coefficients totalling 1548) + 2438
+      (a sum over 31 input parts, coefficients totalling 1500) + 2394
+      (a sum over 30 input parts, coefficients totalling 1452) + 2350
+      (a sum over 29 input parts, coefficients totalling 1404) + 2306
+      (a sum over 28 input parts, coefficients totalling 1356) + 2262
+    pending pairs, the largest of 16 cases:
+      (a sum over 71 input parts, coefficients totalling 724) + 6020
+      4·|input.left.left| + 4·|input.left×36| + 4·|input.left×35.right| + 309
+      (a sum over 30 input parts, coefficients totalling 456) + 573
+      (a sum over 31 input parts, coefficients totalling 472) + 593
+      (a sum over 32 input parts, coefficients totalling 488) + 613
+      (a sum over 33 input parts, coefficients totalling 504) + 633
+      (a sum over 34 input parts, coefficients totalling 520) + 653
+      (a sum over 35 input parts, coefficients totalling 536) + 673
+      (a sum over 34 input parts, coefficients totalling 544) + 691
+      (a sum over 34 input parts, coefficients totalling 548) + 688
+      (a sum over 33 input parts, coefficients totalling 532) + 668
+      (a sum over 32 input parts, coefficients totalling 516) + 648
+      (a sum over 31 input parts, coefficients totalling 500) + 628
+      (a sum over 30 input parts, coefficients totalling 484) + 608
+      (a sum over 29 input parts, coefficients totalling 468) + 588
+      (a sum over 28 input parts, coefficients totalling 452) + 568
+
+  Not counted: preparation workspace, readback of the result, Haskell
+  runtime overhead, GC and process memory.
+--- stderr

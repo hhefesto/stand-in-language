@@ -1,0 +1,6 @@
+status 0
+--- stdout
+enter two digits separated by a space
+runtime error:
+Aborted, user abort: invalid input
+--- stderr

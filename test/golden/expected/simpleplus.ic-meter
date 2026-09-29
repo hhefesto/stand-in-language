@@ -1,0 +1,9 @@
+status 0
+--- stdout
+enter two digits separated by a space
+3 plus 4 is 7
+--- stderr
+IC interactions: 1517868
+IC logical storage peak: Resources {resourceAgents = 18579, resourcePorts = 38826, resourceWork = 82}
+IC static templates: Resources {resourceAgents = 14924, resourcePorts = 30960, resourceWork = 0}
+Excludes preparation workspace, readback, Haskell overhead, GC and RSS.
