@@ -44,6 +44,11 @@ case_ simpleplus.telc-ic-certificate simpleplus.telc '' --ic --certificate
 case_ tictactoe.run tictactoe.tel '1\n4\n2\n5\n3\n'
 case_ tictactoe.certificate tictactoe.tel '' --certificate
 case_ tictactoe.ic tictactoe.tel '1\n4\n2\n5\n3\n' --ic
+# The game haskell-final's test suite played (test/ResolverTests.hs, "test
+# tictactoe.tel": fullRunTicTacToeString is this transcript plus the test
+# harness's closing "done"), sized and on the net.
+case_ tictactoe.test-game tictactoe.tel '1\n9\n2\n8\n3\n'
+case_ tictactoe.test-game-ic tictactoe.tel '1\n9\n2\n8\n3\n' --ic
 case_ tictactoe.ic-meter tictactoe.tel '1\n4\n2\n5\n3\n' --ic --meter
 case_ tictactoe.ic-certificate tictactoe.tel '' --ic --certificate
 case_ tictactoe.ic-draw-net tictactoe.tel '' --ic --draw-net
