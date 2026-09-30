@@ -1000,9 +1000,16 @@ def prog(s: St) -> St & P:
 # Union-find
 # ----------
 
+def nx.of(end: Bool, +i: U32) -> Nx:
+  match end:
+    case True{}:
+      NEnd{}
+    case False{}:
+      NAt{i}
+
 def up.of(r: Array<U32> & U32) -> Array<U32> & Nx:
   (m, +p) = r
-  (m, Bool.pick(Nx, U32.is_zero(p), NEnd{}, NAt{(p - 1 : U32)}))
+  (m, nx.of(U32.is_zero(p), (p - 1 : U32)))
 
 # i's parent on the union-find whose parent is word f of a variable (1
 # bangs, 4 tags).
@@ -1354,7 +1361,7 @@ def tags.join.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, TE>, c: Cmp) -> Lis
                   join.eq(x, y) <> tags.join.go(f, xr, yr, heads(xr, yr))
 
 def tags.join(+xs: List<&2, TE>, +ys: List<&2, TE>) -> List<&2, TE>:
-  tags.join.go((List.length(&2, TE, xs) + List.length(&2, TE, ys) + 1n : Nat), xs, ys, heads(xs, ys))
+  tags.join.go(big(), xs, ys, heads(xs, ys))
 
 def pending.at(both: Bool, +xb: U32, +xt: U32, +yb: U32, +yt: U32, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
   match both:
@@ -1392,7 +1399,7 @@ def pending.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, TE>, c: Cmp, +loc: Lc
                   pending.one(x, y, loc, pending.go(f, xr, yr, heads(xr, yr), loc, rest))
 
 def pending(+xs: List<&2, TE>, +ys: List<&2, TE>, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
-  pending.go((List.length(&2, TE, xs) + List.length(&2, TE, ys) + 1n : Nat), xs, ys, heads(xs, ys), loc, rest)
+  pending.go(big(), xs, ys, heads(xs, ys), loc, rest)
 
 def union.tags.mb(+ra: U32, +rb: U32, +ma: List<&2, TE>, +loc: Lc.Loc, rest: List<&2, W>, r: St & List<&2, TE>) -> St & List<&2, W>:
   (s, +mb) = r
@@ -1430,7 +1437,7 @@ def union.tags(s: St, +a: U32, +b: U32, +loc: Lc.Loc, rest: List<&2, W>) -> St &
 
 def bind.of(r: Array<U32> & U32) -> Array<U32> & Nx:
   (m, +b) = r
-  (m, Bool.pick(Nx, U32.is_zero(b), NEnd{}, NAt{b}))
+  (m, nx.of(U32.is_zero(b), b))
 
 # What a type's walk reads next: a bound variable's binding; anything else
 # ends the walk.
@@ -1672,7 +1679,7 @@ def lookup.at(fuel: Nat, +ts: List<&2, TE>, +t: U32, c: Cmp) -> Sig:
 # The capture a class holds for one tag (its bang none() when there is
 # none).
 def lookup(+ts: List<&2, TE>, +t: U32) -> Sig:
-  lookup.at((List.length(&2, TE, ts) + 1n : Nat), ts, t, head.cmp(ts, t))
+  lookup.at(big(), ts, t, head.cmp(ts, t))
 
 def cap.one(no: Bool, +ct: U32, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> List<&2, W>:
   match no:
@@ -2095,7 +2102,7 @@ def diff.go(fuel: Nat, +xs: List<&2, U32>, +ys: List<&2, U32>, c: Cmp) -> List<&
                   diff.go(f, xr, yr, u.heads(xr, yr))
 
 def diff(+xs: List<&2, U32>, +ys: List<&2, U32>) -> List<&2, U32>:
-  diff.go((List.length(&2, U32, xs) + List.length(&2, U32, ys) + 1n : Nat), xs, ys, u.heads(xs, ys))
+  diff.go(big(), xs, ys, u.heads(xs, ys))
 
 def both.go(fuel: Nat, +xs: List<&2, U32>, +ys: List<&2, U32>, c: Cmp) -> List<&2, U32>:
   match fuel:
@@ -2120,7 +2127,53 @@ def both.go(fuel: Nat, +xs: List<&2, U32>, +ys: List<&2, U32>, c: Cmp) -> List<&
 
 # The union of two sorted lists.
 def both(+xs: List<&2, U32>, +ys: List<&2, U32>) -> List<&2, U32>:
-  both.go((List.length(&2, U32, xs) + List.length(&2, U32, ys) + 1n : Nat), xs, ys, u.heads(xs, ys))
+  both.go(big(), xs, ys, u.heads(xs, ys))
+
+def te.vs(x: TE, +y: U32) -> Cmp:
+  match x:
+    case TE{tag, cb, ct}:
+      U32.cmp(tag, y)
+
+def te.heads(xs: List<&2, TE>, ys: List<&2, U32>) -> Cmp:
+  match xs:
+    case Nil{}:
+      GT{}
+    case Con{x, xr}:
+      match ys:
+        case Nil{}:
+          LT{}
+        case Con{y, yr}:
+          te.vs(x, y)
+
+def te.key(x: TE) -> U32:
+  match x:
+    case TE{tag, cb, ct}:
+      tag
+
+def te.diff.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, U32>, c: Cmp) -> List<&2, U32>:
+  match fuel:
+    case 0n:
+      []
+    case 1n+f:
+      match xs:
+        case Nil{}:
+          []
+        case Con{+x, +xr}:
+          match ys:
+            case Nil{}:
+              keys(Con{x, xr})
+            case Con{+y, +yr}:
+              match c:
+                case LT{}:
+                  te.key(x) <> te.diff.go(f, xr, Con{y, yr}, te.heads(xr, Con{y, yr}))
+                case GT{}:
+                  te.diff.go(f, Con{x, xr}, yr, te.heads(Con{x, xr}, yr))
+                case EQ{}:
+                  te.diff.go(f, xr, yr, te.heads(xr, yr))
+
+# The tags of a class that a sorted list lacks.
+def te.diff(+xs: List<&2, TE>, +ys: List<&2, U32>) -> List<&2, U32>:
+  te.diff.go(big(), xs, ys, te.heads(xs, ys))
 
 # fnTagsOfCaptures: the code a capture position can hold, when it is
 # applied.
@@ -2411,6 +2464,26 @@ def site.ts(+k: U32, +site: Site, r: St & List<&2, U32>) -> St & Bool:
   (s, +ts) = r
   dispatch.new(s, k, site, ts)
 
+def dispatch.te.at(none: Bool, s: St, +k: U32, +site: Site, +ts: List<&2, TE>, new: List<&2, U32>) -> St & Bool:
+  match none:
+    case True{}:
+      (s, False{})
+    case False{}:
+      match site:
+        case Site{+fn, +env, +res, +depth, +loc, +done}:
+          dispatch.new.at(False{}, s, k, Site{fn, env, res, depth, loc, both(done, keys(ts))}, new)
+
+def dispatch.te(+new: List<&2, U32>, s: St, +k: U32, +site: Site, +ts: List<&2, TE>) -> St & Bool:
+  dispatch.te.at(List.is_empty(&2, U32, new), s, k, site, ts, new)
+
+# A code class at a site: the tags not dispatched there yet, compared
+# without listing the class's tags first.
+def site.caps(+k: U32, +site: Site, r: St & List<&2, TE>) -> St & Bool:
+  match site:
+    case Site{fn, env, res, depth, loc, +done}:
+      (s, +ts) = r
+      dispatch.te(te.diff(ts, done), s, k, site, ts)
+
 def site.loc(s: Site) -> Lc.Loc:
   match s:
     case Site{fn, env, res, depth, loc, done}:
@@ -2424,7 +2497,7 @@ def site.fn(s: Site) -> U32:
 def site.walked(k2: K, s: St, +k: U32, +site: Site, +w: U32) -> St & Bool:
   match k2:
     case KCode{}:
-      site.ts(k, site, tag.set(s, ix(w)))
+      site.caps(k, site, caps(s, ix(w)))
     case KCap{}:
       site.ts(k, site, fn.tags(s, ix(w)))
     case KPair{}:
@@ -3286,7 +3359,7 @@ def s.both.go(fuel: Nat, +xs: List<&2, String>, +ys: List<&2, String>, c: Cmp) -
 
 # The union of two sorted lists.
 def s.both(+xs: List<&2, String>, +ys: List<&2, String>) -> List<&2, String>:
-  s.both.go((List.length(&2, String, xs) + List.length(&2, String, ys) + 1n : Nat), xs, ys, str.heads(xs, ys))
+  s.both.go(big(), xs, ys, str.heads(xs, ys))
 def body.fi(b: Lf.Body) -> U32:
   match b:
     case Lf.Body{fi, body}:

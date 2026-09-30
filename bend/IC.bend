@@ -35,6 +35,61 @@ type Net is Type:
 type NI is Data:
   NI{+k: U32, +a: U32, +b: U32, +p1: U32, +p2: U32}
 
+# An agent's kind, as the rules see it (root, ext and free slots are
+# KNone).
+type AK is Data:
+  KNone{}
+  KEra{}
+  KZero{}
+  KGate{}
+  KAbort{}
+  KRef{}
+  KPair{}
+  KAborted{}
+  KDup{}
+  KSplit{}
+  KSetEnv{}
+  KApply{}
+  KScrut{}
+  KScrutAbort{}
+  KLeft{}
+  KRight{}
+  KStuck{}
+
+# The interaction rules (haskell-final's IC rules, by the agent they are
+# tried on first).
+type Rule is Data:
+  RNone{}
+  RSetEnvPair{}
+  RPass{}
+  RSetEnvNonPair{}
+  RApplyRef{}
+  RAwaitGate{}
+  RAwaitAbort{}
+  RPassApp{}
+  RApplyNonFunction{}
+  RSelectGate{}
+  RScrutPair{}
+  RNonDataGate{}
+  RSelectAbort{}
+  RAbortPair{}
+  RNonDataAbort{}
+  RProjectLeft{}
+  RNonPair{}
+  RProjectRight{}
+  RSplitPair{}
+  RSplitZero{}
+  RSplitAborted{}
+  RSplitStuck{}
+  RSplitNonPair{}
+  REraPair{}
+  REraAborted{}
+  REraLeaf{}
+  RDupPlanned{}
+  RDupAborted{}
+  RDupDup{}
+  RDupLeaf{}
+
 # A step of describe: an agent to look at, or what was read of it.
 type DJ is Data:
   DNode{+n: U32, +d: Nat}
@@ -195,22 +250,66 @@ def arity(k: U32) -> U32:
     case _:
       1
 
+# An agent kind (a word of the net) as the rules see it: a balanced tree
+# of comparisons, since a match on a U32's literal values compiles to a
+# test per bit.
+def ak.hi(+k: U32) -> AK:
+  Bool.pick(AK, U32.is_eq(k, 14), KScrut{}, Bool.pick(AK, U32.is_eq(k, 15), KScrutAbort{},
+    Bool.pick(AK, U32.is_eq(k, 16), KLeft{}, Bool.pick(AK, U32.is_eq(k, 17), KRight{},
+    Bool.pick(AK, U32.is_eq(k, 18), KStuck{}, KNone{})))))
+
+def ak.mid(+k: U32) -> AK:
+  Bool.pick(AK, U32.is_eq(k, 10), KDup{}, Bool.pick(AK, U32.is_eq(k, 11), KSplit{},
+    Bool.pick(AK, U32.is_eq(k, 12), KSetEnv{}, KApply{})))
+
+def ak.low(+k: U32) -> AK:
+  Bool.pick(AK, U32.is_eq(k, 3), KEra{}, Bool.pick(AK, U32.is_eq(k, 4), KZero{},
+    Bool.pick(AK, U32.is_eq(k, 5), KGate{}, KNone{})))
+
+def ak.lmid(+k: U32) -> AK:
+  Bool.pick(AK, U32.is_eq(k, 6), KAbort{}, Bool.pick(AK, U32.is_eq(k, 7), KRef{},
+    Bool.pick(AK, U32.is_eq(k, 8), KPair{}, KAborted{})))
+
+def ak.upper(high: Bool, +k: U32) -> AK:
+  match high:
+    case True{}:
+      ak.hi(k)
+    case False{}:
+      ak.mid(k)
+
+def ak.lower(high: Bool, +k: U32) -> AK:
+  match high:
+    case True{}:
+      ak.lmid(k)
+    case False{}:
+      ak.low(k)
+
+def ak.at(high: Bool, +k: U32) -> AK:
+  match high:
+    case True{}:
+      ak.upper(U32.is_ge(k, 14), k)
+    case False{}:
+      ak.lower(U32.is_ge(k, 6), k)
+
+def ak.of(+k: U32) -> AK:
+  ak.at(U32.is_ge(k, 10), k)
+
 # Values: what a consumer can meet (valueKind).
-def is.value(k: U32) -> Bool:
+def is.value(k: AK) -> Bool:
   match k:
-    case 4:
+    case KZero{}:
       True{}
-    case 5:
+    case KGate{}:
       True{}
-    case 6:
+    case KAbort{}:
       True{}
-    case 7:
+    case KRef{}:
       True{}
-    case 8:
+    case KPair{}:
       True{}
-    case 9:
+    case KAborted{}:
       True{}
-    case 18:
+    case KStuck{}:
       True{}
     case _:
       False{}
@@ -286,16 +385,10 @@ def peer(net: Net, +p: U32) -> Net & U32:
 def kind.of(net: Net, +n: U32) -> Net & U32:
   rd(net, (n * 8 : U32))
 
-def interactive(k: U32) -> Bool:
-  match k:
-    case 1:
-      False{}
-    case 2:
-      False{}
-    case 0:
-      False{}
-    case _:
-      True{}
+# Whether a principal port on this kind of agent makes an active pair
+# (root, ext and free slots do not).
+def interactive(+k: U32) -> Bool:
+  U32.is_gt(k, 2)
 
 def ctl.of(net: Net) -> Net & Ctl:
   match net:
@@ -557,102 +650,112 @@ def code.if(yes: Bool, c: U32) -> U32:
     case False{}:
       0
 
-def code.pass(+kb: U32, other: U32) -> U32:
-  match kb:
-    case 9:
-      2
-    case 18:
-      2
-    case _:
-      code.if(is.value(kb), other)
+def rule.if(yes: Bool, r: Rule) -> Rule:
+  match yes:
+    case True{}:
+      r
+    case False{}:
+      RNone{}
 
-# Which rule applies when agent kind ka meets kb, ka first (0: none).
-def rule.code(ka: U32, +kb: U32) -> U32:
-  match ka:
-    case 12:
-      match kb:
-        case 8:
-          1
-        case _:
-          code.pass(kb, 3)
-    case 13:
-      match kb:
-        case 7:
-          4
-        case 5:
-          5
-        case 6:
-          6
-        case 9:
-          7
-        case 18:
-          7
-        case _:
-          code.if(is.value(kb), 8)
-    case 14:
-      match kb:
-        case 4:
-          9
-        case 8:
-          10
-        case _:
-          code.pass(kb, 12)
-    case 15:
-      match kb:
-        case 4:
-          13
-        case 8:
-          14
-        case _:
-          code.pass(kb, 16)
-    case 16:
-      match kb:
-        case 4:
-          2
-        case 8:
-          18
-        case _:
-          code.pass(kb, 20)
-    case 17:
-      match kb:
-        case 4:
-          2
-        case 8:
-          22
-        case _:
-          code.pass(kb, 20)
-    case 11:
-      match kb:
-        case 8:
-          25
-        case 4:
-          26
-        case 9:
-          27
-        case 18:
-          28
-        case _:
-          code.if(is.value(kb), 29)
-    case 3:
-      match kb:
-        case 8:
-          30
-        case 9:
-          31
-        case _:
-          code.if(is.value(kb), 32)
-    case 10:
-      match kb:
-        case 8:
-          33
-        case 9:
-          34
-        case 10:
-          35
-        case _:
-          code.if(is.value(kb), 36)
+# A consumer passes aborted and stuck values along; other values get the
+# rule r.
+def rule.pass(+kb: AK, r: Rule) -> Rule:
+  match kb:
+    case KAborted{}:
+      RPass{}
+    case KStuck{}:
+      RPass{}
     case _:
-      0
+      rule.if(is.value(kb), r)
+
+# Which rule applies when an agent of kind ka meets one of kind kb, ka
+# first.
+def rule.of(ka: AK, +kb: AK) -> Rule:
+  match ka:
+    case KSetEnv{}:
+      match kb:
+        case KPair{}:
+          RSetEnvPair{}
+        case _:
+          rule.pass(kb, RSetEnvNonPair{})
+    case KApply{}:
+      match kb:
+        case KRef{}:
+          RApplyRef{}
+        case KGate{}:
+          RAwaitGate{}
+        case KAbort{}:
+          RAwaitAbort{}
+        case KAborted{}:
+          RPassApp{}
+        case KStuck{}:
+          RPassApp{}
+        case _:
+          rule.if(is.value(kb), RApplyNonFunction{})
+    case KScrut{}:
+      match kb:
+        case KZero{}:
+          RSelectGate{}
+        case KPair{}:
+          RScrutPair{}
+        case _:
+          rule.pass(kb, RNonDataGate{})
+    case KScrutAbort{}:
+      match kb:
+        case KZero{}:
+          RSelectAbort{}
+        case KPair{}:
+          RAbortPair{}
+        case _:
+          rule.pass(kb, RNonDataAbort{})
+    case KLeft{}:
+      match kb:
+        case KZero{}:
+          RPass{}
+        case KPair{}:
+          RProjectLeft{}
+        case _:
+          rule.pass(kb, RNonPair{})
+    case KRight{}:
+      match kb:
+        case KZero{}:
+          RPass{}
+        case KPair{}:
+          RProjectRight{}
+        case _:
+          rule.pass(kb, RNonPair{})
+    case KSplit{}:
+      match kb:
+        case KPair{}:
+          RSplitPair{}
+        case KZero{}:
+          RSplitZero{}
+        case KAborted{}:
+          RSplitAborted{}
+        case KStuck{}:
+          RSplitStuck{}
+        case _:
+          rule.if(is.value(kb), RSplitNonPair{})
+    case KEra{}:
+      match kb:
+        case KPair{}:
+          REraPair{}
+        case KAborted{}:
+          REraAborted{}
+        case _:
+          rule.if(is.value(kb), REraLeaf{})
+    case KDup{}:
+      match kb:
+        case KPair{}:
+          RDupPlanned{}
+        case KAborted{}:
+          RDupAborted{}
+        case KDup{}:
+          RDupDup{}
+        case _:
+          rule.if(is.value(kb), RDupLeaf{})
+    case _:
+      RNone{}
 
 def c.err(c: Ctl) -> U32:
   match c:
@@ -851,7 +954,7 @@ def alloc.reuse(+id: U32, +k: U32, +a: U32, +b: U32, r: Net & U32) -> Net & U32:
 
 def free(net: Net, +n: U32) -> Net:
   match net:
-    case Net{mem, tpl, +ctl}:
+    case Net{mem, tpl, ctl}:
       Net{mem[(n * 8 : U32)] <- 0, tpl, c.set.free(ctl, n)} 
 
 def push(net: Net, +a: U32, +b: U32) -> Net:
@@ -888,22 +991,21 @@ def connect(net: Net, +p: U32, +q: U32) -> Net:
   connect.push(wr(wr(net, idx(p), q), idx(q), p),
                U32.is_eq(slot.of(p), 0) && U32.is_eq(slot.of(q), 0), node.of(p), node.of(q))
 
-def spend.ctl(out: Bool, c: Ctl) -> Ctl:
+def spend.ctl(out: Bool, stk: List<&2, U32>, msgs: List<&2, String>, +nmsg: U32, +bump: U32, +free: U32, +label: U32,
+              +fuel: U32, +spent: U32, +err: U32, emsg: String, +cap: U32) -> Ctl:
   match out:
     case True{}:
-      match c:
-        case Ctl{stk, msgs, nmsg, bump, free, label, fuel, spent, err, emsg, cap}:
-          Ctl{stk, msgs, nmsg, bump, free, label, fuel, spent, 1, emsg, cap}
+      Ctl{stk, msgs, nmsg, bump, free, label, fuel, spent, 1, emsg, cap}
     case False{}:
-      match c:
-        case Ctl{stk, msgs, nmsg, bump, free, label, fuel, spent, err, emsg, cap}:
-          Ctl{stk, msgs, nmsg, bump, free, label, (fuel - 1 : U32), (spent + 1 : U32), err, emsg, cap}
+      Ctl{stk, msgs, nmsg, bump, free, label, (fuel - 1 : U32), (spent + 1 : U32), err, emsg, cap}
 
 # One interaction, or the error that fuel ran out (spend).
 def spend(net: Net) -> Net:
   match net:
-    case Net{mem, tpl, +ctl}:
-      Net{mem, tpl, spend.ctl(U32.is_zero(fuel.of(ctl)), ctl)}
+    case Net{mem, tpl, ctl}:
+      match ctl:
+        case Ctl{stk, msgs, nmsg, bump, free, label, +fuel, spent, err, emsg, cap}:
+          Net{mem, tpl, spend.ctl(U32.is_zero(fuel), stk, msgs, nmsg, bump, free, label, fuel, spent, err, emsg, cap)}
 
 # Allocation
 # ----------
@@ -954,15 +1056,19 @@ def alloc.pick(net: Net, reuse: Bool, +free: U32, +bump: U32, +cap: U32, +k: U32
 # next unused one.
 def alloc(net: Net, +k: U32, +a: U32, +b: U32) -> Net & U32:
   match net:
-    case Net{mem, tpl, +ctl}:
-      alloc.pick(Net{mem, tpl, ctl}, Bool.not(U32.is_zero(c.free(ctl))), c.free(ctl), c.bump(ctl),
-                 c.cap(ctl), k, a, b)
+    case Net{mem, tpl, ctl}:
+      match ctl:
+        case Ctl{stk, msgs, nmsg, +bump, +free, label, fuel, spent, err, emsg, +cap}:
+          alloc.pick(Net{mem, tpl, Ctl{stk, msgs, nmsg, bump, free, label, fuel, spent, err, emsg, cap}},
+                     Bool.not(U32.is_zero(free)), free, bump, cap, k, a, b)
 
 # Free: the agent's kind cleared and it heads the free list.
 def delete(net: Net, +n: U32) -> Net:
   match net:
-    case Net{mem, tpl, +ctl}:
-      free(Net{mem[(n * 8 + 1 : U32)] <- c.free(ctl), tpl, ctl}, n)
+    case Net{mem, tpl, ctl}:
+      match ctl:
+        case Ctl{stk, msgs, nmsg, bump, free, label, fuel, spent, err, emsg, cap}:
+          Net{(mem[(n * 8 + 1 : U32)] <- free)[(n * 8 : U32)] <- 0, tpl, Ctl{stk, msgs, nmsg, bump, n, label, fuel, spent, err, emsg, cap}}
 
 def c.add.label(c: Ctl, +n: U32) -> Ctl:
   match c:
@@ -972,8 +1078,10 @@ def c.add.label(c: Ctl, +n: U32) -> Ctl:
 # A label no Dup has yet (freshLabel).
 def fresh.label(net: Net) -> Net & U32:
   match net:
-    case Net{mem, tpl, +ctl}:
-      (Net{mem, tpl, c.add.label(ctl, 1)}, c.label(ctl))
+    case Net{mem, tpl, ctl}:
+      match ctl:
+        case Ctl{stk, msgs, nmsg, bump, free, +label, fuel, spent, err, emsg, cap}:
+          (Net{mem, tpl, Ctl{stk, msgs, nmsg, bump, free, (label + 1 : U32), fuel, spent, err, emsg, cap}}, label)
 
 def c.add.msg(c: Ctl, m: String) -> Ctl:
   match c:
@@ -1453,8 +1561,10 @@ def inst.body(+off: U32, +k: U32, +e: U32, +w: U32, +env: U32, +res: U32, +map: 
 
 def inst.labels(+off: U32, +k: U32, +e: U32, +w: U32, +env: U32, +res: U32, +map: U32, +l: U32, net: Net) -> Net:
   match net:
-    case Net{mem, tpl, +ctl}:
-      inst.body(off, k, e, w, env, res, map, c.label(ctl), Net{mem, tpl, c.add.label(ctl, l)})
+    case Net{mem, tpl, ctl}:
+      match ctl:
+        case Ctl{stk, msgs, nmsg, bump, free, +label, fuel, spent, err, emsg, cap}:
+          inst.body(off, k, e, w, env, res, map, label, Net{mem, tpl, Ctl{stk, msgs, nmsg, bump, free, (label + l : U32), fuel, spent, err, emsg, cap}})
 
 def inst.w(+off: U32, +k: U32, +e: U32, +l: U32, +env: U32, +res: U32, +map: U32, r: Net & U32) -> Net:
   (net, +w) = r
@@ -1488,87 +1598,87 @@ def instantiate(net: Net, +tid: U32, +env: U32, +res: U32) -> Net:
 # Dispatch
 # --------
 
-# Fire rule c: agent n (info i) meeting agent m (info j).
-def apply.rule(c: U32, net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
-  match c:
-    case 1:
+# Fire rule r: agent n (info i) meeting agent m (info j).
+def apply.rule(r: Rule, net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
+  match r:
+    case RSetEnvPair{}:
       r.setenv.pair(net, n, i, m, j)
-    case 2:
+    case RPass{}:
       r.pass(net, n, i, m)
-    case 3:
+    case RSetEnvNonPair{}:
       r.setenv.nonpair(net, n, i, m, j)
-    case 4:
+    case RApplyRef{}:
       instantiate(del2(spend(net), n, m), ni.a(j), ni.p1(i), ni.p2(i))
-    case 5:
+    case RAwaitGate{}:
       r.await(net, n, i, m, scrut())
-    case 6:
+    case RAwaitAbort{}:
       r.await(net, n, i, m, scrut.abort())
-    case 7:
+    case RPassApp{}:
       r.pass.app(net, n, i, m)
-    case 8:
+    case RApplyNonFunction{}:
       r.apply.nonfunction(net, n, i, m, j)
-    case 9:
+    case RSelectGate{}:
       r.select(net, n, i, m, 0, E.left.gate.ind())
-    case 10:
+    case RScrutPair{}:
       r.scrut.pair(net, n, i, m, j)
-    case 12:
+    case RNonDataGate{}:
       r.nondata(net, n, i, m, j, "gate scrutinee")
-    case 13:
+    case RSelectAbort{}:
       r.select(net, n, i, m, 2, E.abort.ind())
-    case 14:
+    case RAbortPair{}:
       r.abort.pair(net, n, i, m)
-    case 16:
+    case RNonDataAbort{}:
       r.nondata(net, n, i, m, j, "abort message")
-    case 18:
+    case RProjectLeft{}:
       r.project(net, n, i, m, ni.p1(j), ni.p2(j))
-    case 20:
+    case RNonPair{}:
       r.nonpair(net, n, i, m, j)
-    case 22:
+    case RProjectRight{}:
       r.project(net, n, i, m, ni.p2(j), ni.p1(j))
-    case 25:
+    case RSplitPair{}:
       r.split.pair(net, n, i, m, j)
-    case 26:
+    case RSplitZero{}:
       r.split.zero(net, n, i, m)
-    case 27:
+    case RSplitAborted{}:
       r.split.aborted(net, n, i, m, j)
-    case 28:
+    case RSplitStuck{}:
       r.split.stuck(net, n, i, m, j)
-    case 29:
+    case RSplitNonPair{}:
       r.split.nonpair(net, n, i, m, j)
-    case 30:
+    case REraPair{}:
       r.era.pair(net, n, m, j)
-    case 31:
+    case REraAborted{}:
       r.era.aborted(net, n, m, j)
-    case 32:
+    case REraLeaf{}:
       r.era.leaf(net, n, m)
-    case 33:
+    case RDupPlanned{}:
       r.dup.planned(net, n, i, m, j)
-    case 34:
+    case RDupAborted{}:
       r.dup.aborted(net, n, i, m, j)
-    case 35:
+    case RDupDup{}:
       r.dup.dup(net, n, i, m, j, U32.is_eq(ni.a(i), ni.a(j)))
-    case 36:
+    case RDupLeaf{}:
       r.dup.leaf(net, n, i, m, j)
-    case _:
+    case RNone{}:
       fail(net, "no rule")
 
-def fire.flip(zero: Bool, net: Net, +a: U32, +ia: NI, +b: U32, +ib: NI, +c: U32) -> Net:
-  match zero:
-    case True{}:
+def fire.flip(r: Rule, net: Net, +a: U32, +ia: NI, +b: U32, +ib: NI) -> Net:
+  match r:
+    case RNone{}:
       fail(net, "no interaction rule for " ++ show.ni(ia) ++ " meeting " ++ show.ni(ib))
-    case False{}:
-      apply.rule(c, net, b, ib, a, ia)
+    case _:
+      apply.rule(r, net, b, ib, a, ia)
 
-def fire.try(zero: Bool, net: Net, +a: U32, +ia: NI, +b: U32, +ib: NI, +c: U32) -> Net:
-  match zero:
-    case True{}:
-      fire.flip(U32.is_zero(rule.code(ni.k(ib), ni.k(ia))), net, a, ia, b, ib, rule.code(ni.k(ib), ni.k(ia)))
-    case False{}:
-      apply.rule(c, net, a, ia, b, ib)
+def fire.try(r: Rule, net: Net, +a: U32, +ia: NI, +b: U32, +ib: NI) -> Net:
+  match r:
+    case RNone{}:
+      fire.flip(rule.of(ak.of(ni.k(ib)), ak.of(ni.k(ia))), net, a, ia, b, ib)
+    case _:
+      apply.rule(r, net, a, ia, b, ib)
 
 def fire.b(+a: U32, +b: U32, +ia: NI, r: Net & NI) -> Net:
   (net, +ib) = r
-  fire.try(U32.is_zero(rule.code(ni.k(ia), ni.k(ib))), net, a, ia, b, ib, rule.code(ni.k(ia), ni.k(ib)))
+  fire.try(rule.of(ak.of(ni.k(ia)), ak.of(ni.k(ib))), net, a, ia, b, ib)
 
 def fire.a(+a: U32, +b: U32, r: Net & NI) -> Net:
   (net, +ia) = r
@@ -1603,13 +1713,16 @@ def pop.err(ok: Bool, net: Net, stk: List<&2, U32>) -> Popped:
     case True{}:
       pop.list(net, stk)
     case False{}:
-      PEmpty{net}
+      PEmpty{set.stk(net, stk)}
 
-# The next active pair, if it is still facing (pop).
+# The next active pair, if it is still facing (pop). The stack comes out
+# of the control record whole, which leaves the record unshared.
 def pop(net: Net) -> Popped:
   match net:
-    case Net{mem, tpl, +ctl}:
-      pop.err(U32.is_zero(c.err(ctl)), Net{mem, tpl, ctl}, c.stk(ctl))
+    case Net{mem, tpl, ctl}:
+      match ctl:
+        case Ctl{stk, msgs, nmsg, bump, free, label, fuel, spent, +err, emsg, cap}:
+          pop.err(U32.is_zero(err), Net{mem, tpl, Ctl{[], msgs, nmsg, bump, free, label, fuel, spent, err, emsg, cap}}, stk)
 
 # Fire active pairs until none is left, the fuel runs out or a rule fails
 # (reduce).
