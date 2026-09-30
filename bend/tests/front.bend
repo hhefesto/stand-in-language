@@ -289,7 +289,9 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       module.parses("Prelude", prelude), module.parses("tictactoe", ttt),
       module.parses("simpleplus", plus), module.parses("tc_ultra_minimal", tc),
       module.parses("testchar", tchar), module.parses("over-budget-recursion", over),
-      module.parses("unbounded-input-recursion", unb)])))
+      module.parses("unbounded-input-recursion", unb),
+      Result.is_done(&2, &2, E.ExpErr, List<&2, S.EItem>, expand(lines(["foo = \\a -> case a of",
+        "              0 -> a", "              x -> succ a", "", "main = \\i -> (\"Success\", 0)"])))])))
     IO.print(verdict("sites-tc_ultra_minimal", String.eq(
       sites(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "tc_ultra_minimal:6:25 (#0)")))

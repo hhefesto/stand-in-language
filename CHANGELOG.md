@@ -33,6 +33,13 @@
   the IC runtime's closure copying, so interaction counts match
   haskell-final's `--ic --meter` (`bend/{Sha256,Lift,EAL}.bend`,
   `bend/tests/eal.bend`).
+* The Bend `telomare` takes the whole language: `case` expressions (and
+  the pattern lambdas that expand to them) are lowered to nested ifs as
+  haskell-final did, and `#` (which user-defined types use for their tags)
+  becomes the same number haskell-final computed, the SHA-256 of the
+  term's Haskell `show`. Case programs, the Prelude's `Rational`, a user
+  `Nat` type and a qualified import give haskell-final's output and
+  interaction counts.
 * Reorganized the library into compiler-stage modules: `Telomare.Parse`,
   `Telomare.Expand`, `Telomare.Desugar`, `Telomare.Resolve`,
   `Telomare.TypeCheck`, `Telomare.Size` (+ `.IR`) with the shared

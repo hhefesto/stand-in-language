@@ -171,11 +171,26 @@ def hex(s: H8) -> String:
     case H8{a, b, c, d, e, f, g, h}:
       hex.word(a, hex.word(b, hex.word(c, hex.word(d, hex.word(e, hex.word(f, hex.word(g, hex.word(h, SNil{}))))))))
 
+def digest(+bs: List<&2, U32>) -> H8:
+  +n = U32.from_nat(List.length(&2, U32, bs))
+  blocks.at(U32.to_nat((U32.shrn(n, 6n) + 2 : U32)), initial(), block(words(pad(bs, n))))
+
 # The digest of a byte list.
 def bytes(+bs: List<&2, U32>) -> String:
-  +n = U32.from_nat(List.length(&2, U32, bs))
-  hex(blocks.at(U32.to_nat((U32.shrn(n, 6n) + 2 : U32)), initial(), block(words(pad(bs, n)))))
+  hex(digest(bs))
 
 # The digest of a string's UTF-8.
 def string(s: String) -> String:
   bytes(utf8(s))
+
+def word.bytes(+w: U32, acc: List<&2, U32>) -> List<&2, U32>:
+  U32.shrn(w, 24n) <> U32.and(U32.shrn(w, 16n), 255) <> U32.and(U32.shrn(w, 8n), 255) <> U32.and(w, 255) <> acc
+
+def digest.bytes(x: H8) -> List<&2, U32>:
+  match x:
+    case H8{a, b, c, d, e, f, g, h}:
+      word.bytes(a, word.bytes(b, word.bytes(c, word.bytes(d, word.bytes(e, word.bytes(f, word.bytes(g, word.bytes(h, []))))))))
+
+# The digest of a string's UTF-8, as its 32 bytes.
+def raw(s: String) -> List<&2, U32>:
+  digest.bytes(digest(utf8(s)))

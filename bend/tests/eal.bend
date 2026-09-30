@@ -12,8 +12,8 @@ import ../Text.bend as Tx
 # EAL: SHA-256 on the FIPS 180-4 vectors; haskell-final's EALTests, as far
 # as this port computes EAL (verdicts, per-body verdicts, env usage and
 # capture layouts; not the bangs, levels and speculation only the
-# certificate report shows); and two programs' capture layouts against
-# haskell-final's. One `ok NAME` line per group (FAIL NAME when it
+# certificate report shows); a UDT program's lifted hash (its `#`
+# constants) and two programs' capture layouts against haskell-final's. One `ok NAME` line per group (FAIL NAME when it
 # breaks). Run from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
@@ -276,6 +276,17 @@ def layouts.digest(r: Result<&2, &2, String, Fr.Terms>) -> String:
         case Fr.Terms{cert, run}:
           Sha.string(layouts.sized(Sz.size(65536, True{}, E.of.term3(run))))
 
+# The hash of a program's lifted main (on its main2Term3 term), which every
+# body's hash, and so every `#` constant, reaches.
+def main.hash(r: Result<&2, &2, String, Fr.Terms>) -> String:
+  match r:
+    case Fail{e}:
+      "error " ++ e
+    case Done{ts}:
+      match ts:
+        case Fr.Terms{cert, run}:
+          Lf.hash(lifted.main(Lf.defer.lift(cert)))
+
 # The report
 # ----------
 
@@ -364,6 +375,10 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
         "main = let g = {id, \\recur l -> \\accum -> recur (right l) accum, \\l -> \\accum -> accum} in g [1] 0")), "/ok"),
       String.ends_with(sized(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]")), "/ok"),
       sized.all(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]"))])))
+    IO.print(verdict("eal-lift-udt", String.eq(
+      main.hash(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"rat",
+        "import Prelude\nmain = \\input -> (if dEqual (left (right (rPlus (fromRational 1 2) (fromRational 1 2)))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
+      "5d784eccff14ff7b3cf59f65e38e2beb32a901e6491e98e2517a16d2ec9782cd")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "d621d23901b8b564a6e8c985ebb78a2c555d4237d77b2494b0c329dd7c4fd923")))

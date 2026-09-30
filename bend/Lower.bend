@@ -3,6 +3,8 @@ import ./Loc.bend as L
 import ./Syntax.bend as S
 import ./Term.bend as T
 import ./Resolve.bend as Rs
+import ./Show.bend as Sh
+import ./Sha256.bend as Sha
 
 # From the desugared program to Term2 (haskell-final's Telomare.Resolve),
 # two ways, as Haskell does:
@@ -90,8 +92,10 @@ def minus(bs: List<&2, String>, a: Set()) -> Set():
 def generated.var() -> L.Loc:
   L.Gen{"LamBase Cofree instance"}
 
-def case.unsupported() -> Rs.ResErr:
-  Rs.MissingDefinitions{["case expressions are not supported by the Bend port yet"]}
+# What desugaring leaves no trace of (a case, a pattern lambda): never
+# seen here.
+def not.term() -> Rs.ResErr:
+  Rs.MissingDefinitions{["(not a term)"]}
 
 def bind.names(bs: List<&2, S.Bind>) -> List<&2, String>:
   match bs:
@@ -492,7 +496,7 @@ def validate(+fuel: Nat, +env: Map<&2, T.T>, n: VN) -> R(VV):
                 x2 : VV <- validate(f, env, VTerm{x})
                 return VT{T.THash{loc, vt(x2)}}
             case _:
-              Fail{case.unsupported()}
+              Fail{not.term()}
 
 # de Bruijn indices (debruijinize, debruijinizeApp)
 # -------------------------------------------------
@@ -644,11 +648,109 @@ def close.lams(+fuel: Nat, +naked: Bool, t: T.T) -> T.T:
         case other:
           other
 
+# Hashes (generateAllHashes)
+# --------------------------
+
+def kind.show(k: T.LamKind) -> String:
+  match k:
+    case T.Open{}:
+      "Open ()"
+    case T.Closed{}:
+      "Closed ()"
+    case T.LetB{c}:
+      "LetBinding " ++ U32.show(U32.from_nat(c)) ++ " ()"
+
+def lp(paren: Bool) -> String:
+  Bool.pick(String, paren, "(", "")
+
+def rp(paren: Bool, acc: String) -> String:
+  match paren:
+    case True{}:
+      ")" ++ acc
+    case False{}:
+      acc
+
+# `show (forget term2)` onto acc: data-fix's Show (`Fix `, parenthesized as
+# an argument) over ParserTermF's Show1 instances, whose basic
+# constructors quote their text.
+def show(t: T.T, +paren: Bool, acc: String) -> String:
+  match t:
+    case T.TZero{a}:
+      lp(paren) ++ "Fix \"ZeroSF\"" ++ rp(paren, acc)
+    case T.TPair{a, x, y}:
+      lp(paren) ++ "Fix \"PairSF (\"" ++ show(x, False{}, "\", \"" ++ show(y, False{}, "\")\"" ++ rp(paren, acc)))
+    case T.TVar{a, name}:
+      lp(paren) ++ "Fix VarUPF " ++ Sh.string(name) ++ rp(paren, acc)
+    case T.TIdx{a, i}:
+      lp(paren) ++ "Fix VarUPF " ++ U32.show(U32.from_nat(i)) ++ rp(paren, acc)
+    case T.TApp{a, f, x}:
+      lp(paren) ++ "Fix AppUPF " ++ show(f, True{}, " " ++ show(x, True{}, rp(paren, acc)))
+    case T.TLam{a, k, name, body}:
+      lp(paren) ++ "Fix LamUPF " ++ kind.show(k) ++ " " ++ show(body, True{}, rp(paren, acc))
+    case T.TCheck{a, x, y}:
+      lp(paren) ++ "Fix CheckUPF " ++ show(x, True{}, " " ++ show(y, True{}, rp(paren, acc)))
+    case T.TIte{a, x, y, z}:
+      lp(paren) ++ "Fix ITEUPF " ++ show(x, True{}, " " ++ show(y, True{}, " " ++ show(z, True{}, rp(paren, acc))))
+    case T.TLeft{a, x}:
+      lp(paren) ++ "Fix LeftUPF " ++ show(x, True{}, rp(paren, acc))
+    case T.TRight{a, x}:
+      lp(paren) ++ "Fix RightUPF " ++ show(x, True{}, rp(paren, acc))
+    case T.TTrace{a, x}:
+      lp(paren) ++ "Fix TraceUPF " ++ show(x, True{}, rp(paren, acc))
+    case T.THash{a, x}:
+      lp(paren) ++ "Fix HashUPF " ++ show(x, True{}, rp(paren, acc))
+    case T.TChurch{a, n}:
+      lp(paren) ++ "Fix ChurchUPF " ++ U32.show(n) ++ rp(paren, acc)
+    case T.TRec{a, x, y, z}:
+      lp(paren) ++ "Fix UnsizedRecursionUPF " ++ show(x, True{}, " " ++ show(y, True{}, " " ++ show(z, True{}, rp(paren, acc))))
+    case T.TRep{a}:
+      lp(paren) ++ "Fix TUnsizedRepeaterF" ++ rp(paren, acc)
+
+# ints2t
+def ints(bs: List<&2, U32>, +loc: L.Loc) -> T.T:
+  match bs:
+    case Nil{}:
+      T.TZero{loc}
+    case Con{b, rest}:
+      T.TPair{loc, T.ints.i2t(U32.to_nat(b), loc), ints(rest, loc)}
+
+# generateAllHashes: every `#` (HashF), innermost first, becomes a number
+# for its term: the last 8 bytes of the SHA-256 of the term's `show`, as a
+# list, at the whole term's location.
+def hashes(t: T.T, +loc: L.Loc) -> T.T:
+  match t:
+    case T.THash{a, x}:
+      ints(List.drop(&2, U32, Sha.raw(show(hashes(x, loc), False{}, "")), 24n), loc)
+    case T.TPair{a, x, y}:
+      T.TPair{a, hashes(x, loc), hashes(y, loc)}
+    case T.TApp{a, f, x}:
+      T.TApp{a, hashes(f, loc), hashes(x, loc)}
+    case T.TLam{a, k, name, body}:
+      T.TLam{a, k, name, hashes(body, loc)}
+    case T.TCheck{a, x, y}:
+      T.TCheck{a, hashes(x, loc), hashes(y, loc)}
+    case T.TIte{a, x, y, z}:
+      T.TIte{a, hashes(x, loc), hashes(y, loc), hashes(z, loc)}
+    case T.TLeft{a, x}:
+      T.TLeft{a, hashes(x, loc)}
+    case T.TRight{a, x}:
+      T.TRight{a, hashes(x, loc)}
+    case T.TTrace{a, x}:
+      T.TTrace{a, hashes(x, loc)}
+    case T.TRec{a, x, y, z}:
+      T.TRec{a, hashes(x, loc), hashes(y, loc), hashes(z, loc)}
+    case other:
+      other
+
+def hashed(+t: T.T) -> T.T:
+  hashes(t, T.T.loc(t))
+
 # main2Term3's Term2.
 def process(t: S.Surf) -> R(T.T):
   do Result<&2, &2, Rs.ResErr, T.T>:
     v : VV <- validate(fuel(), Map.new(&2, T.T), VTerm{t})
-    debruijn(fuel(), False{}, [], vt(v))
+    t2 : T.T <- debruijn(fuel(), False{}, [], vt(v))
+    return hashed(t2)
 
 # annotateUnsizedCount (the let path)
 # -----------------------------------
@@ -1121,7 +1223,7 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
             case S.SChurch{a, k}:
               Done{LVT{T.TChurch{a, k}, Set.new()}}
             case _:
-              Fail{case.unsupported()}
+              Fail{not.term()}
 
 # The references left over at the top are the placeholders of recursion
 # sites outside every binding, each applied in turn (addRepeaters).
@@ -1156,7 +1258,7 @@ def cleanup(v: LV) -> R(T.T):
     case LVT{t, +refs}:
       add.repeaters(fuel(), ARGo{Nat.is_eq(Set.size(refs), 0n), refs, t})
     case _:
-      Fail{Rs.MissingDefinitions{["(not a term)"]}}
+      Fail{not.term()}
 
 # main2Term3let's Term2.
 def process.let(t: S.Surf) -> R(T.T):
@@ -1164,4 +1266,4 @@ def process.let(t: S.Surf) -> R(T.T):
     v : LV <- lta(fuel(), LNT{cap.top(annotate(fuel(), AT{t})(0n))})
     t1 : T.T <- cleanup(v)
     t2 : T.T <- debruijn(fuel(), True{}, [], t1)
-    return close.lams(fuel(), True{}, t2)
+    return hashed(close.lams(fuel(), True{}, t2))

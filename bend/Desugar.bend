@@ -3,10 +3,9 @@ import ./Loc.bend as L
 import ./Syntax.bend as S
 
 # Desugaring (haskell-final's Telomare.Desugar, desugarTerm): the builtins
-# bound around the program, the case helpers aliased, and applications of
-# builtins turned into primitives where the builtin is in scope. Lowering
-# `case` to nested ifs is stage 7's (lowerCases); until then a case reaches
-# the resolver as it is and is refused there.
+# bound around the program, the case helpers aliased, applications of
+# builtins turned into primitives where the builtin is in scope, and every
+# `case` lowered to nested ifs over the case helpers.
 
 type ON is Data:
   OT{+t: S.Surf}
@@ -351,6 +350,237 @@ def fuel() -> Nat:
 def optimize.builtins(t: S.Surf) -> S.Surf:
   vt(go(fuel(), builtin.names(), OT{t}))
 
-# desugarTerm, less lowerCases (stage 7).
+# Case lowering (lowerCases)
+# --------------------------
+
+# Paths into a pattern, each the projections from its root, first taken
+# first ("RL" is Left (Right x)): to its number leaves (findInts), string
+# leaves (findStrings) and pairs (pairRoute2Dirs), left to right.
+
+def ints.of(p: S.Pat, +path: String) -> List<&2, String>:
+  match p:
+    case S.PPair{a, b}:
+      List.append(&2, String, ints.of(a, path ++ "L"), ints.of(b, path ++ "R"))
+    case S.PInt{n}:
+      [path]
+    case S.PAnn{q, t}:
+      ints.of(q, path)
+    case _:
+      []
+
+def strs.of(p: S.Pat, +path: String) -> List<&2, String>:
+  match p:
+    case S.PPair{a, b}:
+      List.append(&2, String, strs.of(a, path ++ "L"), strs.of(b, path ++ "R"))
+    case S.PStr{t}:
+      [path]
+    case S.PAnn{q, t}:
+      strs.of(q, path)
+    case _:
+      []
+
+def pairs.of(p: S.Pat, +path: String) -> List<&2, String>:
+  match p:
+    case S.PPair{a, b}:
+      path <> List.append(&2, String, pairs.of(a, path ++ "L"), pairs.of(b, path ++ "R"))
+    case S.PAnn{q, t}:
+      pairs.of(q, path)
+    case _:
+      []
+
+def var.add(+k: String, +path: String, r: Map<&2, String> & Bool) -> Map<&2, String>:
+  (m, has) = r
+  match has:
+    case True{}:
+      m
+    case False{}:
+      Map.set(&2, String, m, k, path)
+
+# Each pattern variable's path; the leftmost occurrence wins
+# (findPatternVars).
+def vars.of(p: S.Pat, +path: String, m: Map<&2, String>) -> Map<&2, String>:
+  match p:
+    case S.PPair{a, b}:
+      vars.of(b, path ++ "R", vars.of(a, path ++ "L", m))
+    case S.PVar{name}:
+      +k = L.Name.text(name)
+      var.add(k, path, Map.has(&2, String, m, k))
+    case S.PAnn{q, t}:
+      vars.of(q, path, m)
+    case _:
+      m
+
+def at(path: String, +x: S.Surf) -> S.Surf:
+  match path:
+    case SCon{Chr{76}, rest}:
+      at(rest, S.SLeft{S.loc(x), x})
+    case SCon{c, rest}:
+      at(rest, S.SRight{S.loc(x), x})
+    case SNil{}:
+      x
+
+def ats(paths: List<&2, String>, +x: S.Surf) -> List<&2, S.Surf>:
+  match paths:
+    case Nil{}:
+      []
+    case Con{path, rest}:
+      at(path, x) <> ats(rest, x)
+
+# A pattern's literal skeleton as a term, variables and ignores as 0
+# (patternToTerm).
+def pattern.term(+anno: L.Loc, p: S.Pat) -> S.Surf:
+  match p:
+    case S.PPair{a, b}:
+      S.SPair{anno, pattern.term(anno, a), pattern.term(anno, b)}
+    case S.PInt{n}:
+      S.SInt{anno, n}
+    case S.PStr{t}:
+      S.SStr{anno, t}
+    case S.PAnn{q, t}:
+      pattern.term(anno, q)
+    case _:
+      S.SInt{anno, 0}
+
+# A helper's name, as the generated code refers to it (VarP).
+def helper(+name: String) -> S.Surf:
+  S.SVar{L.Gen{"LamBase Cofree instance"}, name}
+
+# AppP: at the function's location.
+def app(+f: S.Surf, x: S.Surf) -> S.Surf:
+  S.SApp{S.loc(f), f, x}
+
+def list.equal(a: S.Surf, b: S.Surf) -> S.Surf:
+  app(app(helper("__case_listEqual"), a), b)
+
+def pair.check.at(+a: L.Loc, p: S.Pat, +x: S.Surf) -> S.Surf:
+  app(app(app(S.SVar{a, "__case_foldl"}, helper("__case_and")), S.SInt{a, 1}), S.SList{a, ats(pairs.of(p, ""), x)})
+
+# pairStructureCheck: the value has a pair wherever the pattern does.
+def pair.check(p: S.Pat, +x: S.Surf) -> S.Surf:
+  pair.check.at(L.Gen{"pairStructureCheck"}, p, x)
+
+def none(xs: List<&2, String>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case Con{x, rest}:
+      False{}
+
+def matches.pick(noints: Bool, nostrs: Bool, +ra: L.Loc, ieq: S.Surf, seq: S.Surf, pc: S.Surf) -> S.Surf:
+  match noints:
+    case True{}:
+      app(app(S.SVar{ra, "__case_and"}, seq), pc)
+    case False{}:
+      match nostrs:
+        case True{}:
+          app(app(S.SVar{ra, "__case_and"}, ieq), pc)
+        case False{}:
+          app(app(app(S.SVar{ra, "__case_foldl"}, helper("__case_and")), S.SInt{ra, 1}), S.SList{ra, [ieq, seq, pc]})
+
+# Whether the value x matches pattern p: its number and string leaves are
+# the pattern's, and it has the pattern's pairs (at the alternative's
+# location ra; the leaf lists at the case's, anno).
+def matches(+anno: L.Loc, +ra: L.Loc, +p: S.Pat, +x: S.Surf) -> S.Surf:
+  +ns = ints.of(p, "")
+  +ss = strs.of(p, "")
+  matches.pick(none(ns), none(ss), ra,
+    list.equal(S.SList{anno, ats(ns, x)}, S.SList{anno, ats(ns, pattern.term(anno, p))}),
+    list.equal(S.SList{anno, ats(ss, x)}, S.SList{anno, ats(ss, pattern.term(anno, p))}),
+    pair.check(p, x))
+
+# The alternative's result with its pattern's variables bound, in name
+# order, to the parts of x they name (mkCaseAlternative).
+def alt.bound(ks: List<&2, Sigma<&2, &2, String, _ => String>>, +ra: L.Loc, +x: S.Surf, r: S.Surf) -> S.Surf:
+  match ks:
+    case Nil{}:
+      r
+    case Con{kv, rest}:
+      match kv:
+        case (k, path):
+          S.SApp{ra, S.SLam{ra, L.Name{ra, k}, alt.bound(rest, ra, x, r)}, at(path, x)}
+
+# The alternatives as nested ifs, the last else aborting
+# (case2annidatedIfs).
+def ifs(+anno: L.Loc, +x: S.Surf, alts: List<&2, S.Alt>) -> S.Surf:
+  match alts:
+    case Nil{}:
+      +xa = S.loc(x)
+      S.SIte{xa, S.SInt{xa, 1}, app(helper("__case_abort"), S.SStr{xa, "Non-exhaustive patterns in case"}), S.SInt{xa, 0}}
+    case Con{alt, rest}:
+      match alt:
+        case S.Alt{+p, +r}:
+          +ra = S.loc(r)
+          S.SIte{ra, matches(anno, ra, p, x),
+                 alt.bound(Map.to_list(&2, String, vars.of(p, "", Map.new(&2, String))), ra, x, r),
+                 ifs(anno, x, rest)}
+
+# Children first, every case lowered.
+def lower(+fuel: Nat, n: ON) -> OV:
+  match fuel:
+    case 0n:
+      VT{S.SZero{L.Unknown{}}}
+    case 1n+f:
+      match n:
+        case OT{t}:
+          match t:
+            case S.SApp{a, x, y}:
+              VT{S.SApp{a, vt(lower(f, OT{x})), vt(lower(f, OT{y}))}}
+            case S.SLam{a, v, body}:
+              VT{S.SLam{a, v, vt(lower(f, OT{body}))}}
+            case S.SPair{a, x, y}:
+              VT{S.SPair{a, vt(lower(f, OT{x})), vt(lower(f, OT{y}))}}
+            case S.SCheck{a, x, y}:
+              VT{S.SCheck{a, vt(lower(f, OT{x})), vt(lower(f, OT{y}))}}
+            case S.SIte{a, x, y, z}:
+              VT{S.SIte{a, vt(lower(f, OT{x})), vt(lower(f, OT{y})), vt(lower(f, OT{z}))}}
+            case S.SLeft{a, x}:
+              VT{S.SLeft{a, vt(lower(f, OT{x}))}}
+            case S.SRight{a, x}:
+              VT{S.SRight{a, vt(lower(f, OT{x}))}}
+            case S.STrace{a, x}:
+              VT{S.STrace{a, vt(lower(f, OT{x}))}}
+            case S.SHash{a, x}:
+              VT{S.SHash{a, vt(lower(f, OT{x}))}}
+            case S.SRec{a, x, y, z}:
+              VT{S.SRec{a, vt(lower(f, OT{x})), vt(lower(f, OT{y})), vt(lower(f, OT{z}))}}
+            case S.SLet{a, binds, body}:
+              VT{S.SLet{a, vbs(lower(f, OBs{binds})), vt(lower(f, OT{body}))}}
+            case S.SList{a, xs}:
+              VT{S.SList{a, vts(lower(f, OTs{xs}))}}
+            case S.SCase{a, x, alts}:
+              VT{ifs(a, vt(lower(f, OT{x})), vas(lower(f, OAs{alts})))}
+            case other:
+              VT{other}
+        case OTs{xs}:
+          match xs:
+            case Nil{}:
+              VTs{[]}
+            case Con{x, rest}:
+              VTs{vt(lower(f, OT{x})) <> vts(lower(f, OTs{rest}))}
+        case OBs{bs}:
+          match bs:
+            case Nil{}:
+              VBs{[]}
+            case Con{b, rest}:
+              match b:
+                case S.Bind{name, val}:
+                  VBs{S.Bind{name, vt(lower(f, OT{val}))} <> vbs(lower(f, OBs{rest}))}
+        case OAs{alts}:
+          match alts:
+            case Nil{}:
+              VAs{[]}
+            case Con{alt, rest}:
+              match alt:
+                case S.Alt{p, body}:
+                  VAs{S.Alt{p, vt(lower(f, OT{body}))} <> vas(lower(f, OAs{rest}))}
+        case OP{p}:
+          VP{p}
+        case OD{d}:
+          VT{S.SZero{L.Unknown{}}}
+
+def lower.cases(t: S.Surf) -> S.Surf:
+  vt(lower(fuel(), OT{t}))
+
+# desugarTerm.
 def desugar(t: S.Surf) -> S.Surf:
-  optimize.builtins(add.builtins(add.aliases(t)))
+  lower.cases(optimize.builtins(add.builtins(add.aliases(t))))

@@ -409,7 +409,7 @@ goldens in `test/golden/`.
 | Stage | haskell-final modules | Status |
 | --- | --- | --- |
 | Lexical facts | `Telomare.Lexical` | ported: `bend/Lexical.bend` |
-| Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend`, less `case`, `#` and qualified imports |
+| Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend` |
 | Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
 | Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend` |
 | Certify | `Telomare.EAL`, the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,EAL}.bend` (the verdict and the capture layouts; the bangs and levels only the static report shows are not) |

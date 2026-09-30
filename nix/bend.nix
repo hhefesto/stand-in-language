@@ -78,6 +78,9 @@ let
       "ic-fuel"
       "ic-laziness"
       "ic-omega"
+      "ic-case"
+      "ic-udt"
+      "ic-meter-case-udt"
       "ic-meter-tc_ultra_minimal"
       "ic-meter-simpleplus"
       "ic-meter-tictactoe"
@@ -94,6 +97,7 @@ let
       "eal-programs"
       "eal-pinned"
       "eal-sized"
+      "eal-lift-udt"
       "eal-layouts-tc_ultra_minimal"
       "eal-layouts-simpleplus"
     ];
