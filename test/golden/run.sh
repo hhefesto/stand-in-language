@@ -3,12 +3,13 @@
 # each case in test/golden/cases, one file per case under test/golden/expected.
 # The Bend port is measured against them.
 #
-#   test/golden/run.sh BIN_DIR record [PATTERN]   write expected/NAME
-#   test/golden/run.sh BIN_DIR check  [PATTERN]   compare, report PASS/FAIL
+#   test/golden/run.sh BIN_DIR record [PATTERN...]   write expected/NAME
+#   test/golden/run.sh BIN_DIR check  [PATTERN...]   compare, report PASS/FAIL
 #
-# BIN_DIR holds `telomare` (and `telomare-repl` for the repl cases). PATTERN is
-# a shell glob over case names, `*` by default. Run from anywhere; paths are
-# taken relative to the repository root.
+# BIN_DIR holds `telomare` (and `telomare-repl` for the repl cases). Each
+# PATTERN is a shell glob over case names; a case runs when any matches, and
+# with none every case runs. Run from anywhere; paths are taken relative to
+# the repository root.
 #
 # A case runs in a scratch directory holding its program and Prelude.tel,
 # because telomare loads `<Module>.tel` from the current directory. Cases of
@@ -19,12 +20,14 @@
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
-  echo "usage: $0 BIN_DIR record|check [PATTERN]" >&2
+  echo "usage: $0 BIN_DIR record|check [PATTERN...]" >&2
   exit 2
 fi
 bin_dir="$(cd "$1" && pwd)"
 mode="$2"
-pattern="${3:-*}"
+shift 2
+patterns=("$@")
+if [ "${#patterns[@]}" -eq 0 ]; then patterns=('*'); fi
 case "$mode" in
   record | check) ;;
   *)
@@ -68,8 +71,12 @@ program_dir() {
 run() {
   local name="$1" program="$2" input="$3"
   shift 3
-  # shellcheck disable=SC2053 # PATTERN is a glob on purpose
-  if [[ $name != $pattern ]]; then return 0; fi
+  local pattern wanted=false
+  for pattern in "${patterns[@]}"; do
+    # shellcheck disable=SC2053 # PATTERN is a glob on purpose
+    if [[ $name == $pattern ]]; then wanted=true; fi
+  done
+  if [ "$wanted" = false ]; then return 0; fi
   local dir out status
   dir="$(program_dir "$program")"
   out="$work/actual/$name"

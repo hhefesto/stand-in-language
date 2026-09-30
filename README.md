@@ -24,12 +24,22 @@ commit that has it. The port keeps one runtime, the interaction-net runtime
 reference evaluator behind the plain run, the REPL and the LSP; the metered
 evaluator behind `--meter` without `--ic`; and `--fast`.
 
-The Bend `telomare` command is the flake's default app (`nix run . --
-FILE.tel`), but until the stages below land it only opens the program and
-says it cannot compile it yet; meanwhile the sections below describe what
-haskell-final does. `test/golden/` records exactly what it printed for each
-example program and mode, and the port is checked against those recordings
-(`test/golden/run.sh BIN_DIR check`). To run haskell-final itself:
+The Bend `telomare` command is the flake's default app. It runs a program on
+the IC runtime, as haskell-final's `telomare FILE.tel --ic` did (`--ic` is
+accepted and changes nothing):
+
+```sh
+$ nix run . -- tictactoe.tel
+```
+
+haskell-final's other actions are not ported: `--certificate`, `--meter`,
+`--compile` and `.telc` programs, `--draw-net` and `--fast`. The sections
+below describe them as haskell-final has them. The EAL certification that
+haskell-final runs before sizing is not ported yet either (see "Compiler
+stages"). `test/golden/` records exactly what haskell-final printed for each
+example program and mode, and `nix flake check` runs the command on every case
+it covers (`test/golden/run.sh BIN_DIR check [PATTERN...]`). To run
+haskell-final itself:
 
 ```sh
 $ git worktree add ../telomare-haskell-final haskell-final
@@ -398,14 +408,16 @@ goldens in `test/golden/`.
 | Stage | haskell-final modules | Status |
 | --- | --- | --- |
 | Lexical facts | `Telomare.Lexical` | ported: `bend/Lexical.bend` |
-| Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar`, `Telomare.PrettyPrint` | next |
-| Resolve | `Telomare.Resolve` | |
-| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | |
-| Static report | `Telomare.Levels`, `Telomare.Certificate` | |
-| Certify | `Telomare.EAL` | |
-| IC runtime and storage bounds | `Telomare.IC`, `Telomare.IC.*`, `Telomare.SpaceBound` | |
-| Drive | `Telomare.Artifact`, `Telomare.Driver`, the `telomare` command | entry point: `bend/Main.bend` |
-| REPL and LSP | `app/Repl.hs`, `app/LSP.hs`, on the IC runtime | |
+| Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend`, less `case`, `#` and qualified imports |
+| Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
+| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend` |
+| Certify | `Telomare.EAL` | next |
+| IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying not yet guided by EAL |
+| Drive | `Telomare.Driver`, the `telomare` command | ported for running programs: `bend/{Session,Main}.bend` |
+| Static report | `Telomare.Levels`, `Telomare.Certificate` | not ported |
+| IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
+| Artifacts | `Telomare.Artifact` | not ported |
+| REPL and LSP | `app/Repl.hs`, `app/LSP.hs` | not ported |
 
 Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and
 `Telomare.Fast`.

@@ -15,14 +15,38 @@ let
     fileset = bendFiles;
   };
 
+  telFiles = lib.fileset.fileFilter (file: file.hasExt "tel") src;
+
   # The tests also read the Telomare programs the goldens run.
   testSrc = lib.fileset.toSource {
     root = src;
     fileset = lib.fileset.unions [
       bendFiles
-      (lib.fileset.fileFilter (file: file.hasExt "tel") src)
+      telFiles
     ];
   };
+
+  goldenSrc = lib.fileset.toSource {
+    root = src;
+    fileset = lib.fileset.unions [
+      (src + "/test/golden")
+      telFiles
+    ];
+  };
+
+  # The golden cases the port covers: runs on IC (the plain runs too, whose
+  # output is the same), and compile errors. The others are haskell-final's
+  # other actions (--certificate, --meter, --compile, .telc, --draw-net) and
+  # the REPL.
+  goldenPatterns = [
+    "*.run"
+    "*.run-*"
+    "*.ic"
+    "*.ic-abort"
+    "*.ic-carry"
+    "*.test-game"
+    "*.test-game-ic"
+  ];
 
   # Each test under bend/tests prints one `ok NAME` line per group it checks
   # (`FAIL NAME` when one breaks); these are the lines it must print, in order.
@@ -43,6 +67,18 @@ let
       "sites-tictactoe"
       "sites-limits"
       "testchar-error"
+    ];
+    ic = [
+      "ic-application"
+      "ic-projection"
+      "ic-duplication"
+      "ic-gates"
+      "ic-abort"
+      "ic-church"
+      "ic-fuel"
+      "ic-laziness"
+      "ic-omega"
+      "ic-meter-tictactoe"
     ];
     size = [
       "size-tc_ultra_minimal"
@@ -74,12 +110,22 @@ let
       chmod -R u+w .
       ${script}
     '';
-in
-{
+
   # The `telomare` command, bend/Main.bend compiled to a native binary.
   telomare = bendCommand "telomare" bendSrc ''
     mkdir -p $out/bin
     bend bend/Main.bend -o $out/bin/telomare
+  '';
+in
+{
+  inherit telomare;
+
+  # The command against what haskell-final printed (test/golden).
+  goldens = pkgs.runCommand "goldens" { } ''
+    cp -r ${goldenSrc}/. .
+    chmod -R u+w .
+    bash test/golden/run.sh ${telomare}/bin check ${lib.escapeShellArgs goldenPatterns}
+    touch $out
   '';
 
   # Every module type-checks, terminates and proves its laws.

@@ -20,6 +20,13 @@
   `bend/Main.bend` compiled to a native binary: it opens the program it is
   given and reports that the port cannot compile it yet. `nix flake check`
   builds it.
+* The Bend `telomare` runs programs: `telomare FILE.tel [--ic]` parses,
+  resolves and sizes the program in Bend and runs it on the IC runtime
+  (`bend/IC.bend`), printing each display and reading a line of input
+  between iterations, as haskell-final's `--ic` run did; `tictactoe.tel`
+  plays. haskell-final's other flags are refused with a note. The new
+  `goldens` check in `nix flake check` runs the command on every golden
+  case it covers, and `test/golden/run.sh` takes several patterns.
 * Reorganized the library into compiler-stage modules: `Telomare.Parse`,
   `Telomare.Expand`, `Telomare.Desugar`, `Telomare.Resolve`,
   `Telomare.TypeCheck`, `Telomare.Size` (+ `.IR`) with the shared

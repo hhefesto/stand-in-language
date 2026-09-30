@@ -5,7 +5,8 @@ import ./Term.bend as T
 # its locations, plus the abstract values sizing works with. The sized,
 # compiled program (CompiledExpr) uses only the first ten constructors.
 # XError is where Haskell's sizing would have thrown: it travels with the
-# value, and is reported only if it reaches the result.
+# value, and is reported only if it reaches the result. XTpl is a Defer
+# whose body the IC has compiled to template tid.
 #
 # An input position (IVarF) is its path from the root, 'L' and 'R' for
 # left and right, where Haskell numbers positions 2n+1 and 2n+2: a
@@ -39,6 +40,7 @@ type X is Data:
   XLefts{+n: U32, +x: X}
   XRights{+n: U32, +x: X}
   XError{+msg: String}
+  XTpl{+tid: U32, +fi: U32}
 
 # Negative function indices name the machinery's own closures; as a U32
 # they wrap (-1 is 4294967295).
@@ -255,3 +257,70 @@ def of.string(s: String) -> X:
       XZero{}
     case SCon{Chr{c}, rest}:
       XPair{int.u32(c), of.string(rest)}
+
+def fi.signed(neg: Bool, +n: U32) -> String:
+  match neg:
+    case True{}:
+      "-" ++ U32.show((0 - n : U32))
+    case False{}:
+      U32.show(n)
+
+def fi.show(+fi: U32) -> String:
+  "FunctionIndex {unFunctionIndex = " ++ fi.signed(U32.is_ge(fi, 2147483648), fi) ++ "}"
+
+# How Haskell shows a CompiledExpr (data-fix's Show over the Show1
+# instances, which quote their constructor text): Pair 0 0 is
+# Fix "PairSF ("Fix "ZeroSF"", "Fix "ZeroSF"")".
+def show(x: X) -> String:
+  match x:
+    case XZero{}:
+      "Fix \"ZeroSF\""
+    case XPair{a, b}:
+      "Fix \"PairSF (\"" ++ show(a) ++ "\", \"" ++ show(b) ++ "\")\""
+    case XEnv{}:
+      "Fix \"EnvSF\""
+    case XSetEnv{a}:
+      "Fix \"SetEnvSF (\"" ++ show(a) ++ "\")\""
+    case XDefer{fi, a}:
+      "Fix \"DeferSF \"" ++ fi.show(fi) ++ "\" (\"" ++ show(a) ++ "\")\""
+    case XGate{}:
+      "Fix \"GateSF\""
+    case XLeft{a}:
+      "Fix \"LeftSF (\"" ++ show(a) ++ "\")\""
+    case XRight{a}:
+      "Fix \"RightSF (\"" ++ show(a) ++ "\")\""
+    case XAbort{}:
+      "Fix \"AbortF\""
+    case XAborted{m}:
+      "Fix \"(AbortedF \"" ++ show(m) ++ "\")\""
+    case _:
+      "?"
+
+# Haskell's prettyPrint of a StuckExpr: one child continues the line, a
+# pair's second child goes on the next line under the first.
+def pretty.at(x: X, +col: Nat) -> String:
+  match x:
+    case XZero{}:
+      "Z"
+    case XPair{a, b}:
+      "P " ++ pretty.at(a, (col + 2n : Nat)) ++ "\n" ++ String.repeat(" ", (col + 2n : Nat)) ++ pretty.at(b, (col + 2n : Nat))
+    case XEnv{}:
+      "E"
+    case XSetEnv{a}:
+      "S " ++ pretty.at(a, (col + 2n : Nat))
+    case XDefer{fi, a}:
+      "F" ++ fi.signed(U32.is_ge(fi, 2147483648), fi) ++ " "
+        ++ pretty.at(a, (col + 2n + String.length(fi.signed(U32.is_ge(fi, 2147483648), fi)) : Nat))
+    case XGate{}:
+      "G"
+    case XLeft{a}:
+      "L " ++ pretty.at(a, (col + 2n : Nat))
+    case XRight{a}:
+      "R " ++ pretty.at(a, (col + 2n : Nat))
+    case XAbort{}:
+      "!"
+    case _:
+      "?"
+
+def pretty(x: X) -> String:
+  pretty.at(x, 0n)

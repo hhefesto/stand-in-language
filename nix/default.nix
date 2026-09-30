@@ -30,11 +30,13 @@ let
   };
 
   # `nix flake check` builds the command, checks every Bend module (types,
-  # termination, laws) and runs the tests, each built to a native binary.
+  # termination, laws), runs the tests, each built to a native binary, and
+  # runs the command on the goldens it covers.
   checks = {
     inherit telomare;
     bend-check = project.check;
     bend-tests = project.tests;
+    goldens = project.goldens;
     push-cachix = tools.pushCachix;
   };
 in

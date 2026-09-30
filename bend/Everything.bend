@@ -15,6 +15,8 @@ import ./Split.bend as Split
 import ./Expr.bend as Expr
 import ./Size.bend as Size
 import ./Front.bend as Front
+import ./IC.bend as IC
+import ./Session.bend as Session
 import ./Main.bend as Main
 
 # Every module of the port, so that `bend bend/Everything.bend` checks them all
