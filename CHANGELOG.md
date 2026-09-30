@@ -16,6 +16,10 @@
   the lock). `nix flake check` checks every module under `bend/` and runs
   `bend/tests/` as native binaries; the pre-commit hook runs the same module
   check. `bend/Lexical.bend` is the first ported module.
+* `telomare` is the flake's default package and app again, now
+  `bend/Main.bend` compiled to a native binary: it opens the program it is
+  given and reports that the port cannot compile it yet. `nix flake check`
+  builds it.
 * Reorganized the library into compiler-stage modules: `Telomare.Parse`,
   `Telomare.Expand`, `Telomare.Desugar`, `Telomare.Resolve`,
   `Telomare.TypeCheck`, `Telomare.Size` (+ `.IR`) with the shared

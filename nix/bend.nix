@@ -29,8 +29,8 @@ let
     ];
   };
 
-  # `bend` in the sandbox: its release launcher keeps state under HOME and
-  # checks for updates unless told not to.
+  # `bend` in the sandbox, over a writable copy of the sources: its release
+  # launcher keeps state under HOME and checks for updates unless told not to.
   bendCommand =
     name: script:
     pkgs.runCommand name { nativeBuildInputs = [ bend ]; } ''
@@ -38,14 +38,20 @@ let
       cp -r ${bendSrc}/bend bend
       chmod -R u+w bend
       ${script}
-      touch $out
     '';
 in
 {
+  # The `telomare` command, bend/Main.bend compiled to a native binary.
+  telomare = bendCommand "telomare" ''
+    mkdir -p $out/bin
+    bend bend/Main.bend -o $out/bin/telomare
+  '';
+
   # Every module type-checks, terminates and proves its laws.
   check = bendCommand "bend-check" ''
     bend bend/Everything.bend | tee result
     grep -qx "ALL PROOFS CHECK" result
+    touch $out
   '';
 
   # Every test, compiled to a native binary (C through clang) and run.
@@ -68,5 +74,6 @@ in
         printf 'ok %s\n' ${lib.escapeShellArgs lines} | diff - ${name}.out
       '') tests
     )}
+    touch $out
   '';
 }

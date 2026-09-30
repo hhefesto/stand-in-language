@@ -2,8 +2,6 @@
 # Bend: the packages, the development shell, the apps and the checks.
 # flake.nix calls this with the flake's source; default.nix and shell.nix call
 # it through nix/legacy.nix.
-#
-# Until the port has a `telomare` command, the package is Bend itself.
 {
   pkgs,
   src,
@@ -18,19 +16,23 @@ let
     checkNames = builtins.attrNames checks;
     appNames = builtins.attrNames apps;
   };
+  telomare = project.telomare;
   packages = {
-    inherit bend;
-    default = bend;
+    inherit telomare bend;
+    default = telomare;
   };
 
   apps = {
+    default = "${telomare}/bin/telomare";
+    telomare = "${telomare}/bin/telomare";
     bend = "${bend}/bin/bend";
     push-cachix = "${tools.pushCachix}/bin/telomare-push-cachix";
   };
 
-  # `nix flake check` checks every Bend module (types, termination, laws) and
-  # runs the tests, each built to a native binary.
+  # `nix flake check` builds the command, checks every Bend module (types,
+  # termination, laws) and runs the tests, each built to a native binary.
   checks = {
+    inherit telomare;
     bend-check = project.check;
     bend-tests = project.tests;
     push-cachix = tools.pushCachix;

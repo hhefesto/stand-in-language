@@ -24,10 +24,12 @@ commit that has it. The port keeps one runtime, the interaction-net runtime
 reference evaluator behind the plain run, the REPL and the LSP; the metered
 evaluator behind `--meter` without `--ic`; and `--fast`.
 
-Until the Bend `telomare` command lands, the sections below describe what
+The Bend `telomare` command is the flake's default app (`nix run . --
+FILE.tel`), but until the stages below land it only opens the program and
+says it cannot compile it yet; meanwhile the sections below describe what
 haskell-final does. `test/golden/` records exactly what it printed for each
-example program and mode, and the port is checked against those recordings.
-To run haskell-final itself:
+example program and mode, and the port is checked against those recordings
+(`test/golden/run.sh BIN_DIR check`). To run haskell-final itself:
 
 ```sh
 $ git worktree add ../telomare-haskell-final haskell-final
@@ -402,7 +404,7 @@ goldens in `test/golden/`.
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | |
 | Certify | `Telomare.EAL` | |
 | IC runtime and storage bounds | `Telomare.IC`, `Telomare.IC.*`, `Telomare.SpaceBound` | |
-| Drive | `Telomare.Artifact`, `Telomare.Driver`, the `telomare` command | |
+| Drive | `Telomare.Artifact`, `Telomare.Driver`, the `telomare` command | entry point: `bend/Main.bend` |
 | REPL and LSP | `app/Repl.hs`, `app/LSP.hs`, on the IC runtime | |
 
 Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and
