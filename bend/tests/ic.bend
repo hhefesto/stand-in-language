@@ -8,8 +8,8 @@ import ../Text.bend as Tx
 
 # The IC runtime: haskell-final's ICTests on closed terms (application,
 # projection, duplication, gates, abort, church numerals, fuel, branch
-# laziness), and whole sessions' interaction counts against the
-# .ic-meter goldens. One `ok NAME` line per group (FAIL NAME when it
+# laziness), and whole sessions' interaction counts, guided by EAL as the
+# command runs them, against the .ic-meter goldens. One `ok NAME` line per group (FAIL NAME when it
 # breaks). Run from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
@@ -108,7 +108,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> 
     case Done{s}:
       match s:
         case Sz.Sized{counts, expr}:
-          Ss.replay(IC.prepare(expr), lines)
+          Ss.replay(Ss.prepared(expr), lines)
 
 def compiled(r: Result<&2, &2, String, Fr.Terms>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -134,7 +134,7 @@ def text(r: Result<&1, &1, String, String>) -> String:
     case Done{s}:
       s
 
-def report(+prelude: String, +ttt: String) -> IO(Unit):
+def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("ic-application", all([
       gives(se(p(d(100, env()), z())), z()),
@@ -172,6 +172,12 @@ def report(+prelude: String, +ttt: String) -> IO(Unit):
       runs.dry(se(p(d(201, se(p(se(p(E.XGate{}, p(z(), z()))), p(omega.applied(), left(env()))))), p(z(), z()))), 50000),
       gives(se(p(d(202, se(p(se(p(E.XGate{}, p(z(), z()))), p(se(p(p(z(), z()), z())), left(env()))))), p(z(), z()))), z())])))
     IO.print(verdict("ic-omega", runs.dry(omega.applied(), 100000)))
+    IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
+      spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
+      524)))
+    IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
+      spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
+      1517868)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
       15168230)))
@@ -179,5 +185,7 @@ def report(+prelude: String, +ttt: String) -> IO(Unit):
 def main() -> IO(Unit):
   do IO<Unit>:
     prelude : Result<&1, &1, String, String> <- Tx.read_file("Prelude.tel")
+    tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
+    plus : Result<&1, &1, String, String> <- Tx.read_file("simpleplus.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
-    report(text(prelude), text(ttt))
+    report(text(prelude), text(tc), text(plus), text(ttt))

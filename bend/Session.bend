@@ -1,5 +1,7 @@
 import Base
 import ./Expr.bend as E
+import ./Lift.bend as Lf
+import ./EAL.bend as EAL
 import ./IC.bend as IC
 
 # One iteration's outcome, as the session prints it (haskell-final's
@@ -139,6 +141,11 @@ def outcome(r: IC.RB) -> Outcome:
       Stop{"runtime error:\nGeneric Runtime Error: IC runtime: " ++ e ++ " -- " ++ E.show(E.XZero{})}
     case IC.RBOk{+x}:
       value(aborted(x), x)
+
+# prepareEntry: the sized program prepared for runs under EAL's capture
+# layouts for it, so closures are copied as EAL planned.
+def prepared(+expr: E.X) -> IC.Prog:
+  IC.prepare(expr, EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
 
 # A session on given lines (evalLoopIC with its inputs), for the tests: the
 # displays, newest first, and the interactions every iteration spent. It

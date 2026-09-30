@@ -4,6 +4,8 @@ import ./Expr.bend as E
 import ./Term.bend as T
 import ./Front.bend as Fr
 import ./Size.bend as Sz
+import ./Lift.bend as Lf
+import ./EAL.bend as EAL
 import ./IC.bend as IC
 import ./Session.bend as Ss
 
@@ -178,15 +180,34 @@ def play(+p: IC.Prog) -> IO(Unit):
 # The pipeline
 # ------------
 
-def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
+# The program ready to run: sized, then prepared under EAL's guidance.
+def ready(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Sz.SizeFail, IC.Prog>:
   match r:
     case Fail{f}:
-      IO.die(Unit, 1, Sz.render(f, run, 65536))
+      Fail{f}
     case Done{s}:
       match s:
         case Sz.Sized{counts, expr}:
-          play(IC.prepare(expr))
+          Done{Ss.prepared(expr)}
 
+def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, IC.Prog>) -> IO(Unit):
+  match r:
+    case Fail{f}:
+      IO.die(Unit, 1, Sz.render(f, run, 65536))
+    case Done{p}:
+      play(p)
+
+# certifyMain gates the program before its sizing does (Driver's
+# compileMainReporting).
+def certified(+run: T.C, c: Maybe<&2, EAL.Err>, r: Result<&2, &2, Sz.SizeFail, IC.Prog>) -> IO(Unit):
+  match c:
+    case Some{e}:
+      IO.die(Unit, 1, EAL.render(e))
+    case None{}:
+      sized(run, r)
+
+# The certification and the sized program, computed in parallel: they
+# share nothing, and the gate still decides first.
 def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
   match r:
     case Fail{e}:
@@ -194,7 +215,8 @@ def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
     case Done{ts}:
       match ts:
         case Fr.Terms{cert, +run}:
-          sized(run, Sz.size(65536, True{}, E.of.term3(run)))
+          c p = EAL.certify(Lf.defer.lift(cert)) ready(Sz.size(65536, True{}, E.of.term3(run)))
+          certified(run, c, p)
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

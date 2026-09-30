@@ -27,6 +27,12 @@
   plays. haskell-final's other flags are refused with a note. The new
   `goldens` check in `nix flake check` runs the command on every golden
   case it covers, and `test/golden/run.sh` takes several patterns.
+* The Bend `telomare` certifies programs with EAL before running them, as
+  haskell-final did: a program that does not certify is refused with
+  haskell-final's message. The EAL capture layouts of the sized program guide
+  the IC runtime's closure copying, so interaction counts match
+  haskell-final's `--ic --meter` (`bend/{Sha256,Lift,EAL}.bend`,
+  `bend/tests/eal.bend`).
 * Reorganized the library into compiler-stage modules: `Telomare.Parse`,
   `Telomare.Expand`, `Telomare.Desugar`, `Telomare.Resolve`,
   `Telomare.TypeCheck`, `Telomare.Size` (+ `.IR`) with the shared

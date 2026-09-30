@@ -32,11 +32,12 @@ accepted and changes nothing):
 $ nix run . -- tictactoe.tel
 ```
 
-haskell-final's other actions are not ported: `--certificate`, `--meter`,
-`--compile` and `.telc` programs, `--draw-net` and `--fast`. The sections
-below describe them as haskell-final has them. The EAL certification that
-haskell-final runs before sizing is not ported yet either (see "Compiler
-stages"). `test/golden/` records exactly what haskell-final printed for each
+As in haskell-final, the program must pass EAL certification before it is
+sized (a program that does not certify is refused with the reason, exit 1),
+and the EAL capture layouts of the sized program guide the runtime's closure
+copying. haskell-final's other actions are not ported: `--certificate`,
+`--meter`, `--compile` and `.telc` programs, `--draw-net` and `--fast`. The
+sections below describe them as haskell-final has them. `test/golden/` records exactly what haskell-final printed for each
 example program and mode, and `nix flake check` runs the command on every case
 it covers (`test/golden/run.sh BIN_DIR check [PATTERN...]`). To run
 haskell-final itself:
@@ -411,8 +412,8 @@ goldens in `test/golden/`.
 | Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend`, less `case`, `#` and qualified imports |
 | Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
 | Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend` |
-| Certify | `Telomare.EAL` | next |
-| IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying not yet guided by EAL |
+| Certify | `Telomare.EAL`, the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,EAL}.bend` (the verdict and the capture layouts; the bangs and levels only the static report shows are not) |
+| IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying guided by the EAL capture layouts |
 | Drive | `Telomare.Driver`, the `telomare` command | ported for running programs: `bend/{Session,Main}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | not ported |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |

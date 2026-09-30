@@ -1,6 +1,8 @@
 import Base
+import ./Loc.bend as Lc
 import ./Expr.bend as E
 import ./Show.bend as Sh
+import ./Lift.bend as Lf
 
 # The interaction-combinator runtime (haskell-final's Telomare.IC, the part
 # a run uses). The sized program's closures are compiled once into
@@ -61,12 +63,14 @@ type CJ is Data:
   CProj{+path: Maybe<&2, String>, +k: U32, +x: E.X}
 
 # A closure body to compile: its template number, function index, body
-# (nested closures already templates) and the body as written.
+# (nested closures already templates), the body as written, and its code's
+# hash (tplHash) when there is guidance to look up by it.
 type Src is Data:
-  Src{+tid: U32, +fi: U32, +body: E.X, +orig: E.X}
+  Src{+tid: U32, +fi: U32, +body: E.X, +orig: E.X, +code: String}
 
+# The templates so far and, when there is guidance, their codes' hashes.
 type Coll is Data:
-  Coll{+next: U32, +srcs: List<&2, Src>}
+  Coll{+next: U32, +srcs: List<&2, Src>, +hs: Maybe<&2, Map<&2, String>>}
 
 # A compiled template, read out of the scratch net where it was built:
 # its agents (kind, a, b) and its wires, each from the lower port.
@@ -87,6 +91,18 @@ type RJ is Data:
 type RB is Data:
   RBOk{+x: E.X}
   RBErr{+msg: String}
+
+# A step of copying a value region (dupRegion): the value at a port, by
+# the shape at an offset of the store, or the last two regions' copies to
+# pair up.
+type RG is Data:
+  RgVisit{+s: U32, +p: U32}
+  RgPair{}
+
+# The jobs left, and the copies made: two ports per region, first copy on
+# top.
+type RgSt is Type:
+  RgSt{net: Net, jobs: List<&2, RG>, vals: List<&2, U32>}
 
 type RSt is Type:
   RLoop{net: Net, jobs: List<&2, RJ>, vals: List<&2, E.X>}
@@ -1221,15 +1237,162 @@ def r.dup.dup(net: Net, +n: U32, +i: NI, +m: U32, +j: NI, same: Bool) -> Net:
 def r.dup.leaf(net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
   r.two.leaves(i, alloc2(del2(spend(net), n, m), ni.k(j), ni.a(j), ni.b(j), ni.k(j), ni.a(j), ni.b(j)))
 
+# Guided copying (dupPlanFor, dupRegion)
+# --------------------------------------
+
+# How to copy a value of kind k by shape tag t (see the store), when it is
+# materialized (its principal port faces us): 1 as a leaf, 2 as a pair of
+# data, 3 as a pair by the pair shape's parts; 0 not at all, a Dup goes
+# there instead (a frontier).
+def rg.how(material: Bool, +t: U32, +k: U32) -> U32:
+  match material:
+    case False{}:
+      0
+    case True{}:
+      match t:
+        case 1:
+          (code.if(U32.is_eq(k, zero()), 1) + code.if(U32.is_eq(k, pair()), 2) : U32)
+        case 2:
+          code.if(U32.is_eq(k, ref()), 1)
+        case 4:
+          code.if(U32.is_eq(k, pair()), 3)
+        case _:
+          0
+
+def rg.leaf(rest: List<&2, RG>, vals: List<&2, U32>, r: Net & Ids) -> RgSt:
+  (net, +ids) = r
+  match ids:
+    case Ids{+x, +y, z, w}:
+      RgSt{net, rest, port(x, 0) <> port(y, 0) <> vals}
+
+def rg.front(+p: U32, rest: List<&2, RG>, vals: List<&2, U32>, r: Net & U32) -> RgSt:
+  (net, +d) = r
+  RgSt{connect(net, port(d, 0), p), rest, port(d, 1) <> port(d, 2) <> vals}
+
+def rg.halves(+s1: U32, +i: NI, rest: List<&2, RG>, vals: List<&2, U32>, r: Net & U32) -> RgSt:
+  (net, +s2) = r
+  RgSt{net, RgVisit{s1, ni.p1(i)} <> RgVisit{s2, ni.p2(i)} <> RgPair{} <> rest, vals}
+
+def rg.act(how: U32, net: Net, +l: U32, +s: U32, +p: U32, +i: NI, rest: List<&2, RG>, vals: List<&2, U32>) -> RgSt:
+  match how:
+    case 1:
+      rg.leaf(rest, vals, alloc2(delete(net, node.of(p)), ni.k(i), ni.a(i), ni.b(i), ni.k(i), ni.a(i), ni.b(i)))
+    case 2:
+      RgSt{delete(net, node.of(p)), RgVisit{s, ni.p1(i)} <> RgVisit{s, ni.p2(i)} <> RgPair{} <> rest, vals}
+    case 3:
+      rg.halves((s + 2 : U32), i, rest, vals, trd(delete(net, node.of(p)), (s + 1 : U32)))
+    case _:
+      rg.front(p, rest, vals, alloc(net, dup(), l, 0))
+
+def rg.visit(+l: U32, +s: U32, +p: U32, rest: List<&2, RG>, vals: List<&2, U32>, +t: U32, r: Net & NI) -> RgSt:
+  (net, +i) = r
+  rg.act(rg.how(U32.is_zero(slot.of(p)), t, ni.k(i)), net, l, s, p, i, rest, vals)
+
+def rg.tag(+l: U32, +s: U32, +p: U32, rest: List<&2, RG>, vals: List<&2, U32>, r: Net & U32) -> RgSt:
+  (net, +t) = r
+  rg.visit(l, s, p, rest, vals, t, info(net, node.of(p)))
+
+def rg.pair(+a1: U32, +a2: U32, +b1: U32, +b2: U32, rest: List<&2, RG>, more: List<&2, U32>, r: Net & Ids) -> RgSt:
+  (net, +ids) = r
+  match ids:
+    case Ids{+p1, +p2, z, w}:
+      RgSt{connect(connect(connect(connect(net, port(p1, 1), a1), port(p1, 2), b1), port(p2, 1), a2), port(p2, 2), b2),
+           rest, port(p1, 0) <> port(p2, 0) <> more}
+
+def rg.step(net: Net, +l: U32, j: RG, rest: List<&2, RG>, vals: List<&2, U32>) -> RgSt:
+  match j:
+    case RgVisit{+s, +p}:
+      rg.tag(l, s, p, rest, vals, trd(net, s))
+    case RgPair{}:
+      match vals:
+        case b1 <> b2 <> a1 <> a2 <> more:
+          rg.pair(a1, a2, b1, b2, rest, more, alloc2(net, pair(), 0, 0, pair(), 0, 0))
+        case _:
+          RgSt{fail(net, "dupRegion: nothing to pair"), [], vals}
+
+# dupRegion: copy what the shapes vouch for and is materialized (pairs, 0s
+# and code pointers), agent by agent, as notes, not interactions; a Dup of
+# label l at every frontier. Any shape is correct: it only picks where
+# copying is tried.
+def region(fuel: Nat, +l: U32, st: RgSt) -> Net & List<&2, U32>:
+  match fuel:
+    case 0n:
+      match st:
+        case RgSt{net, jobs, vals}:
+          (fail(net, "dupRegion: too deep"), vals)
+    case 1n+f:
+      match st:
+        case RgSt{net, jobs, vals}:
+          match jobs:
+            case Nil{}:
+              (net, vals)
+            case Con{j, rest}:
+              region(f, l, rg.step(net, l, j, rest, vals))
+
+def r.dup.closure.go(+i: NI, r: Net & List<&2, U32>) -> Net:
+  (net, vals) = r
+  match vals:
+    case p1 <> p2 <> more:
+      connect(connect(net, p1, ni.p1(i)), p2, ni.p2(i))
+    case _:
+      fail(net, "dup-closure: no copies")
+
+# Copying a closure whose code has a published capture layout
+# (dup-closure): one interaction, then the pair copied by its plan at s.
+def r.dup.closure(net: Net, +s: U32, +n: U32, +i: NI, +m: U32) -> Net:
+  r.dup.closure.go(i, region(U32.to_nat(4294967295), ni.a(i),
+    RgSt{delete(spend(net), n), [RgVisit{s, port(m, 0)}], []}))
+
+def plan.at(+tid: U32, r: Net & U32) -> Net & U32:
+  (net, +t) = r
+  trd(net, (2 + t + tid : U32))
+
+def plan.code(code: Bool, net: Net, +tid: U32) -> Net & U32:
+  match code:
+    case True{}:
+      plan.at(tid, trd(net, 0))
+    case False{}:
+      (net, 0)
+
+def plan.got(+p: U32, r: Net & NI) -> Net & U32:
+  (net, +i) = r
+  plan.code(U32.is_zero(slot.of(p)) && U32.is_eq(ni.k(i), ref()), net, ni.a(i))
+
+# The plan for a pair whose head is at port p (dupPlanFor): when p is a
+# materialized code pointer whose code has published guidance, where its
+# closures' shape is in the store; else 0.
+def plan.of(net: Net, +p: U32) -> Net & U32:
+  plan.got(p, info(net, node.of(p)))
+
+def r.dup.pick(plain: Bool, net: Net, +s: U32, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
+  match plain:
+    case True{}:
+      r.dup.pair(net, n, i, m, j)
+    case False{}:
+      r.dup.closure(net, s, n, i, m)
+
+def r.dup.planned.got(+n: U32, +i: NI, +m: U32, +j: NI, r: Net & U32) -> Net:
+  (net, +s) = r
+  r.dup.pick(U32.is_zero(s), net, s, n, i, m, j)
+
+# Copying a pair: by plan when it is a closure whose code has published
+# guidance, else generically.
+def r.dup.planned(net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
+  r.dup.planned.got(n, i, m, j, plan.of(net, ni.p1(j)))
+
 # Instantiation
 # -------------
 #
-# The template store: word 0 the number of templates, word 1 where the
+# The template store: word 0 the number of templates T, word 1 where the
 # scratch map begins (a template agent's number -> the agent copied from
-# it), then each template's offset, then the templates: K agents, the index
-# of its boundary (Ext), its labels, W wires, then K (kind, a, b) and W
-# (p, q) wires in the order Haskell connects them (a port is agent*4+slot,
-# numbered within the template).
+# it), then each template's offset, then where each template's plan is (0:
+# none), then the templates: K agents, the index of its boundary (Ext), its
+# labels, W wires, then K (kind, a, b) and W (p, q) wires in the order
+# Haskell connects them (a port is agent*4+slot, numbered within the
+# template); then the plans: the shape of the template's closures, a code
+# pointer and the capture EAL published for its code, as tags: 1 CapData,
+# 2 CapCode, 3 CapOther, 4 CapPair followed by where its second part is,
+# then its first part.
 
 def inst.node.b(+i: U32, +base: U32, +map: U32, +k: U32, +a: U32, r: Net & U32) -> Net:
   (net, +b) = r
@@ -1379,7 +1542,7 @@ def apply.rule(c: U32, net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
     case 32:
       r.era.leaf(net, n, m)
     case 33:
-      r.dup.pair(net, n, i, m, j)
+      r.dup.planned(net, n, i, m, j)
     case 34:
       r.dup.aborted(net, n, i, m, j)
     case 35:
@@ -1671,10 +1834,46 @@ def C.run(-A: Data, -B: Data, f: A -> C(B), r: A & Coll) -> B & Coll:
 def C.bind(-A: Data, -B: Data, m: C(A), f: A -> C(B)) -> C(B):
   c => C.run(A, B, f, m(c))
 
+# A collected body as EAL lifts it (Lift), each template reference its
+# code's hash. Locations do not reach the hash.
+def lifted(+hs: Map<&2, String>, x: E.X) -> Lf.L:
+  match x:
+    case E.XZero{}:
+      Lf.LZero{Lc.Unknown{}}
+    case E.XPair{a, b}:
+      Lf.LPair{Lc.Unknown{}, lifted(hs, a), lifted(hs, b)}
+    case E.XEnv{}:
+      Lf.LEnv{Lc.Unknown{}}
+    case E.XSetEnv{a}:
+      Lf.LSetEnv{Lc.Unknown{}, lifted(hs, a)}
+    case E.XGate{}:
+      Lf.LGate{Lc.Unknown{}}
+    case E.XLeft{a}:
+      Lf.LLeft{Lc.Unknown{}, lifted(hs, a)}
+    case E.XRight{a}:
+      Lf.LRight{Lc.Unknown{}, lifted(hs, a)}
+    case E.XTpl{tid, fi}:
+      Lf.LRef{Lc.Unknown{}, Pair.snd(Map<&2, String>, String, Map.get(String, "", hs, U32.show(tid)))}
+    case _:
+      Lf.LAbort{Lc.Unknown{}}
+
+# A body's code hash (tplHash, hashLiftedBody).
+def code.of(+hs: Map<&2, String>, x: E.X) -> String:
+  Lf.hash(lifted(hs, x))
+
+def c.named(+next: U32, +fi: U32, +body: E.X, orig: E.X, srcs: List<&2, Src>, hs: Maybe<&2, Map<&2, String>>) -> E.X & Coll:
+  match hs:
+    case None{}:
+      (E.XTpl{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, ""} <> srcs, None{}})
+    case Some{+m}:
+      +code = code.of(m, body)
+      (E.XTpl{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, code} <> srcs,
+                             Some{Map.set(&2, String, m, U32.show(next), code)}})
+
 def c.add.go(+fi: U32, body: E.X, orig: E.X, c: Coll) -> E.X & Coll:
   match c:
-    case Coll{+next, srcs}:
-      (E.XTpl{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig} <> srcs})
+    case Coll{+next, srcs, hs}:
+      c.named(next, fi, body, orig, srcs, hs)
 
 def c.add(+fi: U32, body: E.X, orig: E.X) -> C(E.X):
   c => c.add.go(fi, body, orig, c)
@@ -1707,11 +1906,14 @@ def collect(x: E.X) -> C(E.X):
     case other:
       C.pure(E.X, other)
 
+def selector(+tid: U32, +fi: U32, +body: E.X) -> Src:
+  Src{tid, fi, body, body, code.of(Map.new(&2, String), body)}
+
 # The gate's selectors and the identity abort gives: templates 0, 1, 2.
 def selectors() -> List<&2, Src>:
-  [Src{2, E.abort.ind(), E.XEnv{}, E.XEnv{}},
-   Src{1, E.right.gate.ind(), E.XRight{E.XEnv{}}, E.XRight{E.XEnv{}}},
-   Src{0, E.left.gate.ind(), E.XLeft{E.XEnv{}}, E.XLeft{E.XEnv{}}}]
+  [selector(2, E.abort.ind(), E.XEnv{}),
+   selector(1, E.right.gate.ind(), E.XRight{E.XEnv{}}),
+   selector(0, E.left.gate.ind(), E.XLeft{E.XEnv{}})]
 
 def ser.wire.at(lower: Bool, +p: U32, +q: U32, s: Ser) -> Ser:
   match lower:
@@ -1804,7 +2006,7 @@ def cs.net(cs: CS) -> Net:
 
 def src.body(s: Src) -> E.X:
   match s:
-    case Src{tid, fi, body, orig}:
+    case Src{tid, fi, body, orig, code}:
       body
 
 # Every template's words, in template order.
@@ -1838,11 +2040,85 @@ def max.k(ws: List<&2, List<&2, U32>>, +m: U32) -> U32:
     case Con{w, rest}:
       max.k(rest, U32.max(m, max.k.of(w)))
 
-# The store's words: count, map base, offsets, templates.
-def store(+ws: List<&2, List<&2, U32>>) -> List<&2, U32>:
+# Plans
+# -----
+
+# The words a capture shape takes in the store.
+def shape.size(s: Lf.Shape) -> U32:
+  match s:
+    case Lf.CapPair{a, b}:
+      (2 + shape.size(a) + shape.size(b) : U32)
+    case _:
+      1
+
+# A capture shape's words, placed at offset at.
+def shape.words(s: Lf.Shape, +at: U32) -> List<&2, U32>:
+  match s:
+    case Lf.CapData{}:
+      [1]
+    case Lf.CapCode{}:
+      [2]
+    case Lf.CapOther{}:
+      [3]
+    case Lf.CapPair{+a, b}:
+      +at2 = (at + 2 + shape.size(a) : U32)
+      4 <> at2 <> List.append(&2, U32, shape.words(a, (at + 2 : U32)), shape.words(b, at2))
+
+def plan.pick(has: Bool, +code: String, g: Map<&2, Lf.Shape>) -> Maybe<&2, Lf.Shape>:
+  match has:
+    case True{}:
+      Some{Pair.snd(Map<&2, Lf.Shape>, Lf.Shape, Map.get(Lf.Shape, Lf.CapOther{}, g, code))}
+    case False{}:
+      None{}
+
+def plan.has(+code: String, r: Map<&2, Lf.Shape> & Bool) -> Maybe<&2, Lf.Shape>:
+  (g, has) = r
+  plan.pick(has, code, g)
+
+# Each template's closures' shape, when EAL published a capture layout for
+# its code (ealCaptureLayouts, by hash).
+def plans(+g: Map<&2, Lf.Shape>, srcs: List<&2, Src>) -> List<&2, Maybe<&2, Lf.Shape>>:
+  match srcs:
+    case Nil{}:
+      []
+    case Con{s, rest}:
+      match s:
+        case Src{tid, fi, body, orig, +code}:
+          plan.has(code, Map.has(&2, Lf.Shape, g, code)) <> plans(g, rest)
+
+def plan.offs(ps: List<&2, Maybe<&2, Lf.Shape>>, +at: U32) -> List<&2, U32>:
+  match ps:
+    case Nil{}:
+      []
+    case Con{p, rest}:
+      match p:
+        case None{}:
+          0 <> plan.offs(rest, at)
+        case Some{s}:
+          at <> plan.offs(rest, (at + 3 + shape.size(s) : U32))
+
+def plan.words(ps: List<&2, Maybe<&2, Lf.Shape>>, +at: U32) -> List<&2, U32>:
+  match ps:
+    case Nil{}:
+      []
+    case Con{p, rest}:
+      match p:
+        case None{}:
+          plan.words(rest, at)
+        case Some{+s}:
+          List.append(&2, U32, shape.words(Lf.CapPair{Lf.CapCode{}, s}, at),
+            plan.words(rest, (at + 3 + shape.size(s) : U32)))
+
+# The store's words: count, map base, template offsets, plan offsets,
+# templates, plans.
+def store(+ws: List<&2, List<&2, U32>>, +ps: List<&2, Maybe<&2, Lf.Shape>>) -> List<&2, U32>:
   +t = U32.from_nat(List.length(&2, List<&2, U32>, ws))
   +flat = List.concat(&2, U32, ws)
-  t <> (2 + t + U32.from_nat(List.length(&2, U32, flat)) : U32) <> List.append(&2, U32, lens(ws, (2 + t : U32)), flat)
+  +at = (2 + 2 * t + U32.from_nat(List.length(&2, U32, flat)) : U32)
+  +pw = plan.words(ps, at)
+  t <> (at + U32.from_nat(List.length(&2, U32, pw)) : U32)
+    <> List.append(&2, U32, lens(ws, (2 + 2 * t : U32)),
+         List.append(&2, U32, plan.offs(ps, at), List.append(&2, U32, flat, pw)))
 
 def bodies(srcs: List<&2, Src>, acc: Map<&2, E.X>) -> Map<&2, E.X>:
   match srcs:
@@ -1850,7 +2126,7 @@ def bodies(srcs: List<&2, Src>, acc: Map<&2, E.X>) -> Map<&2, E.X>:
       acc
     case Con{s, rest}:
       match s:
-        case Src{tid, fi, body, orig}:
+        case Src{tid, fi, body, orig, code}:
           bodies(rest, Map.set(&2, E.X, acc, U32.show(tid), orig))
 
 def depth.of(+n: U32) -> Nat:
@@ -1859,25 +2135,35 @@ def depth.of(+n: U32) -> Nat:
 def scratch() -> Net:
   Net{Array.new(U32, 16n, 0), Array.new(U32, 2n, 0), Ctl{[], [], 0, 1, 0, 0, 0, 0, 0, "", 8192}}
 
-def prepared.with(entry: E.X, +srcs: List<&2, Src>) -> Prog:
+def prepared.with(+g: Map<&2, Lf.Shape>, entry: E.X, +srcs: List<&2, Src>) -> Prog:
   +ws = tpls(srcs, (CS{scratch(), Map.new(&2, List<&2, U32>)}, []), [])
-  Prog{entry, bodies(srcs, Map.new(&2, E.X)), store(List.drop(&2, List<&2, U32>, ws, 1n)), max.k(ws, 0)}
+  Prog{entry, bodies(srcs, Map.new(&2, E.X)),
+       store(List.drop(&2, List<&2, U32>, ws, 1n), plans(g, srcs)), max.k(ws, 0)}
 
-def prepared(r: E.X & Coll) -> Prog:
+def prepared(+g: Map<&2, Lf.Shape>, r: E.X & Coll) -> Prog:
   (entry, c) = r
   match c:
-    case Coll{next, srcs}:
-      prepared.with(entry, List.reverse(&2, Src, srcs))
+    case Coll{next, srcs, hs}:
+      prepared.with(g, entry, List.reverse(&2, Src, srcs))
+
+# Hashes only guidance looks up by: none without it.
+def hashes.for(g: Map<&2, Lf.Shape>) -> Maybe<&2, Map<&2, String>>:
+  match g:
+    case MTip{}:
+      None{}
+    case _:
+      Some{Map.new(&2, String)}
 
 # prepareIC: the sized program applied to the environment, its closures
-# compiled into templates. Guidance comes with EAL.
-def prepare(sized: E.X) -> Prog:
-  prepared(collect(E.app(sized, E.XEnv{}))(Coll{3, selectors()}))
+# compiled into templates, each with its plan from EAL's capture layouts
+# (ealCaptureLayouts), keyed by code hash.
+def prepare(sized: E.X, +g: Map<&2, Lf.Shape>) -> Prog:
+  prepared(g, collect(E.app(sized, E.XEnv{}))(Coll{3, selectors(), hashes.for(g)}))
 
 # A closed term on its own, as icEvalDetailed runs one: prepared like a
-# program, then run on an input it never looks at.
+# program, unguided, then run on an input it never looks at.
 def prepare.closed(t: E.X) -> Prog:
-  prepared(collect(t)(Coll{3, selectors()}))
+  prepared(Map.new(&2, Lf.Shape), collect(t)(Coll{3, selectors(), None{}}))
 
 # A net ready for runs: room for agents, the template store filled in.
 def fill(ws: List<&2, U32>, +i: U32, a: Array<U32>) -> Array<U32>:

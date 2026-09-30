@@ -78,7 +78,24 @@ let
       "ic-fuel"
       "ic-laziness"
       "ic-omega"
+      "ic-meter-tc_ultra_minimal"
+      "ic-meter-simpleplus"
       "ic-meter-tictactoe"
+    ];
+    eal = [
+      "sha256-vectors"
+      "eal-linear"
+      "eal-lift-dedupe"
+      "eal-self-application"
+      "eal-capture-layouts"
+      "eal-localized-failure"
+      "eal-certify-main"
+      "eal-usage"
+      "eal-programs"
+      "eal-pinned"
+      "eal-sized"
+      "eal-layouts-tc_ultra_minimal"
+      "eal-layouts-simpleplus"
     ];
     size = [
       "size-tc_ultra_minimal"
