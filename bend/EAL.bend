@@ -11,10 +11,9 @@ import ./Lift.bend as Lf
 #
 # The Haskell is followed step for step, because variable numbers, union
 # roots and dispatch order decide tie-breaks and which error comes first:
-# - A code body is derived afresh at each dispatch. The Haskell copies a
-#   template of the first derivation instead, which it documents as the
-#   same constraints; the one visible difference, its variable-budget test
-#   before copying, is kept.
+# - A code body's first derivation is kept as a template, and a later
+#   dispatch copies it, renumbered, as the Haskell's does. The copy shares
+#   the template's blames.
 # - The unifier is one worklist, popped last in first, so its effects come
 #   in the Haskell's depth-first order.
 # - Steps the Haskell repeats to no effect are skipped: a pair already
@@ -166,11 +165,11 @@ type Site is Data:
   Site{+env: Sig, +res: Sig, +depth: U32, +loc: Lc.Loc, +done: List<&2, U32>}
 
 # What is not the variables: the apply sites and their rows, the blames,
-# two counters per body (derivations so far, and the variables the first
-# one minted), the sum equations newest first, the first failure (a list,
-# which keeps it boxed), and the program.
+# the body table and the templates' lists (see capture), the sum
+# equations newest first, the first failure (a list, which keeps it
+# boxed), and the program.
 type X is Type:
-  X{sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P}
+  X{sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, tp: Array<Tp>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P}
 
 # The state: the variables and counters, the pairs, the tags of each tag
 # class root, and the rest.
@@ -241,6 +240,39 @@ type SQ is Data:
 # A derivation of a code body: its env domain bang and type, and its result.
 type Der is Data:
   Der{+b: U32, +t: U32, +s: Sig}
+
+# A variable of a template's block (by its place in the block) and its
+# tags.
+type VT is Data:
+  VT{+i: U32, +ts: List<&2, TE>}
+
+# A template's apply site, with its function position.
+type TS is Data:
+  TS{+fn: U32, +site: Site}
+
+# A template's lists: its variables' tags, its sites in order, its
+# equations newest first, and the derivation it made.
+type Tp is Data:
+  Tp{+tags: List<&2, VT>, +sites: List<&2, TS>, +eqs: List<&2, SumEq>, +der: Der}
+
+# A template's renumbering: variables from v0 move by dv, pairs from p0 by
+# dp.
+type Sh is Data:
+  Sh{+v0: U32, +dv: U32, +p0: U32, +dp: U32}
+
+# What a template word is: a type, a union-find link, a bang (or none()),
+# or a word kept as it is.
+type Wk is Data:
+  Wt{}
+  Wl{}
+  Wb{}
+  Wc{}
+
+# A table that grows: the variables', the pairs', the body table.
+type Gr is Data:
+  Gm{}
+  Gp{}
+  Gc{}
 
 # A step of occurs: whether it hit, and the types left.
 type OS is Data:
@@ -702,17 +734,31 @@ def render(e: Err) -> String:
 # The counters, before the variables: 0 the next variable, 1 the table's
 # size in words, 2 and 3 the pairs and their table's size, 4 whether it
 # failed, 5 and 6 the apply sites and their table's size, 7 and 8 the
-# blames and theirs. Variable i's words start at i * 8 + 16.
+# blames and theirs, 9 and 10 the body table's words used and its size,
+# 11 the sum equations. Variable i's words start at i * 8 + 16.
 
 def m.new() -> Array<U32>:
   Array.set(U32, Array.set(U32, Array.set(U32, Array.set(U32, Array.new(U32, 11n, 0), 1, 2048), 3, 64), 6, 64), 8, 64)
 
+def pow2(k: Nat) -> U32:
+  match k:
+    case 0n:
+      1
+    case 1n+j:
+      (pow2(j) * 2 : U32)
+
+def tp.none() -> Tp:
+  Tp{[], [], [], Der{0, 0, Sig{0, 0}}}
+
+# The body table starts with its ranks' eight words each.
 def st.new(+p: P) -> St:
   match p:
     case P{+n, size, bt}:
-      St{m.new(), Array.new(U32, 9n, 0), Array.new(List<&2, TE>, 8n, te.none()),
+      +d = (U32.log2((n * 8 + 1 : U32)) + 1n : Nat)
+      St{Array.set(U32, Array.set(U32, m.new(), 9, (n * 8 : U32)), 10, pow2(d)), Array.new(U32, 9n, 0),
+         Array.new(List<&2, TE>, 8n, te.none()),
          X{Array.new(Site, 6n, site.none()), Array.new(U32, 8n, 0), Array.new(Blame, 6n, blame.none()),
-           Array.new(U32, (U32.log2((n * 2 + 1 : U32)) + 1n : Nat), 0), [], [], p}}
+           Array.new(U32, d, 0), Array.new(Tp, (U32.log2((n + 1 : U32)) + 1n : Nat), tp.none()), [], [], p}}
 
 def st.m(ps: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & U32) -> St & U32:
   (m, v) = r
@@ -731,8 +777,8 @@ def wr(s: St, +i: U32, +v: U32) -> St:
 
 def x.failed(x: X, e: Err) -> X:
   match x:
-    case X{sites, sv, bl, ct, eqs, err, p}:
-      X{sites, sv, bl, ct, eqs, [e], p}
+    case X{sites, sv, bl, ct, tp, eqs, err, p}:
+      X{sites, sv, bl, ct, tp, eqs, [e], p}
 
 def fail.set(s: St, e: Err) -> St:
   match s:
@@ -923,16 +969,16 @@ def bl.set(s: St, +n: U32, b: Blame) -> St & U32:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          (St{Array.set(U32, m, 7, (n + 1 : U32)), ps, tg, X{sites, sv, Array.set(Blame, bl, n, b), ct, eqs, err, p}}, n)
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          (St{Array.set(U32, m, 7, (n + 1 : U32)), ps, tg, X{sites, sv, Array.set(Blame, bl, n, b), ct, tp, eqs, err, p}}, n)
 
 def bl.grow(s: St, +cap: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
           St{Array.set(U32, m, 8, (cap * 2 : U32)), ps, tg,
-             X{sites, sv, ANode{bl, Array.new(Blame, U32.log2(cap), blame.none())}, ct, eqs, err, p}}
+             X{sites, sv, ANode{bl, Array.new(Blame, U32.log2(cap), blame.none())}, ct, tp, eqs, err, p}}
 
 def bl.room(full: Bool, s: St, +n: U32, +cap: U32, b: Blame) -> St & U32:
   match full:
@@ -953,20 +999,20 @@ def bl.n(b: Blame, r: St & U32) -> St & U32:
 def blame.add(s: St, b: Blame) -> St & U32:
   bl.n(b, rd(s, 7))
 
-def bl.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Blame> & Blame) -> St & Blame:
+def bl.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, ct: Array<U32>, tp: Array<Tp>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Blame> & Blame) -> St & Blame:
   (bl, b) = r
-  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, b)
+  (St{m, ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}}, b)
 
 def blame.get(s: St, +n: U32) -> St & Blame:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          bl.got(m, ps, tg, sites, sv, ct, eqs, err, p, Array.get(Blame, bl, n))
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          bl.got(m, ps, tg, sites, sv, ct, tp, eqs, err, p, Array.get(Blame, bl, n))
 
-def sv.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
+def sv.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, bl: Array<Blame>, ct: Array<U32>, tp: Array<Tp>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
   (sv, v) = r
-  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, v)
+  (St{m, ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}}, v)
 
 # Word i of the sites' rows: site k's are its function position's type
 # (4k), and the tag class root and stamp its last look saw (4k + 1, 4k + 2;
@@ -975,31 +1021,31 @@ def sv.rd(s: St, +i: U32) -> St & U32:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          sv.got(m, ps, tg, sites, bl, ct, eqs, err, p, Array.get(U32, sv, i))
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          sv.got(m, ps, tg, sites, bl, ct, tp, eqs, err, p, Array.get(U32, sv, i))
 
 def sv.wr(s: St, +i: U32, +v: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          St{m, ps, tg, X{sites, Array.set(U32, sv, i, v), bl, ct, eqs, err, p}}
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          St{m, ps, tg, X{sites, Array.set(U32, sv, i, v), bl, ct, tp, eqs, err, p}}
 
 def site.set(s: St, +n: U32, site: Site) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          St{m, ps, tg, X{Array.set(Site, sites, n, site), sv, bl, ct, eqs, err, p}}
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          St{m, ps, tg, X{Array.set(Site, sites, n, site), sv, bl, ct, tp, eqs, err, p}}
 
 def site.grow(s: St, +cap: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
           St{Array.set(U32, m, 6, (cap * 2 : U32)), ps, tg,
              X{ANode{sites, Array.new(Site, U32.log2(cap), site.none())}, ANode{sv, Array.new(U32, U32.log2((cap * 4 : U32)), 0)},
-               bl, ct, eqs, err, p}}
+               bl, ct, tp, eqs, err, p}}
 
 def site.row(s: St, +n: U32, +fn: U32, site: Site) -> St:
   wr(sv.wr(sv.wr(site.set(s, n, site), (n * 4 : U32), fn), (n * 4 + 1 : U32), none()), 5, (n + 1 : U32))
@@ -1023,30 +1069,37 @@ def site.n(+fn: U32, site: Site, r: St & U32) -> St:
 def site.add(s: St, +fn: U32, site: Site) -> St:
   site.n(fn, site, rd(s, 5))
 
-def site.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Site> & Site) -> St & Site:
+def site.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, tp: Array<Tp>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Site> & Site) -> St & Site:
   (sites, site) = r
-  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, site)
+  (St{m, ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}}, site)
 
 def site.get(s: St, +n: U32) -> St & Site:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          site.got(m, ps, tg, sv, bl, ct, eqs, err, p, Array.get(Site, sites, n))
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          site.got(m, ps, tg, sv, bl, ct, tp, eqs, err, p, Array.get(Site, sites, n))
 
-def eq.add(s: St, e: SumEq) -> St:
+def eq.push(s: St, e: SumEq) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          St{m, ps, tg, X{sites, sv, bl, ct, e <> eqs, err, p}}
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          St{m, ps, tg, X{sites, sv, bl, ct, tp, e <> eqs, err, p}}
+
+def eq.count(r: St & U32) -> St:
+  (s, +n) = r
+  wr(s, 11, (n + 1 : U32))
+
+def eq.add(s: St, e: SumEq) -> St:
+  eq.count(rd(eq.push(s, e), 11))
 
 def sum.eq(s: St, +loc: Lc.Loc, +what: String, lhs: List<&2, U32>, +rhs: U32) -> St:
   eq.add(s, SumEq{lhs, rhs, Blame{loc, what}})
 
-def ct.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
+def ct.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, tp: Array<Tp>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
   (ct, v) = r
-  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, v)
+  (St{m, ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}}, v)
 
 # A body's counter: its derivations so far (2r), or the variables its
 # first one minted (2r + 1).
@@ -1054,26 +1107,26 @@ def ct.get(s: St, +i: U32) -> St & U32:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          ct.got(m, ps, tg, sites, sv, bl, eqs, err, p, Array.get(U32, ct, i))
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          ct.got(m, ps, tg, sites, sv, bl, tp, eqs, err, p, Array.get(U32, ct, i))
 
 def ct.set(s: St, +i: U32, +v: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
-          St{m, ps, tg, X{sites, sv, bl, Array.set(U32, ct, i, v), eqs, err, p}}
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          St{m, ps, tg, X{sites, sv, bl, Array.set(U32, ct, i, v), tp, eqs, err, p}}
 
-def p.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, +p: P) -> St & P:
-  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, p)
+def p.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, tp: Array<Tp>, eqs: List<&2, SumEq>, err: List<&2, Err>, +p: P) -> St & P:
+  (St{m, ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}}, p)
 
 # The program.
 def prog(s: St) -> St & P:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, +p}:
-          p.got(m, ps, tg, sites, sv, bl, ct, eqs, err, p)
+        case X{sites, sv, bl, ct, tp, eqs, err, +p}:
+          p.got(m, ps, tg, sites, sv, bl, ct, tp, eqs, err, p)
 
 
 # Union-find
@@ -2428,42 +2481,450 @@ def der.b(+depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) ->
 def derive(s: St, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A) -> St & Der:
   der.b(depth, fi, dup, body, fresh(s))
 
-def first.done(+rk: U32, +v0: U32, +d: Der, r: St & U32) -> St & Der:
-  (s, +v1) = r
-  (ct.set(s, (rk * 2 + 1 : U32), (v1 - v0 : U32)), d)
+# Templates
+# ---------
 
-def first.der(+rk: U32, +v0: U32, r: St & Der) -> St & Der:
-  (s, +d) = r
-  first.done(rk, v0, d, rd(s, 0))
+# A body's first derivation is kept as a template (captureTemplate); a
+# later one copies it instead of walking the body again
+# (instantiateTemplate). A walk writes only to the variables, pairs, apply
+# sites and equations it adds, so the copy, renumbered, is its effect. The
+# body table ct has eight words per rank: derivations so far, then the
+# template's variables and pairs, the first of each, where its words are,
+# and its equations. The words follow the ranks': five per variable
+# (binding, bang parent, class, blame, tag parent) and five per pair
+# (sides and ground mark). A copy shares the template's blames.
 
-def first.v0(+rk: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
-  (s, +v0) = r
-  first.der(rk, v0, derive(s, depth, fi, dup, body))
+def add.to.w(+i: U32, +by: U32, r: St & U32) -> St:
+  (s, +v) = r
+  wr(s, i, (v + by : U32))
 
-def again.at(over: Bool, s: St, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A) -> St & Der:
+# Word i of the table grows by by.
+def add.to(s: St, +i: U32, +by: U32) -> St:
+  add.to.w(i, by, rd(s, i))
+
+def ps.got(m: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & U32) -> St & U32:
+  (ps, w) = r
+  (St{m, ps, tg, x}, w)
+
+# Word i of the pairs' table.
+def ps.rd(s: St, +i: U32) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      ps.got(m, tg, x, Array.get(U32, ps, i))
+
+def ps.wr(s: St, +i: U32, +w: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      St{m, Array.set(U32, ps, i, w), tg, x}
+
+def ct.grow(s: St, +cap: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          St{Array.set(U32, m, 10, (cap * 2 : U32)), ps, tg,
+             X{sites, sv, bl, ANode{ct, Array.new(U32, U32.log2(cap), 0)}, tp, eqs, err, p}}
+
+def tp.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Tp> & Tp) -> St & Tp:
+  (tp, t) = r
+  (St{m, ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}}, t)
+
+# Rank r's template's lists.
+def tp.get(s: St, +r: U32) -> St & Tp:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          tp.got(m, ps, tg, sites, sv, bl, ct, eqs, err, p, Array.get(Tp, tp, r))
+
+def tp.set(s: St, +r: U32, t: Tp) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          St{m, ps, tg, X{sites, sv, bl, ct, Array.set(Tp, tp, r, t), eqs, err, p}}
+
+# The newest n equations.
+def eqs.take(s: St, +n: U32) -> St & List<&2, SumEq>:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, sv, bl, ct, tp, +eqs, err, p}:
+          (St{m, ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}}, List.take(&2, SumEq, eqs, U32.to_nat(n)))
+
+# A table grows until it holds need; which one: the variables (Gm), the
+# pairs (Gp), the body table (Gc).
+def grow.by(g: Gr, s: St, +size: U32) -> St:
+  match g:
+    case Gm{}:
+      grow.m(s, size)
+    case Gp{}:
+      pair.grow(s, size)
+    case Gc{}:
+      ct.grow(s, size)
+
+def fit(fuel: Nat, more: Bool, +g: Gr, +need: U32, s: St, +size: U32) -> St:
+  match fuel:
+    case 0n:
+      s
+    case 1n+f:
+      match more:
+        case True{}:
+          fit(f, U32.is_gt(need, (size * 2 : U32)), g, need, grow.by(g, s, size), (size * 2 : U32))
+        case False{}:
+          s
+
+def fit.at(+g: Gr, +need: U32, r: St & U32) -> St:
+  (s, +size) = r
+  fit(32n, U32.is_gt(need, size), g, need, s, size)
+
+def gr.word(g: Gr) -> U32:
+  match g:
+    case Gm{}:
+      1
+    case Gp{}:
+      3
+    case Gc{}:
+      10
+
+# The table holds need (words; pairs for the pairs').
+def room(s: St, +g: Gr, +need: U32) -> St:
+  fit.at(g, need, rd(s, gr.word(g)))
+
+# Capture
+# -------
+
+def cp.w(+o: U32, r: St & U32) -> St:
+  (s, +w) = r
+  ct.set(s, o, w)
+
+# A variable's five words, from word i of the variables' table to word o
+# of the body table.
+def cp.var(s: St, +i: U32, +o: U32) -> St:
+  cp.w((o + 4 : U32), rd(cp.w((o + 3 : U32), rd(cp.w((o + 2 : U32), rd(cp.w((o + 1 : U32), rd(cp.w(o, rd(s, i)),
+    (i + 1 : U32))), (i + 2 : U32))), (i + 3 : U32))), (i + 4 : U32)))
+
+# A pair's five words, likewise from the pairs' table.
+def cp.pair(s: St, +i: U32, +o: U32) -> St:
+  cp.w((o + 4 : U32), ps.rd(cp.w((o + 3 : U32), ps.rd(cp.w((o + 2 : U32), ps.rd(cp.w((o + 1 : U32), ps.rd(cp.w(o, ps.rd(s, i)),
+    (i + 1 : U32))), (i + 2 : U32))), (i + 3 : U32))), (i + 4 : U32)))
+
+def cp.vars(k: Nat, +i: U32, +o: U32, s: St) -> St:
+  match k:
+    case 0n:
+      s
+    case 1n+j:
+      cp.vars(j, (i + 8 : U32), (o + 5 : U32), cp.var(s, i, o))
+
+def cp.pairs(k: Nat, +i: U32, +o: U32, s: St) -> St:
+  match k:
+    case 0n:
+      s
+    case 1n+j:
+      cp.pairs(j, (i + 8 : U32), (o + 5 : U32), cp.pair(s, i, o))
+
+def cp.tag(empty: Bool, +i: U32, +ts: List<&2, TE>, acc: List<&2, VT>) -> List<&2, VT>:
+  match empty:
+    case True{}:
+      acc
+    case False{}:
+      VT{i, ts} <> acc
+
+def cp.ts(+i: U32, acc: List<&2, VT>, r: St & List<&2, TE>) -> St & List<&2, VT>:
+  (s, +ts) = r
+  (s, cp.tag(List.is_empty(&2, TE, ts), i, ts, acc))
+
+# The tags of the k variables from v + i.
+def cp.tags(k: Nat, +v: U32, +i: U32, p: St & List<&2, VT>) -> St & List<&2, VT>:
+  match k:
+    case 0n:
+      p
+    case 1n+j:
+      (s, acc) = p
+      cp.tags(j, v, (i + 1 : U32), cp.ts(i, acc, tg.get(s, (v + i : U32))))
+
+def cp.site(+fn: U32, acc: List<&2, TS>, r: St & Site) -> St & List<&2, TS>:
+  (s, site) = r
+  (s, TS{fn, site} <> acc)
+
+def cp.fn(+k: U32, acc: List<&2, TS>, r: St & U32) -> St & List<&2, TS>:
+  (s, +fn) = r
+  cp.site(fn, acc, site.get(s, k))
+
+# The n sites up to k, in order.
+def cp.sites(n: Nat, +k: U32, p: St & List<&2, TS>) -> St & List<&2, TS>:
+  match n:
+    case 0n:
+      p
+    case 1n+j:
+      (s, acc) = p
+      cp.sites(j, (k - 1 : U32), cp.fn(k, acc, sv.rd(s, (k * 4 : U32))))
+
+def cp.eqs(+r: U32, +d: Der, tags: List<&2, VT>, sites: List<&2, TS>, q: St & List<&2, SumEq>) -> St:
+  (s, eqs) = q
+  tp.set(s, r, Tp{tags, sites, eqs, d})
+
+def cp.sites.done(+r: U32, +d: Der, +ne: U32, tags: List<&2, VT>, q: St & List<&2, TS>) -> St:
+  (s, sites) = q
+  cp.eqs(r, d, tags, sites, eqs.take(s, ne))
+
+def cp.tags.done(+r: U32, +d: Der, +s0: U32, +ns: U32, +ne: U32, q: St & List<&2, VT>) -> St:
+  (s, tags) = q
+  cp.sites.done(r, d, ne, tags, cp.sites(U32.to_nat(ns), (s0 + ns - 1 : U32), (s, [])))
+
+def cp.head(s: St, +r: U32, +nv: U32, +np: U32, +v0: U32, +p0: U32, +off: U32, +ne: U32) -> St:
+  ct.set(ct.set(ct.set(ct.set(ct.set(ct.set(s, (r * 8 + 1 : U32), nv), (r * 8 + 2 : U32), np), (r * 8 + 3 : U32), v0),
+    (r * 8 + 4 : U32), p0), (r * 8 + 5 : U32), off), (r * 8 + 6 : U32), ne)
+
+def cp.off(+r: U32, +v0: U32, +p0: U32, +s0: U32, +d: Der, +nv: U32, +np: U32, +ns: U32, +ne: U32, q: St & U32) -> St:
+  (s, +off) = q
+  cp.tags.done(r, d, s0, ns, ne, cp.tags(U32.to_nat(nv), v0, 0,
+    (wr(cp.head(cp.pairs(U32.to_nat(np), (p0 * 8 : U32), (off + nv * 5 : U32),
+      cp.vars(U32.to_nat(nv), (v0 * 8 + 16 : U32), off, room(s, Gc{}, (off + nv * 5 + np * 5 : U32)))),
+      r, nv, np, v0, p0, off, ne), 9, (off + nv * 5 + np * 5 : U32)), [])))
+
+def cp.e1(+r: U32, +v0: U32, +p0: U32, +s0: U32, +e0: U32, +d: Der, +v1: U32, +p1: U32, +s1: U32, q: St & U32) -> St:
+  (s, +e1) = q
+  cp.off(r, v0, p0, s0, d, (v1 - v0 : U32), (p1 - p0 : U32), (s1 - s0 : U32), (e1 - e0 : U32), rd(s, 9))
+
+def cp.s1(+r: U32, +v0: U32, +p0: U32, +s0: U32, +e0: U32, +d: Der, +v1: U32, +p1: U32, q: St & U32) -> St:
+  (s, +s1) = q
+  cp.e1(r, v0, p0, s0, e0, d, v1, p1, s1, rd(s, 11))
+
+def cp.p1(+r: U32, +v0: U32, +p0: U32, +s0: U32, +e0: U32, +d: Der, +v1: U32, q: St & U32) -> St:
+  (s, +p1) = q
+  cp.s1(r, v0, p0, s0, e0, d, v1, p1, rd(s, 5))
+
+def cp.v1(+r: U32, +v0: U32, +p0: U32, +s0: U32, +e0: U32, +d: Der, q: St & U32) -> St:
+  (s, +v1) = q
+  cp.p1(r, v0, p0, s0, e0, d, v1, rd(s, 2))
+
+# captureTemplate: rank r's walk added what the counters moved by since
+# v0 (variables), p0 (pairs), s0 (sites) and e0 (equations).
+def capture(s: St, +r: U32, +v0: U32, +p0: U32, +s0: U32, +e0: U32, +d: Der) -> St:
+  cp.v1(r, v0, p0, s0, e0, d, rd(s, 0))
+
+# Instantiation
+# -------------
+
+# A template word renumbered: a type (Wt), a union-find link (parent plus
+# one, 0 at a root; Wl), a bang or none() (Wb), or a word kept (Wc).
+def sh.type(k: K, +w: U32, sh: Sh) -> U32:
+  match k:
+    case KData{}:
+      w
+    case KPair{}:
+      match sh:
+        case Sh{v0, dv, +p0, +dp}:
+          Bool.pick(U32, U32.is_ge((w >> 3n : U32), p0), (w + (dp << 3n : U32) : U32), w)
+    case _:
+      match sh:
+        case Sh{+v0, +dv, p0, dp}:
+          Bool.pick(U32, U32.is_ge((w >> 3n : U32), v0), (w + (dv << 3n : U32) : U32), w)
+
+def sh.word(k: Wk, +w: U32, sh: Sh) -> U32:
+  match k:
+    case Wt{}:
+      sh.type(kind(w), w, sh)
+    case Wl{}:
+      match sh:
+        case Sh{+v0, +dv, p0, dp}:
+          Bool.pick(U32, U32.is_zero(w) || U32.is_lt((w - 1 : U32), v0), w, (w + dv : U32))
+    case Wb{}:
+      match sh:
+        case Sh{+v0, +dv, p0, dp}:
+          Bool.pick(U32, U32.is_lt(w, v0) || U32.is_eq(w, none()), w, (w + dv : U32))
+    case Wc{}:
+      w
+
+def sh.sig(g: Sig, +sh: Sh) -> Sig:
+  match g:
+    case Sig{+b, +t}:
+      Sig{sh.word(Wb{}, b, sh), sh.word(Wt{}, t, sh)}
+
+def sh.tes(ts: List<&2, TE>, +sh: Sh) -> List<&2, TE>:
+  match ts:
+    case Nil{}:
+      []
+    case Con{t, rest}:
+      match t:
+        case TE{+tag, +cb, +ct}:
+          TE{tag, sh.word(Wb{}, cb, sh), sh.word(Wt{}, ct, sh)} <> sh.tes(rest, sh)
+
+def sh.lhs(ls: List<&2, U32>, +sh: Sh) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      []
+    case Con{+l, rest}:
+      sh.word(Wb{}, l, sh) <> sh.lhs(rest, sh)
+
+# The template's equations, renumbered, before the ones there are.
+def sh.eqs(es: List<&2, SumEq>, +sh: Sh, tail: List<&2, SumEq>) -> List<&2, SumEq>:
+  match es:
+    case Nil{}:
+      tail
+    case Con{e, rest}:
+      match e:
+        case SumEq{lhs, +rhs, +blame}:
+          SumEq{sh.lhs(lhs, sh), sh.word(Wb{}, rhs, sh), blame} <> sh.eqs(rest, sh, tail)
+
+def sh.der(d: Der, +sh: Sh) -> Der:
+  match d:
+    case Der{+b, +t, g}:
+      Der{sh.word(Wb{}, b, sh), sh.word(Wt{}, t, sh), sh.sig(g, sh)}
+
+def in.m(k: Wk, +o: U32, +sh: Sh, r: St & U32) -> St:
+  (s, +w) = r
+  wr(s, o, sh.word(k, w, sh))
+
+def in.p(k: Wk, +o: U32, +sh: Sh, r: St & U32) -> St:
+  (s, +w) = r
+  ps.wr(s, o, sh.word(k, w, sh))
+
+# A variable's five words, from word i of the body table to word o of the
+# variables' table.
+def in.var(s: St, +i: U32, +o: U32, +sh: Sh) -> St:
+  in.m(Wl{}, (o + 4 : U32), sh, ct.get(in.m(Wc{}, (o + 3 : U32), sh, ct.get(in.m(Wc{}, (o + 2 : U32), sh, ct.get(
+    in.m(Wl{}, (o + 1 : U32), sh, ct.get(in.m(Wt{}, o, sh, ct.get(s, i)), (i + 1 : U32))), (i + 2 : U32))), (i + 3 : U32))),
+    (i + 4 : U32)))
+
+# A pair's five words, likewise to the pairs' table.
+def in.pair(s: St, +i: U32, +o: U32, +sh: Sh) -> St:
+  in.p(Wc{}, (o + 4 : U32), sh, ct.get(in.p(Wt{}, (o + 3 : U32), sh, ct.get(in.p(Wb{}, (o + 2 : U32), sh, ct.get(
+    in.p(Wt{}, (o + 1 : U32), sh, ct.get(in.p(Wb{}, o, sh, ct.get(s, i)), (i + 1 : U32))), (i + 2 : U32))), (i + 3 : U32))),
+    (i + 4 : U32)))
+
+def in.vars(k: Nat, +i: U32, +o: U32, +sh: Sh, s: St) -> St:
+  match k:
+    case 0n:
+      s
+    case 1n+j:
+      in.vars(j, (i + 5 : U32), (o + 8 : U32), sh, in.var(s, i, o, sh))
+
+def in.pairs(k: Nat, +i: U32, +o: U32, +sh: Sh, s: St) -> St:
+  match k:
+    case 0n:
+      s
+    case 1n+j:
+      in.pairs(j, (i + 5 : U32), (o + 8 : U32), sh, in.pair(s, i, o, sh))
+
+def in.tags(vs: List<&2, VT>, +base: U32, +sh: Sh, s: St) -> St:
+  match vs:
+    case Nil{}:
+      s
+    case Con{v, rest}:
+      match v:
+        case VT{+i, ts}:
+          in.tags(rest, base, sh, tg.set(s, (base + i : U32), sh.tes(ts, sh)))
+
+# The template's sites, renumbered, at this dispatch's depth.
+def in.sites(ts: List<&2, TS>, +depth: U32, +sh: Sh, s: St) -> St:
+  match ts:
+    case Nil{}:
+      s
+    case Con{t, rest}:
+      match t:
+        case TS{+fn, site}:
+          match site:
+            case Site{env, res, d, +loc, done}:
+              in.sites(rest, depth, sh, site.add(s, sh.word(Wt{}, fn, sh), Site{sh.sig(env, sh), sh.sig(res, sh), (depth + 1 : U32), loc, []}))
+
+def in.eqs(s: St, es: List<&2, SumEq>, +sh: Sh) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
+          St{m, ps, tg, X{sites, sv, bl, ct, tp, sh.eqs(es, sh, eqs), err, p}}
+
+def in.tp(+depth: U32, +base: U32, +ne: U32, +sh: Sh, r: St & Tp) -> St & Der:
+  (s, t) = r
+  match t:
+    case Tp{tags, sites, eqs, der}:
+      (in.sites(sites, depth, sh, in.tags(tags, base, sh, in.eqs(add.to(s, 11, ne), eqs, sh))), sh.der(der, sh))
+
+def in.words(+r: U32, +depth: U32, +nv: U32, +np: U32, +off: U32, +ne: U32, +base: U32, +pb: U32, +sh: Sh, s: St) -> St & Der:
+  in.tp(depth, base, ne, sh, tp.get(wr(wr(
+    in.pairs(U32.to_nat(np), (off + nv * 5 : U32), (pb * 8 : U32), sh,
+      in.vars(U32.to_nat(nv), off, (base * 8 + 16 : U32), sh,
+        room(room(s, Gm{}, ((base + nv) * 8 + 24 : U32)), Gp{}, (pb + np : U32)))),
+    0, (base + nv : U32)), 2, (pb + np : U32)), r))
+
+def in.pb(+r: U32, +depth: U32, +nv: U32, +np: U32, +v0: U32, +p0: U32, +off: U32, +ne: U32, +base: U32, q: St & U32) -> St & Der:
+  (s, +pb) = q
+  in.words(r, depth, nv, np, off, ne, base, pb, Sh{v0, (base - v0 : U32), p0, (pb - p0 : U32)}, s)
+
+def in.base(+r: U32, +depth: U32, +nv: U32, +np: U32, +v0: U32, +p0: U32, +off: U32, +ne: U32, q: St & U32) -> St & Der:
+  (s, +base) = q
+  in.pb(r, depth, nv, np, v0, p0, off, ne, base, rd(s, 2))
+
+def in.ne(+r: U32, +depth: U32, +nv: U32, +np: U32, +v0: U32, +p0: U32, +off: U32, q: St & U32) -> St & Der:
+  (s, +ne) = q
+  in.base(r, depth, nv, np, v0, p0, off, ne, rd(s, 0))
+
+def in.off(+r: U32, +depth: U32, +nv: U32, +np: U32, +v0: U32, +p0: U32, q: St & U32) -> St & Der:
+  (s, +off) = q
+  in.ne(r, depth, nv, np, v0, p0, off, ct.get(s, (r * 8 + 6 : U32)))
+
+def in.p0(+r: U32, +depth: U32, +nv: U32, +np: U32, +v0: U32, q: St & U32) -> St & Der:
+  (s, +p0) = q
+  in.off(r, depth, nv, np, v0, p0, ct.get(s, (r * 8 + 5 : U32)))
+
+def in.v0(+r: U32, +depth: U32, +nv: U32, +np: U32, q: St & U32) -> St & Der:
+  (s, +v0) = q
+  in.p0(r, depth, nv, np, v0, ct.get(s, (r * 8 + 4 : U32)))
+
+def in.np(+r: U32, +depth: U32, +nv: U32, q: St & U32) -> St & Der:
+  (s, +np) = q
+  in.v0(r, depth, nv, np, ct.get(s, (r * 8 + 3 : U32)))
+
+# instantiateTemplate: rank r's template, copied for a dispatch at depth.
+def instance(s: St, +r: U32, +depth: U32, +nv: U32) -> St & Der:
+  in.np(r, depth, nv, ct.get(s, (r * 8 + 2 : U32)))
+
+def first.der(+r: U32, +v0: U32, +p0: U32, +s0: U32, +e0: U32, q: St & Der) -> St & Der:
+  (s, +d) = q
+  (capture(s, r, v0, p0, s0, e0, d), d)
+
+def first.e0(+r: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, +v0: U32, +p0: U32, +s0: U32, q: St & U32) -> St & Der:
+  (s, +e0) = q
+  first.der(r, v0, p0, s0, e0, derive(s, depth, fi, dup, body))
+
+def first.s0(+r: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, +v0: U32, +p0: U32, q: St & U32) -> St & Der:
+  (s, +s0) = q
+  first.e0(r, depth, fi, dup, body, v0, p0, s0, rd(s, 11))
+
+def first.p0(+r: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, +v0: U32, q: St & U32) -> St & Der:
+  (s, +p0) = q
+  first.s0(r, depth, fi, dup, body, v0, p0, rd(s, 5))
+
+def first.v0(+r: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, q: St & U32) -> St & Der:
+  (s, +v0) = q
+  first.p0(r, depth, fi, dup, body, v0, rd(s, 2))
+
+def again.at(over: Bool, s: St, +r: U32, +depth: U32, +nv: U32) -> St & Der:
   match over:
     case True{}:
       (fail(s, budget.err()), Der{0, 0, Sig{0, 0}})
     case False{}:
-      derive(s, depth, fi, dup, body)
+      instance(s, r, depth, nv)
 
-def again.base(+size: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
-  (s, +base) = r
-  again.at(U32.is_ge((base + size : U32), var.budget()), s, depth, fi, dup, body)
+def again.base(+r: U32, +depth: U32, +nv: U32, q: St & U32) -> St & Der:
+  (s, +base) = q
+  again.at(U32.is_ge((base + nv : U32), var.budget()), s, r, depth, nv)
 
-def again.size(+depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
-  (s, +size) = r
-  again.base(size, depth, fi, dup, body, rd(s, 0))
+def again.nv(+r: U32, +depth: U32, q: St & U32) -> St & Der:
+  (s, +nv) = q
+  again.base(r, depth, nv, rd(s, 0))
 
-# The first derivation of a body records how many variables it minted; a
-# later one is refused when that many would reach the budget, as copying
-# the Haskell's template is.
+# A body's first derivation walks it and keeps the walk as the body's
+# template; a later one copies the template, and is refused when that
+# many variables would reach the budget, as in the Haskell.
 def derive.pick(first: Bool, s: St, +rk: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A) -> St & Der:
   match first:
     case True{}:
       first.v0(rk, depth, fi, dup, body, rd(s, 0))
     case False{}:
-      again.size(depth, fi, dup, body, ct.get(s, (rk * 2 + 1 : U32)))
+      again.nv(rk, depth, ct.get(s, (rk * 8 + 1 : U32)))
 
 def dispatch.derived(+tag: U32, +env: Sig, +res: Sig, +loc: Lc.Loc, r: St & Der) -> St:
   (s, d) = r
@@ -2484,7 +2945,7 @@ def dispatch.counted(over: Bool, s: St, +count: U32, +rk: U32, +site: Site, +bd:
           match bd:
             case Bd{h, +fi, +dup, +t}:
               dispatch.derived(rk, env, res, loc,
-                derive.pick(U32.is_eq(count, 0), ct.set(s, (rk * 2 : U32), (count + 1 : U32)), rk, depth, fi, dup, t))
+                derive.pick(U32.is_eq(count, 0), ct.set(s, (rk * 8 : U32), (count + 1 : U32)), rk, depth, fi, dup, t))
 
 def dispatch.count(+rk: U32, +site: Site, +bd: Bd, r: St & U32) -> St:
   (s, +count) = r
@@ -2493,7 +2954,7 @@ def dispatch.count(+rk: U32, +site: Site, +bd: Bd, r: St & U32) -> St:
 def dispatch.found(m: Maybe<&2, Bd>, s: St, +rk: U32, +site: Site) -> St:
   match m:
     case Some{bd}:
-      dispatch.count(rk, site, bd, ct.get(s, (rk * 2 : U32)))
+      dispatch.count(rk, site, bd, ct.get(s, (rk * 8 : U32)))
     case None{}:
       fail(s, Internal{"dispatched code not in the DeferMap"})
 
@@ -3541,8 +4002,8 @@ def solve.eqs(s: St) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, +eqs, err, p}:
-          solve.res(ps, tg, X{sites, sv, bl, ct, eqs, err, p}, resolve.eqs(eqs, m))
+        case X{sites, sv, bl, ct, tp, +eqs, err, p}:
+          solve.res(ps, tg, X{sites, sv, bl, ct, tp, eqs, err, p}, resolve.eqs(eqs, m))
 
 def solve.ok(r: St & Bool) -> St:
   (s, ok) = r
@@ -3913,7 +4374,7 @@ def st.err(s: St) -> Maybe<&2, Err>:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, sv, bl, ct, eqs, err, p}:
+        case X{sites, sv, bl, ct, tp, eqs, err, p}:
           first.err(err)
 
 def an.walked(apply: Bool, r: St & Sig) -> St & Sig:
