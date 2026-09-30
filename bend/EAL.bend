@@ -14,29 +14,33 @@ import ./Lift.bend as Lf
 # - A code body is derived afresh at each dispatch. The Haskell copies a
 #   template of the first derivation instead, which it documents as the
 #   same constraints; the one visible difference, its variable-budget test
-#   before copying, is kept (`sizes`).
+#   before copying, is kept.
 # - The unifier is one worklist, popped last in first, so its effects come
 #   in the Haskell's depth-first order.
-# - Tags are strings that sort as the Haskell's Ord Tag does: a code is
-#   "0" and its hash; then "1" gate, "2" gate function, "3" abort, "4"
-#   abort continuation.
+#
+# The state is laid out as the IC's net is, in arrays read and written in
+# place by direct-style defs; recursion that threads it runs on a stack of
+# jobs:
+# - A type is one word: its kind in the low three bits (1 a variable, 2 a
+#   code class, 3 a capture selection, 4 a pair, 5 data) and above them a
+#   variable, or a pair's number in the pairs' table.
+# - A tag is one word: a body's rank among the bodies' hashes (the Haskell
+#   orders code tags by hash), or, above every rank, the built-ins in the
+#   Haskell's Ord Tag order: gate, gate function, abort, abort
+#   continuation.
+# - A variable has eight words: its type binding (0 when unbound), its
+#   bang class's parent plus one (0 at a root), the class (its level times
+#   four, plus 0 unrestricted, 1 forced zero, 2 forced level), the class's
+#   blame (a number in the blames' table) and its tag class's parent plus
+#   one. Before the variables, the table keeps its counters.
+# - A failure is kept in the state, the first one only, and every loop
+#   stops at it.
+# - Branches go on small enumerations (a type's kind, a class merge's
+#   outcome) or on Bools, never on a U32's literal values: a U32 case
+#   compiles to a test per bit, each with its own copy of the default.
 
-# Types and constraints
-# ---------------------
-
-# A type skeleton: data, a variable, a pair (each side with its bang), a
-# code class (a set of tags), or a capture selection of a closure package.
-
-type Tau is Data:
-  DataT{}
-  VarT{+i: U32}
-  PairT{+b1: U32, +t1: Tau, +b2: U32, +t2: Tau}
-  CodeT{+i: U32}
-  CapT{+i: U32}
-
-# A bang variable in front of a type (Sigma).
-type Sig is Data:
-  Sig{+b: U32, +t: Tau}
+# Types
+# -----
 
 type Blame is Data:
   Blame{+loc: Lc.Loc, +why: String}
@@ -56,59 +60,6 @@ type Err is Data:
 type SumEq is Data:
   SumEq{+lhs: List<&2, U32>, +rhs: U32, +blame: Blame}
 
-# A tag of a code class, with the capture that rides with it in a package.
-type TE is Data:
-  TE{+tag: String, +cap: Maybe<&2, Sig>}
-
-# An application, dispatched once its function position resolves to code
-# (ApplySite); `done` are the tags already dispatched there.
-type Site is Data:
-  Site{+fn: Tau, +env: Sig, +res: Sig, +glob: List<&2, U32>, +depth: U32, +loc: Lc.Loc, +done: List<&2, String>}
-
-# What a variable knows: its type binding, its bang class's union-find
-# parent and constraint, and its tag class's parent and tags.
-type V is Data:
-  V{+bind: Maybe<&2, Tau>, +parent: U32, +cls: Class, +tparent: U32, +tags: List<&2, TE>}
-
-# The state: the variables (a table that doubles), the apply sites, and
-# the rest: the next variable and the tables' sizes, the sum equations
-# newest first, leaf box paths, and per body its derivation count and the
-# variables its first derivation minted.
-type St is Type:
-  St{vars: Array<V>, sites: Array<Site>, c: C}
-
-type C is Data:
-  C{+next: U32, +cap: U32, +nsites: U32, +scap: U32, +eqs: List<&2, SumEq>,
-    +leaves: List<&2, List<&2, U32>>, +insts: Map<&2, U32>, +sizes: Map<&2, U32>}
-
-type Mg is Data:
-  MgOk{+c: Class, +changed: Bool}
-  MgErr{+e: Err}
-
-type SP is Data:
-  SP{+a: Sig, +b: Sig}
-
-type WK is Data:
-  WkTau{+t: Tau}
-  WkBound{+i: U32, +b: Maybe<&2, Tau>}
-
-type OJ is Data:
-  OTodo{+ts: List<&2, Tau>}
-  OSeen{+t: Tau, +ts: List<&2, Tau>}
-
-# A step of deepShowTau: a type to show at depth d (stop when d is 0), or
-# its walk.
-type DS is Data:
-  DsTau{+t: Tau, +d: U32, +stop: Bool}
-  DsWalked{+w: Tau, +d: U32}
-
-# Work for the unifier, all at a visited set of capture classes and a
-# dispatch mode (the dispatching tag, or "").
-type W is Data:
-  WSig{+vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, +a: Sig, +b: Sig}
-  WTau{+vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, +a: Tau, +b: Tau}
-  WColl{+vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, +s: Sig}
-
 # Uses of one env path: how many, and where the first was.
 type Use is Data:
   Use{+n: U32, +loc: Lc.Loc}
@@ -116,22 +67,182 @@ type Use is Data:
 type Dup is Data:
   Dup{+path: String, +loc: Lc.Loc}
 
+# The term the analysis walks: Term3Lifting with every reference by its
+# body's rank, and without what the walk ignores (a recursion hole is an
+# env occurrence; a checking wrapper keeps only what it wraps).
+type A is Data:
+  AZero{+loc: Lc.Loc}
+  APair{+loc: Lc.Loc, +a: A, +b: A}
+  AEnv{+loc: Lc.Loc}
+  ASetEnv{+loc: Lc.Loc, +x: A}
+  AGate{+loc: Lc.Loc}
+  ALeft{+loc: Lc.Loc, +x: A}
+  ARight{+loc: Lc.Loc, +x: A}
+  AAbort{+loc: Lc.Loc}
+  ACheck{+loc: Lc.Loc, +c: A}
+  ARef{+loc: Lc.Loc, +r: U32}
+
+# A body: its hash, the index it was first seen with, the env path its
+# walk duplicates (if any) and its term.
+type Bd is Data:
+  Bd{+h: String, +fi: U32, +dup: Maybe<&2, Dup>, +t: A}
+
+# The bodies by rank, a complete binary tree.
+type BT is Data:
+  BTip{}
+  BOne{+b: Bd}
+  BTwo{+l: BT, +r: BT}
+
+# The program's bodies: how many, the tree's size (a power of two), the
+# tree.
+type P is Data:
+  P{+n: U32, +size: U32, +bt: BT}
+
+# A type's kind.
+type K is Data:
+  KVar{}
+  KCode{}
+  KCap{}
+  KPair{}
+  KData{}
+
+# The next link of a chain (a binding, a union-find parent): none, or one.
+type Nx is Data:
+  NEnd{}
+  NAt{+i: U32}
+
+# What constraining a class does (mergeClasses, the old class first):
+# nothing, the new class replaces the old, or a conflict where the new or
+# the old class is the one that must be boxed.
+type Dc is Data:
+  DcKeep{}
+  DcSet{}
+  DcNeedNew{}
+  DcNeedOld{}
+
+# Which class a union of two classes keeps: a's, b's, or a conflict where
+# b's or a's is the one that must be boxed.
+type Mg is Data:
+  MgA{}
+  MgB{}
+  MgNeedB{}
+  MgNeedA{}
+
+# How one apply site went in a round: nothing new, dispatched, or stop
+# (past the last site, or a failure).
+type SS is Data:
+  SsNone{}
+  SsNew{}
+  SsStop{}
+
+# The built-in tags.
+type Bi is Data:
+  BiGate{}
+  BiGateFn{}
+  BiAbort{}
+  BiCont{}
+
+# A bang and a type (Sigma).
+type Sig is Data:
+  Sig{+b: U32, +t: U32}
+
+# A pair type: each side's bang and type.
+type Pr is Data:
+  Pr{+b1: U32, +t1: U32, +b2: U32, +t2: U32}
+
+# A tag of a code class, with the capture that rides with it in a package
+# (its bang cb is none() when there is none).
+type TE is Data:
+  TE{+tag: U32, +cb: U32, +ct: U32}
+
+# An application, dispatched once its function position resolves to code
+# (ApplySite); `done` are the tags already dispatched there.
+type Site is Data:
+  Site{+fn: U32, +env: Sig, +res: Sig, +depth: U32, +loc: Lc.Loc, +done: List<&2, U32>}
+
+# What is not the variables: the apply sites, the blames, two counters per
+# body (derivations so far, and the variables the first one minted), the
+# sum equations newest first, the first failure (a list, which keeps it
+# boxed), and the program.
+type X is Type:
+  X{sites: Array<Site>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P}
+
+# The state: the variables and counters, the pairs, the tags of each tag
+# class root, and the rest.
+type St is Type:
+  St{m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, x: X}
+
+# Work for the unifier, all at a visited set of capture classes and a
+# dispatch mode (the dispatching tag, or none()).
+type W is Data:
+  WSig{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: Sig, +b: Sig}
+  WTau{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32}
+  WColl{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +s: Sig}
+
 # A frame: its env domain bang and type, and its dispatch depth.
 type Ctx is Data:
-  Ctx{+bang: U32, +tau: Tau, +depth: U32}
+  Ctx{+bang: U32, +tau: U32, +depth: U32}
 
-# Box paths, innermost first: this frame's and the whole program's.
-type Paths is Data:
-  Paths{+here: List<&2, U32>, +glob: List<&2, U32>}
+# What waits for a result: a view's sum, a pair's second side, a pair, an
+# application, a projection (left or right).
+type GK is Data:
+  KView{+w: U32, +loc: Lc.Loc}
+  KPairA{+ctx: Ctx, +here: List<&2, U32>, +loc: Lc.Loc, +b: A}
+  KPairB{+loc: Lc.Loc, +sa: Sig}
+  KSetEnv{+ctx: Ctx, +here: List<&2, U32>, +loc: Lc.Loc}
+  KProj{+loc: Lc.Loc, +left: Bool}
 
+# The constraint walk's jobs (viewNode and intrinsic): a node to view or
+# to walk, or a result to hand to the frame on top.
+type GJ is Data:
+  GView{+ctx: Ctx, +here: List<&2, U32>, +t: A, +ks: List<&2, GK>}
+  GIntr{+ctx: Ctx, +here: List<&2, U32>, +t: A, +ks: List<&2, GK>}
+  GRet{+s: Sig, +ks: List<&2, GK>}
+
+# fnTagsOfCaptures' work: a tag class to open, a capture's type, or its
+# walk.
 type FT is Data:
   FtClass{+vis: List<&2, U32>, +i: U32}
-  FtCap{+vis: List<&2, U32>, +cap: Maybe<&2, Sig>}
-  FtWalked{+vis: List<&2, U32>, +w: Tau}
+  FtCap{+vis: List<&2, U32>, +t: U32}
+  FtWalked{+vis: List<&2, U32>, +w: U32}
+
+# fnTagsOfCaptures' work left, and the tags found so far.
+type FQ is Data:
+  FQ{+js: List<&2, FT>, +acc: List<&2, U32>}
+
+# deepShowTau's work: a type to show at a depth, a walked one, or two shown
+# sides to join.
+type DS is Data:
+  DsTau{+t: U32, +d: U32}
+  DsWalked{+k: K, +w: U32, +d: U32}
+  DsJoin{}
+
+# deepShowTau's jobs left and the texts shown so far.
+type DQ is Data:
+  DQ{+js: List<&2, DS>, +vs: List<&2, String>}
+
+# The shapes' work (shapeOfSigma): a type, a walked one, or two shapes to
+# pair.
+type SJ is Data:
+  SjTau{+t: U32}
+  SjWalked{+k: K, +w: U32}
+  SjPair{}
+
+# The shapes' jobs left and the shapes found so far.
+type SQ is Data:
+  SQ{+js: List<&2, SJ>, +vs: List<&2, Lf.Shape>}
+
+# A class root's class, read for the solver.
+type RC is Data:
+  RC{+root: U32, +c: Class}
 
 # A derivation of a code body: its env domain bang and type, and its result.
 type Der is Data:
-  Der{+b: U32, +t: Tau, +s: Sig}
+  Der{+b: U32, +t: U32, +s: Sig}
+
+# A step of occurs: whether it hit, and the types left.
+type OS is Data:
+  OS{+hit: Bool, +ts: List<&2, U32>}
 
 # The solver's class table (by root) and whether a round changed it; or
 # the first failure.
@@ -155,10 +266,6 @@ type AI is Type:
 type Pk is Data:
   Pk{+best: U32, +bc: U32}
 
-type SJ is Data:
-  SjTau{+t: Tau}
-  SjWalked{+w: Tau}
-
 # Which bodies certify so far, and the first dependency found failing.
 type DR is Data:
   DR{+memo: Map<&2, Bool>, +failed: Maybe<&2, String>}
@@ -174,18 +281,11 @@ type DJ is Data:
   DjAll{+hs: List<&2, String>, +memo: Map<&2, Bool>}
   DjAllNext{+hs: List<&2, String>, +r: DR}
 
-# A step of find on the table: a variable's record read, or its parent
-# seen.
-type RJ is Type:
-  RjRead{i: U32, r: Array<V> & V}
-  RjUp{i: U32, p: U32, top: Bool, a: Array<V>}
-  RjFix{i: U32, x: V, p: U32, done: Bool, a: Array<V>}
-
 type HB is Data:
   HB{+h: String, +ok: Bool}
 
-def ds(t: Tau, +d: U32) -> DS:
-  DsTau{t, d, U32.is_eq(d, 0)}
+# Constants
+# ---------
 
 def none() -> U32:
   4294967295
@@ -202,654 +302,91 @@ def var.budget() -> U32:
 def poly.cap() -> U32:
   16384
 
-def v.empty() -> V:
-  V{None{}, none(), Unrestricted{}, none(), []}
+def big() -> Nat:
+  U32.to_nat(4294967295)
 
-def site.empty() -> Site:
-  Site{DataT{}, Sig{0, DataT{}}, Sig{0, DataT{}}, [], 0, Lc.Unknown{}, []}
+# The built-in tags, after every rank; a reference to no body gets
+# missing().
+def t.gate() -> U32:
+  4294967290
 
-def st.new() -> St:
-  St{Array.new(V, 10n, v.empty()), Array.new(Site, 8n, site.empty()),
-     C{0, 1024, 0, 256, [], [], Map.new(&2, U32), Map.new(&2, U32)}}
+def t.gatefn() -> U32:
+  4294967291
 
-# Showing, for messages
-# ---------------------
+def t.abort() -> U32:
+  4294967292
 
-def blame.show(b: Blame) -> String:
-  match b:
-    case Blame{loc, why}:
-      "Blame " ++ Lf.loc.show(loc, True{}) ++ " " ++ Sh.string(why)
+def t.cont() -> U32:
+  4294967293
 
-def tag.show(t: String) -> String:
-  match t:
-    case SCon{Chr{48}, h}:
-      "TCode " ++ h
-    case SCon{Chr{49}, r}:
-      "TGate"
-    case SCon{Chr{50}, r}:
-      "TGateFn"
-    case SCon{Chr{51}, r}:
-      "TAbort"
-    case _:
-      "TAbortCont"
+def missing() -> U32:
+  4294967289
 
-def tags.show.go(ts: List<&2, String>) -> String:
-  match ts:
-    case Nil{}:
-      "]"
-    case Con{t, rest}:
-      "," ++ tag.show(t) ++ tags.show.go(rest)
+def data() -> U32:
+  5
 
-def tags.show(ts: List<&2, String>) -> String:
-  match ts:
-    case Nil{}:
-      "[]"
-    case Con{t, rest}:
-      "[" ++ tag.show(t) ++ tags.show.go(rest)
+def kind.at(+k: U32) -> K:
+  Bool.pick(K, U32.is_eq(k, 1), KVar{}, Bool.pick(K, U32.is_eq(k, 2), KCode{},
+    Bool.pick(K, U32.is_eq(k, 3), KCap{}, Bool.pick(K, U32.is_eq(k, 4), KPair{}, KData{}))))
 
-def mode.show(m: String) -> String:
-  match m:
-    case SNil{}:
-      "Nothing"
-    case SCon{Chr{48}, h}:
-      "Just (TCode " ++ h ++ ")"
-    case other:
-      "Just " ++ tag.show(other)
+def kind(+t: U32) -> K:
+  kind.at((t .&. 7 : U32))
 
-def describe(t: Tau) -> String:
-  match t:
-    case DataT{}:
-      "data"
-    case VarT{i}:
-      "t" ++ U32.show(i)
-    case PairT{b1, t1, b2, t2}:
-      "pair"
-    case CodeT{i}:
-      "code"
-    case CapT{i}:
-      "capture"
+def is.var(+t: U32) -> Bool:
+  U32.is_eq((t .&. 7 : U32), 1)
 
-def steps.show(p: String) -> String:
-  match p:
-    case SNil{}:
-      "<whole env>"
-    case other:
-      other
+def is.code(+t: U32) -> Bool:
+  U32.is_eq((t .&. 7 : U32), 2)
 
-def render.at(m: Maybe<&2, String>) -> String:
-  match m:
-    case Some{place}:
-      " (at " ++ place ++ ")"
-    case None{}:
-      ""
+def is.pair(+t: U32) -> Bool:
+  U32.is_eq((t .&. 7 : U32), 4)
 
-def blame.render(b: Blame) -> String:
-  match b:
-    case Blame{loc, why}:
-      why ++ render.at(Lc.render_compact(loc))
+# Code or a capture selection: something an application can dispatch.
+def appliable(+t: U32) -> Bool:
+  U32.is_eq((t .&. 6 : U32), 2)
 
-# The monad
-# ---------
+def ix(+t: U32) -> U32:
+  (t >> 3n : U32)
 
-# renderEALError
-def render(e: Err) -> String:
-  match e:
-    case TypeMismatch{loc, msg}:
-      "certification failed: " ++ msg ++ render.at(Lc.render_compact(loc))
-    case BoxConflict{need, forbid}:
-      "certification failed: a duplicated value cannot be boxed:\n  boxing required: "
-        ++ blame.render(need) ++ "\n  boxing forbidden: " ++ blame.render(forbid)
-    case GaveUp{msg}:
-      "certification gave up; this usually means unbounded self-application:\n  " ++ msg
-    case DependencyFailed{h}:
-      "a function body this program depends on failed certification: " ++ h
-    case Internal{msg}:
-      "certification internal error (analyzer bug): " ++ msg
+def var.t(+i: U32) -> U32:
+  (i * 8 + 1 : U32)
 
-def M(-A: Data) -> Type:
-  St -> Result<&1, &1, Err, A & St>
+def code.t(+i: U32) -> U32:
+  (i * 8 + 2 : U32)
 
-def M.pure(-A: Data, x: A) -> M(A):
-  s => Done{(x, s)}
+def cap.t(+i: U32) -> U32:
+  (i * 8 + 3 : U32)
 
-def M.fail(-A: Data, e: Err) -> M(A):
-  s => Fail{e}
+def blame.none() -> Blame:
+  Blame{Lc.Unknown{}, ""}
 
-def M.run(-A: Data, -B: Data, f: A -> M(B), r: Result<&1, &1, Err, A & St>) -> Result<&1, &1, Err, B & St>:
-  match r:
-    case Fail{e}:
-      Fail{e}
-    case Done{p}:
-      (a, s) = p
-      f(a)(s)
+def site.none() -> Site:
+  Site{0, Sig{0, 0}, Sig{0, 0}, 0, Lc.Unknown{}, []}
 
-def M.bind(-A: Data, -B: Data, m: M(A), f: A -> M(B)) -> M(B):
-  s => M.run(A, B, f, m(s))
+def pr.none() -> Pr:
+  Pr{0, 0, 0, 0}
 
-# The counters and lists
-# ----------------------
+def te.none() -> List<&2, TE>:
+  []
 
-def c.next(c: C) -> U32:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      next
-
-def c.nsites(c: C) -> U32:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      nsites
-
-def c.eqs(c: C) -> List<&2, SumEq>:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      eqs
-
-def c.leaves(c: C) -> List<&2, List<&2, U32>>:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      leaves
-
-def c.inst(c: C, +h: String) -> U32:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      Pair.snd(Map<&2, U32>, U32, Map.get(U32, 0, insts, h))
-
-def c.size(c: C, +h: String) -> U32:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      Pair.snd(Map<&2, U32>, U32, Map.get(U32, 0, sizes, h))
-
-def c.with.eq(c: C, e: SumEq) -> C:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      C{next, cap, nsites, scap, e <> eqs, leaves, insts, sizes}
-
-def c.with.leaf(c: C, p: List<&2, U32>) -> C:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      C{next, cap, nsites, scap, eqs, p <> leaves, insts, sizes}
-
-def c.with.inst(c: C, +h: String, +n: U32) -> C:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      C{next, cap, nsites, scap, eqs, leaves, Map.set(&2, U32, insts, h, n), sizes}
-
-def c.with.size(c: C, +h: String, +n: U32) -> C:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      C{next, cap, nsites, scap, eqs, leaves, insts, Map.set(&2, U32, sizes, h, n)}
-
-def with.c.go(-A: Data, f: C -> A, s: St) -> Result<&1, &1, Err, A & St>:
+def sig.b(s: Sig) -> U32:
   match s:
-    case St{vars, sites, +c}:
-      Done{(f(c), St{vars, sites, c})}
+    case Sig{b, t}:
+      b
 
-# A read of the rest.
-def with.c(-A: Data, f: C -> A) -> M(A):
-  s => with.c.go(A, f, s)
-
-def on.c.go(f: C -> C, s: St) -> Result<&1, &1, Err, Unit & St>:
+def sig.t(s: Sig) -> U32:
   match s:
-    case St{vars, sites, c}:
-      Done{(Unit{}, St{vars, sites, f(c)})}
+    case Sig{b, t}:
+      t
 
-# Variables
-# ---------
-
-# A change to the rest.
-def on.c(f: C -> C) -> M(Unit):
-  s => on.c.go(f, s)
-
-def grow.vars(+cap: U32, vars: Array<V>) -> Array<V>:
-  ANode{vars, Array.new(V, U32.log2(cap), v.empty())}
-
-def fresh.room(room: Bool, vars: Array<V>, sites: Array<Site>, c: C) -> Result<&1, &1, Err, U32 & St>:
-  match room:
-    case True{}:
-      match c:
-        case C{+next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-          Done{(next, St{vars, sites, C{(next + 1 : U32), cap, nsites, scap, eqs, leaves, insts, sizes}})}
-    case False{}:
-      match c:
-        case C{+next, +cap, nsites, scap, eqs, leaves, insts, sizes}:
-          Done{(next, St{grow.vars(cap, vars), sites, C{(next + 1 : U32), (cap * 2 : U32), nsites, scap, eqs, leaves, insts, sizes}})}
-
-def c.room(c: C) -> Bool:
+def ctx.depth(c: Ctx) -> U32:
   match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      U32.is_lt(next, cap)
+    case Ctx{bang, tau, depth}:
+      depth
 
-def fresh.at(over: Bool, s: St) -> Result<&1, &1, Err, U32 & St>:
-  match over:
-    case True{}:
-      Fail{GaveUp{"constraint variable budget (2000000) exceeded; the dispatch structure is likely exploding"}}
-    case False{}:
-      match s:
-        case St{vars, sites, +c}:
-          fresh.room(c.room(c), vars, sites, c)
 
-def fresh.go(s: St) -> Result<&1, &1, Err, U32 & St>:
-  match s:
-    case St{vars, sites, +c}:
-      fresh.at(U32.is_ge(c.next(c), var.budget()), St{vars, sites, c})
-
-# freshInt
-def fresh() -> M(U32):
-  s => fresh.go(s)
-
-def fresh.tau() -> M(Tau):
-  do M<Tau>:
-    i : U32 <- fresh()
-    return VarT{i}
-
-def fresh.sig() -> M(Sig):
-  do M<Sig>:
-    b : U32 <- fresh()
-    t : Tau <- fresh.tau()
-    return Sig{b, t}
-
-def v.got(r: Array<V> & V, sites: Array<Site>, c: C) -> Result<&1, &1, Err, V & St>:
-  (vars, x) = r
-  Done{(x, St{vars, sites, c})}
-
-def v.get.go(+i: U32, s: St) -> Result<&1, &1, Err, V & St>:
-  match s:
-    case St{vars, sites, c}:
-      v.got(Array.get(V, vars, i), sites, c)
-
-def v.get(+i: U32) -> M(V):
-  s => v.get.go(i, s)
-
-def v.put.go(+i: U32, x: V, s: St) -> Result<&1, &1, Err, Unit & St>:
-  match s:
-    case St{vars, sites, c}:
-      Done{(Unit{}, St{Array.set(V, vars, i, x), sites, c})}
-
-def v.put(+i: U32, x: V) -> M(Unit):
-  s => v.put.go(i, x, s)
-
-def v.bind(x: V) -> Maybe<&2, Tau>:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      bind
-
-def v.parent(x: V) -> U32:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      parent
-
-def v.cls(x: V) -> Class:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      cls
-
-def v.tparent(x: V) -> U32:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      tparent
-
-def v.tags(x: V) -> List<&2, TE>:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      tags
-
-def v.with.bind(x: V, b: Maybe<&2, Tau>) -> V:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      V{b, parent, cls, tparent, tags}
-
-def v.with.parent(x: V, +p: U32) -> V:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      V{bind, p, cls, tparent, tags}
-
-def v.with.cls(x: V, c: Class) -> V:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      V{bind, parent, c, tparent, tags}
-
-def v.with.tparent(x: V, +p: U32) -> V:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      V{bind, parent, cls, p, tags}
-
-def v.with.tags(x: V, ts: List<&2, TE>) -> V:
-  match x:
-    case V{bind, parent, cls, tparent, tags}:
-      V{bind, parent, cls, tparent, ts}
-
-# Equations, leaves, sites, counters
+# Env usage (envUsageL, contraction)
 # ----------------------------------
-
-def eq.add(e: SumEq) -> M(Unit):
-  on.c(c => c.with.eq(c, e))
-
-# recordLeaf
-def leaf.add(p: List<&2, U32>) -> M(Unit):
-  on.c(c => c.with.leaf(c, p))
-
-def eqs.get() -> M(List<&2, SumEq>):
-  with.c(List<&2, SumEq>, c => c.eqs(c))
-
-def leaves.get() -> M(List<&2, List<&2, U32>>):
-  with.c(List<&2, List<&2, U32>>, c => c.leaves(c))
-
-def next.get() -> M(U32):
-  with.c(U32, c => c.next(c))
-
-def nsites.get() -> M(U32):
-  with.c(U32, c => c.nsites(c))
-
-def insts.get(+h: String) -> M(U32):
-  with.c(U32, c => c.inst(c, h))
-
-def insts.put(+h: String, +n: U32) -> M(Unit):
-  on.c(c => c.with.inst(c, h, n))
-
-# The variables a body's first derivation minted (0 before it has one).
-def sizes.get(+h: String) -> M(U32):
-  with.c(U32, c => c.size(c, h))
-
-def sizes.put(+h: String, +n: U32) -> M(Unit):
-  on.c(c => c.with.size(c, h, n))
-
-def grow.sites(+cap: U32, a: Array<Site>) -> Array<Site>:
-  ANode{a, Array.new(Site, U32.log2(cap), site.empty())}
-
-def site.add.room(room: Bool, x: Site, vars: Array<V>, sites: Array<Site>, c: C) -> Result<&1, &1, Err, Unit & St>:
-  match room:
-    case True{}:
-      match c:
-        case C{next, cap, +nsites, scap, eqs, leaves, insts, sizes}:
-          Done{(Unit{}, St{vars, Array.set(Site, sites, nsites, x), C{next, cap, (nsites + 1 : U32), scap, eqs, leaves, insts, sizes}})}
-    case False{}:
-      match c:
-        case C{next, cap, +nsites, +scap, eqs, leaves, insts, sizes}:
-          Done{(Unit{}, St{vars, Array.set(Site, grow.sites(scap, sites), nsites, x), C{next, cap, (nsites + 1 : U32), (scap * 2 : U32), eqs, leaves, insts, sizes}})}
-
-def site.add.at(x: Site, vars: Array<V>, sites: Array<Site>, c: C) -> Result<&1, &1, Err, Unit & St>:
-  match c:
-    case C{next, cap, +nsites, +scap, eqs, leaves, insts, sizes}:
-      site.add.room(U32.is_lt(nsites, scap), x, vars, sites, C{next, cap, nsites, scap, eqs, leaves, insts, sizes})
-
-def site.add.go(x: Site, s: St) -> Result<&1, &1, Err, Unit & St>:
-  match s:
-    case St{vars, sites, c}:
-      site.add.at(x, vars, sites, c)
-
-# registerApply
-def site.add(x: Site) -> M(Unit):
-  s => site.add.go(x, s)
-
-def site.got(r: Array<Site> & Site, vars: Array<V>, c: C) -> Result<&1, &1, Err, Site & St>:
-  (sites, x) = r
-  Done{(x, St{vars, sites, c})}
-
-def site.get.go(+k: U32, s: St) -> Result<&1, &1, Err, Site & St>:
-  match s:
-    case St{vars, sites, c}:
-      site.got(Array.get(Site, sites, k), vars, c)
-
-def site.get(+k: U32) -> M(Site):
-  s => site.get.go(k, s)
-
-def site.put.go(+k: U32, x: Site, s: St) -> Result<&1, &1, Err, Unit & St>:
-  match s:
-    case St{vars, sites, c}:
-      Done{(Unit{}, St{vars, Array.set(Site, sites, k, x), c})}
-
-def site.put(+k: U32, x: Site) -> M(Unit):
-  s => site.put.go(k, x, s)
-
-# Union-find
-# ----------
-
-def parent.of(tag: Bool, x: V) -> U32:
-  match tag:
-    case True{}:
-      v.tparent(x)
-    case False{}:
-      v.parent(x)
-
-def merge.lv(ge: Bool, a: Class, b: Class) -> Mg:
-  match ge:
-    case True{}:
-      MgOk{a, False{}}
-    case False{}:
-      MgOk{b, True{}}
-
-# mergeClasses, and whether the class changed: it keeps the first class
-# unless the second is stricter.
-def merge(a: Class, b: Class) -> Mg:
-  match a:
-    case Unrestricted{}:
-      match b:
-        case Unrestricted{}:
-          MgOk{Unrestricted{}, False{}}
-        case other:
-          MgOk{other, True{}}
-    case ForcedZero{z}:
-      match b:
-        case Unrestricted{}:
-          MgOk{ForcedZero{z}, False{}}
-        case ForcedZero{y}:
-          MgOk{ForcedZero{z}, False{}}
-        case ForcedLevel{n, l}:
-          MgErr{BoxConflict{l, z}}
-    case ForcedLevel{+la, l}:
-      match b:
-        case Unrestricted{}:
-          MgOk{ForcedLevel{la, l}, False{}}
-        case ForcedZero{z}:
-          MgErr{BoxConflict{l, z}}
-        case ForcedLevel{+lb, m}:
-          merge.lv(U32.is_ge(la, lb), ForcedLevel{la, l}, ForcedLevel{lb, m})
-
-def over.cap(c: Class) -> Bool:
-  match c:
-    case ForcedLevel{n, blame}:
-      U32.is_gt(n, level.cap())
-    case _:
-      False{}
-
-def sum.eq(+loc: Lc.Loc, +what: String, lhs: List<&2, U32>, +rhs: U32) -> M(Unit):
-  eq.add(SumEq{lhs, rhs, Blame{loc, what}})
-
-# Tag classes
-# -----------
-
-def te.tag(e: TE) -> String:
-  match e:
-    case TE{tag, cap}:
-      tag
-
-def keys(ts: List<&2, TE>) -> List<&2, String>:
-  match ts:
-    case Nil{}:
-      []
-    case Con{e, rest}:
-      te.tag(e) <> keys(rest)
-
-def with.cap(ts: List<&2, String>, +cap: Maybe<&2, Sig>) -> List<&2, TE>:
-  match ts:
-    case Nil{}:
-      []
-    case Con{t, rest}:
-      TE{t, cap} <> with.cap(rest, cap)
-
-def keep(x: Maybe<&2, Sig>, y: Maybe<&2, Sig>) -> Maybe<&2, Sig>:
-  match x:
-    case Some{s}:
-      Some{s}
-    case None{}:
-      y
-
-def te.cap(e: TE) -> Maybe<&2, Sig>:
-  match e:
-    case TE{tag, cap}:
-      cap
-
-# How the heads of two tag lists compare (a missing head is greatest).
-def heads(xs: List<&2, TE>, ys: List<&2, TE>) -> Cmp:
-  match xs:
-    case Nil{}:
-      GT{}
-    case Con{x, xr}:
-      match ys:
-        case Nil{}:
-          LT{}
-        case Con{y, yr}:
-          String.order(te.tag(x), te.tag(y))
-
-def join.eq(x: TE, y: TE) -> TE:
-  match x y:
-    case TE{t, cx} TE{u, cy}:
-      TE{t, keep(cx, cy)}
-
-# The two classes' tags, joined: a tag on both sides keeps a capture, the
-# first side's when both have one (Map.unionWith keep).
-def tags.join.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, TE>, c: Cmp) -> List<&2, TE>:
-  match fuel:
-    case 0n:
-      []
-    case 1n+f:
-      match xs:
-        case Nil{}:
-          ys
-        case Con{+x, +xr}:
-          match ys:
-            case Nil{}:
-              Con{x, xr}
-            case Con{+y, +yr}:
-              match c:
-                case LT{}:
-                  x <> tags.join.go(f, xr, Con{y, yr}, heads(xr, Con{y, yr}))
-                case GT{}:
-                  y <> tags.join.go(f, Con{x, xr}, yr, heads(Con{x, xr}, yr))
-                case EQ{}:
-                  join.eq(x, y) <> tags.join.go(f, xr, yr, heads(xr, yr))
-
-def tags.join(+xs: List<&2, TE>, +ys: List<&2, TE>) -> List<&2, TE>:
-  tags.join.go((List.length(&2, TE, xs) + List.length(&2, TE, ys) + 1n : Nat), xs, ys, heads(xs, ys))
-
-def pending.one(cx: Maybe<&2, Sig>, cy: Maybe<&2, Sig>, rest: List<&2, SP>) -> List<&2, SP>:
-  match cx:
-    case Some{a}:
-      match cy:
-        case Some{b}:
-          SP{a, b} <> rest
-        case None{}:
-          rest
-    case None{}:
-      rest
-
-# The captures both classes hold for one tag, in tag order: they must
-# unify.
-def pending.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, TE>, c: Cmp) -> List<&2, SP>:
-  match fuel:
-    case 0n:
-      []
-    case 1n+f:
-      match xs:
-        case Nil{}:
-          []
-        case Con{+x, +xr}:
-          match ys:
-            case Nil{}:
-              []
-            case Con{+y, +yr}:
-              match c:
-                case LT{}:
-                  pending.go(f, xr, Con{y, yr}, heads(xr, Con{y, yr}))
-                case GT{}:
-                  pending.go(f, Con{x, xr}, yr, heads(Con{x, xr}, yr))
-                case EQ{}:
-                  pending.one(te.cap(x), te.cap(y), pending.go(f, xr, yr, heads(xr, yr)))
-
-def pending(+xs: List<&2, TE>, +ys: List<&2, TE>) -> List<&2, SP>:
-  pending.go((List.length(&2, TE, xs) + List.length(&2, TE, ys) + 1n : Nat), xs, ys, heads(xs, ys))
-
-def head.cmp(ts: List<&2, TE>, +t: String) -> Cmp:
-  match ts:
-    case Nil{}:
-      GT{}
-    case Con{e, rest}:
-      String.order(te.tag(e), t)
-
-# The capture a class holds for one tag, if the tag is there with one.
-def lookup.go(fuel: Nat, +ts: List<&2, TE>, +t: String, c: Cmp) -> Maybe<&2, Sig>:
-  match fuel:
-    case 0n:
-      None{}
-    case 1n+f:
-      match ts:
-        case Nil{}:
-          None{}
-        case Con{+e, +rest}:
-          match c:
-            case LT{}:
-              lookup.go(f, rest, t, head.cmp(rest, t))
-            case EQ{}:
-              te.cap(e)
-            case GT{}:
-              None{}
-
-def lookup(+ts: List<&2, TE>, +t: String) -> Maybe<&2, Sig>:
-  lookup.go((List.length(&2, TE, ts) + 1n : Nat), ts, t, head.cmp(ts, t))
-
-def occurs.var(hit: Bool, f: Nat, +i: U32, ts: List<&2, Tau>) -> M(Bool):
-  match hit:
-    case True{}:
-      M.pure(Bool, True{})
-    case False{}:
-      M.pure(Bool, False{})
-
-def sigs(ps: List<&2, SP>, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
-  match ps:
-    case Nil{}:
-      rest
-    case Con{p, pr}:
-      match p:
-        case SP{a, b}:
-          WSig{[], "", loc, a, b} <> sigs(pr, loc, rest)
-
-def cap.all(cs: List<&2, TE>, +vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, +t: Tau, rest: List<&2, W>) -> List<&2, W>:
-  match cs:
-    case Nil{}:
-      rest
-    case Con{e, er}:
-      match e:
-        case TE{tag, cap}:
-          match cap:
-            case Some{s}:
-              match s:
-                case Sig{b, ct}:
-                  WTau{vis, mode, loc, ct, t} <> cap.all(er, vis, mode, loc, t, rest)
-            case None{}:
-              cap.all(er, vis, mode, loc, t, rest)
-
-def cap.mode(m: Maybe<&2, Sig>, +cs: List<&2, TE>, +vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, +t: Tau, rest: List<&2, W>) -> List<&2, W>:
-  match m:
-    case Some{s}:
-      match s:
-        case Sig{b, ct}:
-          WTau{vis, mode, loc, ct, t} <> rest
-    case None{}:
-      cap.all(cs, vis, mode, loc, t, rest)
-
-def cap.for(+mode: String, +cs: List<&2, TE>) -> Maybe<&2, Sig>:
-  match mode:
-    case SNil{}:
-      None{}
-    case other:
-      lookup(cs, other)
-
-def member(xs: List<&2, U32>, +x: U32) -> Bool:
-  match xs:
-    case Nil{}:
-      False{}
-    case Con{y, rest}:
-      U32.is_eq(x, y) || member(rest, x)
 
 def use.add.got(+path: String, +loc: Lc.Loc, r: Map<&2, Use> & Use) -> Map<&2, Use>:
   (acc, u) = r
@@ -912,60 +449,865 @@ def dup.find(us: List<&2, Sigma<&2, &2, String, _ => Use>>, +ks: List<&2, String
 def contraction(+us: Map<&2, Use>) -> Maybe<&2, Dup>:
   dup.find(Map.to_list(&2, Use, us), Map.keys(&2, Use, us))
 
-# Constraint generation (viewNode, intrinsic)
-# -------------------------------------------
+def dup.of(+l: Lf.L) -> Maybe<&2, Dup>:
+  contraction(usage(l, "", Map.new(&2, Use)))
 
-def sig.b(s: Sig) -> U32:
-  match s:
-    case Sig{b, t}:
-      b
+# The program
+# -----------
 
-def sig.t(s: Sig) -> Tau:
-  match s:
-    case Sig{b, t}:
-      t
-
-def l.loc(l: Lf.L) -> Lc.Loc:
+# A lifted term as the analysis walks it.
+def to.a(l: Lf.L, +ranks: Map<&2, U32>) -> A:
   match l:
     case Lf.LZero{loc}:
-      loc
+      AZero{loc}
     case Lf.LPair{loc, a, b}:
-      loc
+      APair{loc, to.a(a, ranks), to.a(b, ranks)}
     case Lf.LEnv{loc}:
-      loc
-    case Lf.LSetEnv{loc, x}:
-      loc
-    case Lf.LGate{loc}:
-      loc
-    case Lf.LLeft{loc, x}:
-      loc
-    case Lf.LRight{loc, x}:
-      loc
-    case Lf.LAbort{loc}:
-      loc
+      AEnv{loc}
     case Lf.LUnsized{loc, tok}:
-      loc
+      AEnv{loc}
+    case Lf.LSetEnv{loc, x}:
+      ASetEnv{loc, to.a(x, ranks)}
+    case Lf.LGate{loc}:
+      AGate{loc}
+    case Lf.LLeft{loc, x}:
+      ALeft{loc, to.a(x, ranks)}
+    case Lf.LRight{loc, x}:
+      ARight{loc, to.a(x, ranks)}
+    case Lf.LAbort{loc}:
+      AAbort{loc}
     case Lf.LCheck{loc, cloc, tc, c}:
-      loc
+      ACheck{loc, to.a(c, ranks)}
     case Lf.LRef{loc, h}:
-      loc
+      ARef{loc, Pair.snd(Map<&2, U32>, U32, Map.get(U32, missing(), ranks, h))}
 
-def paths.in(+w: U32, p: Paths) -> Paths:
+def ranks.go(ks: List<&2, String>, +i: U32, acc: Map<&2, U32>) -> Map<&2, U32>:
+  match ks:
+    case Nil{}:
+      acc
+    case Con{k, rest}:
+      ranks.go(rest, (i + 1 : U32), Map.set(&2, U32, acc, k, i))
+
+# Each body's rank: its place in hash order.
+def ranks(+bodies: Map<&2, Lf.Body>) -> Map<&2, U32>:
+  ranks.go(Map.keys(&2, Lf.Body, bodies), 0, Map.new(&2, U32))
+
+def bds(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +ranks: Map<&2, U32>) -> List<&2, Bd>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (h, b):
+          match b:
+            case Lf.Body{fi, +body}:
+              Bd{h, fi, dup.of(body), to.a(body, ranks)} <> bds(rest, ranks)
+
+def bt.build(+d: Nat, +xs: List<&2, Bd>) -> BT:
+  match d:
+    case 0n:
+      match xs:
+        case Nil{}:
+          BTip{}
+        case Con{x, rest}:
+          BOne{x}
+    case 1n+e:
+      +k = U32.to_nat(U32.shln(1, e))
+      BTwo{bt.build(e, List.take(&2, Bd, xs, k)), bt.build(e, List.drop(&2, Bd, xs, k))}
+
+# The body of a rank below the subtree's half size when lo.
+def bt.get(t: BT, lo: Bool, +r: U32, +half: U32) -> Maybe<&2, Bd>:
+  match t:
+    case BTip{}:
+      None{}
+    case BOne{b}:
+      Some{b}
+    case BTwo{l, u}:
+      match lo:
+        case True{}:
+          bt.get(l, U32.is_lt(r, U32.shr(half)), r, U32.shr(half))
+        case False{}:
+          bt.get(u, U32.is_lt((r - half : U32), U32.shr(half)), (r - half : U32), U32.shr(half))
+
+def body.in(ok: Bool, bt: BT, +r: U32, +size: U32) -> Maybe<&2, Bd>:
+  match ok:
+    case True{}:
+      bt.get(bt, U32.is_lt(r, U32.shr(size)), r, U32.shr(size))
+    case False{}:
+      None{}
+
+# The body of a rank.
+def body.at(p: P, +r: U32) -> Maybe<&2, Bd>:
   match p:
-    case Paths{here, glob}:
-      Paths{w <> here, w <> glob}
+    case P{+n, +size, bt}:
+      body.in(U32.is_lt(r, n), bt, r, size)
 
-def paths.glob(p: Paths) -> List<&2, U32>:
+def depth.at(one: Bool, +n: U32) -> Nat:
+  match one:
+    case True{}:
+      0n
+    case False{}:
+      (U32.log2((n - 1 : U32)) + 1n : Nat)
+
+def depth.of(+n: U32) -> Nat:
+  depth.at(U32.is_le(n, 1), n)
+
+def program.of(+n: U32, +d: Nat, xs: List<&2, Bd>) -> P:
+  P{n, U32.shln(1, d), bt.build(d, xs)}
+
+# The bodies as the analysis sees them.
+def program(+bodies: Map<&2, Lf.Body>, +ranks: Map<&2, U32>) -> P:
+  +n = U32.from_nat(Map.size(&2, Lf.Body, bodies))
+  program.of(n, depth.of(n), bds(Map.to_list(&2, Lf.Body, bodies), ranks))
+
+# Showing, for messages
+# ---------------------
+
+def blame.show(b: Blame) -> String:
+  match b:
+    case Blame{loc, why}:
+      "Blame " ++ Lf.loc.show(loc, True{}) ++ " " ++ Sh.string(why)
+
+def bd.hash(m: Maybe<&2, Bd>) -> String:
+  match m:
+    case Some{b}:
+      match b:
+        case Bd{h, fi, dup, t}:
+          h
+    case None{}:
+      "(unknown)"
+
+def builtin(+t: U32) -> Bi:
+  Bool.pick(Bi, U32.is_eq(t, t.gate()), BiGate{}, Bool.pick(Bi, U32.is_eq(t, t.gatefn()), BiGateFn{},
+    Bool.pick(Bi, U32.is_eq(t, t.abort()), BiAbort{}, BiCont{})))
+
+def bi.show(b: Bi) -> String:
+  match b:
+    case BiGate{}:
+      "TGate"
+    case BiGateFn{}:
+      "TGateFn"
+    case BiAbort{}:
+      "TAbort"
+    case BiCont{}:
+      "TAbortCont"
+
+def tag.builtin(+t: U32) -> String:
+  bi.show(builtin(t))
+
+def tag.show.at(code: Bool, +p: P, +t: U32) -> String:
+  match code:
+    case True{}:
+      "TCode " ++ bd.hash(body.at(p, t))
+    case False{}:
+      tag.builtin(t)
+
+def tag.show(+p: P, +t: U32) -> String:
+  tag.show.at(U32.is_lt(t, t.gate()), p, t)
+
+def tags.show.go(+p: P, ts: List<&2, U32>) -> String:
+  match ts:
+    case Nil{}:
+      "]"
+    case Con{t, rest}:
+      "," ++ tag.show(p, t) ++ tags.show.go(p, rest)
+
+def tags.show(+p: P, ts: List<&2, U32>) -> String:
+  match ts:
+    case Nil{}:
+      "[]"
+    case Con{t, rest}:
+      "[" ++ tag.show(p, t) ++ tags.show.go(p, rest)
+
+def mode.code(code: Bool, +p: P, +m: U32) -> String:
+  match code:
+    case True{}:
+      "Just (" ++ tag.show(p, m) ++ ")"
+    case False{}:
+      "Just " ++ tag.show(p, m)
+
+def mode.at(no: Bool, +p: P, +m: U32) -> String:
+  match no:
+    case True{}:
+      "Nothing"
+    case False{}:
+      mode.code(U32.is_lt(m, t.gate()), p, m)
+
+def mode.show(+p: P, +m: U32) -> String:
+  mode.at(U32.is_eq(m, none()), p, m)
+
+def describe.k(k: K, +t: U32) -> String:
+  match k:
+    case KVar{}:
+      "t" ++ U32.show(ix(t))
+    case KCode{}:
+      "code"
+    case KCap{}:
+      "capture"
+    case KPair{}:
+      "pair"
+    case KData{}:
+      "data"
+
+def describe(+t: U32) -> String:
+  describe.k(kind(t), t)
+
+def steps.show(p: String) -> String:
   match p:
-    case Paths{here, glob}:
-      glob
+    case SNil{}:
+      "<whole env>"
+    case other:
+      other
 
-def ctx.depth(c: Ctx) -> U32:
-  match c:
-    case Ctx{bang, tau, depth}:
-      depth
+def render.at(m: Maybe<&2, String>) -> String:
+  match m:
+    case Some{place}:
+      " (at " ++ place ++ ")"
+    case None{}:
+      ""
 
-def str.heads(xs: List<&2, String>, ys: List<&2, String>) -> Cmp:
+def blame.render(b: Blame) -> String:
+  match b:
+    case Blame{loc, why}:
+      why ++ render.at(Lc.render_compact(loc))
+
+# renderEALError
+def render(e: Err) -> String:
+  match e:
+    case TypeMismatch{loc, msg}:
+      "certification failed: " ++ msg ++ render.at(Lc.render_compact(loc))
+    case BoxConflict{need, forbid}:
+      "certification failed: a duplicated value cannot be boxed:\n  boxing required: "
+        ++ blame.render(need) ++ "\n  boxing forbidden: " ++ blame.render(forbid)
+    case GaveUp{msg}:
+      "certification gave up; this usually means unbounded self-application:\n  " ++ msg
+    case DependencyFailed{h}:
+      "a function body this program depends on failed certification: " ++ h
+    case Internal{msg}:
+      "certification internal error (analyzer bug): " ++ msg
+
+
+
+# The state
+# ---------
+
+# The counters, before the variables: 0 the next variable, 1 the table's
+# size in words, 2 and 3 the pairs and their table's size, 4 whether it
+# failed, 5 and 6 the apply sites and their table's size, 7 and 8 the
+# blames and theirs. Variable i's words start at i * 8 + 16.
+
+def m.new() -> Array<U32>:
+  Array.set(U32, Array.set(U32, Array.set(U32, Array.set(U32, Array.new(U32, 11n, 0), 1, 2048), 3, 64), 6, 64), 8, 64)
+
+def st.new(+p: P) -> St:
+  match p:
+    case P{+n, size, bt}:
+      St{m.new(), Array.new(Pr, 6n, pr.none()), Array.new(List<&2, TE>, 8n, te.none()),
+         X{Array.new(Site, 6n, site.none()), Array.new(Blame, 6n, blame.none()),
+           Array.new(U32, (U32.log2((n * 2 + 1 : U32)) + 1n : Nat), 0), [], [], p}}
+
+def st.m(ps: Array<Pr>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & U32) -> St & U32:
+  (m, v) = r
+  (St{m, ps, tg, x}, v)
+
+# Word i of the table.
+def rd(s: St, +i: U32) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      st.m(ps, tg, x, Array.get(U32, m, i))
+
+def wr(s: St, +i: U32, +v: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      St{Array.set(U32, m, i, v), ps, tg, x}
+
+def x.failed(x: X, e: Err) -> X:
+  match x:
+    case X{sites, bl, ct, eqs, err, p}:
+      X{sites, bl, ct, eqs, [e], p}
+
+def fail.set(s: St, e: Err) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      St{Array.set(U32, m, 4, 1), ps, tg, x.failed(x, e)}
+
+def zero.of(r: St & U32) -> St & Bool:
+  (s, +v) = r
+  (s, U32.is_zero(v))
+
+# Whether nothing has failed yet.
+def ok.of(s: St) -> St & Bool:
+  zero.of(rd(s, 4))
+
+def fail.at(e: Err, r: St & Bool) -> St:
+  (s, ok) = r
+  match ok:
+    case True{}:
+      fail.set(s, e)
+    case False{}:
+      s
+
+# A failure, unless there is one already.
+def fail(s: St, e: Err) -> St:
+  fail.at(e, ok.of(s))
+
+def budget.err() -> Err:
+  GaveUp{"constraint variable budget (2000000) exceeded; the dispatch structure is likely exploding"}
+
+# The table and the tags double.
+def grow.m(s: St, +size: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      St{Array.set(U32, ANode{m, Array.new(U32, U32.log2(size), 0)}, 1, (size * 2 : U32)), ps,
+         ANode{tg, Array.new(List<&2, TE>, U32.log2((size >> 3n : U32)), te.none())}, x}
+
+def fresh.at(over: Bool, full: Bool, s: St, +n: U32, +size: U32) -> St & U32:
+  match over:
+    case True{}:
+      (fail(s, budget.err()), 0)
+    case False{}:
+      match full:
+        case True{}:
+          (wr(grow.m(s, size), 0, (n + 1 : U32)), n)
+        case False{}:
+          (wr(s, 0, (n + 1 : U32)), n)
+
+def fresh.size(+n: U32, r: St & U32) -> St & U32:
+  (s, +size) = r
+  fresh.at(U32.is_ge(n, var.budget()), U32.is_gt((n * 8 + 24 : U32), size), s, n, size)
+
+def fresh.next(r: St & U32) -> St & U32:
+  (s, +n) = r
+  fresh.size(n, rd(s, 1))
+
+# freshInt
+def fresh(s: St) -> St & U32:
+  fresh.next(rd(s, 0))
+
+def as.var(r: St & U32) -> St & U32:
+  (s, +i) = r
+  (s, var.t(i))
+
+def fresh.tau(s: St) -> St & U32:
+  as.var(fresh(s))
+
+def fresh.sig.t(+b: U32, r: St & U32) -> St & Sig:
+  (s, +i) = r
+  (s, Sig{b, var.t(i)})
+
+def fresh.sig.b(r: St & U32) -> St & Sig:
+  (s, +b) = r
+  fresh.sig.t(b, fresh(s))
+
+def fresh.sig(s: St) -> St & Sig:
+  fresh.sig.b(fresh(s))
+
+# Pairs
+# -----
+
+def pair.set(s: St, +n: U32, pr: Pr) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      (St{Array.set(U32, m, 2, (n + 1 : U32)), Array.set(Pr, ps, n, pr), tg, x}, (n * 8 + 4 : U32))
+
+def pair.grow(s: St, +cap: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      St{Array.set(U32, m, 3, (cap * 2 : U32)), ANode{ps, Array.new(Pr, U32.log2(cap), pr.none())}, tg, x}
+
+def pair.room(full: Bool, s: St, +n: U32, +cap: U32, pr: Pr) -> St & U32:
+  match full:
+    case True{}:
+      pair.set(pair.grow(s, cap), n, pr)
+    case False{}:
+      pair.set(s, n, pr)
+
+def pair.cap(+n: U32, pr: Pr, r: St & U32) -> St & U32:
+  (s, +cap) = r
+  pair.room(U32.is_ge(n, cap), s, n, cap, pr)
+
+def pair.n(pr: Pr, r: St & U32) -> St & U32:
+  (s, +n) = r
+  pair.cap(n, pr, rd(s, 3))
+
+# A pair type.
+def pair.new(s: St, pr: Pr) -> St & U32:
+  pair.n(pr, rd(s, 2))
+
+def pair.got(m: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<Pr> & Pr) -> St & Pr:
+  (ps, pr) = r
+  (St{m, ps, tg, x}, pr)
+
+# A pair type's sides.
+def pair.get(s: St, +t: U32) -> St & Pr:
+  match s:
+    case St{m, ps, tg, x}:
+      pair.got(m, tg, x, Array.get(Pr, ps, ix(t)))
+
+# Tag sets
+# --------
+
+def tg.got(m: Array<U32>, ps: Array<Pr>, x: X, r: Array<List<&2, TE>> & List<&2, TE>) -> St & List<&2, TE>:
+  (tg, ts) = r
+  (St{m, ps, tg, x}, ts)
+
+# The tags held at a variable (a tag class's root).
+def tg.get(s: St, +i: U32) -> St & List<&2, TE>:
+  match s:
+    case St{m, ps, tg, x}:
+      tg.got(m, ps, x, Array.get(List<&2, TE>, tg, i))
+
+def tg.set(s: St, +i: U32, ts: List<&2, TE>) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      St{m, ps, Array.set(List<&2, TE>, tg, i, ts), x}
+
+# Blames, sites, equations, counters
+# ----------------------------------
+
+def bl.set(s: St, +n: U32, b: Blame) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          (St{Array.set(U32, m, 7, (n + 1 : U32)), ps, tg, X{sites, Array.set(Blame, bl, n, b), ct, eqs, err, p}}, n)
+
+def bl.grow(s: St, +cap: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          St{Array.set(U32, m, 8, (cap * 2 : U32)), ps, tg,
+             X{sites, ANode{bl, Array.new(Blame, U32.log2(cap), blame.none())}, ct, eqs, err, p}}
+
+def bl.room(full: Bool, s: St, +n: U32, +cap: U32, b: Blame) -> St & U32:
+  match full:
+    case True{}:
+      bl.set(bl.grow(s, cap), n, b)
+    case False{}:
+      bl.set(s, n, b)
+
+def bl.cap(+n: U32, b: Blame, r: St & U32) -> St & U32:
+  (s, +cap) = r
+  bl.room(U32.is_ge(n, cap), s, n, cap, b)
+
+def bl.n(b: Blame, r: St & U32) -> St & U32:
+  (s, +n) = r
+  bl.cap(n, b, rd(s, 8))
+
+# A blame kept, by its number.
+def blame.add(s: St, b: Blame) -> St & U32:
+  bl.n(b, rd(s, 7))
+
+def bl.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, sites: Array<Site>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Blame> & Blame) -> St & Blame:
+  (bl, b) = r
+  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, b)
+
+def blame.get(s: St, +n: U32) -> St & Blame:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          bl.got(m, ps, tg, sites, ct, eqs, err, p, Array.get(Blame, bl, n))
+
+def site.set(s: St, +n: U32, site: Site) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          St{m, ps, tg, X{Array.set(Site, sites, n, site), bl, ct, eqs, err, p}}
+
+def site.grow(s: St, +cap: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          St{Array.set(U32, m, 6, (cap * 2 : U32)), ps, tg,
+             X{ANode{sites, Array.new(Site, U32.log2(cap), site.none())}, bl, ct, eqs, err, p}}
+
+def site.room(full: Bool, s: St, +n: U32, +cap: U32, site: Site) -> St:
+  match full:
+    case True{}:
+      wr(site.set(site.grow(s, cap), n, site), 5, (n + 1 : U32))
+    case False{}:
+      wr(site.set(s, n, site), 5, (n + 1 : U32))
+
+def site.cap(+n: U32, site: Site, r: St & U32) -> St:
+  (s, +cap) = r
+  site.room(U32.is_ge(n, cap), s, n, cap, site)
+
+def site.n(site: Site, r: St & U32) -> St:
+  (s, +n) = r
+  site.cap(n, site, rd(s, 6))
+
+# registerApply
+def site.add(s: St, site: Site) -> St:
+  site.n(site, rd(s, 5))
+
+def site.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Site> & Site) -> St & Site:
+  (sites, site) = r
+  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, site)
+
+def site.get(s: St, +n: U32) -> St & Site:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          site.got(m, ps, tg, bl, ct, eqs, err, p, Array.get(Site, sites, n))
+
+def eq.add(s: St, e: SumEq) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          St{m, ps, tg, X{sites, bl, ct, e <> eqs, err, p}}
+
+def sum.eq(s: St, +loc: Lc.Loc, +what: String, lhs: List<&2, U32>, +rhs: U32) -> St:
+  eq.add(s, SumEq{lhs, rhs, Blame{loc, what}})
+
+def ct.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, sites: Array<Site>, bl: Array<Blame>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
+  (ct, v) = r
+  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, v)
+
+# A body's counter: its derivations so far (2r), or the variables its
+# first one minted (2r + 1).
+def ct.get(s: St, +i: U32) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          ct.got(m, ps, tg, sites, bl, eqs, err, p, Array.get(U32, ct, i))
+
+def ct.set(s: St, +i: U32, +v: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          St{m, ps, tg, X{sites, bl, Array.set(U32, ct, i, v), eqs, err, p}}
+
+def p.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, sites: Array<Site>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, +p: P) -> St & P:
+  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, p)
+
+# The program.
+def prog(s: St) -> St & P:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, +p}:
+          p.got(m, ps, tg, sites, bl, ct, eqs, err, p)
+
+
+# Union-find
+# ----------
+
+def up.of(r: Array<U32> & U32) -> Array<U32> & Nx:
+  (m, +p) = r
+  (m, Bool.pick(Nx, U32.is_zero(p), NEnd{}, NAt{(p - 1 : U32)}))
+
+# i's parent on the union-find whose parent is word f of a variable (1
+# bangs, 4 tags).
+def up(m: Array<U32>, +f: U32, +i: U32) -> Array<U32> & Nx:
+  up.of(Array.get(U32, m, (i * 8 + 16 + f : U32)))
+
+# The root of i; r holds i's parent.
+def root(fuel: Nat, +f: U32, +i: U32, r: Array<U32> & Nx) -> Array<U32> & U32:
+  match fuel:
+    case 0n:
+      (m, n) = r
+      (m, i)
+    case 1n+g:
+      (m, n) = r
+      match n:
+        case NEnd{}:
+          (m, i)
+        case NAt{+j}:
+          root(g, f, j, up(m, f, j))
+
+# Every variable on the path from i points at the root r0 afterwards.
+def compress(fuel: Nat, +f: U32, +r0: U32, +i: U32, r: Array<U32> & Nx) -> Array<U32>:
+  match fuel:
+    case 0n:
+      (m, n) = r
+      m
+    case 1n+g:
+      (m, n) = r
+      match n:
+        case NEnd{}:
+          m
+        case NAt{+j}:
+          compress(g, f, r0, j, up(Array.set(U32, m, (i * 8 + 16 + f : U32), (r0 + 1 : U32)), f, j))
+
+def found(+f: U32, +i: U32, r: Array<U32> & U32) -> Array<U32> & U32:
+  (m, +r0) = r
+  (compress(big(), f, r0, i, up(m, f, i)), r0)
+
+def find.m(m: Array<U32>, +f: U32, +i: U32) -> Array<U32> & U32:
+  found(f, i, root(big(), f, i, up(m, f, i)))
+
+# find with path compression: on the bangs (f = 1) or the tags (f = 4).
+def find(s: St, +f: U32, +i: U32) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      st.m(ps, tg, x, find.m(m, f, i))
+
+# Bang classes
+# ------------
+
+def decide.at(free: Bool, zero: Bool, nz: Bool, ge: Bool) -> Dc:
+  match free:
+    case True{}:
+      DcSet{}
+    case False{}:
+      match zero:
+        case True{}:
+          match nz:
+            case True{}:
+              DcKeep{}
+            case False{}:
+              DcNeedNew{}
+        case False{}:
+          match nz:
+            case True{}:
+              DcNeedOld{}
+            case False{}:
+              match ge:
+                case True{}:
+                  DcKeep{}
+                case False{}:
+                  DcSet{}
+
+# Constraining a class (its word c) to kind k (1 forced zero, 2 forced
+# level) at level n.
+def decide(+c: U32, +k: U32, +n: U32) -> Dc:
+  decide.at(U32.is_zero((c .&. 3 : U32)), U32.is_eq((c .&. 3 : U32), 1), U32.is_eq(k, 1), U32.is_ge((c >> 2n : U32), n))
+
+def cls.store(+root: U32, +c: U32, r: St & U32) -> St:
+  (s, +id) = r
+  wr(wr(s, (root * 8 + 18 : U32), c), (root * 8 + 19 : U32), id)
+
+def conflict(need.new: Bool, nb: Blame, r: St & Blame) -> St & Bool:
+  match need.new:
+    case True{}:
+      (s, ob) = r
+      (fail(s, BoxConflict{nb, ob}), False{})
+    case False{}:
+      (s, ob) = r
+      (fail(s, BoxConflict{ob, nb}), False{})
+
+def blame.of.id(r: St & U32) -> St & Blame:
+  (s, +id) = r
+  blame.get(s, id)
+
+# A class's blame.
+def blame.of(s: St, +root: U32) -> St & Blame:
+  blame.of.id(rd(s, (root * 8 + 19 : U32)))
+
+def constrain.act(d: Dc, s: St, +root: U32, +k: U32, +n: U32, b: Blame) -> St & Bool:
+  match d:
+    case DcKeep{}:
+      (s, False{})
+    case DcSet{}:
+      (cls.store(root, (n * 4 + k : U32), blame.add(s, b)), True{})
+    case DcNeedNew{}:
+      conflict(True{}, b, blame.of(s, root))
+    case DcNeedOld{}:
+      conflict(False{}, b, blame.of(s, root))
+
+def constrain.cls(+root: U32, +k: U32, +n: U32, b: Blame, r: St & U32) -> St & Bool:
+  (s, +c) = r
+  constrain.act(decide(c, k, n), s, root, k, n, b)
+
+def constrain.found(+k: U32, +n: U32, b: Blame, over: Bool, r: St & U32) -> St & Bool:
+  match over:
+    case True{}:
+      (s, root) = r
+      (fail(s, GaveUp{"bang level exceeded cap of 4096: " ++ blame.show(b)}), False{})
+    case False{}:
+      (s, +root) = r
+      constrain.cls(root, k, n, b, rd(s, (root * 8 + 18 : U32)))
+
+# constrainB to forced zero (k = 1) or to forced level n (k = 2): whether
+# the class changed.
+def constrain(s: St, +b: U32, +k: U32, +n: U32, bl: Blame) -> St & Bool:
+  constrain.found(k, n, bl, U32.is_eq(k, 2) && U32.is_gt(n, level.cap()), find(s, 1, b))
+
+def forced.zero.done(+b: U32, r: St & Bool) -> St & U32:
+  (s, changed) = r
+  (s, b)
+
+def forced.zero.at(bl: Blame, r: St & U32) -> St & U32:
+  (s, +b) = r
+  forced.zero.done(b, constrain(s, b, 1, 0, bl))
+
+# forcedZeroB
+def forced.zero(s: St, bl: Blame) -> St & U32:
+  forced.zero.at(bl, fresh(s))
+
+def plain.at(+t: U32, r: St & U32) -> St & Sig:
+  (s, +b) = r
+  (s, Sig{b, t})
+
+# plainSigma: a value constructor's own type, locally unboxed.
+def plain(s: St, +loc: Lc.Loc, +what: String, +t: U32) -> St & Sig:
+  plain.at(t, forced.zero(s, Blame{loc, what}))
+
+def union.pick.at(afree: Bool, azero: Bool, bfree: Bool, bzero: Bool, ge: Bool) -> Mg:
+  match afree:
+    case True{}:
+      MgB{}
+    case False{}:
+      match azero:
+        case True{}:
+          match bfree:
+            case True{}:
+              MgA{}
+            case False{}:
+              match bzero:
+                case True{}:
+                  MgA{}
+                case False{}:
+                  MgNeedB{}
+        case False{}:
+          match bfree:
+            case True{}:
+              MgA{}
+            case False{}:
+              match bzero:
+                case True{}:
+                  MgNeedA{}
+                case False{}:
+                  match ge:
+                    case True{}:
+                      MgA{}
+                    case False{}:
+                      MgB{}
+
+# Which class a union keeps, of a's (word ca) and b's (word cb): mergeClasses,
+# a's first.
+def union.pick(+ca: U32, +cb: U32) -> Mg:
+  union.pick.at(U32.is_zero((ca .&. 3 : U32)), U32.is_eq((ca .&. 3 : U32), 1), U32.is_zero((cb .&. 3 : U32)),
+    U32.is_eq((cb .&. 3 : U32), 1), U32.is_ge((ca >> 2n : U32), (cb >> 2n : U32)))
+
+def union.clash.b(need.b: Bool, ba: Blame, r: St & Blame) -> St:
+  match need.b:
+    case True{}:
+      (s, bb) = r
+      fail(s, BoxConflict{bb, ba})
+    case False{}:
+      (s, bb) = r
+      fail(s, BoxConflict{ba, bb})
+
+def union.clash(need.b: Bool, +rb: U32, r: St & Blame) -> St:
+  (s, ba) = r
+  union.clash.b(need.b, ba, blame.of(s, rb))
+
+def union.keep.a(+ra: U32, +rb: U32, +ca: U32, r: St & U32) -> St:
+  (s, +id) = r
+  wr(wr(wr(wr(s, (ra * 8 + 17 : U32), (rb + 1 : U32)), (rb * 8 + 18 : U32), ca), (rb * 8 + 19 : U32), id), (ra * 8 + 18 : U32), 0)
+
+def union.act(d: Mg, s: St, +ra: U32, +rb: U32, +ca: U32) -> St:
+  match d:
+    case MgA{}:
+      union.keep.a(ra, rb, ca, rd(s, (ra * 8 + 19 : U32)))
+    case MgB{}:
+      wr(wr(s, (ra * 8 + 17 : U32), (rb + 1 : U32)), (ra * 8 + 18 : U32), 0)
+    case MgNeedB{}:
+      union.clash(True{}, rb, blame.of(s, ra))
+    case MgNeedA{}:
+      union.clash(False{}, rb, blame.of(s, ra))
+
+def union.cb(+ra: U32, +rb: U32, +ca: U32, r: St & U32) -> St:
+  (s, +cb) = r
+  union.act(union.pick(ca, cb), s, ra, rb, ca)
+
+def union.ca(+ra: U32, +rb: U32, r: St & U32) -> St:
+  (s, +ca) = r
+  union.cb(ra, rb, ca, rd(s, (rb * 8 + 18 : U32)))
+
+def union.same(same: Bool, s: St, +ra: U32, +rb: U32) -> St:
+  match same:
+    case True{}:
+      s
+    case False{}:
+      union.ca(ra, rb, rd(s, (ra * 8 + 18 : U32)))
+
+def union.rb(+ra: U32, r: St & U32) -> St:
+  (s, +rb) = r
+  union.same(U32.is_eq(ra, rb), s, ra, rb)
+
+def union.ra(+b: U32, r: St & U32) -> St:
+  (s, +ra) = r
+  union.rb(ra, find(s, 1, b))
+
+# unionB: the root of a points at b's, which keeps the merged class.
+def union.b(s: St, +a: U32, +b: U32) -> St:
+  union.ra(b, find(s, 1, a))
+
+# Tag classes
+# -----------
+
+def keys(ts: List<&2, TE>) -> List<&2, U32>:
+  match ts:
+    case Nil{}:
+      []
+    case Con{e, rest}:
+      match e:
+        case TE{tag, cb, ct}:
+          tag <> keys(rest)
+
+def caps.at(r: St & U32) -> St & List<&2, TE>:
+  (s, +root) = r
+  tg.get(s, root)
+
+# The tags of i's class, with their captures (capturesOf).
+def caps(s: St, +i: U32) -> St & List<&2, TE>:
+  caps.at(find(s, 4, i))
+
+def keys.of(r: St & List<&2, TE>) -> St & List<&2, U32>:
+  (s, ts) = r
+  (s, keys(ts))
+
+# tagSetOf
+def tag.set(s: St, +i: U32) -> St & List<&2, U32>:
+  keys.of(caps(s, i))
+
+def fresh.code.at(+tag: U32, r: St & U32) -> St & U32:
+  (s, +i) = r
+  (tg.set(s, i, [TE{tag, none(), 0}]), code.t(i))
+
+# A fresh code class holding exactly this tag (freshCode).
+def fresh.code(s: St, +tag: U32) -> St & U32:
+  fresh.code.at(tag, fresh(s))
+
+def with.cap(ts: List<&2, U32>, +cb: U32, +ct: U32) -> List<&2, TE>:
+  match ts:
+    case Nil{}:
+      []
+    case Con{t, rest}:
+      TE{t, cb, ct} <> with.cap(rest, cb, ct)
+
+def package.at(ts: List<&2, U32>, +cap: Sig, r: St & U32) -> St & U32:
+  match cap:
+    case Sig{+cb, +ct}:
+      (s, +p) = r
+      (tg.set(s, p, with.cap(ts, cb, ct)), p)
+
+def package.ts(+cap: Sig, r: St & List<&2, U32>) -> St & U32:
+  (s, ts) = r
+  package.at(ts, cap, fresh(s))
+
+# A closure package: the tags of code class i, each carrying this capture
+# (packageClass).
+def package(s: St, +i: U32, +cap: Sig) -> St & U32:
+  package.ts(cap, tag.set(s, i))
+
+def te.cmp(x: TE, y: TE) -> Cmp:
+  match x y:
+    case TE{a, xb, xt} TE{b, yb, yt}:
+      U32.cmp(a, b)
+
+# How the heads of two tag lists compare (a missing head is greatest).
+def heads(xs: List<&2, TE>, ys: List<&2, TE>) -> Cmp:
   match xs:
     case Nil{}:
       GT{}
@@ -974,34 +1316,23 @@ def str.heads(xs: List<&2, String>, ys: List<&2, String>) -> Cmp:
         case Nil{}:
           LT{}
         case Con{y, yr}:
-          String.order(x, y)
+          te.cmp(x, y)
 
-# xs less ys.
-def diff.go(fuel: Nat, +xs: List<&2, String>, +ys: List<&2, String>, c: Cmp) -> List<&2, String>:
-  match fuel:
-    case 0n:
-      []
-    case 1n+f:
-      match xs:
-        case Nil{}:
-          []
-        case Con{+x, +xr}:
-          match ys:
-            case Nil{}:
-              Con{x, xr}
-            case Con{+y, +yr}:
-              match c:
-                case LT{}:
-                  x <> diff.go(f, xr, Con{y, yr}, str.heads(xr, Con{y, yr}))
-                case GT{}:
-                  diff.go(f, Con{x, xr}, yr, str.heads(Con{x, xr}, yr))
-                case EQ{}:
-                  diff.go(f, xr, yr, str.heads(xr, yr))
+def join.at(has: Bool, +t: U32, +xb: U32, +xt: U32, +yb: U32, +yt: U32) -> TE:
+  match has:
+    case True{}:
+      TE{t, xb, xt}
+    case False{}:
+      TE{t, yb, yt}
 
-def diff(+xs: List<&2, String>, +ys: List<&2, String>) -> List<&2, String>:
-  diff.go((List.length(&2, String, xs) + List.length(&2, String, ys) + 1n : Nat), xs, ys, str.heads(xs, ys))
+def join.eq(x: TE, y: TE) -> TE:
+  match x y:
+    case TE{+t, +xb, +xt} TE{u, +yb, +yt}:
+      join.at(U32.is_ne(xb, none()), t, xb, xt, yb, yt)
 
-def both.go(fuel: Nat, +xs: List<&2, String>, +ys: List<&2, String>, c: Cmp) -> List<&2, String>:
+# The two classes' tags, joined: a tag on both sides keeps a capture, the
+# first side's when both have one (Map.unionWith keep).
+def tags.join.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, TE>, c: Cmp) -> List<&2, TE>:
   match fuel:
     case 0n:
       []
@@ -1016,55 +1347,1265 @@ def both.go(fuel: Nat, +xs: List<&2, String>, +ys: List<&2, String>, c: Cmp) -> 
             case Con{+y, +yr}:
               match c:
                 case LT{}:
-                  x <> both.go(f, xr, Con{y, yr}, str.heads(xr, Con{y, yr}))
+                  x <> tags.join.go(f, xr, Con{y, yr}, heads(xr, Con{y, yr}))
                 case GT{}:
-                  y <> both.go(f, Con{x, xr}, yr, str.heads(Con{x, xr}, yr))
+                  y <> tags.join.go(f, Con{x, xr}, yr, heads(Con{x, xr}, yr))
                 case EQ{}:
-                  x <> both.go(f, xr, yr, str.heads(xr, yr))
+                  join.eq(x, y) <> tags.join.go(f, xr, yr, heads(xr, yr))
+
+def tags.join(+xs: List<&2, TE>, +ys: List<&2, TE>) -> List<&2, TE>:
+  tags.join.go((List.length(&2, TE, xs) + List.length(&2, TE, ys) + 1n : Nat), xs, ys, heads(xs, ys))
+
+def pending.at(both: Bool, +xb: U32, +xt: U32, +yb: U32, +yt: U32, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
+  match both:
+    case True{}:
+      WSig{[], none(), loc, Sig{xb, xt}, Sig{yb, yt}} <> rest
+    case False{}:
+      rest
+
+def pending.one(x: TE, y: TE, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
+  match x y:
+    case TE{t, +xb, +xt} TE{u, +yb, +yt}:
+      pending.at(U32.is_ne(xb, none()) && U32.is_ne(yb, none()), xb, xt, yb, yt, loc, rest)
+
+# The captures both classes hold for one tag, in tag order, as unifier
+# work: they must unify.
+def pending.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, TE>, c: Cmp, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
+  match fuel:
+    case 0n:
+      rest
+    case 1n+f:
+      match xs:
+        case Nil{}:
+          rest
+        case Con{+x, +xr}:
+          match ys:
+            case Nil{}:
+              rest
+            case Con{+y, +yr}:
+              match c:
+                case LT{}:
+                  pending.go(f, xr, Con{y, yr}, heads(xr, Con{y, yr}), loc, rest)
+                case GT{}:
+                  pending.go(f, Con{x, xr}, yr, heads(Con{x, xr}, yr), loc, rest)
+                case EQ{}:
+                  pending.one(x, y, loc, pending.go(f, xr, yr, heads(xr, yr), loc, rest))
+
+def pending(+xs: List<&2, TE>, +ys: List<&2, TE>, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
+  pending.go((List.length(&2, TE, xs) + List.length(&2, TE, ys) + 1n : Nat), xs, ys, heads(xs, ys), loc, rest)
+
+def union.tags.mb(+ra: U32, +rb: U32, +ma: List<&2, TE>, +loc: Lc.Loc, rest: List<&2, W>, r: St & List<&2, TE>) -> St & List<&2, W>:
+  (s, +mb) = r
+  (tg.set(tg.set(wr(s, (ra * 8 + 20 : U32), (rb + 1 : U32)), rb, tags.join(ma, mb)), ra, te.none()),
+   pending(ma, mb, loc, rest))
+
+def union.tags.ma(+ra: U32, +rb: U32, +loc: Lc.Loc, rest: List<&2, W>, r: St & List<&2, TE>) -> St & List<&2, W>:
+  (s, +ma) = r
+  union.tags.mb(ra, rb, ma, loc, rest, tg.get(s, rb))
+
+def union.tags.same(same: Bool, s: St, +ra: U32, +rb: U32, +loc: Lc.Loc, rest: List<&2, W>) -> St & List<&2, W>:
+  match same:
+    case True{}:
+      (s, rest)
+    case False{}:
+      union.tags.ma(ra, rb, loc, rest, tg.get(s, ra))
+
+def union.tags.rb(+ra: U32, +loc: Lc.Loc, rest: List<&2, W>, r: St & U32) -> St & List<&2, W>:
+  (s, +rb) = r
+  union.tags.same(U32.is_eq(ra, rb), s, ra, rb, loc, rest)
+
+def union.tags.ra(+b: U32, +loc: Lc.Loc, rest: List<&2, W>, r: St & U32) -> St & List<&2, W>:
+  (s, +ra) = r
+  union.tags.rb(ra, loc, rest, find(s, 4, b))
+
+# unionTags: a's root points at b's, which holds both classes' tags; the
+# captures both held for a tag must unify, so they go on the unifier's
+# work, first.
+def union.tags(s: St, +a: U32, +b: U32, +loc: Lc.Loc, rest: List<&2, W>) -> St & List<&2, W>:
+  union.tags.ra(b, loc, rest, find(s, 4, a))
+
+
+# Types
+# -----
+
+def bind.of(r: Array<U32> & U32) -> Array<U32> & Nx:
+  (m, +b) = r
+  (m, Bool.pick(Nx, U32.is_zero(b), NEnd{}, NAt{b}))
+
+# What a type's walk reads next: a bound variable's binding; anything else
+# ends the walk.
+def bound.at(var: Bool, +t: U32, m: Array<U32>) -> Array<U32> & Nx:
+  match var:
+    case True{}:
+      bind.of(Array.get(U32, m, (ix(t) * 8 + 16 : U32)))
+    case False{}:
+      (m, NEnd{})
+
+def bound(+t: U32, m: Array<U32>) -> Array<U32> & Nx:
+  bound.at(is.var(t), t, m)
+
+def walk.go(fuel: Nat, +t: U32, r: Array<U32> & Nx) -> Array<U32> & U32:
+  match fuel:
+    case 0n:
+      (m, n) = r
+      (m, t)
+    case 1n+g:
+      (m, n) = r
+      match n:
+        case NEnd{}:
+          (m, t)
+        case NAt{+b}:
+          walk.go(g, b, bound(b, m))
+
+# walkTau
+def walk(s: St, +t: U32) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      st.m(ps, tg, x, walk.go(big(), t, bound(t, m)))
+
+def occurs.pair(ts: List<&2, U32>, r: St & Pr) -> St & OS:
+  (s, pr) = r
+  match pr:
+    case Pr{b1, t1, b2, t2}:
+      (s, OS{False{}, t1 <> t2 <> ts})
+
+def occurs.kind(k: K, +i: U32, s: St, +w: U32, ts: List<&2, U32>) -> St & OS:
+  match k:
+    case KVar{}:
+      (s, OS{U32.is_eq(ix(w), i), ts})
+    case KPair{}:
+      occurs.pair(ts, pair.get(s, w))
+    case _:
+      (s, OS{False{}, ts})
+
+def occurs.walked(+i: U32, ts: List<&2, U32>, r: St & U32) -> St & OS:
+  (s, +w) = r
+  occurs.kind(kind(w), i, s, w, ts)
+
+def occurs.go(fuel: Nat, +i: U32, r: St & OS) -> St & Bool:
+  match fuel:
+    case 0n:
+      (s, o) = r
+      (s, False{})
+    case 1n+g:
+      (s, o) = r
+      match o:
+        case OS{hit, ts}:
+          match hit:
+            case True{}:
+              (s, True{})
+            case False{}:
+              match ts:
+                case Nil{}:
+                  (s, False{})
+                case Con{+t, rest}:
+                  occurs.go(g, i, occurs.walked(i, rest, walk(s, t)))
+
+# Whether variable i occurs in t.
+def occurs(s: St, +i: U32, +t: U32) -> St & Bool:
+  occurs.go(big(), i, (s, OS{False{}, [t]}))
+
+# deepShowTau, for mismatch reports: the texts come out on a stack, a
+# pair's once both sides are shown.
+
+def ds.push(js: List<&2, DS>, vs: List<&2, String>, s: St, +v: String) -> St & DQ:
+  (s, DQ{js, v <> vs})
+
+def ds.walked(+d: U32, js: List<&2, DS>, vs: List<&2, String>, r: St & U32) -> St & DQ:
+  (s, +w) = r
+  (s, DQ{DsWalked{kind(w), w, d} <> js, vs})
+
+def ds.code.p(+root: U32, ts: List<&2, U32>, js: List<&2, DS>, vs: List<&2, String>, r: St & P) -> St & DQ:
+  (s, +p) = r
+  (s, DQ{js, ("Code#" ++ U32.show(root) ++ tags.show(p, ts)) <> vs})
+
+def ds.code.ts(+root: U32, js: List<&2, DS>, vs: List<&2, String>, r: St & List<&2, U32>) -> St & DQ:
+  (s, ts) = r
+  ds.code.p(root, ts, js, vs, prog(s))
+
+def ds.code(+i: U32, js: List<&2, DS>, vs: List<&2, String>, r: St & U32) -> St & DQ:
+  (s, +root) = r
+  ds.code.ts(root, js, vs, tag.set(s, i))
+
+def ds.cap(js: List<&2, DS>, vs: List<&2, String>, r: St & U32) -> St & DQ:
+  (s, +root) = r
+  (s, DQ{js, ("Cap#" ++ U32.show(root)) <> vs})
+
+def ds.pair(+d: U32, js: List<&2, DS>, vs: List<&2, String>, r: St & Pr) -> St & DQ:
+  (s, pr) = r
+  match pr:
+    case Pr{b1, t1, b2, t2}:
+      (s, DQ{DsTau{t1, (d - 1 : U32)} <> DsTau{t2, (d - 1 : U32)} <> DsJoin{} <> js, vs})
+
+def ds.join(vs: List<&2, String>) -> List<&2, String>:
+  match vs:
+    case Con{sb, r1}:
+      match r1:
+        case Con{sa, r2}:
+          ("(" ++ sa ++ ", " ++ sb ++ ")") <> r2
+        case Nil{}:
+          [sb]
+    case Nil{}:
+      []
+
+def ds.tau(stop: Bool, s: St, +t: U32, +d: U32, js: List<&2, DS>, vs: List<&2, String>) -> St & DQ:
+  match stop:
+    case True{}:
+      ds.push(js, vs, s, "...")
+    case False{}:
+      ds.walked(d, js, vs, walk(s, t))
+
+def ds.step(s: St, j: DS, js: List<&2, DS>, vs: List<&2, String>) -> St & DQ:
+  match j:
+    case DsTau{+t, +d}:
+      ds.tau(U32.is_zero(d), s, t, d, js, vs)
+    case DsWalked{k, +w, +d}:
+      match k:
+        case KData{}:
+          ds.push(js, vs, s, "D")
+        case KVar{}:
+          ds.push(js, vs, s, "t" ++ U32.show(ix(w)))
+        case KCode{}:
+          ds.code(ix(w), js, vs, find(s, 4, ix(w)))
+        case KCap{}:
+          ds.cap(js, vs, find(s, 4, ix(w)))
+        case KPair{}:
+          ds.pair(d, js, vs, pair.get(s, w))
+    case DsJoin{}:
+      (s, DQ{js, ds.join(vs)})
+
+def ds.go(fuel: Nat, r: St & DQ) -> St & String:
+  match fuel:
+    case 0n:
+      (s, q) = r
+      (s, "...")
+    case 1n+f:
+      (s, q) = r
+      match q:
+        case DQ{js, vs}:
+          match js:
+            case Con{j, rest}:
+              ds.go(f, ds.step(s, j, rest, vs))
+            case Nil{}:
+              match vs:
+                case Con{v, more}:
+                  (s, v)
+                case Nil{}:
+                  (s, "...")
+
+def deep.show(s: St, +t: U32) -> St & String:
+  ds.go(big(), (s, DQ{[DsTau{t, 5}], []}))
+
+def mismatch.p(+loc: Lc.Loc, +mode: U32, +a: U32, +b: U32, +da: String, +db: String, r: St & P) -> St & List<&2, W>:
+  (s, +p) = r
+  (fail(s, TypeMismatch{loc, describe(a) ++ " vs " ++ describe(b) ++ " [mode " ++ mode.show(p, mode) ++ "; "
+    ++ da ++ " ||| " ++ db ++ "]"}), [])
+
+def mismatch.b(+loc: Lc.Loc, +mode: U32, +a: U32, +b: U32, +da: String, r: St & String) -> St & List<&2, W>:
+  (s, +db) = r
+  mismatch.p(loc, mode, a, b, da, db, prog(s))
+
+def mismatch.a(+loc: Lc.Loc, +mode: U32, +a: U32, +b: U32, r: St & String) -> St & List<&2, W>:
+  (s, +da) = r
+  mismatch.b(loc, mode, a, b, da, deep.show(s, b))
+
+# Two walked types that cannot unify: the unification stops here.
+def mismatch(s: St, +loc: Lc.Loc, +mode: U32, +a: U32, +b: U32) -> St & List<&2, W>:
+  mismatch.a(loc, mode, a, b, deep.show(s, a))
+
+# Unification
+# -----------
+
+def bind.at(cyclic: Bool, s: St, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  match cyclic:
+    case True{}:
+      (wr(s, (i * 8 + 16 : U32), data()), WTau{[], none(), loc, t, data()} <> rest)
+    case False{}:
+      (wr(s, (i * 8 + 16 : U32), t), rest)
+
+def bind.occ(+loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>, r: St & Bool) -> St & List<&2, W>:
+  (s, cyclic) = r
+  bind.at(cyclic, s, loc, i, t, rest)
+
+# bindTVar: a cyclic binding collapses to data.
+def bind.var(s: St, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  bind.occ(loc, i, t, rest, occurs(s, i, t))
+
+def member(xs: List<&2, U32>, +x: U32) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{y, rest}:
+      U32.is_eq(x, y) || member(rest, x)
+
+def te.cap(e: TE) -> Sig:
+  match e:
+    case TE{tag, cb, ct}:
+      Sig{cb, ct}
+
+def head.cmp(ts: List<&2, TE>, +t: U32) -> Cmp:
+  match ts:
+    case Nil{}:
+      GT{}
+    case Con{e, rest}:
+      match e:
+        case TE{tag, cb, ct}:
+          U32.cmp(tag, t)
+
+def lookup.at(fuel: Nat, +ts: List<&2, TE>, +t: U32, c: Cmp) -> Sig:
+  match fuel:
+    case 0n:
+      Sig{none(), 0}
+    case 1n+f:
+      match ts:
+        case Nil{}:
+          Sig{none(), 0}
+        case Con{+e, +rest}:
+          match c:
+            case LT{}:
+              lookup.at(f, rest, t, head.cmp(rest, t))
+            case EQ{}:
+              te.cap(e)
+            case GT{}:
+              Sig{none(), 0}
+
+# The capture a class holds for one tag (its bang none() when there is
+# none).
+def lookup(+ts: List<&2, TE>, +t: U32) -> Sig:
+  lookup.at((List.length(&2, TE, ts) + 1n : Nat), ts, t, head.cmp(ts, t))
+
+def cap.one(no: Bool, +ct: U32, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> List<&2, W>:
+  match no:
+    case True{}:
+      rest
+    case False{}:
+      WTau{vis, mode, loc, ct, t} <> rest
+
+def cap.all(cs: List<&2, TE>, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> List<&2, W>:
+  match cs:
+    case Nil{}:
+      rest
+    case Con{e, er}:
+      match e:
+        case TE{tag, +cb, ct}:
+          cap.one(U32.is_eq(cb, none()), ct, vis, mode, loc, t, cap.all(er, vis, mode, loc, t, rest))
+
+def cap.pick(no: Bool, +ct: U32, +cs: List<&2, TE>, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> List<&2, W>:
+  match no:
+    case True{}:
+      cap.all(cs, vis, mode, loc, t, rest)
+    case False{}:
+      WTau{vis, mode, loc, ct, t} <> rest
+
+def cap.mode(m: Sig, +cs: List<&2, TE>, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> List<&2, W>:
+  match m:
+    case Sig{+cb, ct}:
+      cap.pick(U32.is_eq(cb, none()), ct, cs, vis, mode, loc, t, rest)
+
+def cap.for.at(no: Bool, +mode: U32, +cs: List<&2, TE>) -> Sig:
+  match no:
+    case True{}:
+      Sig{none(), 0}
+    case False{}:
+      lookup(cs, mode)
+
+def cap.for(+mode: U32, +cs: List<&2, TE>) -> Sig:
+  cap.for.at(U32.is_eq(mode, none()), mode, cs)
+
+def cap.caps(+root: U32, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>, r: St & List<&2, TE>) -> St & List<&2, W>:
+  (s, +cs) = r
+  (s, cap.mode(cap.for(mode, cs), cs, root <> vis, mode, loc, t, rest))
+
+def cap.seen(seen: Bool, s: St, +root: U32, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  match seen:
+    case True{}:
+      (s, rest)
+    case False{}:
+      cap.caps(root, vis, mode, loc, t, rest, tg.get(s, root))
+
+def cap.found(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>, r: St & U32) -> St & List<&2, W>:
+  (s, +root) = r
+  cap.seen(member(vis, root), s, root, vis, mode, loc, t, rest)
+
+# resolveCapT: under a dispatch mode the package holds, that tag's capture
+# is meant; otherwise every capture the package holds must fit.
+def cap.resolve(s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  cap.found(vis, mode, loc, t, rest, find(s, 4, i))
+
+def colls(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, rest: List<&2, W>, r: St & Pr) -> St & List<&2, W>:
+  (s, pr) = r
+  match pr:
+    case Pr{b1, t1, b2, t2}:
+      (s, WColl{vis, mode, loc, Sig{b1, t1}} <> WColl{vis, mode, loc, Sig{b2, t2}} <> rest)
+
+def pairs.b(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, pa: Pr, rest: List<&2, W>, r: St & Pr) -> St & List<&2, W>:
+  match pa:
+    case Pr{a1, s1, a2, s2}:
+      (s, pb) = r
+      match pb:
+        case Pr{b1, t1, b2, t2}:
+          (s, WSig{vis, mode, loc, Sig{a1, s1}, Sig{b1, t1}} <> WSig{vis, mode, loc, Sig{a2, s2}, Sig{b2, t2}} <> rest)
+
+def pairs.a(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +b: U32, rest: List<&2, W>, r: St & Pr) -> St & List<&2, W>:
+  (s, pa) = r
+  pairs.b(vis, mode, loc, pa, rest, pair.get(s, b))
+
+def same.var(same: Bool, s: St, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  match same:
+    case True{}:
+      (s, rest)
+    case False{}:
+      bind.var(s, loc, i, t, rest)
+
+# unifyTauAt, on walked types: its immediate effect, then the work left.
+def walked(ka: K, kb: K, s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  match ka:
+    case KVar{}:
+      match kb:
+        case KVar{}:
+          same.var(U32.is_eq(a, b), s, loc, ix(a), b, rest)
+        case _:
+          bind.var(s, loc, ix(a), b, rest)
+    case KData{}:
+      match kb:
+        case KVar{}:
+          bind.var(s, loc, ix(b), a, rest)
+        case KData{}:
+          (s, rest)
+        case KCap{}:
+          cap.resolve(s, vis, mode, loc, ix(b), a, rest)
+        case KPair{}:
+          colls(vis, mode, loc, rest, pair.get(s, b))
+        case KCode{}:
+          mismatch(s, loc, mode, a, b)
+    case KCode{}:
+      match kb:
+        case KVar{}:
+          bind.var(s, loc, ix(b), a, rest)
+        case KCode{}:
+          union.tags(s, ix(a), ix(b), loc, rest)
+        case KCap{}:
+          cap.resolve(s, vis, mode, loc, ix(b), a, rest)
+        case _:
+          mismatch(s, loc, mode, a, b)
+    case KCap{}:
+      match kb:
+        case KVar{}:
+          bind.var(s, loc, ix(b), a, rest)
+        case KCap{}:
+          union.tags(s, ix(a), ix(b), loc, rest)
+        case _:
+          cap.resolve(s, vis, mode, loc, ix(a), b, rest)
+    case KPair{}:
+      match kb:
+        case KVar{}:
+          bind.var(s, loc, ix(b), a, rest)
+        case KCap{}:
+          cap.resolve(s, vis, mode, loc, ix(b), a, rest)
+        case KPair{}:
+          pairs.a(vis, mode, loc, b, rest, pair.get(s, a))
+        case KData{}:
+          colls(vis, mode, loc, rest, pair.get(s, a))
+        case KCode{}:
+          mismatch(s, loc, mode, a, b)
+
+def unify.wb(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +wa: U32, rest: List<&2, W>, r: St & U32) -> St & List<&2, W>:
+  (s, +wb) = r
+  walked(kind(wa), kind(wb), s, vis, mode, loc, wa, wb, rest)
+
+def unify.wa(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +b: U32, rest: List<&2, W>, r: St & U32) -> St & List<&2, W>:
+  (s, +wa) = r
+  unify.wb(vis, mode, loc, wa, rest, walk(s, b))
+
+def unify.coll(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>, r: St & Bool) -> St & List<&2, W>:
+  (s, changed) = r
+  (s, WTau{vis, mode, loc, t, data()} <> rest)
+
+def unify.one(s: St, w: W, rest: List<&2, W>) -> St & List<&2, W>:
+  match w:
+    case WSig{+vis, +mode, +loc, a, b}:
+      match a b:
+        case Sig{+ba, ta} Sig{+bb, tb}:
+          (union.b(s, ba, bb), WTau{vis, mode, loc, ta, tb} <> rest)
+    case WTau{+vis, +mode, +loc, +a, +b}:
+      unify.wa(vis, mode, loc, b, rest, walk(s, a))
+    case WColl{+vis, +mode, +loc, sg}:
+      match sg:
+        case Sig{+b, +t}:
+          unify.coll(vis, mode, loc, t, rest, constrain(s, b, 1, 0, Blame{loc, "component of a data pair is unboxed data"}))
+
+def unify.ok(w: W, rest: List<&2, W>, r: St & Bool) -> St & List<&2, W>:
+  (s, ok) = r
+  match ok:
+    case True{}:
+      unify.one(s, w, rest)
+    case False{}:
+      (s, [])
+
+def unify.go(fuel: Nat, r: St & List<&2, W>) -> St:
+  match fuel:
+    case 0n:
+      (s, ws) = r
+      fail(s, Internal{"unification ran out of steps"})
+    case 1n+f:
+      (s, ws) = r
+      match ws:
+        case Nil{}:
+          s
+        case Con{w, rest}:
+          unify.go(f, unify.ok(w, rest, ok.of(s)))
+
+# unifySigmaAt with an empty visited set.
+def unify.at(s: St, +mode: U32, +loc: Lc.Loc, a: Sig, b: Sig) -> St:
+  unify.go(big(), (s, [WSig{[], mode, loc, a, b}]))
+
+# unifySigma
+def unify(s: St, +loc: Lc.Loc, a: Sig, b: Sig) -> St:
+  unify.at(s, none(), loc, a, b)
+
+
+# Constraint generation (viewNode, intrinsic)
+# -------------------------------------------
+
+def a.loc(t: A) -> Lc.Loc:
+  match t:
+    case AZero{loc}:
+      loc
+    case APair{loc, a, b}:
+      loc
+    case AEnv{loc}:
+      loc
+    case ASetEnv{loc, x}:
+      loc
+    case AGate{loc}:
+      loc
+    case ALeft{loc, x}:
+      loc
+    case ARight{loc, x}:
+      loc
+    case AAbort{loc}:
+      loc
+    case ACheck{loc, c}:
+      loc
+    case ARef{loc, r}:
+      loc
+
+def occ.b(+tau: U32, r: St & U32) -> St & Sig:
+  (s, +b) = r
+  (s, Sig{b, tau})
+
+def occ.slack(+bang: U32, +tau: U32, +here: List<&2, U32>, +loc: Lc.Loc, +d: U32, r: St & U32) -> St & Sig:
+  (s, +slack) = r
+  occ.b(tau, forced.zero(sum.eq(sum.eq(s, loc, "env occurrence depth = domain bang + slack", [bang, slack], d),
+    loc, "env occurrence depth matches its path boxes", here, d), Blame{loc, "variable occurrence is locally unboxed"}))
+
+def occ.d(+bang: U32, +tau: U32, +here: List<&2, U32>, +loc: Lc.Loc, r: St & U32) -> St & Sig:
+  (s, +d) = r
+  occ.slack(bang, tau, here, loc, d, fresh(s))
+
+# envOccurrence
+def occurrence(s: St, +ctx: Ctx, +here: List<&2, U32>, +loc: Lc.Loc) -> St & Sig:
+  match ctx:
+    case Ctx{+bang, +tau, depth}:
+      occ.d(bang, tau, here, loc, fresh(s))
+
+def leaf.code.at(+loc: Lc.Loc, +what: String, r: St & U32) -> St & Sig:
+  (s, +ct) = r
+  plain(s, loc, what, ct)
+
+# A code constant: a fresh code class holding its tag, locally unboxed.
+def leaf.code(s: St, +loc: Lc.Loc, +tag: U32, +what: String) -> St & Sig:
+  leaf.code.at(loc, what, fresh.code(s, tag))
+
+def pair.plain(+loc: Lc.Loc, r: St & U32) -> St & Sig:
+  (s, +t) = r
+  plain(s, loc, "pair constructor is locally unboxed", t)
+
+def pair.pkg.b(+loc: Lc.Loc, +sa: Sig, +sb: Sig, r: St & U32) -> St & Sig:
+  (s, +p) = r
+  pair.plain(loc, pair.new(s, Pr{sig.b(sa), sig.t(sa), sig.b(sb), cap.t(p)}))
+
+# A pair: a code-headed one is a closure package, whose right side the
+# package's tags hold as their capture.
+def pair.of(code: Bool, s: St, +loc: Lc.Loc, +sa: Sig, +sb: Sig, +w: U32) -> St & Sig:
+  match code:
+    case True{}:
+      pair.pkg.b(loc, sa, sb, package(s, ix(w), sb))
+    case False{}:
+      pair.plain(loc, pair.new(s, Pr{sig.b(sa), sig.t(sa), sig.b(sb), sig.t(sb)}))
+
+def gen.ret0(ks: List<&2, GK>, r: St & Sig) -> St & GJ:
+  (s, sg) = r
+  (s, GRet{sg, ks})
+
+def gen.pair(+loc: Lc.Loc, +sa: Sig, +sb: Sig, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +w) = r
+  gen.ret0(ks, pair.of(is.code(w), s, loc, sa, sb, w))
+
+def se.done(+loc: Lc.Loc, +depth: U32, +fnt: U32, +si: Sig, +so: Sig, +sx: Sig, +pairb: U32, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +t) = r
+  (site.add(unify(s, loc, sx, Sig{pairb, t}), Site{fnt, si, so, depth, loc, []}), GRet{so, ks})
+
+def se.pairb(+loc: Lc.Loc, +depth: U32, +fnt: U32, +fnb: U32, +si: Sig, +so: Sig, +sx: Sig, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +pairb) = r
+  se.done(loc, depth, fnt, si, so, sx, pairb, ks, pair.new(s, Pr{fnb, fnt, sig.b(si), sig.t(si)}))
+
+def se.fnb(+loc: Lc.Loc, +depth: U32, +fnt: U32, +si: Sig, +so: Sig, +sx: Sig, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +fnb) = r
+  se.pairb(loc, depth, fnt, fnb, si, so, sx, ks, fresh(s))
+
+def se.fnt(+loc: Lc.Loc, +depth: U32, +si: Sig, +so: Sig, +sx: Sig, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +fnt) = r
+  se.fnb(loc, depth, fnt, si, so, sx, ks, forced.zero(s, Blame{loc, "applied function must be unboxed"}))
+
+def se.so(+loc: Lc.Loc, +depth: U32, +si: Sig, +sx: Sig, ks: List<&2, GK>, r: St & Sig) -> St & GJ:
+  (s, +so) = r
+  se.fnt(loc, depth, si, so, sx, ks, fresh.tau(s))
+
+def se.si(+loc: Lc.Loc, +depth: U32, +sx: Sig, ks: List<&2, GK>, r: St & Sig) -> St & GJ:
+  (s, +si) = r
+  se.so(loc, depth, si, sx, ks, fresh.sig(s))
+
+def pj.done(left: Bool, +loc: Lc.Loc, +sl: Sig, +sr: Sig, +sx: Sig, +pb: U32, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  match left:
+    case True{}:
+      (s, +t) = r
+      (unify(s, loc, sx, Sig{pb, t}), GRet{sl, ks})
+    case False{}:
+      (s, +t) = r
+      (unify(s, loc, sx, Sig{pb, t}), GRet{sr, ks})
+
+def pj.pb(left: Bool, +loc: Lc.Loc, +sl: Sig, +sr: Sig, +sx: Sig, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +pb) = r
+  pj.done(left, loc, sl, sr, sx, pb, ks, pair.new(s, Pr{sig.b(sl), sig.t(sl), sig.b(sr), sig.t(sr)}))
+
+def pj.sr(left: Bool, +loc: Lc.Loc, +sl: Sig, +sx: Sig, ks: List<&2, GK>, r: St & Sig) -> St & GJ:
+  (s, +sr) = r
+  pj.pb(left, loc, sl, sr, sx, ks, fresh(s))
+
+def pj.sl(left: Bool, +loc: Lc.Loc, +sx: Sig, ks: List<&2, GK>, r: St & Sig) -> St & GJ:
+  (s, +sl) = r
+  pj.sr(left, loc, sl, sx, ks, fresh.sig(s))
+
+def gen.viewed(+w: U32, +bi: U32, +ti: U32, +loc: Lc.Loc, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +v) = r
+  (sum.eq(s, loc, "view bangs = edge boxes + intrinsic bangs", [w, bi], v), GRet{Sig{v, ti}, ks})
+
+# A result handed to the frame waiting for it.
+def gen.ret(s: St, k: GK, sg: Sig, ks: List<&2, GK>) -> St & GJ:
+  match k:
+    case KView{+w, +loc}:
+      match sg:
+        case Sig{+bi, +ti}:
+          gen.viewed(w, bi, ti, loc, ks, fresh(s))
+    case KPairA{+ctx, +here, +loc, +b}:
+      (s, GView{ctx, here, b, KPairB{loc, sg} <> ks})
+    case KPairB{+loc, +sa}:
+      gen.pair(loc, sa, sg, ks, walk(s, sig.t(sa)))
+    case KSetEnv{+ctx, +here, +loc}:
+      se.si(loc, ctx.depth(ctx), sg, ks, fresh.sig(s))
+    case KProj{+loc, left}:
+      pj.sl(left, loc, sg, ks, fresh.sig(s))
+
+def gen.view.at(+ctx: Ctx, +here: List<&2, U32>, +t: A, ks: List<&2, GK>, r: St & U32) -> St & GJ:
+  (s, +w) = r
+  (s, GIntr{ctx, w <> here, t, KView{w, a.loc(t)} <> ks})
+
+def gen.intr(s: St, +ctx: Ctx, +here: List<&2, U32>, t: A, ks: List<&2, GK>) -> St & GJ:
+  match t:
+    case AZero{+loc}:
+      gen.ret0(ks, plain(s, loc, "Zero is an unboxed value", data()))
+    case APair{+loc, a, +b}:
+      (s, GView{ctx, here, a, KPairA{ctx, here, loc, b} <> ks})
+    case AEnv{+loc}:
+      gen.ret0(ks, occurrence(s, ctx, here, loc))
+    case ASetEnv{+loc, x}:
+      (s, GView{ctx, here, x, KSetEnv{ctx, here, loc} <> ks})
+    case AGate{+loc}:
+      gen.ret0(ks, leaf.code(s, loc, t.gate(), "gate is an unboxed value"))
+    case ALeft{+loc, x}:
+      (s, GView{ctx, here, x, KProj{loc, True{}} <> ks})
+    case ARight{+loc, x}:
+      (s, GView{ctx, here, x, KProj{loc, False{}} <> ks})
+    case AAbort{+loc}:
+      gen.ret0(ks, leaf.code(s, loc, t.abort(), "abort is an unboxed value"))
+    case ACheck{loc, c}:
+      (s, GIntr{ctx, here, c, ks})
+    case ARef{+loc, +r}:
+      gen.ret0(ks, leaf.code(s, loc, r, "code constant is an unboxed value"))
+
+def gen.go(fuel: Nat, r: St & GJ) -> St & Sig:
+  match fuel:
+    case 0n:
+      (s, j) = r
+      (fail(s, Internal{"term too deep"}), Sig{0, 0})
+    case 1n+f:
+      (s, j) = r
+      match j:
+        case GRet{sg, ks}:
+          match ks:
+            case Nil{}:
+              (s, sg)
+            case Con{k, rest}:
+              gen.go(f, gen.ret(s, k, sg, rest))
+        case GView{+ctx, +here, +t, ks}:
+          gen.go(f, gen.view.at(ctx, here, t, ks, fresh(s)))
+        case GIntr{+ctx, +here, t, ks}:
+          gen.go(f, gen.intr(s, ctx, here, t, ks))
+
+# viewNode: a node's type as its parent sees it (view bang = edge boxes +
+# intrinsic bang), from its own (intrinsic).
+def view(s: St, +ctx: Ctx, +here: List<&2, U32>, +t: A) -> St & Sig:
+  gen.go(big(), (s, GView{ctx, here, t, []}))
+
+# Sorted tag lists
+# ----------------
+
+def u.heads(xs: List<&2, U32>, ys: List<&2, U32>) -> Cmp:
+  match xs:
+    case Nil{}:
+      GT{}
+    case Con{x, xr}:
+      match ys:
+        case Nil{}:
+          LT{}
+        case Con{y, yr}:
+          U32.cmp(x, y)
+
+# xs less ys.
+def diff.go(fuel: Nat, +xs: List<&2, U32>, +ys: List<&2, U32>, c: Cmp) -> List<&2, U32>:
+  match fuel:
+    case 0n:
+      []
+    case 1n+f:
+      match xs:
+        case Nil{}:
+          []
+        case Con{+x, +xr}:
+          match ys:
+            case Nil{}:
+              Con{x, xr}
+            case Con{+y, +yr}:
+              match c:
+                case LT{}:
+                  x <> diff.go(f, xr, Con{y, yr}, u.heads(xr, Con{y, yr}))
+                case GT{}:
+                  diff.go(f, Con{x, xr}, yr, u.heads(Con{x, xr}, yr))
+                case EQ{}:
+                  diff.go(f, xr, yr, u.heads(xr, yr))
+
+def diff(+xs: List<&2, U32>, +ys: List<&2, U32>) -> List<&2, U32>:
+  diff.go((List.length(&2, U32, xs) + List.length(&2, U32, ys) + 1n : Nat), xs, ys, u.heads(xs, ys))
+
+def both.go(fuel: Nat, +xs: List<&2, U32>, +ys: List<&2, U32>, c: Cmp) -> List<&2, U32>:
+  match fuel:
+    case 0n:
+      []
+    case 1n+f:
+      match xs:
+        case Nil{}:
+          ys
+        case Con{+x, +xr}:
+          match ys:
+            case Nil{}:
+              Con{x, xr}
+            case Con{+y, +yr}:
+              match c:
+                case LT{}:
+                  x <> both.go(f, xr, Con{y, yr}, u.heads(xr, Con{y, yr}))
+                case GT{}:
+                  y <> both.go(f, Con{x, xr}, yr, u.heads(Con{x, xr}, yr))
+                case EQ{}:
+                  x <> both.go(f, xr, yr, u.heads(xr, yr))
 
 # The union of two sorted lists.
-def both(+xs: List<&2, String>, +ys: List<&2, String>) -> List<&2, String>:
-  both.go((List.length(&2, String, xs) + List.length(&2, String, ys) + 1n : Nat), xs, ys, str.heads(xs, ys))
+def both(+xs: List<&2, U32>, +ys: List<&2, U32>) -> List<&2, U32>:
+  both.go((List.length(&2, U32, xs) + List.length(&2, U32, ys) + 1n : Nat), xs, ys, u.heads(xs, ys))
 
-# Dispatch
-# --------
+# fnTagsOfCaptures: the code a capture position can hold, when it is
+# applied.
+
+def ft.one(no: Bool, +ct: U32, +vis: List<&2, U32>, rest: List<&2, FT>) -> List<&2, FT>:
+  match no:
+    case True{}:
+      rest
+    case False{}:
+      FtCap{vis, ct} <> rest
 
 def ft.caps(cs: List<&2, TE>, +vis: List<&2, U32>, rest: List<&2, FT>) -> List<&2, FT>:
   match cs:
     case Nil{}:
       rest
     case Con{e, er}:
-      FtCap{vis, te.cap(e)} <> ft.caps(er, vis, rest)
+      match e:
+        case TE{tag, +cb, ct}:
+          ft.one(U32.is_eq(cb, none()), ct, vis, ft.caps(er, vis, rest))
 
-def body.fi(b: Lf.Body) -> U32:
+def fn.caps(+root: U32, +vis: List<&2, U32>, js: List<&2, FT>, +acc: List<&2, U32>, r: St & List<&2, TE>) -> St & FQ:
+  (s, cs) = r
+  (s, FQ{ft.caps(cs, root <> vis, js), acc})
+
+def fn.seen(seen: Bool, s: St, +root: U32, +vis: List<&2, U32>, js: List<&2, FT>, +acc: List<&2, U32>) -> St & FQ:
+  match seen:
+    case True{}:
+      (s, FQ{js, acc})
+    case False{}:
+      fn.caps(root, vis, js, acc, tg.get(s, root))
+
+def fn.class(+vis: List<&2, U32>, js: List<&2, FT>, +acc: List<&2, U32>, r: St & U32) -> St & FQ:
+  (s, +root) = r
+  fn.seen(member(vis, root), s, root, vis, js, acc)
+
+def fn.walked(+vis: List<&2, U32>, js: List<&2, FT>, +acc: List<&2, U32>, r: St & U32) -> St & FQ:
+  (s, +w) = r
+  (s, FQ{FtWalked{vis, w} <> js, acc})
+
+def fn.ts(js: List<&2, FT>, +acc: List<&2, U32>, r: St & List<&2, U32>) -> St & FQ:
+  (s, +ts) = r
+  (s, FQ{js, both(acc, ts)})
+
+def fn.w(k: K, s: St, +vis: List<&2, U32>, +w: U32, js: List<&2, FT>, +acc: List<&2, U32>) -> St & FQ:
+  match k:
+    case KCode{}:
+      fn.ts(js, acc, tag.set(s, ix(w)))
+    case KCap{}:
+      (s, FQ{FtClass{vis, ix(w)} <> js, acc})
+    case _:
+      (s, FQ{js, acc})
+
+def fn.step(s: St, j: FT, js: List<&2, FT>, +acc: List<&2, U32>) -> St & FQ:
+  match j:
+    case FtClass{+vis, +i}:
+      fn.class(vis, js, acc, find(s, 4, i))
+    case FtCap{+vis, +t}:
+      fn.walked(vis, js, acc, walk(s, t))
+    case FtWalked{+vis, +w}:
+      fn.w(kind(w), s, vis, w, js, acc)
+
+def fn.go(fuel: Nat, r: St & FQ) -> St & List<&2, U32>:
+  match fuel:
+    case 0n:
+      (s, q) = r
+      (s, [])
+    case 1n+f:
+      (s, q) = r
+      match q:
+        case FQ{js, +acc}:
+          match js:
+            case Nil{}:
+              (s, acc)
+            case Con{j, rest}:
+              fn.go(f, fn.step(s, j, rest, acc))
+
+def fn.tags(s: St, +i: U32) -> St & List<&2, U32>:
+  fn.go(big(), (s, FQ{[FtClass{[], i}], []}))
+
+# Dispatch
+# --------
+
+def drop.b(r: St & Bool) -> St:
+  (s, c) = r
+  s
+
+# A body's contraction: its env domain bang must be boxed.
+def dup.derive(d: Maybe<&2, Dup>, s: St, +b: U32, +fi: U32) -> St:
+  match d:
+    case Some{x}:
+      match x:
+        case Dup{path, loc}:
+          drop.b(constrain(s, b, 2, 1, Blame{loc, "env path " ++ steps.show(path) ++ " duplicated in " ++ E.fi.show(fi)}))
+    case None{}:
+      s
+
+def der.done(+b: U32, +t: U32, r: St & Sig) -> St & Der:
+  (s, +sg) = r
+  (s, Der{b, t, sg})
+
+def der.t(+b: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
+  (s, +t) = r
+  der.done(b, t, view(dup.derive(dup, s, b, fi), Ctx{b, t, (depth + 1 : U32)}, [], body))
+
+def der.b(+depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
+  (s, +b) = r
+  der.t(b, depth, fi, dup, body, fresh.tau(s))
+
+# A body walked at a dispatch site (captureTemplate's walk).
+def derive(s: St, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A) -> St & Der:
+  der.b(depth, fi, dup, body, fresh(s))
+
+def first.done(+rk: U32, +v0: U32, +d: Der, r: St & U32) -> St & Der:
+  (s, +v1) = r
+  (ct.set(s, (rk * 2 + 1 : U32), (v1 - v0 : U32)), d)
+
+def first.der(+rk: U32, +v0: U32, r: St & Der) -> St & Der:
+  (s, +d) = r
+  first.done(rk, v0, d, rd(s, 0))
+
+def first.v0(+rk: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
+  (s, +v0) = r
+  first.der(rk, v0, derive(s, depth, fi, dup, body))
+
+def again.at(over: Bool, s: St, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A) -> St & Der:
+  match over:
+    case True{}:
+      (fail(s, budget.err()), Der{0, 0, Sig{0, 0}})
+    case False{}:
+      derive(s, depth, fi, dup, body)
+
+def again.base(+size: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
+  (s, +base) = r
+  again.at(U32.is_ge((base + size : U32), var.budget()), s, depth, fi, dup, body)
+
+def again.size(+depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A, r: St & U32) -> St & Der:
+  (s, +size) = r
+  again.base(size, depth, fi, dup, body, rd(s, 0))
+
+# The first derivation of a body records how many variables it minted; a
+# later one is refused when that many would reach the budget, as copying
+# the Haskell's template is.
+def derive.pick(first: Bool, s: St, +rk: U32, +depth: U32, +fi: U32, +dup: Maybe<&2, Dup>, +body: A) -> St & Der:
+  match first:
+    case True{}:
+      first.v0(rk, depth, fi, dup, body, rd(s, 0))
+    case False{}:
+      again.size(depth, fi, dup, body, ct.get(s, (rk * 2 + 1 : U32)))
+
+def dispatch.derived(+tag: U32, +env: Sig, +res: Sig, +loc: Lc.Loc, r: St & Der) -> St:
+  (s, d) = r
+  match d:
+    case Der{+b, +t, +sg}:
+      unify(unify.at(s, tag, loc, env, Sig{b, t}), loc, res, sg)
+
+def dispatch.counted(over: Bool, s: St, +count: U32, +rk: U32, +site: Site, +bd: Bd) -> St:
+  match over:
+    case True{}:
+      match bd:
+        case Bd{h, fi, dup, t}:
+          fail(s, GaveUp{"polyvariance budget: body " ++ E.fi.show(fi)
+            ++ " needed more than 16384 derivations (dispatch structure likely exploding)"})
+    case False{}:
+      match site:
+        case Site{fn, +env, +res, +depth, +loc, done}:
+          match bd:
+            case Bd{h, +fi, +dup, +t}:
+              dispatch.derived(rk, env, res, loc,
+                derive.pick(U32.is_eq(count, 0), ct.set(s, (rk * 2 : U32), (count + 1 : U32)), rk, depth, fi, dup, t))
+
+def dispatch.count(+rk: U32, +site: Site, +bd: Bd, r: St & U32) -> St:
+  (s, +count) = r
+  dispatch.counted(U32.is_ge(count, poly.cap()), s, count, rk, site, bd)
+
+def dispatch.found(m: Maybe<&2, Bd>, s: St, +rk: U32, +site: Site) -> St:
+  match m:
+    case Some{bd}:
+      dispatch.count(rk, site, bd, ct.get(s, (rk * 2 : U32)))
+    case None{}:
+      fail(s, Internal{"dispatched code not in the DeferMap"})
+
+def dispatch.code.p(+rk: U32, +site: Site, r: St & P) -> St:
+  (s, +p) = r
+  dispatch.found(body.at(p, rk), s, rk, site)
+
+def dispatch.code(deep: Bool, s: St, +rk: U32, +site: Site, +loc: Lc.Loc) -> St:
+  match deep:
+    case True{}:
+      fail(s, GaveUp{"code dispatch depth exceeded 1024 (unbounded self-application?): " ++ Lf.loc.show(loc, False{})})
+    case False{}:
+      dispatch.code.p(rk, site, prog(s))
+
+def unify.to(+loc: Lc.Loc, +res: Sig, r: St & Sig) -> St:
+  (s, +g) = r
+  unify(s, loc, res, g)
+
+def gate.ct(+loc: Lc.Loc, +res: Sig, r: St & U32) -> St:
+  (s, +ct) = r
+  unify.to(loc, res, plain(s, loc, "gate switch function is locally unboxed", ct))
+
+def gate.scr(+loc: Lc.Loc, +env: Sig, +res: Sig, r: St & U32) -> St:
+  (s, +scr) = r
+  gate.ct(loc, res, fresh.code(unify(s, loc, env, Sig{scr, data()}), t.gatefn()))
+
+def gf.t(+loc: Lc.Loc, +env: Sig, +res: Sig, +se: Sig, +st: Sig, +bb: U32, r: St & U32) -> St:
+  (s, +t) = r
+  unify(unify(unify(s, loc, env, Sig{bb, t}), loc, res, se), loc, res, st)
+
+def gf.bb(+loc: Lc.Loc, +env: Sig, +res: Sig, +se: Sig, +st: Sig, r: St & U32) -> St:
+  (s, +bb) = r
+  gf.t(loc, env, res, se, st, bb, pair.new(s, Pr{sig.b(se), sig.t(se), sig.b(st), sig.t(st)}))
+
+def gf.st(+loc: Lc.Loc, +env: Sig, +res: Sig, +se: Sig, r: St & Sig) -> St:
+  (s, +st) = r
+  gf.bb(loc, env, res, se, st, fresh(s))
+
+def gf.se(+loc: Lc.Loc, +env: Sig, +res: Sig, r: St & Sig) -> St:
+  (s, +se) = r
+  gf.st(loc, env, res, se, fresh.sig(s))
+
+def abort.ct(+loc: Lc.Loc, +res: Sig, r: St & U32) -> St:
+  (s, +ct) = r
+  unify.to(loc, res, plain(s, loc, "abort continuation is locally unboxed", ct))
+
+def dispatch.builtin(b: Bi, s: St, site: Site) -> St:
   match b:
-    case Lf.Body{fi, body}:
-      fi
+    case BiGate{}:
+      match site:
+        case Site{fn, +env, +res, depth, +loc, done}:
+          gate.scr(loc, env, res, forced.zero(s, Blame{loc, "gate scrutinee must be unboxed data"}))
+    case BiGateFn{}:
+      match site:
+        case Site{fn, +env, +res, depth, +loc, done}:
+          gf.se(loc, env, res, fresh.sig(s))
+    case BiAbort{}:
+      match site:
+        case Site{fn, env, +res, depth, +loc, done}:
+          abort.ct(loc, res, fresh.code(s, t.cont()))
+    case BiCont{}:
+      match site:
+        case Site{fn, +env, +res, depth, +loc, done}:
+          unify(s, loc, env, res)
 
-def body.l(b: Lf.Body) -> Lf.L:
-  match b:
-    case Lf.Body{fi, body}:
-      body
+def dispatch.k(code: Bool, s: St, +tag: U32, +site: Site) -> St:
+  match code:
+    case True{}:
+      match site:
+        case Site{fn, env, res, +depth, +loc, done}:
+          dispatch.code(U32.is_ge(depth, depth.cap()), s, tag, site, loc)
+    case False{}:
+      dispatch.builtin(builtin(tag), s, site)
 
-def site.done(s: Site) -> List<&2, String>:
-  match s:
-    case Site{fn, env, res, glob, depth, loc, done}:
-      done
+# dispatchTag: the constraints of applying one tag at one site.
+def dispatch(s: St, +site: Site, +tag: U32) -> St:
+  dispatch.k(U32.is_lt(tag, t.gate()), s, tag, site)
 
-def site.with.done(s: Site, d: List<&2, String>) -> Site:
-  match s:
-    case Site{fn, env, res, glob, depth, loc, done}:
-      Site{fn, env, res, glob, depth, loc, d}
+# The tags in order, while nothing has failed.
+def dispatch.all(ts: List<&2, U32>, +site: Site, r: St & Bool) -> St:
+  match ts:
+    case Nil{}:
+      (s, ok) = r
+      s
+    case Con{+t, rest}:
+      (s, ok) = r
+      match ok:
+        case True{}:
+          dispatch.all(rest, site, ok.of(dispatch(s, site, t)))
+        case False{}:
+          s
 
-def site.fn(s: Site) -> Tau:
-  match s:
-    case Site{fn, env, res, glob, depth, loc, done}:
-      fn
+def dispatch.new.at(none: Bool, s: St, +k: U32, +site: Site, new: List<&2, U32>) -> St & Bool:
+  match none:
+    case True{}:
+      (s, False{})
+    case False{}:
+      (dispatch.all(new, site, ok.of(site.set(s, k, site))), True{})
+
+def dispatch.new.with(+new: List<&2, U32>, s: St, +k: U32, +site: Site) -> St & Bool:
+  dispatch.new.at(List.is_empty(&2, U32, new), s, k, site, new)
+
+# dispatchNew: the tags this site has not dispatched yet; marked first.
+def dispatch.new(s: St, +k: U32, +site: Site, +tags: List<&2, U32>) -> St & Bool:
+  match site:
+    case Site{+fn, +env, +res, +depth, +loc, +done}:
+      dispatch.new.with(diff(tags, done), s, k, Site{fn, env, res, depth, loc, both(done, tags)})
+
+def site.ts(+k: U32, +site: Site, r: St & List<&2, U32>) -> St & Bool:
+  (s, +ts) = r
+  dispatch.new(s, k, site, ts)
 
 def site.loc(s: Site) -> Lc.Loc:
   match s:
-    case Site{fn, env, res, glob, depth, loc, done}:
+    case Site{fn, env, res, depth, loc, done}:
       loc
+
+def site.fn(s: Site) -> U32:
+  match s:
+    case Site{fn, env, res, depth, loc, done}:
+      fn
+
+def site.walked(k2: K, s: St, +k: U32, +site: Site, +w: U32) -> St & Bool:
+  match k2:
+    case KCode{}:
+      site.ts(k, site, tag.set(s, ix(w)))
+    case KCap{}:
+      site.ts(k, site, fn.tags(s, ix(w)))
+    case KPair{}:
+      (fail(s, TypeMismatch{site.loc(site), "applied value is pair, not code"}), False{})
+    case _:
+      (s, False{})
+
+def site.w(+k: U32, +site: Site, r: St & U32) -> St & Bool:
+  (s, +w) = r
+  site.walked(kind(w), s, k, site, w)
+
+def site.read(+k: U32, r: St & Site) -> St & Bool:
+  (s, +site) = r
+  site.w(k, site, walk(s, site.fn(site)))
+
+# One site: dispatch whatever new code its function position holds.
+def site.resolve(s: St, +k: U32) -> St & Bool:
+  site.read(k, site.get(s, k))
+
+def site.flag(c: Bool, r: St & Bool) -> St & SS:
+  match c:
+    case True{}:
+      (s, ok) = r
+      (s, Bool.pick(SS, ok, SsNew{}, SsStop{}))
+    case False{}:
+      (s, ok) = r
+      (s, Bool.pick(SS, ok, SsNone{}, SsStop{}))
+
+def site.flagged(r: St & Bool) -> St & SS:
+  (s, c) = r
+  site.flag(c, ok.of(s))
+
+def site.step.at(more: Bool, s: St, +k: U32) -> St & SS:
+  match more:
+    case True{}:
+      site.flagged(site.resolve(s, k))
+    case False{}:
+      (s, SsStop{})
+
+# Site k of n.
+def site.step(s: St, +k: U32, +n: U32) -> St & SS:
+  site.step.at(U32.is_lt(k, n), s, k)
+
+# One round over the sites there were when it began; r is how the site
+# before k went.
+def round(fuel: Nat, +k: U32, +n: U32, +changed: Bool, r: St & SS) -> St & Bool:
+  match fuel:
+    case 0n:
+      (s, c) = r
+      (s, changed)
+    case 1n+f:
+      (s, c) = r
+      match c:
+        case SsNone{}:
+          round(f, (k + 1 : U32), n, changed, site.step(s, k, n))
+        case SsNew{}:
+          round(f, (k + 1 : U32), n, True{}, site.step(s, k, n))
+        case SsStop{}:
+          (s, changed)
+
+def start.of(r: St & Bool) -> St & SS:
+  (s, ok) = r
+  (s, Bool.pick(SS, ok, SsNone{}, SsStop{}))
+
+def applies.over(over: Bool, r: St & U32) -> St & Bool:
+  match over:
+    case True{}:
+      (s, n) = r
+      (fail(s, GaveUp{"application dispatch did not converge"}), False{})
+    case False{}:
+      (s, +n) = r
+      round(U32.to_nat((n + 2 : U32)), 0, n, False{}, start.of(ok.of(s)))
+
+def applies.go(fuel: Nat, +rn: U32, r: St & Bool) -> St:
+  match fuel:
+    case 0n:
+      (s, c) = r
+      s
+    case 1n+f:
+      (s, c) = r
+      match c:
+        case False{}:
+          s
+        case True{}:
+          applies.go(f, (rn + 1 : U32), applies.over(U32.is_gt(rn, 10000), rd(s, 5)))
+
+# resolveApplies: dispatch every tag every site's function position holds,
+# to a fixpoint.
+def applies(s: St) -> St:
+  applies.go(10003n, 0, (s, True{}))
+
+# virtualMainApply: the run applies the program to its input, so that
+# application is certified too: a closure package applies its code to
+# (input, captures), bare code to the input alone.
+
+def register.so(+fn: U32, +env: Sig, r: St & Sig) -> St:
+  (s, +so) = r
+  site.add(s, Site{fn, env, so, 0, Lc.Gen{"virtual application of main to input"}, []})
+
+def register(s: St, +fn: U32, +env: Sig) -> St:
+  register.so(fn, env, fresh.sig(s))
+
+def vp.t(+wc: U32, +eb: U32, r: St & U32) -> St:
+  (s, +t) = r
+  register(s, wc, Sig{eb, t})
+
+def vp.eb(+wc: U32, +ib: U32, +b2: U32, +t2: U32, r: St & U32) -> St:
+  (s, +eb) = r
+  vp.t(wc, eb, pair.new(s, Pr{ib, data(), b2, t2}))
+
+def vp.ib(+wc: U32, +b2: U32, +t2: U32, r: St & U32) -> St:
+  (s, +ib) = r
+  vp.eb(wc, ib, b2, t2, fresh(s))
+
+def virtual.pair(ok: Bool, s: St, +wc: U32, +b2: U32, +t2: U32) -> St:
+  match ok:
+    case True{}:
+      vp.ib(wc, b2, t2, fresh(s))
+    case False{}:
+      s
+
+def virtual.wc(+b2: U32, +t2: U32, r: St & U32) -> St:
+  (s, +wc) = r
+  virtual.pair(appliable(wc), s, wc, b2, t2)
+
+def virtual.pr(r: St & Pr) -> St:
+  (s, pr) = r
+  match pr:
+    case Pr{b1, +t1, +b2, +t2}:
+      virtual.wc(b2, t2, walk(s, t1))
+
+def vt.ib(+w: U32, r: St & U32) -> St:
+  (s, +ib) = r
+  register(s, w, Sig{ib, data()})
+
+def virtual.top(ok: Bool, s: St, +w: U32) -> St:
+  match ok:
+    case True{}:
+      vt.ib(w, fresh(s))
+    case False{}:
+      s
+
+def virtual.at(pair: Bool, s: St, +w: U32) -> St:
+  match pair:
+    case True{}:
+      virtual.pr(pair.get(s, w))
+    case False{}:
+      virtual.top(appliable(w), s, w)
+
+def virtual.w(r: St & U32) -> St:
+  (s, +w) = r
+  virtual.at(is.pair(w), s, w)
+
+def virtual(s: St, +sg: Sig) -> St:
+  virtual.w(walk(s, sig.t(sg)))
+
+def dup.top(d: Maybe<&2, Dup>, s: St, +b: U32, +what: String) -> St:
+  match d:
+    case Some{x}:
+      match x:
+        case Dup{path, loc}:
+          drop.b(constrain(s, b, 2, 1, Blame{loc, what ++ " path " ++ steps.show(path) ++ " duplicated"}))
+    case None{}:
+      s
+
+def top.t(+b: U32, +what: String, +dup: Maybe<&2, Dup>, +term: A, r: St & U32) -> St & Sig:
+  (s, +t) = r
+  view(dup.top(dup, s, b, what), Ctx{b, t, 0}, [], term)
+
+def top.b(+what: String, +dup: Maybe<&2, Dup>, +term: A, r: St & U32) -> St & Sig:
+  (s, +b) = r
+  top.t(b, what, dup, term, fresh.tau(s))
+
+# The walk of a top-level term over its own env.
+def walk.top(s: St, +what: String, +dup: Maybe<&2, Dup>, +term: A) -> St & Sig:
+  top.b(what, dup, term, fresh(s))
+
+
+# Solving
+# -------
+
 
 def derived(+what: String, b: Blame) -> Blame:
   match b:
@@ -1127,1153 +2668,12 @@ def eq.roots(es: List<&2, SumEq>, acc: List<&2, U32>) -> List<&2, U32>:
         case SumEq{lhs, rhs, blame}:
           eq.roots(rest, rhs <> List.append(&2, U32, lhs, acc))
 
-def c.cap(c: C) -> U32:
-  match c:
-    case C{next, cap, nsites, scap, eqs, leaves, insts, sizes}:
-      cap
-
-def register(fn: Tau, env: Sig) -> M(Unit):
-  do M<Unit>:
-    so : Sig <- fresh.sig()
-    site.add(Site{fn, env, so, [], 0, Lc.Gen{"virtual application of main to input"}, []})
-
-def appliable(t: Tau) -> Bool:
-  match t:
-    case CodeT{i}:
-      True{}
-    case CapT{i}:
-      True{}
-    case _:
-      False{}
-
-def virtual.pair(ok: Bool, wc: Tau, +b2: U32, +t2: Tau) -> M(Unit):
-  match ok:
-    case True{}:
-      do M<Unit>:
-        ib : U32 <- fresh()
-        eb : U32 <- fresh()
-        register(wc, Sig{eb, PairT{ib, DataT{}, b2, t2}})
-    case False{}:
-      M.pure(Unit, Unit{})
-
-def virtual.top(ok: Bool, w: Tau) -> M(Unit):
-  match ok:
-    case True{}:
-      do M<Unit>:
-        ib : U32 <- fresh()
-        register(w, Sig{ib, DataT{}})
-    case False{}:
-      M.pure(Unit, Unit{})
-
-# allDataShape
-def all.data(s: Lf.Shape) -> Bool:
-  match s:
-    case Lf.CapData{}:
-      True{}
-    case Lf.CapPair{a, b}:
-      all.data(a) && all.data(b)
-    case _:
-      False{}
-
-def meet.flat(data: Bool) -> Lf.Shape:
-  match data:
-    case True{}:
-      Lf.CapData{}
-    case False{}:
-      Lf.CapOther{}
-
-# meetShape: what two construction sites' capture shapes agree on (equal
-# shapes meet to themselves: pairs by their parts, code to code).
-def meet(a: Lf.Shape, b: Lf.Shape) -> Lf.Shape:
-  match a b:
-    case Lf.CapPair{a1, a2} Lf.CapPair{b1, b2}:
-      Lf.CapPair{meet(a1, b1), meet(a2, b2)}
-    case Lf.CapCode{} Lf.CapCode{}:
-      Lf.CapCode{}
-    case +x +y:
-      meet.flat(all.data(x) && all.data(y))
-
-def shape.meet(+h: String, +s: Lf.Shape, r: Map<&2, Lf.Shape> & Lf.Shape) -> Map<&2, Lf.Shape>:
-  (m, +old) = r
-  Map.set(&2, Lf.Shape, m, h, meet(s, old))
-
-def shape.add(+h: String, +s: Lf.Shape, r: Map<&2, Lf.Shape> & Bool) -> Map<&2, Lf.Shape>:
-  (m, known) = r
-  match known:
-    case True{}:
-      shape.meet(h, s, Map.get(Lf.Shape, Lf.CapOther{}, m, h))
-    case False{}:
-      Map.set(&2, Lf.Shape, m, h, s)
-
-# The bodies a term references directly, in hash order (refsOf).
-def refs(l: Lf.L, +acc: List<&2, String>) -> List<&2, String>:
-  match l:
-    case Lf.LRef{loc, h}:
-      both(acc, [h])
-    case Lf.LPair{loc, a, b}:
-      refs(b, refs(a, acc))
-    case Lf.LSetEnv{loc, x}:
-      refs(x, acc)
-    case Lf.LLeft{loc, x}:
-      refs(x, acc)
-    case Lf.LRight{loc, x}:
-      refs(x, acc)
-    case Lf.LCheck{loc, cloc, tc, c}:
-      refs(c, refs(tc, acc))
-    case _:
-      acc
-
-def ran(r: Result<&1, &1, Err, Sig & St>) -> Bool:
-  match r:
-    case Fail{e}:
-      False{}
-    case Done{p}:
-      True{}
-
-def failure(r: Result<&1, &1, Err, Sig & St>) -> Maybe<&2, Err>:
-  match r:
-    case Fail{e}:
-      Some{e}
-    case Done{p}:
-      None{}
-
-def ensure.at(+h: String, r: Map<&2, Bool> & Bool) -> DJ:
-  (m, known) = r
-  DjEnsure{h, known, m}
-
-def ensure(+h: String, m: Map<&2, Bool>) -> DJ:
-  ensure.at(h, Map.has(&2, Bool, m, h))
-
-def memo.ok.at(r: Map<&2, Bool> & Bool) -> Bool & Map<&2, Bool>:
-  (m, ok) = r
-  (ok, m)
-
-def memo.ok(+h: String, m: Map<&2, Bool>) -> Bool & Map<&2, Bool>:
-  memo.ok.at(Map.get(Bool, False{}, m, h))
-
-def next.of(+h: String, rest: List<&2, String>, p: Bool & Map<&2, Bool>) -> DJ:
-  (ok, m) = p
-  DjNext{ok, h, rest, m}
-
-def body.of(+bodies: Map<&2, Lf.Body>, +h: String) -> Lf.Body:
-  Pair.snd(Map<&2, Lf.Body>, Lf.Body, Map.get(Lf.Body, Lf.Body{0, Lf.LZero{Lc.Unknown{}}}, bodies, h))
-
-def data.main(data: Bool) -> Maybe<&2, Err>:
-  match data:
-    case True{}:
-      Some{TypeMismatch{Lc.Gen{"EAL certification"}, "main is data through and through; a program must be a function of its input"}}
-    case False{}:
-      None{}
-
-# The program's main shape, or why it does not certify.
-def main.of(r: Result<&1, &1, Err, Lf.Shape & St>) -> Result<&2, &2, Err, Lf.Shape>:
-  match r:
-    case Fail{e}:
-      Fail{e}
-    case Done{p}:
-      (s, st) = p
-      Done{s}
-
-# certifyMain beyond ealLiftedMain: main must be a function of its input.
-def certified(r: Result<&2, &2, Err, Lf.Shape>) -> Maybe<&2, Err>:
-  match r:
-    case Fail{e}:
-      Some{e}
-    case Done{s}:
-      data.main(all.data(s))
-
-def dr.memo(r: DR) -> Map<&2, Bool>:
-  match r:
-    case DR{memo, failed}:
-      memo
-
-def layouts.keep(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Shape>>, +memo: Map<&2, Bool>, +acc: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
-  match kvs:
-    case Nil{}:
-      acc
-    case Con{kv, rest}:
-      match kv:
-        case (+h, s):
-          layouts.keep(rest, memo, Bool.pick(Map<&2, Lf.Shape>, Pair.snd(Map<&2, Bool>, Bool, Map.get(Bool, False{}, memo, h)),
-            Map.set(&2, Lf.Shape, acc, h, s), acc))
-
-# A variable's record changed in one step.
-def v.mod.at(+i: U32, f: V -> V, r: Array<V> & V, sites: Array<Site>, c: C) -> Result<&1, &1, Err, Unit & St>:
-  (vars, x) = r
-  Done{(Unit{}, St{Array.set(V, vars, i, f(x)), sites, c})}
-
-def v.mod.go(+i: U32, f: V -> V, s: St) -> Result<&1, &1, Err, Unit & St>:
-  match s:
-    case St{vars, sites, c}:
-      v.mod.at(i, f, Array.get(V, vars, i), sites, c)
-
-def v.mod(+i: U32, f: V -> V) -> M(Unit):
-  s => v.mod.go(i, f, s)
-
-# Something of a variable's record, read in one step.
-def v.read.at(-A: Data, f: V -> A, r: Array<V> & V, sites: Array<Site>, c: C) -> Result<&1, &1, Err, A & St>:
-  (vars, x) = r
-  Done{(f(x), St{vars, sites, c})}
-
-def v.read.go(-A: Data, +i: U32, f: V -> A, s: St) -> Result<&1, &1, Err, A & St>:
-  match s:
-    case St{vars, sites, c}:
-      v.read.at(A, f, Array.get(V, vars, i), sites, c)
-
-def v.read(-A: Data, +i: U32, f: V -> A) -> M(A):
-  s => v.read.go(A, i, f, s)
-
-def set.bind(+i: U32, t: Tau) -> M(Unit):
-  v.mod(i, x => v.with.bind(x, Some{t}))
-
-def bind.at(cyclic: Bool, +loc: Lc.Loc, +i: U32, +t: Tau, rest: List<&2, W>) -> M(List<&2, W>):
-  match cyclic:
-    case True{}:
-      do M<List<&2, W>>:
-        u : Unit <- set.bind(i, DataT{})
-        return WTau{[], "", loc, t, DataT{}} <> rest
-    case False{}:
-      do M<List<&2, W>>:
-        u : Unit <- set.bind(i, t)
-        return rest
-
-def set.parent(+i: U32, +p: U32) -> M(Unit):
-  v.mod(i, x => v.with.parent(x, p))
-
-def set.cls(+i: U32, c: Class) -> M(Unit):
-  v.mod(i, x => v.with.cls(x, c))
-
-def constrain.merged(+r: U32, m: Mg) -> M(Bool):
-  match m:
-    case MgErr{e}:
-      M.fail(Bool, e)
-    case MgOk{c, changed}:
-      match changed:
-        case True{}:
-          do M<Bool>:
-            u : Unit <- set.cls(r, c)
-            return True{}
-        case False{}:
-          M.pure(Bool, False{})
-
-def union.merged(+ra: U32, +rb: U32, m: Mg) -> M(Unit):
-  match m:
-    case MgErr{e}:
-      M.fail(Unit, e)
-    case MgOk{c, changed}:
-      do M<Unit>:
-        u : Unit <- set.parent(ra, rb)
-        u2 : Unit <- set.cls(rb, c)
-        set.cls(ra, Unrestricted{})
-
-def set.tparent(+i: U32, +p: U32) -> M(Unit):
-  v.mod(i, x => v.with.tparent(x, p))
-
-def set.tags(+i: U32, ts: List<&2, TE>) -> M(Unit):
-  v.mod(i, x => v.with.tags(x, ts))
-
-# A fresh code class holding exactly these tags (freshCode).
-def fresh.code(ts: List<&2, String>) -> M(Tau):
-  do M<Tau>:
-    +i : U32 <- fresh()
-    u : Unit <- set.tags(i, with.cap(ts, None{}))
-    return CodeT{i}
-
-def union.tags.roots(same: Bool, +ra: U32, +rb: U32) -> M(List<&2, SP>):
-  match same:
-    case True{}:
-      M.pure(List<&2, SP>, [])
-    case False{}:
-      do M<List<&2, SP>>:
-        xa : V <- v.get(ra)
-        xb : V <- v.get(rb)
-        +ma : List<&2, TE> = v.tags(xa)
-        +mb : List<&2, TE> = v.tags(xb)
-        u : Unit <- set.tparent(ra, rb)
-        u2 : Unit <- set.tags(rb, tags.join(ma, mb))
-        u3 : Unit <- set.tags(ra, [])
-        return pending(ma, mb)
-
-def get.bind(+i: U32) -> M(Maybe<&2, Tau>):
-  v.read(Maybe<&2, Tau>, i, x => v.bind(x))
-
-def walk.go(fuel: Nat, j: WK) -> M(Tau):
-  match fuel:
-    case 0n:
-      M.fail(Tau, Internal{"a type binding cycle"})
-    case 1n+f:
-      match j:
-        case WkTau{t}:
-          match t:
-            case VarT{+i}:
-              do M<Tau>:
-                b : Maybe<&2, Tau> <- get.bind(i)
-                walk.go(f, WkBound{i, b})
-            case other:
-              M.pure(Tau, other)
-        case WkBound{i, b}:
-          match b:
-            case Some{t}:
-              walk.go(f, WkTau{t})
-            case None{}:
-              M.pure(Tau, VarT{i})
-
-# walkTau
-def walk(t: Tau) -> M(Tau):
-  walk.go(U32.to_nat(4294967295), WkTau{t})
-
-def occurs.go(fuel: Nat, +i: U32, j: OJ) -> M(Bool):
-  match fuel:
-    case 0n:
-      M.pure(Bool, False{})
-    case 1n+f:
-      match j:
-        case OTodo{ts}:
-          match ts:
-            case Nil{}:
-              M.pure(Bool, False{})
-            case Con{t, rest}:
-              do M<Bool>:
-                w : Tau <- walk(t)
-                occurs.go(f, i, OSeen{w, rest})
-        case OSeen{t, ts}:
-          match t:
-            case VarT{j2}:
-              occurs.var(U32.is_eq(i, j2), f, i, ts)
-            case PairT{b1, t1, b2, t2}:
-              occurs.go(f, i, OTodo{t1 <> t2 <> ts})
-            case _:
-              occurs.go(f, i, OTodo{ts})
-
-def occurs(+i: U32, t: Tau) -> M(Bool):
-  occurs.go(U32.to_nat(4294967295), i, OTodo{[t]})
-
-# Unification
-# -----------
-
-# bindTVar: a cyclic binding collapses to data.
-def bind.var(+loc: Lc.Loc, +i: U32, +t: Tau, rest: List<&2, W>) -> M(List<&2, W>):
-  do M<List<&2, W>>:
-    cyclic : Bool <- occurs(i, t)
-    bind.at(cyclic, loc, i, t, rest)
-
-def same.var(same: Bool, +loc: Lc.Loc, +i: U32, +j: U32, rest: List<&2, W>) -> M(List<&2, W>):
-  match same:
-    case True{}:
-      M.pure(List<&2, W>, rest)
-    case False{}:
-      bind.var(loc, i, VarT{j}, rest)
-
-def virtual.at(+w: Tau) -> M(Unit):
-  match w:
-    case PairT{b1, t1, +b2, +t2}:
-      do M<Unit>:
-        +wc : Tau <- walk(t1)
-        virtual.pair(appliable(wc), wc, b2, t2)
-    case other:
-      virtual.top(appliable(other), other)
-
-# virtualMainApply: the run applies the program to its input, so that
-# application is certified too: a closure package applies its code to
-# (input, captures), bare code to the input alone.
-def virtual(s: Sig) -> M(Unit):
-  do M<Unit>:
-    +w : Tau <- walk(sig.t(s))
-    virtual.at(w)
-
-# shapeOfSigma
-def shape.go(+fuel: Nat, j: SJ) -> M(Lf.Shape):
-  match fuel:
-    case 0n:
-      M.pure(Lf.Shape, Lf.CapOther{})
-    case 1n+f:
-      match j:
-        case SjTau{t}:
-          do M<Lf.Shape>:
-            w : Tau <- walk(t)
-            shape.go(f, SjWalked{w})
-        case SjWalked{w}:
-          match w:
-            case DataT{}:
-              M.pure(Lf.Shape, Lf.CapData{})
-            case PairT{b1, t1, b2, t2}:
-              do M<Lf.Shape>:
-                a : Lf.Shape <- shape.go(f, SjTau{t1})
-                b : Lf.Shape <- shape.go(f, SjTau{t2})
-                return Lf.CapPair{a, b}
-            case CodeT{i}:
-              M.pure(Lf.Shape, Lf.CapCode{})
-            case _:
-              M.pure(Lf.Shape, Lf.CapOther{})
-
-def shape(s: Sig) -> M(Lf.Shape):
-  shape.go(U32.to_nat(4294967295), SjTau{sig.t(s)})
-
-def shapes.caps(ts: List<&2, TE>, +acc: Map<&2, Lf.Shape>) -> M(Map<&2, Lf.Shape>):
-  match ts:
-    case Nil{}:
-      M.pure(Map<&2, Lf.Shape>, acc)
-    case Con{e, rest}:
-      match e:
-        case TE{tag, cap}:
-          match tag:
-            case SCon{Chr{48}, +h}:
-              match cap:
-                case Some{sig}:
-                  do M<Map<&2, Lf.Shape>>:
-                    +s : Lf.Shape <- shape(sig)
-                    shapes.caps(rest, shape.add(h, s, Map.has(&2, Lf.Shape, acc, h)))
-                case None{}:
-                  shapes.caps(rest, acc)
-            case _:
-              shapes.caps(rest, acc)
-
-def shapes.go(fuel: Nat, +i: U32, more: Bool, +acc: Map<&2, Lf.Shape>) -> M(Map<&2, Lf.Shape>):
-  match fuel:
-    case 0n:
-      M.pure(Map<&2, Lf.Shape>, acc)
-    case 1n+f:
-      match more:
-        case False{}:
-          M.pure(Map<&2, Lf.Shape>, acc)
-        case True{}:
-          do M<Map<&2, Lf.Shape>>:
-            x : V <- v.get(i)
-            n : U32 <- next.get()
-            acc2 : Map<&2, Lf.Shape> <- shapes.caps(v.tags(x), acc)
-            shapes.go(f, (i + 1 : U32), U32.is_lt((i + 1 : U32), n), acc2)
-
-# groundCaptureShapes: every closure package's capture shape, met per hash
-# over the sites it is built at.
-def shapes() -> M(Map<&2, Lf.Shape>):
-  do M<Map<&2, Lf.Shape>>:
-    +n : U32 <- next.get()
-    shapes.go(U32.to_nat(n), 0, U32.is_lt(0, n), Map.new(&2, Lf.Shape))
-
-# Bodies standalone, and their dependencies
-# -----------------------------------------
-
-def get.cls(+i: U32) -> M(Class):
-  v.read(Class, i, x => v.cls(x))
-
-def union.roots(same: Bool, +ra: U32, +rb: U32) -> M(Unit):
-  match same:
-    case True{}:
-      M.pure(Unit, Unit{})
-    case False{}:
-      do M<Unit>:
-        ia : Class <- get.cls(ra)
-        ib : Class <- get.cls(rb)
-        union.merged(ra, rb, merge(ia, ib))
-
-def get.tags(+i: U32) -> M(List<&2, TE>):
-  v.read(List<&2, TE>, i, x => v.tags(x))
-
-def root.go(fuel: Nat, +tag: Bool, j: RJ) -> Array<V> & U32:
-  match fuel:
-    case 0n:
-      match j:
-        case RjRead{i, r}:
-          (a, x) = r
-          (a, i)
-        case RjUp{i, p, top, a}:
-          (a, i)
-        case RjFix{i, x, p, done, a}:
-          (a, i)
-    case 1n+f:
-      match j:
-        case RjRead{+i, r}:
-          (a, x) = r
-          +p = parent.of(tag, x)
-          root.go(f, tag, RjUp{i, p, U32.is_eq(p, none()), a})
-        case RjUp{i, +p, top, a}:
-          match top:
-            case True{}:
-              (a, i)
-            case False{}:
-              root.go(f, tag, RjRead{p, Array.get(V, a, p)})
-        case RjFix{i, x, p, done, a}:
-          (a, i)
-
-def with.parent.of(tag: Bool, x: V, +p: U32) -> V:
-  match tag:
-    case True{}:
-      v.with.tparent(x, p)
-    case False{}:
-      v.with.parent(x, p)
-
-# Every variable on the path from i points at the root r afterwards.
-def compress.go(fuel: Nat, +tag: Bool, +r: U32, j: RJ) -> Array<V>:
-  match fuel:
-    case 0n:
-      match j:
-        case RjRead{i, rd}:
-          (a, x) = rd
-          a
-        case RjUp{i, p, top, a}:
-          a
-        case RjFix{i, x, p, done, a}:
-          a
-    case 1n+f:
-      match j:
-        case RjRead{+i, rd}:
-          (a, +x) = rd
-          +p = parent.of(tag, x)
-          compress.go(f, tag, r, RjFix{i, x, p, U32.is_eq(p, none()) || U32.is_eq(p, r), a})
-        case RjUp{i, p, top, a}:
-          a
-        case RjFix{+i, x, +p, done, a}:
-          match done:
-            case True{}:
-              a
-            case False{}:
-              compress.go(f, tag, r, RjRead{p, Array.get(V, Array.set(V, a, i, with.parent.of(tag, x, r)), p)})
-
-def find.fin(+tag: Bool, +i: U32, r: Array<V> & U32, sites: Array<Site>, c: C) -> Result<&1, &1, Err, U32 & St>:
-  (a, +root) = r
-  Done{(root, St{compress.go(U32.to_nat(4294967295), tag, root, RjRead{i, Array.get(V, a, i)}), sites, c})}
-
-def find.go(+tag: Bool, +i: U32, s: St) -> Result<&1, &1, Err, U32 & St>:
-  match s:
-    case St{vars, sites, c}:
-      find.fin(tag, i, root.go(U32.to_nat(4294967295), tag, RjRead{i, Array.get(V, vars, i)}), sites, c)
-
-# find with path compression, on either union-find.
-def find(+tag: Bool, +i: U32) -> M(U32):
-  s => find.go(tag, i, s)
-
-# findB
-def find.b(+i: U32) -> M(U32):
-  find(False{}, i)
-
-# findTag
-def find.t(+i: U32) -> M(U32):
-  find(True{}, i)
-
-# Bang classes
-# ------------
-
-# constrainB on a class root.
-def constrain.go(+r: U32, nc: Class) -> M(Bool):
-  do M<Bool>:
-    ci : Class <- get.cls(r)
-    constrain.merged(r, merge(ci, nc))
-
-def constrain.at(over: Bool, +r: U32, nc: Class) -> M(Bool):
-  match over:
-    case True{}:
-      match nc:
-        case ForcedLevel{n, blame}:
-          M.fail(Bool, GaveUp{"bang level exceeded cap of 4096: " ++ blame.show(blame)})
-        case _:
-          M.fail(Bool, Internal{"level cap"})
-    case False{}:
-      constrain.go(r, nc)
-
-# constrainB: whether the class changed.
-def constrain(+b: U32, +nc: Class) -> M(Bool):
-  do M<Bool>:
-    +r : U32 <- find.b(b)
-    constrain.at(over.cap(nc), r, nc)
-
-# constrainB on a variable known to be a root.
-def constrain.root(+r: U32, +nc: Class) -> M(Bool):
-  constrain.at(over.cap(nc), r, nc)
-
-# unionB
-def union.b(+a: U32, +b: U32) -> M(Unit):
-  do M<Unit>:
-    +ra : U32 <- find.b(a)
-    +rb : U32 <- find.b(b)
-    union.roots(U32.is_eq(ra, rb), ra, rb)
-
-def forced.zero(+blame: Blame) -> M(U32):
-  do M<U32>:
-    +b : U32 <- fresh()
-    changed : Bool <- constrain(b, ForcedZero{blame})
-    return b
-
-# plainSigma: a value constructor's own type, locally unboxed.
-def plain(+loc: Lc.Loc, +what: String, t: Tau) -> M(Sig):
-  do M<Sig>:
-    b : U32 <- forced.zero(Blame{loc, what})
-    return Sig{b, t}
-
-# The captures of a tag class (capturesOf).
-def caps(+i: U32) -> M(List<&2, TE>):
-  do M<List<&2, TE>>:
-    +r : U32 <- find.t(i)
-    x : V <- v.get(r)
-    return v.tags(x)
-
-# tagSetOf
-def tag.set(+i: U32) -> M(List<&2, String>):
-  do M<List<&2, String>>:
-    ts : List<&2, TE> <- caps(i)
-    return keys(ts)
-
-# A closure package: the tags of code class i, each carrying this capture
-# (packageClass).
-def package(+i: U32, +cap: Sig) -> M(U32):
-  do M<U32>:
-    ts : List<&2, String> <- tag.set(i)
-    +p : U32 <- fresh()
-    u : Unit <- set.tags(p, with.cap(ts, Some{cap}))
-    return p
-
-# unionTags, less the unifications of the captures both held, which it
-# returns for the caller to run.
-def union.tags(+a: U32, +b: U32) -> M(List<&2, SP>):
-  do M<List<&2, SP>>:
-    +ra : U32 <- find.t(a)
-    +rb : U32 <- find.t(b)
-    union.tags.roots(U32.is_eq(ra, rb), ra, rb)
-
-# Types
-# -----
-
-# deepShowTau, for mismatch reports.
-def deep.show(+fuel: Nat, j: DS) -> M(String):
-  match fuel:
-    case 0n:
-      M.pure(String, "...")
-    case 1n+f:
-      match j:
-        case DsTau{t, +d, stop}:
-          match stop:
-            case True{}:
-              M.pure(String, "...")
-            case False{}:
-              do M<String>:
-                w : Tau <- walk(t)
-                deep.show(f, DsWalked{w, d})
-        case DsWalked{w, +d}:
-          match w:
-            case DataT{}:
-              M.pure(String, "D")
-            case VarT{i}:
-              M.pure(String, "t" ++ U32.show(i))
-            case CodeT{+i}:
-              do M<String>:
-                r : U32 <- find.t(i)
-                ts : List<&2, String> <- tag.set(i)
-                return "Code#" ++ U32.show(r) ++ tags.show(ts)
-            case CapT{+i}:
-              do M<String>:
-                r : U32 <- find.t(i)
-                return "Cap#" ++ U32.show(r)
-            case PairT{b1, t1, b2, t2}:
-              do M<String>:
-                sa : String <- deep.show(f, ds(t1, (d - 1 : U32)))
-                sb : String <- deep.show(f, ds(t2, (d - 1 : U32)))
-                return "(" ++ sa ++ ", " ++ sb ++ ")"
-
-def mismatch(+loc: Lc.Loc, +mode: String, +a: Tau, +b: Tau) -> M(List<&2, W>):
-  do M<List<&2, W>>:
-    da : String <- deep.show(64n, ds(a, 5))
-    db : String <- deep.show(64n, ds(b, 5))
-    M.fail(List<&2, W>, TypeMismatch{loc, describe(a) ++ " vs " ++ describe(b) ++ " [mode "
-      ++ mode.show(mode) ++ "; " ++ da ++ " ||| " ++ db ++ "]"})
-
-def join.tags(+loc: Lc.Loc, +i: U32, +j: U32, rest: List<&2, W>) -> M(List<&2, W>):
-  do M<List<&2, W>>:
-    ps : List<&2, SP> <- union.tags(i, j)
-    return sigs(ps, loc, rest)
-
-def cap.seen(seen: Bool, +r: U32, +vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, +t: Tau, rest: List<&2, W>) -> M(List<&2, W>):
-  match seen:
-    case True{}:
-      M.pure(List<&2, W>, rest)
-    case False{}:
-      do M<List<&2, W>>:
-        +cs : List<&2, TE> <- caps(r)
-        return cap.mode(cap.for(mode, cs), cs, r <> vis, mode, loc, t, rest)
-
-# resolveCapT: under a dispatch mode the package holds, that tag's capture
-# is meant; otherwise every capture the package holds must fit.
-def cap.resolve(+vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, +i: U32, +t: Tau, rest: List<&2, W>) -> M(List<&2, W>):
-  do M<List<&2, W>>:
-    +r : U32 <- find.t(i)
-    cap.seen(member(vis, r), r, vis, mode, loc, t, rest)
-
-# unifyTauAt, on walked types: its immediate effect, then the work left.
-def walked(+vis: List<&2, U32>, +mode: String, +loc: Lc.Loc, a: Tau, b: Tau, rest: List<&2, W>) -> M(List<&2, W>):
-  match a:
-    case VarT{+i}:
-      match b:
-        case VarT{+j}:
-          same.var(U32.is_eq(i, j), loc, i, j, rest)
-        case other:
-          bind.var(loc, i, other, rest)
-    case DataT{}:
-      match b:
-        case VarT{+j}:
-          bind.var(loc, j, DataT{}, rest)
-        case DataT{}:
-          M.pure(List<&2, W>, rest)
-        case CapT{+j}:
-          cap.resolve(vis, mode, loc, j, DataT{}, rest)
-        case PairT{b1, t1, b2, t2}:
-          M.pure(List<&2, W>, WColl{vis, mode, loc, Sig{b1, t1}} <> WColl{vis, mode, loc, Sig{b2, t2}} <> rest)
-        case other:
-          mismatch(loc, mode, DataT{}, other)
-    case CodeT{+i}:
-      match b:
-        case VarT{+j}:
-          bind.var(loc, j, CodeT{i}, rest)
-        case CodeT{+j}:
-          join.tags(loc, i, j, rest)
-        case CapT{+j}:
-          cap.resolve(vis, mode, loc, j, CodeT{i}, rest)
-        case other:
-          mismatch(loc, mode, CodeT{i}, other)
-    case CapT{+i}:
-      match b:
-        case VarT{+j}:
-          bind.var(loc, j, CapT{i}, rest)
-        case CapT{+j}:
-          join.tags(loc, i, j, rest)
-        case other:
-          cap.resolve(vis, mode, loc, i, other, rest)
-    case PairT{+a1, +s1, +a2, +s2}:
-      match b:
-        case VarT{+j}:
-          bind.var(loc, j, PairT{a1, s1, a2, s2}, rest)
-        case CapT{+j}:
-          cap.resolve(vis, mode, loc, j, PairT{a1, s1, a2, s2}, rest)
-        case PairT{b1, t1, b2, t2}:
-          M.pure(List<&2, W>, WSig{vis, mode, loc, Sig{a1, s1}, Sig{b1, t1}} <> WSig{vis, mode, loc, Sig{a2, s2}, Sig{b2, t2}} <> rest)
-        case DataT{}:
-          M.pure(List<&2, W>, WColl{vis, mode, loc, Sig{a1, s1}} <> WColl{vis, mode, loc, Sig{a2, s2}} <> rest)
-        case other:
-          mismatch(loc, mode, PairT{a1, s1, a2, s2}, other)
-
-def unify.step(w: W, rest: List<&2, W>) -> M(List<&2, W>):
-  match w:
-    case WSig{vis, mode, loc, a, b}:
-      match a b:
-        case Sig{+ba, ta} Sig{+bb, tb}:
-          do M<List<&2, W>>:
-            u : Unit <- union.b(ba, bb)
-            return WTau{vis, mode, loc, ta, tb} <> rest
-    case WTau{+vis, +mode, +loc, a, b}:
-      do M<List<&2, W>>:
-        wa : Tau <- walk(a)
-        wb : Tau <- walk(b)
-        walked(vis, mode, loc, wa, wb, rest)
-    case WColl{vis, mode, +loc, s}:
-      match s:
-        case Sig{+b, t}:
-          do M<List<&2, W>>:
-            changed : Bool <- constrain(b, ForcedZero{Blame{loc, "component of a data pair is unboxed data"}})
-            return WTau{vis, mode, loc, t, DataT{}} <> rest
-
-def unify.go(fuel: Nat, ws: List<&2, W>) -> M(Unit):
-  match fuel:
-    case 0n:
-      M.fail(Unit, Internal{"unification ran out of steps"})
-    case 1n+f:
-      match ws:
-        case Nil{}:
-          M.pure(Unit, Unit{})
-        case Con{w, rest}:
-          do M<Unit>:
-            next : List<&2, W> <- unify.step(w, rest)
-            unify.go(f, next)
-
-# unifySigmaAt with an empty visited set.
-def unify.at(+mode: String, +loc: Lc.Loc, a: Sig, b: Sig) -> M(Unit):
-  unify.go(U32.to_nat(4294967295), [WSig{[], mode, loc, a, b}])
-
-# unifySigma
-def unify(+loc: Lc.Loc, a: Sig, b: Sig) -> M(Unit):
-  unify.at("", loc, a, b)
-
-# Env usage (envUsageL, contraction)
-# ----------------------------------
-
-def pair.of(+loc: Lc.Loc, +sa: Sig, +sb: Sig, w: Tau) -> M(Sig):
-  match w:
-    case CodeT{+i}:
-      do M<Sig>:
-        p : U32 <- package(i, sb)
-        plain(loc, "pair constructor is locally unboxed", PairT{sig.b(sa), sig.t(sa), sig.b(sb), CapT{p}})
-    case _:
-      plain(loc, "pair constructor is locally unboxed", PairT{sig.b(sa), sig.t(sa), sig.b(sb), sig.t(sb)})
-
-# envOccurrence
-def occurrence(+ctx: Ctx, +paths: Paths, +loc: Lc.Loc) -> M(Sig):
-  match ctx paths:
-    case Ctx{+bang, +tau, depth} Paths{here, glob}:
-      do M<Sig>:
-        u : Unit <- leaf.add(glob)
-        +d : U32 <- fresh()
-        slack : U32 <- fresh()
-        u2 : Unit <- sum.eq(loc, "env occurrence depth = domain bang + slack", [bang, slack], d)
-        u3 : Unit <- sum.eq(loc, "env occurrence depth matches its path boxes", here, d)
-        b : U32 <- forced.zero(Blame{loc, "variable occurrence is locally unboxed"})
-        return Sig{b, tau}
-
-def leaf.code(+paths: Paths, +loc: Lc.Loc, +tag: String, +what: String) -> M(Sig):
-  match paths:
-    case Paths{here, glob}:
-      do M<Sig>:
-        u : Unit <- leaf.add(glob)
-        ct : Tau <- fresh.code([tag])
-        plain(loc, what, ct)
-
-# viewNode (node) and intrinsic, as one.
-def gen(+fuel: Nat, node: Bool, +ctx: Ctx, +paths: Paths, +t: Lf.L) -> M(Sig):
-  match fuel:
-    case 0n:
-      M.fail(Sig, Internal{"term too deep"})
-    case 1n+f:
-      match node:
-        case True{}:
-          do M<Sig>:
-            +w : U32 <- fresh()
-            +si : Sig <- gen(f, False{}, ctx, paths.in(w, paths), t)
-            +v : U32 <- fresh()
-            u : Unit <- sum.eq(l.loc(t), "view bangs = edge boxes + intrinsic bangs", [w, sig.b(si)], v)
-            return Sig{v, sig.t(si)}
-        case False{}:
-          match t:
-            case Lf.LZero{+loc}:
-              do M<Sig>:
-                u : Unit <- leaf.add(paths.glob(paths))
-                plain(loc, "Zero is an unboxed value", DataT{})
-            case Lf.LPair{+loc, a, b}:
-              do M<Sig>:
-                +sa : Sig <- gen(f, True{}, ctx, paths, a)
-                +sb : Sig <- gen(f, True{}, ctx, paths, b)
-                w : Tau <- walk(sig.t(sa))
-                pair.of(loc, sa, sb, w)
-            case Lf.LEnv{+loc}:
-              occurrence(ctx, paths, loc)
-            case Lf.LUnsized{+loc, tok}:
-              occurrence(ctx, paths, loc)
-            case Lf.LRef{+loc, h}:
-              leaf.code(paths, loc, "0" ++ h, "code constant is an unboxed value")
-            case Lf.LSetEnv{+loc, x}:
-              do M<Sig>:
-                sx : Sig <- gen(f, True{}, ctx, paths, x)
-                +si : Sig <- fresh.sig()
-                +so : Sig <- fresh.sig()
-                +fnT : Tau <- fresh.tau()
-                fnB : U32 <- forced.zero(Blame{loc, "applied function must be unboxed"})
-                pairB : U32 <- fresh()
-                u : Unit <- unify(loc, sx, Sig{pairB, PairT{fnB, fnT, sig.b(si), sig.t(si)}})
-                u2 : Unit <- site.add(Site{fnT, si, so, paths.glob(paths), ctx.depth(ctx), loc, []})
-                return so
-            case Lf.LGate{+loc}:
-              leaf.code(paths, loc, "1", "gate is an unboxed value")
-            case Lf.LLeft{+loc, x}:
-              do M<Sig>:
-                sx : Sig <- gen(f, True{}, ctx, paths, x)
-                +sl : Sig <- fresh.sig()
-                +sr : Sig <- fresh.sig()
-                pb : U32 <- fresh()
-                u : Unit <- unify(loc, sx, Sig{pb, PairT{sig.b(sl), sig.t(sl), sig.b(sr), sig.t(sr)}})
-                return sl
-            case Lf.LRight{+loc, x}:
-              do M<Sig>:
-                sx : Sig <- gen(f, True{}, ctx, paths, x)
-                +sl : Sig <- fresh.sig()
-                +sr : Sig <- fresh.sig()
-                pb : U32 <- fresh()
-                u : Unit <- unify(loc, sx, Sig{pb, PairT{sig.b(sl), sig.t(sl), sig.b(sr), sig.t(sr)}})
-                return sr
-            case Lf.LAbort{+loc}:
-              leaf.code(paths, loc, "3", "abort is an unboxed value")
-            case Lf.LCheck{loc, cloc, tc, c}:
-              gen(f, False{}, ctx, paths, c)
-
-# viewNode
-def view(+ctx: Ctx, +paths: Paths, +t: Lf.L) -> M(Sig):
-  gen(U32.to_nat(4294967295), True{}, ctx, paths, t)
-
-# Sorted tag lists
-# ----------------
-
-def ft.class(seen: Bool, +r: U32, +vis: List<&2, U32>, rest: List<&2, FT>) -> M(List<&2, FT>):
-  match seen:
-    case True{}:
-      M.pure(List<&2, FT>, rest)
-    case False{}:
-      do M<List<&2, FT>>:
-        cs : List<&2, TE> <- caps(r)
-        return ft.caps(cs, r <> vis, rest)
-
-# fnTagsOfCaptures: the code a capture position can hold, when it is
-# applied.
-def fn.tags.go(fuel: Nat, js: List<&2, FT>, +acc: List<&2, String>) -> M(List<&2, String>):
-  match fuel:
-    case 0n:
-      M.pure(List<&2, String>, acc)
-    case 1n+f:
-      match js:
-        case Nil{}:
-          M.pure(List<&2, String>, acc)
-        case Con{j, rest}:
-          match j:
-            case FtClass{+vis, +i}:
-              do M<List<&2, String>>:
-                +r : U32 <- find.t(i)
-                next : List<&2, FT> <- ft.class(member(vis, r), r, vis, rest)
-                fn.tags.go(f, next, acc)
-            case FtCap{vis, cap}:
-              match cap:
-                case Some{s}:
-                  do M<List<&2, String>>:
-                    w : Tau <- walk(sig.t(s))
-                    fn.tags.go(f, FtWalked{vis, w} <> rest, acc)
-                case None{}:
-                  fn.tags.go(f, rest, acc)
-            case FtWalked{vis, w}:
-              match w:
-                case CodeT{+k}:
-                  do M<List<&2, String>>:
-                    ts : List<&2, String> <- tag.set(k)
-                    fn.tags.go(f, rest, both(acc, ts))
-                case CapT{+k}:
-                  fn.tags.go(f, FtClass{vis, k} <> rest, acc)
-                case _:
-                  fn.tags.go(f, rest, acc)
-
-def fn.tags(+i: U32) -> M(List<&2, String>):
-  fn.tags.go(U32.to_nat(4294967295), [FtClass{[], i}], [])
-
-def dup.constrain(d: Maybe<&2, Dup>, +b: U32, +pre: String, +post: String) -> M(Unit):
-  match d:
-    case Some{x}:
-      match x:
-        case Dup{path, loc}:
-          do M<Unit>:
-            changed : Bool <- constrain(b, ForcedLevel{1, Blame{loc, pre ++ steps.show(path) ++ post}})
-            return Unit{}
-    case None{}:
-      M.pure(Unit, Unit{})
-
-# A body walked at a dispatch site (captureTemplate's walk).
-def derive(+glob: List<&2, U32>, +depth: U32, +fi: U32, +body: Lf.L) -> M(Der):
-  do M<Der>:
-    +b : U32 <- fresh()
-    +t : Tau <- fresh.tau()
-    u : Unit <- dup.constrain(contraction(usage(body, "", Map.new(&2, Use))), b, "env path ", " duplicated in " ++ E.fi.show(fi))
-    s : Sig <- view(Ctx{b, t, (depth + 1 : U32)}, Paths{[], glob}, body)
-    return Der{b, t, s}
-
-# The first derivation of a body records how many variables it minted; a
-# later one is refused when that many would reach the budget, as copying
-# the Haskell's template is.
-def derive.first(+h: String, +glob: List<&2, U32>, +depth: U32, +fi: U32, +body: Lf.L) -> M(Der):
-  do M<Der>:
-    +v0 : U32 <- next.get()
-    +d : Der <- derive(glob, depth, fi, body)
-    v1 : U32 <- next.get()
-    u : Unit <- sizes.put(h, (v1 - v0 : U32))
-    return d
-
-def derive.again.at(over: Bool, +glob: List<&2, U32>, +depth: U32, +fi: U32, +body: Lf.L) -> M(Der):
-  match over:
-    case True{}:
-      M.fail(Der, GaveUp{"constraint variable budget (2000000) exceeded; the dispatch structure is likely exploding"})
-    case False{}:
-      derive(glob, depth, fi, body)
-
-def derive.again(+h: String, +glob: List<&2, U32>, +depth: U32, +fi: U32, +body: Lf.L) -> M(Der):
-  do M<Der>:
-    size : U32 <- sizes.get(h)
-    base : U32 <- next.get()
-    derive.again.at(U32.is_ge((base + size : U32), var.budget()), glob, depth, fi, body)
-
-def derive.pick(first: Bool, +h: String, +glob: List<&2, U32>, +depth: U32, +fi: U32, +body: Lf.L) -> M(Der):
-  match first:
-    case True{}:
-      derive.first(h, glob, depth, fi, body)
-    case False{}:
-      derive.again(h, glob, depth, fi, body)
-
-def dispatch.derived(+tag: String, +env: Sig, +res: Sig, +loc: Lc.Loc, d: Der) -> M(Unit):
-  match d:
-    case Der{b, t, s}:
-      do M<Unit>:
-        u : Unit <- unify.at(tag, loc, env, Sig{b, t})
-        unify(loc, res, s)
-
-def dispatch.counted(over: Bool, +count: U32, +h: String, +tag: String, +site: Site, +b: Lf.Body) -> M(Unit):
-  match over:
-    case True{}:
-      M.fail(Unit, GaveUp{"polyvariance budget: body " ++ E.fi.show(body.fi(b)) ++ " needed more than 16384 derivations (dispatch structure likely exploding)"})
-    case False{}:
-      match site:
-        case Site{fn, +env, +res, +glob, +depth, +loc, done}:
-          do M<Unit>:
-            u : Unit <- insts.put(h, (count + 1 : U32))
-            d : Der <- derive.pick(U32.is_eq(count, 0), h, glob, depth, body.fi(b), body.l(b))
-            dispatch.derived(tag, env, res, loc, d)
-
-def dispatch.found(r: Map<&2, Lf.Body> & Bool, +h: String, +tag: String, +site: Site) -> M(Unit):
-  (bodies, found) = r
-  match found:
-    case True{}:
-      do M<Unit>:
-        +count : U32 <- insts.get(h)
-        +b : Lf.Body = Pair.snd(Map<&2, Lf.Body>, Lf.Body, Map.get(Lf.Body, Lf.Body{0, Lf.LZero{Lc.Unknown{}}}, bodies, h))
-        dispatch.counted(U32.is_ge(count, poly.cap()), count, h, tag, site, b)
-    case False{}:
-      M.fail(Unit, Internal{"dispatched code not in the DeferMap " ++ h})
-
-def dispatch.code(deep: Bool, +bodies: Map<&2, Lf.Body>, +h: String, +tag: String, +site: Site, +loc: Lc.Loc) -> M(Unit):
-  match deep:
-    case True{}:
-      M.fail(Unit, GaveUp{"code dispatch depth exceeded 1024 (unbounded self-application?): " ++ Lf.loc.show(loc, False{})})
-    case False{}:
-      dispatch.found(Map.has(&2, Lf.Body, bodies, h), h, tag, site)
-
-# dispatchTag: the constraints of applying one tag at one site.
-def dispatch(+bodies: Map<&2, Lf.Body>, +site: Site, +tag: String) -> M(Unit):
-  match site:
-    case Site{fn, +env, +res, glob, +depth, +loc, done}:
-      match tag:
-        case SCon{Chr{48}, +h}:
-          dispatch.code(U32.is_ge(depth, depth.cap()), bodies, h, tag, site, loc)
-        case SCon{Chr{49}, r}:
-          do M<Unit>:
-            scr : U32 <- forced.zero(Blame{loc, "gate scrutinee must be unboxed data"})
-            u : Unit <- unify(loc, env, Sig{scr, DataT{}})
-            ct : Tau <- fresh.code(["2"])
-            gfn : Sig <- plain(loc, "gate switch function is locally unboxed", ct)
-            unify(loc, res, gfn)
-        case SCon{Chr{50}, r}:
-          do M<Unit>:
-            +se : Sig <- fresh.sig()
-            +st : Sig <- fresh.sig()
-            bb : U32 <- fresh()
-            u : Unit <- unify(loc, env, Sig{bb, PairT{sig.b(se), sig.t(se), sig.b(st), sig.t(st)}})
-            u2 : Unit <- unify(loc, res, se)
-            unify(loc, res, st)
-        case SCon{Chr{51}, r}:
-          do M<Unit>:
-            ct : Tau <- fresh.code(["4"])
-            cont : Sig <- plain(loc, "abort continuation is locally unboxed", ct)
-            unify(loc, res, cont)
-        case _:
-          unify(loc, env, res)
-
-def dispatch.all(+bodies: Map<&2, Lf.Body>, +site: Site, ts: List<&2, String>) -> M(Unit):
-  match ts:
-    case Nil{}:
-      M.pure(Unit, Unit{})
-    case Con{t, rest}:
-      do M<Unit>:
-        u : Unit <- dispatch(bodies, site, t)
-        dispatch.all(bodies, site, rest)
-
-def dispatch.new.at(none: Bool, +bodies: Map<&2, Lf.Body>, +k: U32, +site: Site, +tags: List<&2, String>, new: List<&2, String>) -> M(Bool):
-  match none:
-    case True{}:
-      M.pure(Bool, False{})
-    case False{}:
-      do M<Bool>:
-        u : Unit <- site.put(k, site.with.done(site, both(site.done(site), tags)))
-        u2 : Unit <- dispatch.all(bodies, site, new)
-        return True{}
-
-# dispatchNew: the tags this site has not dispatched yet; marked first.
-def dispatch.new(+bodies: Map<&2, Lf.Body>, +k: U32, +site: Site, +tags: List<&2, String>) -> M(Bool):
-  +new = diff(tags, site.done(site))
-  dispatch.new.at(List.is_empty(&2, String, new), bodies, k, site, tags, new)
-
-def site.walked(+bodies: Map<&2, Lf.Body>, +k: U32, +site: Site, w: Tau) -> M(Bool):
-  match w:
-    case CodeT{+i}:
-      do M<Bool>:
-        +ts : List<&2, String> <- tag.set(i)
-        dispatch.new(bodies, k, site, ts)
-    case CapT{+i}:
-      do M<Bool>:
-        +ts : List<&2, String> <- fn.tags(i)
-        dispatch.new(bodies, k, site, ts)
-    case PairT{b1, t1, b2, t2}:
-      M.fail(Bool, TypeMismatch{site.loc(site), "applied value is pair, not code"})
-    case _:
-      M.pure(Bool, False{})
-
-def site.resolve(+bodies: Map<&2, Lf.Body>, +k: U32) -> M(Bool):
-  do M<Bool>:
-    +site : Site <- site.get(k)
-    w : Tau <- walk(site.fn(site))
-    site.walked(bodies, k, site, w)
-
-# One round over the sites there were when it began.
-def round(fuel: Nat, +bodies: Map<&2, Lf.Body>, +k: U32, +n: U32, more: Bool, +changed: Bool) -> M(Bool):
-  match fuel:
-    case 0n:
-      M.pure(Bool, changed)
-    case 1n+f:
-      match more:
-        case False{}:
-          M.pure(Bool, changed)
-        case True{}:
-          do M<Bool>:
-            c : Bool <- site.resolve(bodies, k)
-            round(f, bodies, (k + 1 : U32), n, U32.is_lt((k + 1 : U32), n), changed || c)
-
-def applies.go(fuel: Nat, +bodies: Map<&2, Lf.Body>, +r: U32, more: Bool, over: Bool) -> M(Unit):
-  match fuel:
-    case 0n:
-      M.pure(Unit, Unit{})
-    case 1n+f:
-      match more:
-        case False{}:
-          M.pure(Unit, Unit{})
-        case True{}:
-          match over:
-            case True{}:
-              M.fail(Unit, GaveUp{"application dispatch did not converge"})
-            case False{}:
-              do M<Unit>:
-                +n : U32 <- nsites.get()
-                changed : Bool <- round(U32.to_nat(n), bodies, 0, n, U32.is_lt(0, n), False{})
-                applies.go(f, bodies, (r + 1 : U32), changed, U32.is_gt((r + 1 : U32), 10000))
-
-# resolveApplies: dispatch every tag every site's function position holds,
-# to a fixpoint.
-def applies(+bodies: Map<&2, Lf.Body>) -> M(Unit):
-  applies.go(10002n, bodies, 0, True{}, False{})
-
-# Solving
-# -------
-
-def roots(ls: List<&2, U32>) -> M(List<&2, U32>):
-  match ls:
-    case Nil{}:
-      M.pure(List<&2, U32>, [])
-    case Con{+l, rest}:
-      do M<List<&2, U32>>:
-        r : U32 <- find.b(l)
-        rs : List<&2, U32> <- roots(rest)
-        return r <> rs
-
-# resolveEqs: the equations over class roots.
-def resolve.eqs(es: List<&2, SumEq>) -> M(List<&2, SumEq>):
-  match es:
-    case Nil{}:
-      M.pure(List<&2, SumEq>, [])
-    case Con{e, rest}:
-      match e:
-        case SumEq{lhs, +rhs, blame}:
-          do M<List<&2, SumEq>>:
-            ls : List<&2, U32> <- roots(lhs)
-            r : U32 <- find.b(rhs)
-            more : List<&2, SumEq> <- resolve.eqs(rest)
-            return SumEq{ls, r, blame} <> more
 
 # Nothing merges classes while the solver runs, so the equations' roots
 # are found once and their classes copied to a table of their own; both
-# passes then work on tables, not in the analysis' monad. A derived blame
-# is built only when a class keeps it or a conflict names it.
+# passes then work on tables. A derived blame is built only when a class
+# keeps it or a conflict names it.
+
 
 def pr.or(+ch: Bool, r: PR) -> PR:
   match r:
@@ -2717,97 +3117,294 @@ def assign(+es: List<&2, SumEq>, +d: Nat, r: PR) -> Maybe<&2, Err>:
     case PErr{e}:
       Some{e}
 
-# The solver
-# ----------
 
-def cls.copy(+r: U32, t: Array<Class>, q: Array<V> & V) -> Array<V> & Array<Class>:
-  (vars, x) = q
-  (vars, Array.set(Class, t, r, v.cls(x)))
+# The solver on the state
+# -----------------------
 
-# The roots' classes, in a table of their own.
-def table(rs: List<&2, U32>, p: Array<V> & Array<Class>) -> Array<V> & Array<Class>:
+def roots.go(ls: List<&2, U32>, acc: List<&2, U32>, r: Array<U32> & U32) -> Array<U32> & List<&2, U32>:
+  match ls:
+    case Nil{}:
+      (m, +x) = r
+      (m, List.reverse(&2, U32, x <> acc))
+    case Con{+l, rest}:
+      (m, +x) = r
+      roots.go(rest, x <> acc, find.m(m, 1, l))
+
+# The class roots of these bangs.
+def roots.of(ls: List<&2, U32>, m: Array<U32>) -> Array<U32> & List<&2, U32>:
+  match ls:
+    case Nil{}:
+      (m, [])
+    case Con{+l, rest}:
+      roots.go(rest, [], find.m(m, 1, l))
+
+def eq.rhs(+blame: Blame, ls: List<&2, U32>, r: Array<U32> & U32) -> Array<U32> & SumEq:
+  (m, +rt) = r
+  (m, SumEq{ls, rt, blame})
+
+def eq.lhs(+rhs: U32, +blame: Blame, r: Array<U32> & List<&2, U32>) -> Array<U32> & SumEq:
+  (m, ls) = r
+  eq.rhs(blame, ls, find.m(m, 1, rhs))
+
+def eq.res(e: SumEq, m: Array<U32>) -> Array<U32> & SumEq:
+  match e:
+    case SumEq{lhs, +rhs, +blame}:
+      eq.lhs(rhs, blame, roots.of(lhs, m))
+
+def resolve.go(es: List<&2, SumEq>, acc: List<&2, SumEq>, r: Array<U32> & SumEq) -> Array<U32> & List<&2, SumEq>:
+  match es:
+    case Nil{}:
+      (m, e) = r
+      (m, List.reverse(&2, SumEq, e <> acc))
+    case Con{e2, rest}:
+      (m, e) = r
+      resolve.go(rest, e <> acc, eq.res(e2, m))
+
+# resolveEqs: the equations over class roots.
+def resolve.eqs(es: List<&2, SumEq>, m: Array<U32>) -> Array<U32> & List<&2, SumEq>:
+  match es:
+    case Nil{}:
+      (m, [])
+    case Con{e, rest}:
+      resolve.go(rest, [], eq.res(e, m))
+
+def class.k(free: Bool, zero: Bool, +n: U32, b: Blame) -> Class:
+  match free:
+    case True{}:
+      Unrestricted{}
+    case False{}:
+      match zero:
+        case True{}:
+          ForcedZero{b}
+        case False{}:
+          ForcedLevel{n, b}
+
+def rc.blame(+root: U32, +c: U32, r: St & Blame) -> St & RC:
+  (s, b) = r
+  (s, RC{root, class.k(U32.is_zero((c .&. 3 : U32)), U32.is_eq((c .&. 3 : U32), 1), (c >> 2n : U32), b)})
+
+def rc.c(+root: U32, r: St & U32) -> St & RC:
+  (s, +c) = r
+  rc.blame(root, c, blame.of(s, root))
+
+# A root's class, as the solver keeps it.
+def class.read(s: St, +root: U32) -> St & RC:
+  rc.c(root, rd(s, (root * 8 + 18 : U32)))
+
+def table.go(rs: List<&2, U32>, t: Array<Class>, r: St & RC) -> St & Array<Class>:
   match rs:
     case Nil{}:
-      p
-    case Con{+r, rest}:
-      (vars, t) = p
-      table(rest, cls.copy(r, t, Array.get(V, vars, r)))
+      (s, rc) = r
+      match rc:
+        case RC{+root, c}:
+          (s, Array.set(Class, t, root, c))
+    case Con{+x, rest}:
+      (s, rc) = r
+      match rc:
+        case RC{+root, c}:
+          table.go(rest, Array.set(Class, t, root, c), class.read(s, x))
 
-def solve.done(s: St, m: Maybe<&2, Err>) -> Result<&1, &1, Err, Unit & St>:
+# The roots' classes, in a table of their own.
+def table(rs: List<&2, U32>, t: Array<Class>, s: St) -> St & Array<Class>:
+  match rs:
+    case Nil{}:
+      (s, t)
+    case Con{+x, rest}:
+      table.go(rest, t, class.read(s, x))
+
+def solve.done(s: St, m: Maybe<&2, Err>) -> St:
   match m:
     case None{}:
-      Done{(Unit{}, s)}
+      s
     case Some{e}:
-      Fail{e}
+      fail(s, e)
 
-def solve.with(+rs: List<&2, SumEq>, +d: Nat, sites: Array<Site>, c: C, p: Array<V> & Array<Class>) -> Result<&1, &1, Err, Unit & St>:
-  (vars, cls) = p
-  solve.done(St{vars, sites, c},
-    assign(rs, d, rounds(U32.to_nat((U32.from_nat(List.length(&2, SumEq, rs)) * 4 + 64 : U32)), rs, PGo{cls, True{}})))
+def solve.tab(+rs: List<&2, SumEq>, +d: Nat, r: St & Array<Class>) -> St:
+  (s, cls) = r
+  solve.done(s, assign(rs, d, rounds(U32.to_nat((U32.from_nat(List.length(&2, SumEq, rs)) * 4 + 64 : U32)), rs, PGo{cls, True{}})))
 
-def solve.go(+rs: List<&2, SumEq>, s: St) -> Result<&1, &1, Err, Unit & St>:
+def solve.size(+rs: List<&2, SumEq>, r: St & U32) -> St:
+  (s, +size) = r
+  solve.tab(rs, (U32.log2(size) - 3n : Nat), table(eq.roots(rs, []), Array.new(Class, (U32.log2(size) - 3n : Nat), Unrestricted{}), s))
+
+def solve.res(ps: Array<Pr>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & List<&2, SumEq>) -> St:
+  (m, +rs) = r
+  solve.size(rs, rd(St{m, ps, tg, x}, 1))
+
+def solve.eqs(s: St) -> St:
   match s:
-    case St{vars, sites, +c}:
-      +d = U32.log2(c.cap(c))
-      solve.with(rs, d, sites, c, table(eq.roots(rs, []), (vars, Array.new(Class, d, Unrestricted{}))))
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, +eqs, err, p}:
+          solve.res(ps, tg, X{sites, bl, ct, eqs, err, p}, resolve.eqs(eqs, m))
 
-# propagate, then assignValues, over the equations' roots.
-def solve() -> M(Unit):
-  do M<Unit>:
-    es : List<&2, SumEq> <- eqs.get()
-    +rs : List<&2, SumEq> <- resolve.eqs(es)
-    s => solve.go(rs, s)
-
-# The whole analysis
-# ------------------
-
-def main.apply(apply: Bool, +bodies: Map<&2, Lf.Body>, s: Sig) -> M(Unit):
-  match apply:
+def solve.ok(r: St & Bool) -> St:
+  (s, ok) = r
+  match ok:
     case True{}:
-      do M<Unit>:
-        u : Unit <- virtual(s)
-        applies(bodies)
+      solve.eqs(s)
     case False{}:
-      M.pure(Unit, Unit{})
+      s
 
-# The walk of a top-level term over its own env.
-def walk.top(+what: String, +term: Lf.L) -> M(Sig):
-  do M<Sig>:
-    +b : U32 <- fresh()
-    +t : Tau <- fresh.tau()
-    u : Unit <- dup.constrain(contraction(usage(term, "", Map.new(&2, Use))), b, what ++ " path ", " duplicated")
-    view(Ctx{b, t, 0}, Paths{[], []}, term)
+# propagate, then assignValues, over the equations' roots; not after a
+# failure.
+def solve(s: St) -> St:
+  solve.ok(ok.of(s))
 
-# Every dispatch, then the program applied to its input and its dispatches.
-def main.apply.all(+bodies: Map<&2, Lf.Body>, apply: Bool, +s: Sig) -> M(Unit):
-  do M<Unit>:
-    u : Unit <- applies(bodies)
-    main.apply(apply, bodies, s)
+def str.heads(xs: List<&2, String>, ys: List<&2, String>) -> Cmp:
+  match xs:
+    case Nil{}:
+      GT{}
+    case Con{x, xr}:
+      match ys:
+        case Nil{}:
+          LT{}
+        case Con{y, yr}:
+          String.order(x, y)
 
-# analyzeTopWith: a top-level term (the program, or a body standalone) over
-# its own env; the program also applied to its input.
-def analyze(+bodies: Map<&2, Lf.Body>, apply: Bool, +what: String, +term: Lf.L) -> M(Sig):
-  do M<Sig>:
-    +s : Sig <- walk.top(what, term)
-    u : Unit <- main.apply.all(bodies, apply, s)
-    u2 : Unit <- solve()
-    return s
 
-# Capture shapes
-# --------------
+def s.both.go(fuel: Nat, +xs: List<&2, String>, +ys: List<&2, String>, c: Cmp) -> List<&2, String>:
+  match fuel:
+    case 0n:
+      []
+    case 1n+f:
+      match xs:
+        case Nil{}:
+          ys
+        case Con{+x, +xr}:
+          match ys:
+            case Nil{}:
+              Con{x, xr}
+            case Con{+y, +yr}:
+              match c:
+                case LT{}:
+                  x <> s.both.go(f, xr, Con{y, yr}, str.heads(xr, Con{y, yr}))
+                case GT{}:
+                  y <> s.both.go(f, Con{x, xr}, yr, str.heads(Con{x, xr}, yr))
+                case EQ{}:
+                  x <> s.both.go(f, xr, yr, str.heads(xr, yr))
 
-# summarizeBody: whether a body certifies standalone.
-def standalone(+bodies: Map<&2, Lf.Body>, b: Lf.Body) -> Bool:
+# The union of two sorted lists.
+def s.both(+xs: List<&2, String>, +ys: List<&2, String>) -> List<&2, String>:
+  s.both.go((List.length(&2, String, xs) + List.length(&2, String, ys) + 1n : Nat), xs, ys, str.heads(xs, ys))
+def body.fi(b: Lf.Body) -> U32:
   match b:
     case Lf.Body{fi, body}:
-      ran(analyze(bodies, False{}, "env of lifted body " ++ E.fi.show(fi), body)(st.new()))
+      fi
 
-# summarizeBody's failure: why a body does not certify standalone, if it
-# does not.
-def summary(+bodies: Map<&2, Lf.Body>, b: Lf.Body) -> Maybe<&2, Err>:
+def body.l(b: Lf.Body) -> Lf.L:
   match b:
     case Lf.Body{fi, body}:
-      failure(analyze(bodies, False{}, "env of lifted body " ++ E.fi.show(fi), body)(st.new()))
+      body
+
+
+# allDataShape
+def all.data(s: Lf.Shape) -> Bool:
+  match s:
+    case Lf.CapData{}:
+      True{}
+    case Lf.CapPair{a, b}:
+      all.data(a) && all.data(b)
+    case _:
+      False{}
+
+def meet.flat(data: Bool) -> Lf.Shape:
+  match data:
+    case True{}:
+      Lf.CapData{}
+    case False{}:
+      Lf.CapOther{}
+
+# meetShape: what two construction sites' capture shapes agree on (equal
+# shapes meet to themselves: pairs by their parts, code to code).
+def meet(a: Lf.Shape, b: Lf.Shape) -> Lf.Shape:
+  match a b:
+    case Lf.CapPair{a1, a2} Lf.CapPair{b1, b2}:
+      Lf.CapPair{meet(a1, b1), meet(a2, b2)}
+    case Lf.CapCode{} Lf.CapCode{}:
+      Lf.CapCode{}
+    case +x +y:
+      meet.flat(all.data(x) && all.data(y))
+
+def shape.meet(+h: String, +s: Lf.Shape, r: Map<&2, Lf.Shape> & Lf.Shape) -> Map<&2, Lf.Shape>:
+  (m, +old) = r
+  Map.set(&2, Lf.Shape, m, h, meet(s, old))
+
+def shape.add(+h: String, +s: Lf.Shape, r: Map<&2, Lf.Shape> & Bool) -> Map<&2, Lf.Shape>:
+  (m, known) = r
+  match known:
+    case True{}:
+      shape.meet(h, s, Map.get(Lf.Shape, Lf.CapOther{}, m, h))
+    case False{}:
+      Map.set(&2, Lf.Shape, m, h, s)
+
+# The bodies a term references directly, in hash order (refsOf).
+def refs(l: Lf.L, +acc: List<&2, String>) -> List<&2, String>:
+  match l:
+    case Lf.LRef{loc, h}:
+      s.both(acc, [h])
+    case Lf.LPair{loc, a, b}:
+      refs(b, refs(a, acc))
+    case Lf.LSetEnv{loc, x}:
+      refs(x, acc)
+    case Lf.LLeft{loc, x}:
+      refs(x, acc)
+    case Lf.LRight{loc, x}:
+      refs(x, acc)
+    case Lf.LCheck{loc, cloc, tc, c}:
+      refs(c, refs(tc, acc))
+    case _:
+      acc
+def ensure.at(+h: String, r: Map<&2, Bool> & Bool) -> DJ:
+  (m, known) = r
+  DjEnsure{h, known, m}
+
+def ensure(+h: String, m: Map<&2, Bool>) -> DJ:
+  ensure.at(h, Map.has(&2, Bool, m, h))
+
+def memo.ok.at(r: Map<&2, Bool> & Bool) -> Bool & Map<&2, Bool>:
+  (m, ok) = r
+  (ok, m)
+
+def memo.ok(+h: String, m: Map<&2, Bool>) -> Bool & Map<&2, Bool>:
+  memo.ok.at(Map.get(Bool, False{}, m, h))
+
+def next.of(+h: String, rest: List<&2, String>, p: Bool & Map<&2, Bool>) -> DJ:
+  (ok, m) = p
+  DjNext{ok, h, rest, m}
+
+def body.of(+bodies: Map<&2, Lf.Body>, +h: String) -> Lf.Body:
+  Pair.snd(Map<&2, Lf.Body>, Lf.Body, Map.get(Lf.Body, Lf.Body{0, Lf.LZero{Lc.Unknown{}}}, bodies, h))
+
+def data.main(data: Bool) -> Maybe<&2, Err>:
+  match data:
+    case True{}:
+      Some{TypeMismatch{Lc.Gen{"EAL certification"}, "main is data through and through; a program must be a function of its input"}}
+    case False{}:
+      None{}
+
+# certifyMain beyond ealLiftedMain: main must be a function of its input.
+def certified(r: Result<&2, &2, Err, Lf.Shape>) -> Maybe<&2, Err>:
+  match r:
+    case Fail{e}:
+      Some{e}
+    case Done{s}:
+      data.main(all.data(s))
+
+def dr.memo(r: DR) -> Map<&2, Bool>:
+  match r:
+    case DR{memo, failed}:
+      memo
+
+def layouts.keep(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Shape>>, +memo: Map<&2, Bool>, +acc: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+h, s):
+          layouts.keep(rest, memo, Bool.pick(Map<&2, Lf.Shape>, Pair.snd(Map<&2, Bool>, Bool, Map.get(Bool, False{}, memo, h)),
+            Map.set(&2, Lf.Shape, acc, h, s), acc))
 
 def deps(+fuel: Nat, +bodies: Map<&2, Lf.Body>, +pre: Map<&2, Bool>, j: DJ) -> DR:
   match fuel:
@@ -2860,25 +3457,6 @@ def deps(+fuel: Nat, +bodies: Map<&2, Lf.Body>, +pre: Map<&2, Bool>, j: DJ) -> D
 # every body's standalone verdict.
 def check.deps(+bodies: Map<&2, Lf.Body>, +pre: Map<&2, Bool>, hs: List<&2, String>, memo: Map<&2, Bool>) -> DR:
   deps(U32.to_nat(4294967295), bodies, pre, DjCheck{hs, memo})
-
-def verdicts.go(+fuel: Nat, +bodies: Map<&2, Lf.Body>, +n: U32, one: Bool, +hs: List<&2, String>) -> List<&2, HB>:
-  match fuel:
-    case 0n:
-      []
-    case 1n+f:
-      match one:
-        case True{}:
-          match hs:
-            case Nil{}:
-              []
-            case Con{+h, rest}:
-              [HB{h, standalone(bodies, body.of(bodies, h))}]
-        case False{}:
-          +k = U32.shr(n)
-          +m = (n - k : U32)
-          a b = verdicts.go(f, bodies, k, U32.is_le(k, 1), List.take(&2, String, hs, U32.to_nat(k))) verdicts.go(f, bodies, m, U32.is_le(m, 1), List.drop(&2, String, hs, U32.to_nat(k)))
-          List.append(&2, HB, a, b)
-
 def verdicts.map(xs: List<&2, HB>, acc: Map<&2, Bool>) -> Map<&2, Bool>:
   match xs:
     case Nil{}:
@@ -2887,57 +3465,6 @@ def verdicts.map(xs: List<&2, HB>, acc: Map<&2, Bool>) -> Map<&2, Bool>:
       match x:
         case HB{h, ok}:
           verdicts.map(rest, Map.set(&2, Bool, acc, h, ok))
-
-# Every body's standalone verdict (summarizeBody), computed in parallel: a
-# balanced fork-join over the bodies in hash order.
-def verdicts(+bodies: Map<&2, Lf.Body>) -> Map<&2, Bool>:
-  +hs = Map.keys(&2, Lf.Body, bodies)
-  +n = U32.from_nat(List.length(&2, String, hs))
-  verdicts.map(verdicts.go(U32.to_nat((U32.from_nat(U32.log2(n)) + 3 : U32)), bodies, n, U32.is_le(n, 1), hs), Map.new(&2, Bool))
-
-# The entry points
-# ----------------
-
-def main.shape(+bodies: Map<&2, Lf.Body>, +main: Lf.L) -> M(Lf.Shape):
-  do M<Lf.Shape>:
-    s : Sig <- analyze(bodies, True{}, "program input", main)
-    shape(s)
-
-def inferred.at(r: DR, main: Result<&1, &1, Err, Lf.Shape & St>) -> Result<&2, &2, Err, Lf.Shape>:
-  match r:
-    case DR{memo, failed}:
-      match failed:
-        case Some{d}:
-          Fail{DependencyFailed{d}}
-        case None{}:
-          main.of(main)
-
-def inferred.with(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +pre: Map<&2, Bool>, r: Result<&1, &1, Err, Lf.Shape & St>) -> Result<&2, &2, Err, Lf.Shape>:
-  inferred.at(check.deps(bodies, pre, refs(main, []), Map.new(&2, Bool)), r)
-
-# ealLiftedMain: the program's main shape, or why it does not certify, its
-# dependencies first. The bodies' standalone verdicts and the whole
-# program's analysis run in parallel.
-def inferred(t: Lf.Lifted) -> Result<&2, &2, Err, Lf.Shape>:
-  match t:
-    case Lf.Lifted{+bodies, +main}:
-      pre r = verdicts(bodies) main.shape(bodies, main)(st.new())
-      inferred.with(bodies, main, pre, r)
-
-# certifyMain: why the program is not certified, if it is not.
-def certify(t: Lf.Lifted) -> Maybe<&2, Err>:
-  certified(inferred(t))
-
-# ealGuidance's verdicts: whether each body certifies, its dependencies
-# first.
-def gated(+bodies: Map<&2, Lf.Body>) -> Map<&2, Bool>:
-  dr.memo(deps(U32.to_nat(4294967295), bodies, verdicts(bodies),
-    DjAll{Map.keys(&2, Lf.Body, bodies), Map.new(&2, Bool)}))
-
-def main.shapes(+bodies: Map<&2, Lf.Body>, +main: Lf.L) -> M(Map<&2, Lf.Shape>):
-  do M<Map<&2, Lf.Shape>>:
-    s : Sig <- analyze(bodies, True{}, "program input", main)
-    shapes()
 
 def layouts.at(+bodies: Map<&2, Lf.Body>, +pre: Map<&2, Bool>, +m: Map<&2, Lf.Shape>, r: DR) -> Map<&2, Lf.Shape>:
   match r:
@@ -2952,13 +3479,291 @@ def layouts.at(+bodies: Map<&2, Lf.Body>, +pre: Map<&2, Bool>, +m: Map<&2, Lf.Sh
 def layouts.with(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +pre: Map<&2, Bool>, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
   layouts.at(bodies, pre, m, check.deps(bodies, pre, refs(main, []), Map.new(&2, Bool)))
 
-def layouts.ran(+bodies: Map<&2, Lf.Body>, +main: Lf.L, r: Result<&1, &1, Err, Map<&2, Lf.Shape> & St>) -> Map<&2, Lf.Shape>:
+# Capture shapes
+# --------------
+
+def sh.walked(js: List<&2, SJ>, vs: List<&2, Lf.Shape>, r: St & U32) -> St & SQ:
+  (s, +w) = r
+  (s, SQ{SjWalked{kind(w), w} <> js, vs})
+
+def sh.pair(js: List<&2, SJ>, vs: List<&2, Lf.Shape>, r: St & Pr) -> St & SQ:
+  (s, pr) = r
+  match pr:
+    case Pr{b1, t1, b2, t2}:
+      (s, SQ{SjTau{t1} <> SjTau{t2} <> SjPair{} <> js, vs})
+
+def sh.join(vs: List<&2, Lf.Shape>) -> List<&2, Lf.Shape>:
+  match vs:
+    case Con{b, r1}:
+      match r1:
+        case Con{a, r2}:
+          Lf.CapPair{a, b} <> r2
+        case Nil{}:
+          [b]
+    case Nil{}:
+      []
+
+def sh.step(s: St, j: SJ, js: List<&2, SJ>, vs: List<&2, Lf.Shape>) -> St & SQ:
+  match j:
+    case SjTau{+t}:
+      sh.walked(js, vs, walk(s, t))
+    case SjWalked{k, +w}:
+      match k:
+        case KData{}:
+          (s, SQ{js, Lf.CapData{} <> vs})
+        case KPair{}:
+          sh.pair(js, vs, pair.get(s, w))
+        case KCode{}:
+          (s, SQ{js, Lf.CapCode{} <> vs})
+        case _:
+          (s, SQ{js, Lf.CapOther{} <> vs})
+    case SjPair{}:
+      (s, SQ{js, sh.join(vs)})
+
+def sh.go(fuel: Nat, r: St & SQ) -> St & Lf.Shape:
+  match fuel:
+    case 0n:
+      (s, q) = r
+      (s, Lf.CapOther{})
+    case 1n+f:
+      (s, q) = r
+      match q:
+        case SQ{js, vs}:
+          match js:
+            case Con{j, rest}:
+              sh.go(f, sh.step(s, j, rest, vs))
+            case Nil{}:
+              match vs:
+                case Con{v, more}:
+                  (s, v)
+                case Nil{}:
+                  (s, Lf.CapOther{})
+
+# shapeOfSigma, of a type.
+def shape(s: St, +t: U32) -> St & Lf.Shape:
+  sh.go(big(), (s, SQ{[SjTau{t}], []}))
+
+def shp.add(+h: String, acc: Map<&2, Lf.Shape>, r: St & Lf.Shape) -> St & Map<&2, Lf.Shape>:
+  (s, +sh) = r
+  (s, shape.add(h, sh, Map.has(&2, Lf.Shape, acc, h)))
+
+def shp.te(ok: Bool, s: St, +tag: U32, +ct: U32, +p: P, acc: Map<&2, Lf.Shape>) -> St & Map<&2, Lf.Shape>:
+  match ok:
+    case True{}:
+      shp.add(bd.hash(body.at(p, tag)), acc, shape(s, ct))
+    case False{}:
+      (s, acc)
+
+def shapes.caps(ts: List<&2, TE>, +p: P, r: St & Map<&2, Lf.Shape>) -> St & Map<&2, Lf.Shape>:
+  match ts:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      match e:
+        case TE{+tag, +cb, +ct}:
+          (s, acc) = r
+          shapes.caps(rest, p, shp.te(U32.is_lt(tag, t.gate()) && U32.is_ne(cb, none()), s, tag, ct, p, acc))
+
+def shapes.ts(+p: P, acc: Map<&2, Lf.Shape>, r: St & List<&2, TE>) -> St & Map<&2, Lf.Shape>:
+  (s, ts) = r
+  shapes.caps(ts, p, (s, acc))
+
+def shapes.go(fuel: Nat, more: Bool, +i: U32, +n: U32, +p: P, r: St & Map<&2, Lf.Shape>) -> St & Map<&2, Lf.Shape>:
+  match fuel:
+    case 0n:
+      r
+    case 1n+f:
+      match more:
+        case False{}:
+          r
+        case True{}:
+          (s, acc) = r
+          shapes.go(f, U32.is_lt((i + 1 : U32), n), (i + 1 : U32), n, p, shapes.ts(p, acc, tg.get(s, i)))
+
+def shapes.n(+p: P, r: St & U32) -> St & Map<&2, Lf.Shape>:
+  (s, +n) = r
+  shapes.go(U32.to_nat((n + 1 : U32)), U32.is_lt(0, n), 0, n, p, (s, Map.new(&2, Lf.Shape)))
+
+def shapes.p(r: St & P) -> St & Map<&2, Lf.Shape>:
+  (s, +p) = r
+  shapes.n(p, rd(s, 0))
+
+# groundCaptureShapes: every closure package's capture shape, met per hash
+# over the sites it is built at.
+def shapes(s: St) -> St & Map<&2, Lf.Shape>:
+  shapes.p(prog(s))
+
+# The whole analysis
+# ------------------
+
+def first.err(es: List<&2, Err>) -> Maybe<&2, Err>:
+  match es:
+    case Nil{}:
+      None{}
+    case Con{e, rest}:
+      Some{e}
+
+def st.err(s: St) -> Maybe<&2, Err>:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, bl, ct, eqs, err, p}:
+          first.err(err)
+
+def an.walked(apply: Bool, r: St & Sig) -> St & Sig:
+  match apply:
+    case True{}:
+      (s, +sg) = r
+      (solve(applies(virtual(applies(s), sg))), sg)
+    case False{}:
+      (s, +sg) = r
+      (solve(applies(s)), sg)
+
+# analyzeTopWith: a top-level term (the program, or a body standalone) over
+# its own env, every dispatch, and the solve; the program is also applied
+# to its input.
+def analyze(s: St, apply: Bool, +what: String, +dup: Maybe<&2, Dup>, +term: A) -> St & Sig:
+  an.walked(apply, walk.top(s, what, dup, term))
+
+def failure.of(r: St & Sig) -> Maybe<&2, Err>:
+  (s, sg) = r
+  st.err(s)
+
+# summarizeBody: why a body does not certify standalone, if it does not.
+def standalone(+p: P, b: Bd) -> Maybe<&2, Err>:
+  match b:
+    case Bd{h, +fi, +dup, +t}:
+      failure.of(analyze(st.new(p), False{}, "env of lifted body " ++ E.fi.show(fi), dup, t))
+
+def verdict.one(+p: P, m: Maybe<&2, Bd>) -> List<&2, HB>:
+  match m:
+    case Some{b}:
+      match b:
+        case Bd{+h, +fi, +dup, +t}:
+          [HB{h, Maybe.is_none(&2, Err, standalone(p, Bd{h, fi, dup, t}))}]
+    case None{}:
+      []
+
+def verdicts.go(+fuel: Nat, +p: P, +lo: U32, +n: U32, one: Bool) -> List<&2, HB>:
+  match fuel:
+    case 0n:
+      []
+    case 1n+f:
+      match one:
+        case True{}:
+          verdict.one(p, body.at(p, lo))
+        case False{}:
+          a b = verdicts.go(f, p, lo, U32.shr(n), U32.is_le(U32.shr(n), 1)) verdicts.go(f, p, (lo + U32.shr(n) : U32), (n - U32.shr(n) : U32), U32.is_le((n - U32.shr(n) : U32), 1))
+          List.append(&2, HB, a, b)
+
+def p.n(p: P) -> U32:
+  match p:
+    case P{n, size, bt}:
+      n
+
+# Every body's standalone verdict (summarizeBody), computed in parallel: a
+# balanced fork-join over the bodies in hash order.
+def verdicts(+p: P) -> Map<&2, Bool>:
+  verdicts.map(verdicts.go(U32.to_nat((U32.from_nat(U32.log2(p.n(p))) + 3 : U32)), p, 0, p.n(p), U32.is_le(p.n(p), 1)),
+    Map.new(&2, Bool))
+
+def main.at(m: Maybe<&2, Err>, sh: Lf.Shape) -> Result<&2, &2, Err, Lf.Shape>:
+  match m:
+    case Some{e}:
+      Fail{e}
+    case None{}:
+      Done{sh}
+
+def main.done(r: St & Lf.Shape) -> Result<&2, &2, Err, Lf.Shape>:
+  (s, sh) = r
+  main.at(st.err(s), sh)
+
+
+# The entry points
+# ----------------
+
+def main.sg(r: St & Sig) -> Result<&2, &2, Err, Lf.Shape>:
+  (s, +sg) = r
+  main.done(shape(s, sig.t(sg)))
+
+# The program's main shape, or why it does not certify.
+def main.shape(+p: P, +dup: Maybe<&2, Dup>, +term: A) -> Result<&2, &2, Err, Lf.Shape>:
+  main.sg(analyze(st.new(p), True{}, "program input", dup, term))
+
+def inferred.at(r: DR, main: Result<&2, &2, Err, Lf.Shape>) -> Result<&2, &2, Err, Lf.Shape>:
   match r:
-    case Fail{e}:
+    case DR{memo, failed}:
+      match failed:
+        case Some{d}:
+          Fail{DependencyFailed{d}}
+        case None{}:
+          main
+
+def inferred.with(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +pre: Map<&2, Bool>, r: Result<&2, &2, Err, Lf.Shape>) -> Result<&2, &2, Err, Lf.Shape>:
+  inferred.at(check.deps(bodies, pre, refs(main, []), Map.new(&2, Bool)), r)
+
+def inferred.p(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +rk: Map<&2, U32>, +p: P) -> Result<&2, &2, Err, Lf.Shape>:
+  pre r = verdicts(p) main.shape(p, dup.of(main), to.a(main, rk))
+  inferred.with(bodies, main, pre, r)
+
+# ealLiftedMain: the program's main shape, or why it does not certify, its
+# dependencies first. The bodies' standalone verdicts and the whole
+# program's analysis run in parallel.
+def inferred(t: Lf.Lifted) -> Result<&2, &2, Err, Lf.Shape>:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      inferred.p(bodies, main, ranks(bodies), program(bodies, ranks(bodies)))
+
+# certifyMain: why the program is not certified, if it is not.
+def certify(t: Lf.Lifted) -> Maybe<&2, Err>:
+  certified(inferred(t))
+
+# ealGuidance's verdicts: whether each body certifies, its dependencies
+# first.
+def gated(+bodies: Map<&2, Lf.Body>) -> Map<&2, Bool>:
+  dr.memo(deps(big(), bodies, verdicts(program(bodies, ranks(bodies))),
+    DjAll{Map.keys(&2, Lf.Body, bodies), Map.new(&2, Bool)}))
+
+def summary.at(+fi: U32, +body: Lf.L, +rk: Map<&2, U32>, +p: P) -> Maybe<&2, Err>:
+  standalone(p, Bd{"", fi, dup.of(body), to.a(body, rk)})
+
+# summarizeBody's failure: why a body does not certify standalone, if it
+# does not.
+def summary(+bodies: Map<&2, Lf.Body>, b: Lf.Body) -> Maybe<&2, Err>:
+  match b:
+    case Lf.Body{+fi, +body}:
+      summary.at(fi, body, ranks(bodies), program(bodies, ranks(bodies)))
+
+def lay.done(r: St & Map<&2, Lf.Shape>) -> Maybe<&2, Map<&2, Lf.Shape>>:
+  (s, m) = r
+  Some{m}
+
+def lay.flag(r: St & Bool) -> Maybe<&2, Map<&2, Lf.Shape>>:
+  (s, ok) = r
+  match ok:
+    case True{}:
+      lay.done(shapes(s))
+    case False{}:
+      None{}
+
+def lay.sg(r: St & Sig) -> Maybe<&2, Map<&2, Lf.Shape>>:
+  (s, sg) = r
+  lay.flag(ok.of(s))
+
+# The capture shapes of the whole program's closure packages, when its
+# analysis succeeds.
+def main.shapes(+p: P, +dup: Maybe<&2, Dup>, +term: A) -> Maybe<&2, Map<&2, Lf.Shape>>:
+  lay.sg(analyze(st.new(p), True{}, "program input", dup, term))
+
+def layouts.ran(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: P, r: Maybe<&2, Map<&2, Lf.Shape>>) -> Map<&2, Lf.Shape>:
+  match r:
+    case None{}:
       Map.new(&2, Lf.Shape)
-    case Done{p}:
-      (+m, st) = p
-      layouts.with(bodies, main, verdicts(bodies), m)
+    case Some{m}:
+      layouts.with(bodies, main, verdicts(p), m)
+
+def layouts.p(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +rk: Map<&2, U32>, +p: P) -> Map<&2, Lf.Shape>:
+  layouts.ran(bodies, main, p, main.shapes(p, dup.of(main), to.a(main, rk)))
 
 # ealCaptureLayouts: the capture shape of each closure code the whole
 # program builds, for the codes that certify standalone; none when the
@@ -2967,21 +3772,4 @@ def layouts.ran(+bodies: Map<&2, Lf.Body>, +main: Lf.L, r: Result<&1, &1, Err, M
 def layouts(t: Lf.Lifted) -> Map<&2, Lf.Shape>:
   match t:
     case Lf.Lifted{+bodies, +main}:
-      layouts.ran(bodies, main, main.shapes(bodies, main)(st.new()))
-
-def st.next(s: St) -> U32:
-  match s:
-    case St{vars, sites, c}:
-      c.next(c)
-
-def ran.u(r: Result<&1, &1, Err, Unit & St>) -> Bool:
-  match r:
-    case Fail{e}:
-      False{}
-    case Done{p}:
-      True{}
-
-def resolved() -> M(List<&2, SumEq>):
-  do M<List<&2, SumEq>>:
-    es : List<&2, SumEq> <- eqs.get()
-    resolve.eqs(es)
+      layouts.p(bodies, main, ranks(bodies), program(bodies, ranks(bodies)))

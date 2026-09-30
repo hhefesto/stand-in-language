@@ -199,15 +199,16 @@ def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, IC.Prog>) -> IO(Unit):
 
 # certifyMain gates the program before its sizing does (Driver's
 # compileMainReporting).
-def certified(+run: T.C, c: Maybe<&2, EAL.Err>, r: Result<&2, &2, Sz.SizeFail, IC.Prog>) -> IO(Unit):
+def certified(+run: T.C, c: Maybe<&2, EAL.Err>) -> IO(Unit):
   match c:
     case Some{e}:
       IO.die(Unit, 1, EAL.render(e))
     case None{}:
-      sized(run, r)
+      sized(run, ready(Sz.size(65536, True{}, E.of.term3(run))))
 
-# The certification and the sized program, computed in parallel: they
-# share nothing, and the gate still decides first.
+# The certification, then the sized program. EAL forks over the bodies
+# inside each; run side by side, the two would split the lanes between
+# them and starve those forks.
 def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
   match r:
     case Fail{e}:
@@ -215,8 +216,7 @@ def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
     case Done{ts}:
       match ts:
         case Fr.Terms{cert, +run}:
-          c p = EAL.certify(Lf.defer.lift(cert)) ready(Sz.size(65536, True{}, E.of.term3(run)))
-          certified(run, c, p)
+          certified(run, EAL.certify(Lf.defer.lift(cert)))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
