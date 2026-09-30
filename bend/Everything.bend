@@ -12,6 +12,8 @@ import ./Desugar.bend as Desugar
 import ./Term.bend as Term
 import ./Lower.bend as Lower
 import ./Split.bend as Split
+import ./Expr.bend as Expr
+import ./Size.bend as Size
 import ./Front.bend as Front
 import ./Main.bend as Main
 

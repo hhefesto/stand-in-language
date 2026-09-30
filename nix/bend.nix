@@ -44,6 +44,14 @@ let
       "sites-limits"
       "testchar-error"
     ];
+    size = [
+      "size-tc_ultra_minimal"
+      "size-simpleplus"
+      "size-tictactoe"
+      "size-over-budget"
+      "size-budget-exhausted"
+      "size-unbounded-input"
+    ];
     lexical = [
       "reserved"
       "unreserved"
