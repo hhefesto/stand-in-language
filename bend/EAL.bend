@@ -17,6 +17,11 @@ import ./Lift.bend as Lf
 #   before copying, is kept.
 # - The unifier is one worklist, popped last in first, so its effects come
 #   in the Haskell's depth-first order.
+# - Steps the Haskell repeats to no effect are skipped: a pair already
+#   collapsed to data and unboxed bangs (ground) is not collapsed again, a
+#   type is not unified with itself, and an apply site whose code class is
+#   the same, with the same tags, as at its last look is not looked at
+#   again.
 #
 # The state is laid out as the IC's net is, in arrays read and written in
 # place by direct-style defs; recursion that threads it runs on a stack of
@@ -31,8 +36,12 @@ import ./Lift.bend as Lf
 # - A variable has eight words: its type binding (0 when unbound), its
 #   bang class's parent plus one (0 at a root), the class (its level times
 #   four, plus 0 unrestricted, 1 forced zero, 2 forced level), the class's
-#   blame (a number in the blames' table) and its tag class's parent plus
-#   one. Before the variables, the table keeps its counters.
+#   blame (a number in the blames' table), its tag class's parent plus one
+#   and a stamp of its tags. Before the variables, the table keeps its
+#   counters. A pair has eight words in a table of its own, an apply site
+#   four (besides its record).
+# - The solver copies the classes its equations name into tables of words
+#   and runs over the equations as rows of words.
 # - A failure is kept in the state, the first one only, and every loop
 #   stops at it.
 # - Branches go on small enumerations (a type's kind, a class merge's
@@ -44,11 +53,6 @@ import ./Lift.bend as Lf
 
 type Blame is Data:
   Blame{+loc: Lc.Loc, +why: String}
-
-type Class is Data:
-  Unrestricted{}
-  ForcedZero{+blame: Blame}
-  ForcedLevel{+n: U32, +blame: Blame}
 
 type Err is Data:
   TypeMismatch{+loc: Lc.Loc, +msg: String}
@@ -156,21 +160,22 @@ type TE is Data:
   TE{+tag: U32, +cb: U32, +ct: U32}
 
 # An application, dispatched once its function position resolves to code
-# (ApplySite); `done` are the tags already dispatched there.
+# (ApplySite, but for its function position, in the sites' rows); `done`
+# are the tags already dispatched there.
 type Site is Data:
-  Site{+fn: U32, +env: Sig, +res: Sig, +depth: U32, +loc: Lc.Loc, +done: List<&2, U32>}
+  Site{+env: Sig, +res: Sig, +depth: U32, +loc: Lc.Loc, +done: List<&2, U32>}
 
-# What is not the variables: the apply sites, the blames, two counters per
-# body (derivations so far, and the variables the first one minted), the
-# sum equations newest first, the first failure (a list, which keeps it
-# boxed), and the program.
+# What is not the variables: the apply sites and their rows, the blames,
+# two counters per body (derivations so far, and the variables the first
+# one minted), the sum equations newest first, the first failure (a list,
+# which keeps it boxed), and the program.
 type X is Type:
-  X{sites: Array<Site>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P}
+  X{sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P}
 
 # The state: the variables and counters, the pairs, the tags of each tag
 # class root, and the rest.
 type St is Type:
-  St{m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, x: X}
+  St{m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, x: X}
 
 # Work for the unifier, all at a visited set of capture classes and a
 # dispatch mode (the dispatching tag, or none()).
@@ -178,6 +183,7 @@ type W is Data:
   WSig{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: Sig, +b: Sig}
   WTau{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32}
   WColl{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +s: Sig}
+  WGround{+p: U32}
 
 # A frame: its env domain bang and type, and its dispatch depth.
 type Ctx is Data:
@@ -232,10 +238,6 @@ type SJ is Data:
 type SQ is Data:
   SQ{+js: List<&2, SJ>, +vs: List<&2, Lf.Shape>}
 
-# A class root's class, read for the solver.
-type RC is Data:
-  RC{+root: U32, +c: Class}
-
 # A derivation of a code body: its env domain bang and type, and its result.
 type Der is Data:
   Der{+b: U32, +t: U32, +s: Sig}
@@ -244,23 +246,32 @@ type Der is Data:
 type OS is Data:
   OS{+hit: Bool, +ts: List<&2, U32>}
 
-# The solver's class table (by root) and whether a round changed it; or
-# the first failure.
-type PR is Type:
-  PGo{cls: Array<Class>, changed: Bool}
-  PErr{e: Err}
+# A class word's kind: unrestricted, forced to zero, forced to a level.
+type CK is Data:
+  CFree{}
+  CZero{}
+  CLevel{}
 
-# The assignment: each root's value, whether it is forced to zero, and how
-# often it is a summand, with whether a round changed a value; or the
-# failure.
-type AR is Type:
-  AGo{vals: Array<U32>, zf: Array<U32>, cnt: Array<U32>, changed: Bool}
-  AErr{e: Err}
+# The solver's state: each root's class word (as a variable's) and blame
+# (by the root's number), the equations as rows of words in q, each
+# [summands, total, summand roots...], with their blames in qb, each
+# root's value (its class's lower bound until the assignment) and how many
+# equations it is a summand of, and whether the pass's round changed
+# anything; or the first failure.
+type Sv is Type:
+  Sv{c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, ch: Bool}
+  SvErr{e: Err}
 
-# The assignment's start: the classes, and the values and zero flags read
-# off them.
-type AI is Type:
-  AI{cls: Array<Class>, vals: Array<U32>, zf: Array<U32>}
+# An equation's summands: whether all are forced to zero, the sum of their
+# lower bounds, how many may be boxed, and the last of those.
+type Sm is Data:
+  Sm{+fz: Bool, +sum: U32, +free: U32, +lone: U32}
+
+# The solver's passes over the rows.
+type Pass is Data:
+  PProp{}
+  PAdjust{}
+  PHolds{}
 
 # The summand picked so far and how many equations it is in.
 type Pk is Data:
@@ -361,10 +372,7 @@ def blame.none() -> Blame:
   Blame{Lc.Unknown{}, ""}
 
 def site.none() -> Site:
-  Site{0, Sig{0, 0}, Sig{0, 0}, 0, Lc.Unknown{}, []}
-
-def pr.none() -> Pr:
-  Pr{0, 0, 0, 0}
+  Site{Sig{0, 0}, Sig{0, 0}, 0, Lc.Unknown{}, []}
 
 def te.none() -> List<&2, TE>:
   []
@@ -702,11 +710,11 @@ def m.new() -> Array<U32>:
 def st.new(+p: P) -> St:
   match p:
     case P{+n, size, bt}:
-      St{m.new(), Array.new(Pr, 6n, pr.none()), Array.new(List<&2, TE>, 8n, te.none()),
-         X{Array.new(Site, 6n, site.none()), Array.new(Blame, 6n, blame.none()),
+      St{m.new(), Array.new(U32, 9n, 0), Array.new(List<&2, TE>, 8n, te.none()),
+         X{Array.new(Site, 6n, site.none()), Array.new(U32, 8n, 0), Array.new(Blame, 6n, blame.none()),
            Array.new(U32, (U32.log2((n * 2 + 1 : U32)) + 1n : Nat), 0), [], [], p}}
 
-def st.m(ps: Array<Pr>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & U32) -> St & U32:
+def st.m(ps: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & U32) -> St & U32:
   (m, v) = r
   (St{m, ps, tg, x}, v)
 
@@ -723,8 +731,8 @@ def wr(s: St, +i: U32, +v: U32) -> St:
 
 def x.failed(x: X, e: Err) -> X:
   match x:
-    case X{sites, bl, ct, eqs, err, p}:
-      X{sites, bl, ct, eqs, [e], p}
+    case X{sites, sv, bl, ct, eqs, err, p}:
+      X{sites, sv, bl, ct, eqs, [e], p}
 
 def fail.set(s: St, e: Err) -> St:
   match s:
@@ -805,15 +813,24 @@ def fresh.sig(s: St) -> St & Sig:
 # Pairs
 # -----
 
+# Pair type t (pair n is n * 8 + 4) has its words in ps from t - 4: its
+# sides' bangs and types (b1, t1, b2, t2), then, at t itself, whether it
+# is ground (see colls).
+
 def pair.set(s: St, +n: U32, pr: Pr) -> St & U32:
   match s:
     case St{m, ps, tg, x}:
-      (St{Array.set(U32, m, 2, (n + 1 : U32)), Array.set(Pr, ps, n, pr), tg, x}, (n * 8 + 4 : U32))
+      match pr:
+        case Pr{+b1, +t1, +b2, +t2}:
+          (St{Array.set(U32, m, 2, (n + 1 : U32)),
+              Array.set(U32, Array.set(U32, Array.set(U32, Array.set(U32, ps, (n * 8 : U32), b1), (n * 8 + 1 : U32), t1),
+                (n * 8 + 2 : U32), b2), (n * 8 + 3 : U32), t2),
+              tg, x}, (n * 8 + 4 : U32))
 
 def pair.grow(s: St, +cap: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
-      St{Array.set(U32, m, 3, (cap * 2 : U32)), ANode{ps, Array.new(Pr, U32.log2(cap), pr.none())}, tg, x}
+      St{Array.set(U32, m, 3, (cap * 2 : U32)), ANode{ps, Array.new(U32, U32.log2((cap * 8 : U32)), 0)}, tg, x}
 
 def pair.room(full: Bool, s: St, +n: U32, +cap: U32, pr: Pr) -> St & U32:
   match full:
@@ -834,7 +851,23 @@ def pair.n(pr: Pr, r: St & U32) -> St & U32:
 def pair.new(s: St, pr: Pr) -> St & U32:
   pair.n(pr, rd(s, 2))
 
-def pair.got(m: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<Pr> & Pr) -> St & Pr:
+def pr.t2(+b1: U32, +t1: U32, +b2: U32, r: Array<U32> & U32) -> Array<U32> & Pr:
+  (ps, +t2) = r
+  (ps, Pr{b1, t1, b2, t2})
+
+def pr.b2(+o: U32, +b1: U32, +t1: U32, r: Array<U32> & U32) -> Array<U32> & Pr:
+  (ps, +b2) = r
+  pr.t2(b1, t1, b2, ps[(o + 3 : U32)])
+
+def pr.t1(+o: U32, +b1: U32, r: Array<U32> & U32) -> Array<U32> & Pr:
+  (ps, +t1) = r
+  pr.b2(o, b1, t1, ps[(o + 2 : U32)])
+
+def pr.b1(+o: U32, r: Array<U32> & U32) -> Array<U32> & Pr:
+  (ps, +b1) = r
+  pr.t1(o, b1, ps[(o + 1 : U32)])
+
+def pair.got(m: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & Pr) -> St & Pr:
   (ps, pr) = r
   (St{m, ps, tg, x}, pr)
 
@@ -842,12 +875,27 @@ def pair.got(m: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<Pr> & Pr) ->
 def pair.get(s: St, +t: U32) -> St & Pr:
   match s:
     case St{m, ps, tg, x}:
-      pair.got(m, tg, x, Array.get(Pr, ps, ix(t)))
+      pair.got(m, tg, x, pr.b1((t - 4 : U32), ps[(t - 4 : U32)]))
+
+def ground.got(m: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & U32) -> St & Bool:
+  (ps, +g) = r
+  (St{m, ps, tg, x}, U32.is_ne(g, 0))
+
+# Whether a pair type is ground.
+def ground.of(s: St, +t: U32) -> St & Bool:
+  match s:
+    case St{m, ps, tg, x}:
+      ground.got(m, tg, x, ps[(t : U32)])
+
+def ground.set(s: St, +t: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      St{m, ps[t] <- 1, tg, x}
 
 # Tag sets
 # --------
 
-def tg.got(m: Array<U32>, ps: Array<Pr>, x: X, r: Array<List<&2, TE>> & List<&2, TE>) -> St & List<&2, TE>:
+def tg.got(m: Array<U32>, ps: Array<U32>, x: X, r: Array<List<&2, TE>> & List<&2, TE>) -> St & List<&2, TE>:
   (tg, ts) = r
   (St{m, ps, tg, x}, ts)
 
@@ -857,10 +905,16 @@ def tg.get(s: St, +i: U32) -> St & List<&2, TE>:
     case St{m, ps, tg, x}:
       tg.got(m, ps, x, Array.get(List<&2, TE>, tg, i))
 
+def tg.bump(+i: U32, r: St & U32) -> St:
+  (s, +v) = r
+  wr(s, (i * 8 + 21 : U32), (v + 1 : U32))
+
+# Every write of a variable's tags stamps it anew (word 5 of the variable),
+# so that an unchanged stamp means unchanged tags.
 def tg.set(s: St, +i: U32, ts: List<&2, TE>) -> St:
   match s:
     case St{m, ps, tg, x}:
-      St{m, ps, Array.set(List<&2, TE>, tg, i, ts), x}
+      tg.bump(i, rd(St{m, ps, Array.set(List<&2, TE>, tg, i, ts), x}, (i * 8 + 21 : U32)))
 
 # Blames, sites, equations, counters
 # ----------------------------------
@@ -869,16 +923,16 @@ def bl.set(s: St, +n: U32, b: Blame) -> St & U32:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
-          (St{Array.set(U32, m, 7, (n + 1 : U32)), ps, tg, X{sites, Array.set(Blame, bl, n, b), ct, eqs, err, p}}, n)
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          (St{Array.set(U32, m, 7, (n + 1 : U32)), ps, tg, X{sites, sv, Array.set(Blame, bl, n, b), ct, eqs, err, p}}, n)
 
 def bl.grow(s: St, +cap: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
+        case X{sites, sv, bl, ct, eqs, err, p}:
           St{Array.set(U32, m, 8, (cap * 2 : U32)), ps, tg,
-             X{sites, ANode{bl, Array.new(Blame, U32.log2(cap), blame.none())}, ct, eqs, err, p}}
+             X{sites, sv, ANode{bl, Array.new(Blame, U32.log2(cap), blame.none())}, ct, eqs, err, p}}
 
 def bl.room(full: Bool, s: St, +n: U32, +cap: U32, b: Blame) -> St & U32:
   match full:
@@ -899,75 +953,100 @@ def bl.n(b: Blame, r: St & U32) -> St & U32:
 def blame.add(s: St, b: Blame) -> St & U32:
   bl.n(b, rd(s, 7))
 
-def bl.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, sites: Array<Site>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Blame> & Blame) -> St & Blame:
+def bl.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Blame> & Blame) -> St & Blame:
   (bl, b) = r
-  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, b)
+  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, b)
 
 def blame.get(s: St, +n: U32) -> St & Blame:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
-          bl.got(m, ps, tg, sites, ct, eqs, err, p, Array.get(Blame, bl, n))
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          bl.got(m, ps, tg, sites, sv, ct, eqs, err, p, Array.get(Blame, bl, n))
+
+def sv.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
+  (sv, v) = r
+  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, v)
+
+# Word i of the sites' rows: site k's are its function position's type
+# (4k), and the tag class root and stamp its last look saw (4k + 1, 4k + 2;
+# see site.resolve).
+def sv.rd(s: St, +i: U32) -> St & U32:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          sv.got(m, ps, tg, sites, bl, ct, eqs, err, p, Array.get(U32, sv, i))
+
+def sv.wr(s: St, +i: U32, +v: U32) -> St:
+  match s:
+    case St{m, ps, tg, x}:
+      match x:
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          St{m, ps, tg, X{sites, Array.set(U32, sv, i, v), bl, ct, eqs, err, p}}
 
 def site.set(s: St, +n: U32, site: Site) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
-          St{m, ps, tg, X{Array.set(Site, sites, n, site), bl, ct, eqs, err, p}}
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          St{m, ps, tg, X{Array.set(Site, sites, n, site), sv, bl, ct, eqs, err, p}}
 
 def site.grow(s: St, +cap: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
+        case X{sites, sv, bl, ct, eqs, err, p}:
           St{Array.set(U32, m, 6, (cap * 2 : U32)), ps, tg,
-             X{ANode{sites, Array.new(Site, U32.log2(cap), site.none())}, bl, ct, eqs, err, p}}
+             X{ANode{sites, Array.new(Site, U32.log2(cap), site.none())}, ANode{sv, Array.new(U32, U32.log2((cap * 4 : U32)), 0)},
+               bl, ct, eqs, err, p}}
 
-def site.room(full: Bool, s: St, +n: U32, +cap: U32, site: Site) -> St:
+def site.row(s: St, +n: U32, +fn: U32, site: Site) -> St:
+  wr(sv.wr(sv.wr(site.set(s, n, site), (n * 4 : U32), fn), (n * 4 + 1 : U32), none()), 5, (n + 1 : U32))
+
+def site.room(full: Bool, s: St, +n: U32, +cap: U32, +fn: U32, site: Site) -> St:
   match full:
     case True{}:
-      wr(site.set(site.grow(s, cap), n, site), 5, (n + 1 : U32))
+      site.row(site.grow(s, cap), n, fn, site)
     case False{}:
-      wr(site.set(s, n, site), 5, (n + 1 : U32))
+      site.row(s, n, fn, site)
 
-def site.cap(+n: U32, site: Site, r: St & U32) -> St:
+def site.cap(+n: U32, +fn: U32, site: Site, r: St & U32) -> St:
   (s, +cap) = r
-  site.room(U32.is_ge(n, cap), s, n, cap, site)
+  site.room(U32.is_ge(n, cap), s, n, cap, fn, site)
 
-def site.n(site: Site, r: St & U32) -> St:
+def site.n(+fn: U32, site: Site, r: St & U32) -> St:
   (s, +n) = r
-  site.cap(n, site, rd(s, 6))
+  site.cap(n, fn, site, rd(s, 6))
 
-# registerApply
-def site.add(s: St, site: Site) -> St:
-  site.n(site, rd(s, 5))
+# registerApply: a site applying fn.
+def site.add(s: St, +fn: U32, site: Site) -> St:
+  site.n(fn, site, rd(s, 5))
 
-def site.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Site> & Site) -> St & Site:
+def site.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<Site> & Site) -> St & Site:
   (sites, site) = r
-  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, site)
+  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, site)
 
 def site.get(s: St, +n: U32) -> St & Site:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
-          site.got(m, ps, tg, bl, ct, eqs, err, p, Array.get(Site, sites, n))
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          site.got(m, ps, tg, sv, bl, ct, eqs, err, p, Array.get(Site, sites, n))
 
 def eq.add(s: St, e: SumEq) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
-          St{m, ps, tg, X{sites, bl, ct, e <> eqs, err, p}}
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          St{m, ps, tg, X{sites, sv, bl, ct, e <> eqs, err, p}}
 
 def sum.eq(s: St, +loc: Lc.Loc, +what: String, lhs: List<&2, U32>, +rhs: U32) -> St:
   eq.add(s, SumEq{lhs, rhs, Blame{loc, what}})
 
-def ct.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, sites: Array<Site>, bl: Array<Blame>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
+def ct.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, eqs: List<&2, SumEq>, err: List<&2, Err>, p: P, r: Array<U32> & U32) -> St & U32:
   (ct, v) = r
-  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, v)
+  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, v)
 
 # A body's counter: its derivations so far (2r), or the variables its
 # first one minted (2r + 1).
@@ -975,26 +1054,26 @@ def ct.get(s: St, +i: U32) -> St & U32:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
-          ct.got(m, ps, tg, sites, bl, eqs, err, p, Array.get(U32, ct, i))
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          ct.got(m, ps, tg, sites, sv, bl, eqs, err, p, Array.get(U32, ct, i))
 
 def ct.set(s: St, +i: U32, +v: U32) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
-          St{m, ps, tg, X{sites, bl, Array.set(U32, ct, i, v), eqs, err, p}}
+        case X{sites, sv, bl, ct, eqs, err, p}:
+          St{m, ps, tg, X{sites, sv, bl, Array.set(U32, ct, i, v), eqs, err, p}}
 
-def p.got(m: Array<U32>, ps: Array<Pr>, tg: Array<List<&2, TE>>, sites: Array<Site>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, +p: P) -> St & P:
-  (St{m, ps, tg, X{sites, bl, ct, eqs, err, p}}, p)
+def p.got(m: Array<U32>, ps: Array<U32>, tg: Array<List<&2, TE>>, sites: Array<Site>, sv: Array<U32>, bl: Array<Blame>, ct: Array<U32>, eqs: List<&2, SumEq>, err: List<&2, Err>, +p: P) -> St & P:
+  (St{m, ps, tg, X{sites, sv, bl, ct, eqs, err, p}}, p)
 
 # The program.
 def prog(s: St) -> St & P:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, +p}:
-          p.got(m, ps, tg, sites, bl, ct, eqs, err, p)
+        case X{sites, sv, bl, ct, eqs, err, +p}:
+          p.got(m, ps, tg, sites, sv, bl, ct, eqs, err, p)
 
 
 # Union-find
@@ -1739,11 +1818,70 @@ def cap.found(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List
 def cap.resolve(s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> St & List<&2, W>:
   cap.found(vis, mode, loc, t, rest, find(s, 4, i))
 
-def colls(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, rest: List<&2, W>, r: St & Pr) -> St & List<&2, W>:
+# A walked side of a collapsed pair is ground when it is data or a ground
+# pair.
+def side.k(k: K, s: St, +w: U32) -> St & Bool:
+  match k:
+    case KData{}:
+      (s, True{})
+    case KPair{}:
+      ground.of(s, w)
+    case _:
+      (s, False{})
+
+def side.ok(r: St & U32) -> St & Bool:
+  (s, +w) = r
+  side.k(kind(w), s, w)
+
+def ground.t2(+p: U32, r: St & Bool) -> St:
+  (s, ok) = r
+  match ok:
+    case True{}:
+      ground.set(s, p)
+    case False{}:
+      s
+
+def ground.t1(+p: U32, +t2: U32, r: St & Bool) -> St:
+  (s, ok) = r
+  match ok:
+    case True{}:
+      ground.t2(p, side.ok(walk(s, t2)))
+    case False{}:
+      s
+
+def ground.pr(+p: U32, r: St & Pr) -> St:
+  (s, pr) = r
+  match pr:
+    case Pr{b1, +t1, b2, +t2}:
+      ground.t1(p, t2, side.ok(walk(s, t1)))
+
+# A pair just collapsed is ground when both its sides are.
+def ground.mark(s: St, +p: U32) -> St:
+  ground.pr(p, pair.get(s, p))
+
+def colls(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +p: U32, rest: List<&2, W>, r: St & Pr) -> St & List<&2, W>:
   (s, pr) = r
   match pr:
     case Pr{b1, t1, b2, t2}:
-      (s, WColl{vis, mode, loc, Sig{b1, t1}} <> WColl{vis, mode, loc, Sig{b2, t2}} <> rest)
+      (s, WColl{vis, mode, loc, Sig{b1, t1}} <> WColl{vis, mode, loc, Sig{b2, t2}} <> WGround{p} <> rest)
+
+def coll.at(ground: Bool, s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +p: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  match ground:
+    case True{}:
+      (s, rest)
+    case False{}:
+      colls(vis, mode, loc, p, rest, pair.get(s, p))
+
+def coll.g(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +p: U32, rest: List<&2, W>, r: St & Bool) -> St & List<&2, W>:
+  (s, g) = r
+  coll.at(g, s, vis, mode, loc, p, rest)
+
+# A pair meets data: each side's bang is unboxed and its type meets data,
+# and then the pair is ground if its sides are. Nothing unbinds a type
+# variable, and a class forced to zero stays so (or the analysis fails),
+# so collapsing a ground pair again would change nothing: it is skipped.
+def coll(s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +p: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  coll.g(vis, mode, loc, p, rest, ground.of(s, p))
 
 def pairs.b(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, pa: Pr, rest: List<&2, W>, r: St & Pr) -> St & List<&2, W>:
   match pa:
@@ -1757,20 +1895,14 @@ def pairs.a(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +b: U32, rest: List<&
   (s, pa) = r
   pairs.b(vis, mode, loc, pa, rest, pair.get(s, b))
 
-def same.var(same: Bool, s: St, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> St & List<&2, W>:
-  match same:
-    case True{}:
-      (s, rest)
-    case False{}:
-      bind.var(s, loc, i, t, rest)
-
-# unifyTauAt, on walked types: its immediate effect, then the work left.
+# unifyTauAt, on two different walked types: its immediate effect, then
+# the work left.
 def walked(ka: K, kb: K, s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> St & List<&2, W>:
   match ka:
     case KVar{}:
       match kb:
         case KVar{}:
-          same.var(U32.is_eq(a, b), s, loc, ix(a), b, rest)
+          bind.var(s, loc, ix(a), b, rest)
         case _:
           bind.var(s, loc, ix(a), b, rest)
     case KData{}:
@@ -1782,7 +1914,7 @@ def walked(ka: K, kb: K, s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +
         case KCap{}:
           cap.resolve(s, vis, mode, loc, ix(b), a, rest)
         case KPair{}:
-          colls(vis, mode, loc, rest, pair.get(s, b))
+          coll(s, vis, mode, loc, b, rest)
         case KCode{}:
           mismatch(s, loc, mode, a, b)
     case KCode{}:
@@ -1812,13 +1944,21 @@ def walked(ka: K, kb: K, s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +
         case KPair{}:
           pairs.a(vis, mode, loc, b, rest, pair.get(s, a))
         case KData{}:
-          colls(vis, mode, loc, rest, pair.get(s, a))
+          coll(s, vis, mode, loc, a, rest)
         case KCode{}:
           mismatch(s, loc, mode, a, b)
 
+# A type unifies with itself without effect (for a pair, side by side).
+def unify.same(same: Bool, s: St, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> St & List<&2, W>:
+  match same:
+    case True{}:
+      (s, rest)
+    case False{}:
+      walked(kind(a), kind(b), s, vis, mode, loc, a, b, rest)
+
 def unify.wb(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +wa: U32, rest: List<&2, W>, r: St & U32) -> St & List<&2, W>:
   (s, +wb) = r
-  walked(kind(wa), kind(wb), s, vis, mode, loc, wa, wb, rest)
+  unify.same(U32.is_eq(wa, wb), s, vis, mode, loc, wa, wb, rest)
 
 def unify.wa(+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +b: U32, rest: List<&2, W>, r: St & U32) -> St & List<&2, W>:
   (s, +wa) = r
@@ -1840,6 +1980,8 @@ def unify.one(s: St, w: W, rest: List<&2, W>) -> St & List<&2, W>:
       match sg:
         case Sig{+b, +t}:
           unify.coll(vis, mode, loc, t, rest, constrain(s, b, 1, 0, Blame{loc, "component of a data pair is unboxed data"}))
+    case WGround{+p}:
+      (ground.mark(s, p), rest)
 
 def unify.ok(w: W, rest: List<&2, W>, r: St & Bool) -> St & List<&2, W>:
   (s, ok) = r
@@ -1951,7 +2093,7 @@ def gen.pair(+loc: Lc.Loc, +sa: Sig, +sb: Sig, ks: List<&2, GK>, r: St & U32) ->
 
 def se.done(+loc: Lc.Loc, +depth: U32, +fnt: U32, +si: Sig, +so: Sig, +sx: Sig, +pairb: U32, ks: List<&2, GK>, r: St & U32) -> St & GJ:
   (s, +t) = r
-  (site.add(unify(s, loc, sx, Sig{pairb, t}), Site{fnt, si, so, depth, loc, []}), GRet{so, ks})
+  (site.add(unify(s, loc, sx, Sig{pairb, t}), fnt, Site{si, so, depth, loc, []}), GRet{so, ks})
 
 def se.pairb(+loc: Lc.Loc, +depth: U32, +fnt: U32, +fnb: U32, +si: Sig, +so: Sig, +sx: Sig, ks: List<&2, GK>, r: St & U32) -> St & GJ:
   (s, +pairb) = r
@@ -2338,7 +2480,7 @@ def dispatch.counted(over: Bool, s: St, +count: U32, +rk: U32, +site: Site, +bd:
             ++ " needed more than 16384 derivations (dispatch structure likely exploding)"})
     case False{}:
       match site:
-        case Site{fn, +env, +res, +depth, +loc, done}:
+        case Site{+env, +res, +depth, +loc, done}:
           match bd:
             case Bd{h, +fi, +dup, +t}:
               dispatch.derived(rk, env, res, loc,
@@ -2402,26 +2544,26 @@ def dispatch.builtin(b: Bi, s: St, site: Site) -> St:
   match b:
     case BiGate{}:
       match site:
-        case Site{fn, +env, +res, depth, +loc, done}:
+        case Site{+env, +res, depth, +loc, done}:
           gate.scr(loc, env, res, forced.zero(s, Blame{loc, "gate scrutinee must be unboxed data"}))
     case BiGateFn{}:
       match site:
-        case Site{fn, +env, +res, depth, +loc, done}:
+        case Site{+env, +res, depth, +loc, done}:
           gf.se(loc, env, res, fresh.sig(s))
     case BiAbort{}:
       match site:
-        case Site{fn, env, +res, depth, +loc, done}:
+        case Site{env, +res, depth, +loc, done}:
           abort.ct(loc, res, fresh.code(s, t.cont()))
     case BiCont{}:
       match site:
-        case Site{fn, +env, +res, depth, +loc, done}:
+        case Site{+env, +res, depth, +loc, done}:
           unify(s, loc, env, res)
 
 def dispatch.k(code: Bool, s: St, +tag: U32, +site: Site) -> St:
   match code:
     case True{}:
       match site:
-        case Site{fn, env, res, +depth, +loc, done}:
+        case Site{env, res, +depth, +loc, done}:
           dispatch.code(U32.is_ge(depth, depth.cap()), s, tag, site, loc)
     case False{}:
       dispatch.builtin(builtin(tag), s, site)
@@ -2457,8 +2599,8 @@ def dispatch.new.with(+new: List<&2, U32>, s: St, +k: U32, +site: Site) -> St & 
 # dispatchNew: the tags this site has not dispatched yet; marked first.
 def dispatch.new(s: St, +k: U32, +site: Site, +tags: List<&2, U32>) -> St & Bool:
   match site:
-    case Site{+fn, +env, +res, +depth, +loc, +done}:
-      dispatch.new.with(diff(tags, done), s, k, Site{fn, env, res, depth, loc, both(done, tags)})
+    case Site{+env, +res, +depth, +loc, +done}:
+      dispatch.new.with(diff(tags, done), s, k, Site{env, res, depth, loc, both(done, tags)})
 
 def site.ts(+k: U32, +site: Site, r: St & List<&2, U32>) -> St & Bool:
   (s, +ts) = r
@@ -2470,8 +2612,8 @@ def dispatch.te.at(none: Bool, s: St, +k: U32, +site: Site, +ts: List<&2, TE>, n
       (s, False{})
     case False{}:
       match site:
-        case Site{+fn, +env, +res, +depth, +loc, +done}:
-          dispatch.new.at(False{}, s, k, Site{fn, env, res, depth, loc, both(done, keys(ts))}, new)
+        case Site{+env, +res, +depth, +loc, +done}:
+          dispatch.new.at(False{}, s, k, Site{env, res, depth, loc, both(done, keys(ts))}, new)
 
 def dispatch.te(+new: List<&2, U32>, s: St, +k: U32, +site: Site, +ts: List<&2, TE>) -> St & Bool:
   dispatch.te.at(List.is_empty(&2, U32, new), s, k, site, ts, new)
@@ -2480,42 +2622,75 @@ def dispatch.te(+new: List<&2, U32>, s: St, +k: U32, +site: Site, +ts: List<&2, 
 # without listing the class's tags first.
 def site.caps(+k: U32, +site: Site, r: St & List<&2, TE>) -> St & Bool:
   match site:
-    case Site{fn, env, res, depth, loc, +done}:
+    case Site{env, res, depth, loc, +done}:
       (s, +ts) = r
       dispatch.te(te.diff(ts, done), s, k, site, ts)
 
 def site.loc(s: Site) -> Lc.Loc:
   match s:
-    case Site{fn, env, res, depth, loc, done}:
+    case Site{env, res, depth, loc, done}:
       loc
 
-def site.fn(s: Site) -> U32:
-  match s:
-    case Site{fn, env, res, depth, loc, done}:
-      fn
+def site.full(+k: U32, +root: U32, r: St & Site) -> St & Bool:
+  (s, +site) = r
+  site.caps(k, site, tg.get(s, root))
 
-def site.walked(k2: K, s: St, +k: U32, +site: Site, +w: U32) -> St & Bool:
+def site.same(same: Bool, s: St, +k: U32, +root: U32, +stamp: U32) -> St & Bool:
+  match same:
+    case True{}:
+      (s, False{})
+    case False{}:
+      site.full(k, root, site.get(sv.wr(sv.wr(s, (k * 4 + 1 : U32), root), (k * 4 + 2 : U32), stamp), k))
+
+def site.ms(+k: U32, +root: U32, +stamp: U32, +mr: U32, r: St & U32) -> St & Bool:
+  (s, +ms) = r
+  site.same(U32.is_eq(mr, root) && U32.is_eq(ms, stamp), s, k, root, stamp)
+
+def site.mr(+k: U32, +root: U32, +stamp: U32, r: St & U32) -> St & Bool:
+  (s, +mr) = r
+  site.ms(k, root, stamp, mr, sv.rd(s, (k * 4 + 2 : U32)))
+
+def site.stamp(+k: U32, +root: U32, r: St & U32) -> St & Bool:
+  (s, +stamp) = r
+  site.mr(k, root, stamp, sv.rd(s, (k * 4 + 1 : U32)))
+
+# A code class at a site. Its look records the class's root and stamp:
+# the tags it saw are all dispatched (or being so) from then on, so while
+# the root and its stamp stay the same there is nothing new to look for.
+def site.code(+k: U32, r: St & U32) -> St & Bool:
+  (s, +root) = r
+  site.stamp(k, root, rd(s, (root * 8 + 21 : U32)))
+
+def site.capw(+k: U32, +w: U32, r: St & Site) -> St & Bool:
+  (s, +site) = r
+  site.ts(k, site, fn.tags(s, ix(w)))
+
+def site.pairw(r: St & Site) -> St & Bool:
+  (s, site) = r
+  (fail(s, TypeMismatch{site.loc(site), "applied value is pair, not code"}), False{})
+
+def site.walked(k2: K, s: St, +k: U32, +w: U32) -> St & Bool:
   match k2:
     case KCode{}:
-      site.caps(k, site, caps(s, ix(w)))
+      site.code(k, find(s, 4, ix(w)))
     case KCap{}:
-      site.ts(k, site, fn.tags(s, ix(w)))
+      site.capw(k, w, site.get(s, k))
     case KPair{}:
-      (fail(s, TypeMismatch{site.loc(site), "applied value is pair, not code"}), False{})
+      site.pairw(site.get(s, k))
     case _:
       (s, False{})
 
-def site.w(+k: U32, +site: Site, r: St & U32) -> St & Bool:
+def site.w(+k: U32, r: St & U32) -> St & Bool:
   (s, +w) = r
-  site.walked(kind(w), s, k, site, w)
+  site.walked(kind(w), s, k, w)
 
-def site.read(+k: U32, r: St & Site) -> St & Bool:
-  (s, +site) = r
-  site.w(k, site, walk(s, site.fn(site)))
+def site.fn(+k: U32, r: St & U32) -> St & Bool:
+  (s, +fn) = r
+  site.w(k, walk(s, fn))
 
 # One site: dispatch whatever new code its function position holds.
 def site.resolve(s: St, +k: U32) -> St & Bool:
-  site.read(k, site.get(s, k))
+  site.fn(k, sv.rd(s, (k * 4 : U32)))
 
 def site.flag(c: Bool, r: St & Bool) -> St & SS:
   match c:
@@ -2595,7 +2770,7 @@ def applies(s: St) -> St:
 
 def register.so(+fn: U32, +env: Sig, r: St & Sig) -> St:
   (s, +so) = r
-  site.add(s, Site{fn, env, so, 0, Lc.Gen{"virtual application of main to input"}, []})
+  site.add(s, fn, Site{env, so, 0, Lc.Gen{"virtual application of main to input"}, []})
 
 def register(s: St, +fn: U32, +env: Sig) -> St:
   register.so(fn, env, fresh.sig(s))
@@ -2679,516 +2854,562 @@ def walk.top(s: St, +what: String, +dup: Maybe<&2, Dup>, +term: A) -> St & Sig:
 # Solving
 # -------
 
+# The solver's tables are built once the walk and dispatch are done. The
+# equations are resolved to class roots then, and nothing merges classes
+# afterwards, so their roots stay roots.
 
 def derived(+what: String, b: Blame) -> Blame:
   match b:
     case Blame{loc, why}:
       Blame{loc, what ++ ": " ++ why}
 
-def is.fz(c: Class) -> Bool:
-  match c:
-    case ForcedZero{b}:
-      True{}
-    case _:
-      False{}
-
-def lower(c: Class) -> U32:
-  match c:
-    case ForcedLevel{n, b}:
-      n
-    case _:
-      0
-
-def all.fz(cs: List<&2, Class>) -> Bool:
-  match cs:
-    case Nil{}:
-      True{}
-    case Con{c, rest}:
-      is.fz(c) && all.fz(rest)
-
-def sum.lower(cs: List<&2, Class>) -> U32:
-  match cs:
-    case Nil{}:
-      0
-    case Con{c, rest}:
-      (lower(c) + sum.lower(rest) : U32)
-
-def boxable.at(fz: Bool, l: U32, rest: List<&2, U32>) -> List<&2, U32>:
-  match fz:
-    case True{}:
-      rest
-    case False{}:
-      l <> rest
-
-# The summands whose classes may be boxed.
-def boxable(ls: List<&2, U32>, cs: List<&2, Class>) -> List<&2, U32>:
-  match ls:
-    case Nil{}:
-      []
-    case Con{l, lr}:
-      match cs:
-        case Nil{}:
-          []
-        case Con{c, cr}:
-          boxable.at(is.fz(c), l, boxable(lr, cr))
-
-def eq.roots(es: List<&2, SumEq>, acc: List<&2, U32>) -> List<&2, U32>:
-  match es:
-    case Nil{}:
-      acc
-    case Con{e, rest}:
-      match e:
-        case SumEq{lhs, rhs, blame}:
-          eq.roots(rest, rhs <> List.append(&2, U32, lhs, acc))
-
-
-# Nothing merges classes while the solver runs, so the equations' roots
-# are found once and their classes copied to a table of their own; both
-# passes then work on tables. A derived blame is built only when a class
-# keeps it or a conflict names it.
-
-
-def pr.or(+ch: Bool, r: PR) -> PR:
-  match r:
-    case PGo{cls, c}:
-      PGo{cls, ch || c}
-    case PErr{e}:
-      PErr{e}
-
-def zero.at(+r: U32, +what: String, +blame: Blame, p: Array<Class> & Class) -> PR:
-  (cls, old) = p
-  match old:
-    case Unrestricted{}:
-      PGo{Array.set(Class, cls, r, ForcedZero{derived(what, blame)}), True{}}
-    case ForcedZero{z}:
-      PGo{cls, False{}}
-    case ForcedLevel{n, l}:
-      PErr{BoxConflict{l, derived(what, blame)}}
-
-# constrainB to ForcedZero, on a root.
-def zero(cls: Array<Class>, +r: U32, +what: String, +blame: Blame) -> PR:
-  zero.at(r, what, blame, Array.get(Class, cls, r))
-
-def level.keep(keep: Bool, cls: Array<Class>, +r: U32, +n: U32, +what: String, +blame: Blame) -> PR:
-  match keep:
-    case True{}:
-      PGo{cls, False{}}
-    case False{}:
-      PGo{Array.set(Class, cls, r, ForcedLevel{n, derived(what, blame)}), True{}}
-
-def level.at(+r: U32, +n: U32, +what: String, +blame: Blame, p: Array<Class> & Class) -> PR:
-  (cls, old) = p
-  match old:
-    case Unrestricted{}:
-      PGo{Array.set(Class, cls, r, ForcedLevel{n, derived(what, blame)}), True{}}
-    case ForcedZero{z}:
-      PErr{BoxConflict{derived(what, blame), z}}
-    case ForcedLevel{+la, l}:
-      level.keep(U32.is_ge(la, n), cls, r, n, what, blame)
-
-# constrainB to ForcedLevel n, on a root; past the level cap, it gives up.
-def level(over: Bool, cls: Array<Class>, +r: U32, +n: U32, +what: String, +blame: Blame) -> PR:
-  match over:
-    case True{}:
-      PErr{GaveUp{"bang level exceeded cap of 4096: " ++ blame.show(derived(what, blame))}}
-    case False{}:
-      level.at(r, n, what, blame, Array.get(Class, cls, r))
-
-def zero.then(+l: U32, +blame: Blame, r: PR) -> PR:
-  match r:
-    case PGo{cls, ch}:
-      pr.or(ch, zero(cls, l, "summand of an unboxed total", blame))
-    case PErr{e}:
-      PErr{e}
-
-def zeros(ls: List<&2, U32>, +blame: Blame, r: PR) -> PR:
-  match ls:
-    case Nil{}:
-      r
-    case Con{+l, rest}:
-      zeros(rest, blame, zero.then(l, blame, r))
-
-def classes.push(cs: List<&2, Class>, q: Array<Class> & Class) -> Array<Class> & List<&2, Class>:
-  (cls, c) = q
-  (cls, c <> cs)
-
-# The classes of these roots.
-def classes(ls: List<&2, U32>, p: Array<Class> & List<&2, Class>) -> Array<Class> & List<&2, Class>:
-  match ls:
-    case Nil{}:
-      (cls, cs) = p
-      (cls, List.reverse(&2, Class, cs))
-    case Con{l, rest}:
-      (cls, cs) = p
-      classes(rest, classes.push(cs, Array.get(Class, cls, l)))
-
-# An unboxed total unboxes every summand.
-def prop.c1(fz: Bool, +lhs: List<&2, U32>, +blame: Blame, cls: Array<Class>) -> PR:
-  match fz:
-    case True{}:
-      zeros(lhs, blame, PGo{cls, False{}})
-    case False{}:
-      PGo{cls, False{}}
-
-# Summands all unboxed unbox the total.
-def prop.c2(all: Bool, cls: Array<Class>, +rhs: U32, +blame: Blame) -> PR:
-  match all:
-    case True{}:
-      zero(cls, rhs, "all summands unboxed", blame)
-    case False{}:
-      PGo{cls, False{}}
-
-# The summands' lower bounds bound the total.
-def prop.c3(some: Bool, cls: Array<Class>, +rhs: U32, +n: U32, +blame: Blame) -> PR:
-  match some:
-    case True{}:
-      level(U32.is_gt(n, level.cap()), cls, rhs, n, "sum of summand lower bounds", blame)
-    case False{}:
-      PGo{cls, False{}}
-
-# A boxed total's only boxable summand takes its level.
-def prop.c4(frees: List<&2, U32>, ri: Class, cls: Array<Class>, +blame: Blame) -> PR:
-  match frees:
-    case Con{+lone, rest}:
-      match rest:
-        case Nil{}:
-          match ri:
-            case ForcedLevel{+n, b}:
-              level(U32.is_gt(n, level.cap()), cls, lone, n, "only boxable summand", blame)
-            case _:
-              PGo{cls, False{}}
-        case _:
-          PGo{cls, False{}}
-    case Nil{}:
-      PGo{cls, False{}}
-
-def step.ri2(frees: List<&2, U32>, +blame: Blame, p: Array<Class> & Class) -> PR:
-  (cls, ri) = p
-  prop.c4(frees, ri, cls, blame)
-
-def step.c4(+lhs: List<&2, U32>, +rhs: U32, +blame: Blame, +cs: List<&2, Class>, r: PR) -> PR:
-  match r:
-    case PGo{cls, ch}:
-      pr.or(ch, step.ri2(boxable(lhs, cs), blame, Array.get(Class, cls, rhs)))
-    case PErr{e}:
-      PErr{e}
-
-def step.c3(+lhs: List<&2, U32>, +rhs: U32, +blame: Blame, +cs: List<&2, Class>, r: PR) -> PR:
-  match r:
-    case PGo{cls, ch}:
-      +n = sum.lower(cs)
-      step.c4(lhs, rhs, blame, cs, pr.or(ch, prop.c3(U32.is_gt(n, 0), cls, rhs, n, blame)))
-    case PErr{e}:
-      PErr{e}
-
-def step.cs(+lhs: List<&2, U32>, +rhs: U32, +blame: Blame, +c1: Bool, p: Array<Class> & List<&2, Class>) -> PR:
-  (cls, +cs) = p
-  step.c3(lhs, rhs, blame, cs, pr.or(c1, prop.c2(all.fz(cs), cls, rhs, blame)))
-
-def step.c1(+lhs: List<&2, U32>, +rhs: U32, +blame: Blame, r: PR) -> PR:
-  match r:
-    case PGo{cls, c1}:
-      step.cs(lhs, rhs, blame, c1, classes(lhs, (cls, [])))
-    case PErr{e}:
-      PErr{e}
-
-def step.ri(+lhs: List<&2, U32>, +rhs: U32, +blame: Blame, p: Array<Class> & Class) -> PR:
-  (cls, ri) = p
-  step.c1(lhs, rhs, blame, prop.c1(is.fz(ri), lhs, blame, cls))
-
-# One equation's propagation step: whether any class changed.
-def step(e: SumEq, cls: Array<Class>) -> PR:
-  match e:
-    case SumEq{+lhs, +rhs, +blame}:
-      step.ri(lhs, rhs, blame, Array.get(Class, cls, rhs))
-
-def prop.round(es: List<&2, SumEq>, r: PR) -> PR:
-  match es:
-    case Nil{}:
-      r
-    case Con{e, rest}:
-      match r:
-        case PGo{cls, ch}:
-          prop.round(rest, pr.or(ch, step(e, cls)))
-        case PErr{x}:
-          PErr{x}
-
-# propagate: zero-forcings and lower bounds through the sums, round after
-# round to a fixpoint, within fuel rounds.
-def rounds(fuel: Nat, +es: List<&2, SumEq>, r: PR) -> PR:
-  match fuel:
-    case 0n:
-      match r:
-        case PGo{cls, changed}:
-          match changed:
-            case True{}:
-              PErr{GaveUp{"constraint propagation did not converge"}}
-            case False{}:
-              PGo{cls, False{}}
-        case PErr{e}:
-          PErr{e}
-    case 1n+f:
-      match r:
-        case PGo{cls, changed}:
-          match changed:
-            case True{}:
-              rounds(f, es, prop.round(es, PGo{cls, False{}}))
-            case False{}:
-              PGo{cls, False{}}
-        case PErr{e}:
-          PErr{e}
-
-# Assignment (assignValues)
-# -------------------------
-
 def give.up(+what: String, b: Blame) -> Err:
   GaveUp{what ++ ": " ++ blame.show(b)}
 
-def a.plus(+acc: U32, q: Array<U32> & U32) -> Array<U32> & U32:
-  (vals, v) = q
-  (vals, (acc + v : U32))
+# A class word's kind.
+def ck(+w: U32) -> CK:
+  Bool.pick(CK, U32.is_zero((w .&. 3 : U32)), CFree{}, Bool.pick(CK, U32.is_eq((w .&. 3 : U32), 1), CZero{}, CLevel{}))
 
-# The sum of these roots' values.
-def a.sum(ls: List<&2, U32>, p: Array<U32> & U32) -> Array<U32> & U32:
-  match ls:
-    case Nil{}:
-      p
-    case Con{l, rest}:
-      (vals, acc) = p
-      a.sum(rest, a.plus(acc, vals[l]))
+def is.zero(+w: U32) -> Bool:
+  U32.is_eq((w .&. 3 : U32), 1)
 
-def a.free(+fs: List<&2, U32>, +l: U32, q: Array<U32> & U32) -> Array<U32> & List<&2, U32>:
-  (zf, z) = q
-  (zf, Bool.pick(List<&2, U32>, U32.is_eq(z, 0), l <> fs, fs))
+def sv.fail(sv: Sv, e: Err) -> Sv:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, ch}:
+      SvErr{e}
+    case SvErr{x}:
+      SvErr{x}
 
-# The summands that may be boxed (in no particular order: the pick is a
-# minimum).
-def a.frees(ls: List<&2, U32>, p: Array<U32> & List<&2, U32>) -> Array<U32> & List<&2, U32>:
-  match ls:
-    case Nil{}:
-      p
-    case Con{+l, rest}:
-      (zf, fs) = p
-      a.frees(rest, a.free(fs, l, zf[l]))
+def c.got(cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+  (c, w) = r
+  (Sv{c, cb, q, qb, v, n, ch}, w)
 
-def a.cmp(+l: U32, q: Array<U32> & U32, k: Pk) -> Array<U32> & Pk:
-  (cnt, +c) = q
+# Root r's class word.
+def c.rd(sv: Sv, +r: U32) -> Sv & U32:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, +ch}:
+      c.got(cb, q, qb, v, n, ch, Array.get(U32, c, r))
+    case SvErr{e}:
+      (SvErr{e}, 0)
+
+# Root r's class becomes word w, blamed on b: a change. Until the
+# assignment, a root's value is its class's lower bound.
+def c.wr(sv: Sv, +r: U32, +w: U32, b: Blame) -> Sv:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, ch}:
+      Sv{Array.set(U32, c, r, w), Array.set(Blame, cb, r, b), q, qb, Array.set(U32, v, r, (w >> 2n : U32)), n, True{}}
+    case SvErr{e}:
+      SvErr{e}
+
+def cb.got(c: Array<U32>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<Blame> & Blame) -> Sv & Blame:
+  (cb, b) = r
+  (Sv{c, cb, q, qb, v, n, ch}, b)
+
+# Root r's class's blame.
+def cb.rd(sv: Sv, +r: U32) -> Sv & Blame:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, +ch}:
+      cb.got(c, q, qb, v, n, ch, Array.get(Blame, cb, r))
+    case SvErr{e}:
+      (SvErr{e}, blame.none())
+
+def q.got(c: Array<U32>, cb: Array<Blame>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+  (q, w) = r
+  (Sv{c, cb, q, qb, v, n, ch}, w)
+
+# Word i of the equations' rows.
+def q.rd(sv: Sv, +i: U32) -> Sv & U32:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, +ch}:
+      q.got(c, cb, qb, v, n, ch, Array.get(U32, q, i))
+    case SvErr{e}:
+      (SvErr{e}, 0)
+
+def qb.got(c: Array<U32>, cb: Array<Blame>, q: Array<U32>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<Blame> & Blame) -> Sv & Blame:
+  (qb, b) = r
+  (Sv{c, cb, q, qb, v, n, ch}, b)
+
+# Equation e's blame.
+def qb.rd(sv: Sv, +e: U32) -> Sv & Blame:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, +ch}:
+      qb.got(c, cb, q, v, n, ch, Array.get(Blame, qb, e))
+    case SvErr{x}:
+      (SvErr{x}, blame.none())
+
+def v.got(c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+  (v, x) = r
+  (Sv{c, cb, q, qb, v, n, ch}, x)
+
+# Root r's value.
+def v.rd(sv: Sv, +r: U32) -> Sv & U32:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, +ch}:
+      v.got(c, cb, q, qb, n, ch, Array.get(U32, v, r))
+    case SvErr{e}:
+      (SvErr{e}, 0)
+
+# Root r's value becomes x: a change.
+def v.wr(sv: Sv, +r: U32, +x: U32) -> Sv:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, ch}:
+      Sv{c, cb, q, qb, Array.set(U32, v, r, x), n, True{}}
+    case SvErr{e}:
+      SvErr{e}
+
+def n.got(c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+  (n, x) = r
+  (Sv{c, cb, q, qb, v, n, ch}, x)
+
+# How many equations root r is a summand of.
+def n.rd(sv: Sv, +r: U32) -> Sv & U32:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, +ch}:
+      n.got(c, cb, q, qb, v, ch, Array.get(U32, n, r))
+    case SvErr{e}:
+      (SvErr{e}, 0)
+
+
+def q.wr(sv: Sv, +i: U32, +w: U32) -> Sv:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, ch}:
+      Sv{c, cb, Array.set(U32, q, i, w), qb, v, n, ch}
+    case SvErr{e}:
+      SvErr{e}
+
+def qb.wr(sv: Sv, +e: U32, b: Blame) -> Sv:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, ch}:
+      Sv{c, cb, q, Array.set(Blame, qb, e, b), v, n, ch}
+    case SvErr{x}:
+      SvErr{x}
+
+def n.inc.at(+r: U32, c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, +ch: Bool, p: Array<U32> & U32) -> Sv:
+  (n, +x) = p
+  Sv{c, cb, q, qb, v, Array.set(U32, n, r, (x + 1 : U32)), ch}
+
+# One more equation has root r as a summand.
+def n.inc(sv: Sv, +r: U32) -> Sv:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, +ch}:
+      n.inc.at(r, c, cb, q, qb, v, ch, Array.get(U32, n, r))
+    case SvErr{e}:
+      SvErr{e}
+
+def sv.err(sv: Sv) -> Maybe<&2, Err>:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, ch}:
+      None{}
+    case SvErr{e}:
+      Some{e}
+
+# propagate
+# ---------
+
+def zero.clash(+ob: Blame, +what: String, r: Sv & Blame) -> Sv:
+  (sv, b) = r
+  sv.fail(sv, BoxConflict{ob, derived(what, b)})
+
+def zero.old(+what: String, +e: U32, r: Sv & Blame) -> Sv:
+  (sv, +ob) = r
+  zero.clash(ob, what, qb.rd(sv, e))
+
+def zero.set(+r: U32, +what: String, p: Sv & Blame) -> Sv:
+  (sv, b) = p
+  c.wr(sv, r, 1, derived(what, b))
+
+def zero.at(k: CK, sv: Sv, +r: U32, +what: String, +e: U32) -> Sv:
   match k:
-    case Pk{+best, +bc}:
-      +better = U32.is_lt(c, bc) || (U32.is_eq(c, bc) && U32.is_lt(l, best))
-      (cnt, Pk{Bool.pick(U32, better, l, best), Bool.pick(U32, better, c, bc)})
+    case CFree{}:
+      zero.set(r, what, qb.rd(sv, e))
+    case CZero{}:
+      sv
+    case CLevel{}:
+      zero.old(what, e, cb.rd(sv, r))
 
-# minimumBy on (count, root): the summand in the fewest equations, then the
-# lowest.
-def a.pick(ls: List<&2, U32>, p: Array<U32> & Pk) -> Array<U32> & Pk:
-  match ls:
-    case Nil{}:
-      p
-    case Con{+l, rest}:
-      (cnt, k) = p
-      a.pick(rest, a.cmp(l, cnt[l], k))
+def zero.w(+r: U32, +what: String, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +w) = p
+  zero.at(ck(w), sv, r, what, e)
 
-def adjust.set(over: Bool, +p: U32, +v: U32, +blame: Blame, vals: Array<U32>, zf: Array<U32>, cnt: Array<U32>) -> AR:
+# constrainB to forced zero, on root r, for equation e (whose blame the
+# class's derives from).
+def zero(sv: Sv, +r: U32, +what: String, +e: U32) -> Sv:
+  zero.w(r, what, e, c.rd(sv, r))
+
+def level.set(+r: U32, +lv: U32, +what: String, p: Sv & Blame) -> Sv:
+  (sv, b) = p
+  c.wr(sv, r, (lv * 4 + 2 : U32), derived(what, b))
+
+def level.clash(+ob: Blame, +what: String, p: Sv & Blame) -> Sv:
+  (sv, b) = p
+  sv.fail(sv, BoxConflict{derived(what, b), ob})
+
+def level.old(+what: String, +e: U32, p: Sv & Blame) -> Sv:
+  (sv, +ob) = p
+  level.clash(ob, what, qb.rd(sv, e))
+
+def level.keep(keep: Bool, sv: Sv, +r: U32, +lv: U32, +what: String, +e: U32) -> Sv:
+  match keep:
+    case True{}:
+      sv
+    case False{}:
+      level.set(r, lv, what, qb.rd(sv, e))
+
+def level.at(k: CK, sv: Sv, +r: U32, +lv: U32, +la: U32, +what: String, +e: U32) -> Sv:
+  match k:
+    case CFree{}:
+      level.set(r, lv, what, qb.rd(sv, e))
+    case CZero{}:
+      level.old(what, e, cb.rd(sv, r))
+    case CLevel{}:
+      level.keep(U32.is_ge(la, lv), sv, r, lv, what, e)
+
+def level.w(+r: U32, +lv: U32, +what: String, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +w) = p
+  level.at(ck(w), sv, r, lv, (w >> 2n : U32), what, e)
+
+def level.over.at(+what: String, p: Sv & Blame) -> Sv:
+  (sv, b) = p
+  sv.fail(sv, GaveUp{"bang level exceeded cap of 4096: " ++ blame.show(derived(what, b))})
+
+def level.over(over: Bool, sv: Sv, +r: U32, +lv: U32, +what: String, +e: U32) -> Sv:
   match over:
     case True{}:
-      AErr{give.up("assignment exceeded level cap", blame)}
+      level.over.at(what, qb.rd(sv, e))
     case False{}:
-      AGo{vals[p] <- v, zf, cnt, True{}}
+      level.w(r, lv, what, e, c.rd(sv, r))
 
-def adjust.raise(+blame: Blame, +short: U32, +p: U32, zf: Array<U32>, cnt: Array<U32>, q: Array<U32> & U32) -> AR:
-  (vals, v) = q
-  +v2 = (v + short : U32)
-  adjust.set(U32.is_gt(v2, level.cap()), p, v2, blame, vals, zf, cnt)
+# constrainB to forced level lv, on root r, for equation e; past the level
+# cap, it gives up.
+def level(sv: Sv, +r: U32, +lv: U32, +what: String, +e: U32) -> Sv:
+  level.over(U32.is_gt(lv, level.cap()), sv, r, lv, what, e)
 
-def adjust.pick(+blame: Blame, +short: U32, vals: Array<U32>, zf: Array<U32>, p: Array<U32> & Pk) -> AR:
-  (cnt, k) = p
+def zero.q(+e: U32, p: Sv & U32) -> Sv:
+  (sv, +l) = p
+  zero(sv, l, "summand of an unboxed total", e)
+
+# The k summands from row word i are forced to zero.
+def zeros(k: Nat, +e: U32, +i: U32, sv: Sv) -> Sv:
   match k:
-    case Pk{+best, bc}:
-      adjust.raise(blame, short, best, zf, cnt, vals[best])
+    case 0n:
+      sv
+    case 1n+j:
+      zeros(j, e, (i + 1 : U32), zero.q(e, q.rd(sv, i)))
 
-def adjust.first(+f: U32, q: Array<U32> & U32) -> Array<U32> & Pk:
-  (cnt, c) = q
-  (cnt, Pk{f, c})
+def sm.add(s: Sm, +l: U32, +w: U32) -> Sm:
+  match s:
+    case Sm{fz, +sum, +free, +lone}:
+      Sm{fz && is.zero(w), (sum + (w >> 2n : U32) : U32),
+         Bool.pick(U32, is.zero(w), free, (free + 1 : U32)), Bool.pick(U32, is.zero(w), lone, l)}
+
+def sm.w(+l: U32, s: Sm, p: Sv & U32) -> Sv & Sm:
+  (sv, +w) = p
+  (sv, sm.add(s, l, w))
+
+def sm.l(s: Sm, p: Sv & U32) -> Sv & Sm:
+  (sv, +l) = p
+  sm.w(l, s, c.rd(sv, l))
+
+# The k summands from row word i, summed up.
+def sm.go(k: Nat, +i: U32, p: Sv & Sm) -> Sv & Sm:
+  match k:
+    case 0n:
+      p
+    case 1n+j:
+      (sv, s) = p
+      sm.go(j, (i + 1 : U32), sm.l(s, q.rd(sv, i)))
+
+# An unboxed total unboxes every summand.
+def prop.c1(fz: Bool, sv: Sv, +nl: U32, +o: U32, +e: U32) -> Sv:
+  match fz:
+    case True{}:
+      zeros(U32.to_nat(nl), e, (o + 2 : U32), sv)
+    case False{}:
+      sv
+
+# Summands all unboxed unbox the total.
+def prop.c2(all: Bool, sv: Sv, +rhs: U32, +e: U32) -> Sv:
+  match all:
+    case True{}:
+      zero(sv, rhs, "all summands unboxed", e)
+    case False{}:
+      sv
+
+# The summands' lower bounds bound the total.
+def prop.c3(some: Bool, sv: Sv, +rhs: U32, +sum: U32, +e: U32) -> Sv:
+  match some:
+    case True{}:
+      level(sv, rhs, sum, "sum of summand lower bounds", e)
+    case False{}:
+      sv
+
+def c4.at(k: CK, sv: Sv, +lone: U32, +lb: U32, +e: U32) -> Sv:
+  match k:
+    case CLevel{}:
+      level(sv, lone, lb, "only boxable summand", e)
+    case _:
+      sv
+
+def c4.w(+lone: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +w) = p
+  c4.at(ck(w), sv, lone, (w >> 2n : U32), e)
+
+# A boxed total's only boxable summand takes its level.
+def prop.c4(one: Bool, sv: Sv, +lone: U32, +rhs: U32, +e: U32) -> Sv:
+  match one:
+    case True{}:
+      c4.w(lone, e, c.rd(sv, rhs))
+    case False{}:
+      sv
+
+def step.sm(+rhs: U32, +e: U32, p: Sv & Sm) -> Sv:
+  (sv, s) = p
+  match s:
+    case Sm{fz, +sum, +free, +lone}:
+      prop.c4(U32.is_eq(free, 1), prop.c3(U32.is_gt(sum, 0), prop.c2(fz, sv, rhs, e), rhs, sum, e), lone, rhs, e)
+
+def step.ri(+nl: U32, +rhs: U32, +o: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +ri) = p
+  step.sm(rhs, e, sm.go(U32.to_nat(nl), (o + 2 : U32), (prop.c1(is.zero(ri), sv, nl, o, e), Sm{True{}, 0, 0, 0})))
+
+def step.rhs(+nl: U32, +o: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +rhs) = p
+  step.ri(nl, rhs, o, e, c.rd(sv, rhs))
+
+def step.nl(+o: U32, +e: U32, p: Sv & U32) -> Sv & U32:
+  (sv, +nl) = p
+  (step.rhs(nl, o, e, q.rd(sv, (o + 1 : U32))), (o + 2 + nl : U32))
+
+# One equation's propagation step (equation e, its row at o); the next
+# row's offset.
+def step(sv: Sv, +o: U32, +e: U32) -> Sv & U32:
+  step.nl(o, e, q.rd(sv, o))
+
+# assignValues
+# ------------
+
+def a.err(+what: String, p: Sv & Blame) -> Sv:
+  (sv, b) = p
+  sv.fail(sv, give.up(what, b))
+
+def a.plus(+acc: U32, p: Sv & U32) -> Sv & U32:
+  (sv, +x) = p
+  (sv, (acc + x : U32))
+
+def a.l(+acc: U32, p: Sv & U32) -> Sv & U32:
+  (sv, +l) = p
+  a.plus(acc, v.rd(sv, l))
+
+# The sum of the values of the k summands from row word i.
+def a.sum(k: Nat, +i: U32, p: Sv & U32) -> Sv & U32:
+  match k:
+    case 0n:
+      p
+    case 1n+j:
+      (sv, +acc) = p
+      a.sum(j, (i + 1 : U32), a.l(acc, q.rd(sv, i)))
+
+def pk.cmp(k: Pk, +l: U32, +cnt: U32) -> Pk:
+  match k:
+    case Pk{+best, +bc}:
+      +better = U32.is_lt(cnt, bc) || (U32.is_eq(cnt, bc) && U32.is_lt(l, best))
+      Pk{Bool.pick(U32, better, l, best), Bool.pick(U32, better, cnt, bc)}
+
+def pk.n(+l: U32, k: Pk, p: Sv & U32) -> Sv & Pk:
+  (sv, +cnt) = p
+  (sv, pk.cmp(k, l, cnt))
+
+def pk.z(z: Bool, +l: U32, k: Pk, sv: Sv) -> Sv & Pk:
+  match z:
+    case True{}:
+      (sv, k)
+    case False{}:
+      pk.n(l, k, n.rd(sv, l))
+
+def pk.w(+l: U32, k: Pk, p: Sv & U32) -> Sv & Pk:
+  (sv, +w) = p
+  pk.z(is.zero(w), l, k, sv)
+
+def pk.l(k: Pk, p: Sv & U32) -> Sv & Pk:
+  (sv, +l) = p
+  pk.w(l, k, c.rd(sv, l))
+
+# minimumBy on (count, root) over the k summands from row word i that may
+# be boxed: the summand in the fewest equations, then the lowest; none()
+# if no summand may be.
+def pk.go(k: Nat, +i: U32, p: Sv & Pk) -> Sv & Pk:
+  match k:
+    case 0n:
+      p
+    case 1n+j:
+      (sv, x) = p
+      pk.go(j, (i + 1 : U32), pk.l(x, q.rd(sv, i)))
+
+def adj.set(over: Bool, sv: Sv, +r: U32, +x: U32, +e: U32) -> Sv:
+  match over:
+    case True{}:
+      a.err("assignment exceeded level cap", qb.rd(sv, e))
+    case False{}:
+      v.wr(sv, r, x)
+
+def adj.raise(+short: U32, +e: U32, +r: U32, p: Sv & U32) -> Sv:
+  (sv, +x) = p
+  adj.set(U32.is_gt((x + short : U32), level.cap()), sv, r, (x + short : U32), e)
+
+def adj.empty(empty: Bool, sv: Sv, +best: U32, +short: U32, +e: U32) -> Sv:
+  match empty:
+    case True{}:
+      a.err("no boxable position to absorb required boxes", qb.rd(sv, e))
+    case False{}:
+      adj.raise(short, e, best, v.rd(sv, best))
 
 # The sum falls short: raise one free summand by the difference.
-def adjust.lt(+blame: Blame, +short: U32, vals: Array<U32>, cnt: Array<U32>, p: Array<U32> & List<&2, U32>) -> AR:
-  (zf, fs) = p
-  match fs:
-    case Nil{}:
-      AErr{give.up("no boxable position to absorb required boxes", blame)}
-    case Con{+f, rest}:
-      adjust.pick(blame, short, vals, zf, a.pick(rest, adjust.first(f, cnt[f])))
+def adj.pick(+short: U32, +e: U32, p: Sv & Pk) -> Sv:
+  (sv, k) = p
+  match k:
+    case Pk{+best, bc}:
+      adj.empty(U32.is_eq(best, none()), sv, best, short, e)
 
-def adjust.over(zero: Bool, over: Bool, +rhs: U32, +sum: U32, +blame: Blame, vals: Array<U32>, zf: Array<U32>, cnt: Array<U32>) -> AR:
+def adj.over(zero: Bool, over: Bool, sv: Sv, +rhs: U32, +sum: U32, +e: U32) -> Sv:
   match zero:
     case True{}:
-      AErr{give.up("sum exceeds an unboxed total", blame)}
+      a.err("sum exceeds an unboxed total", qb.rd(sv, e))
     case False{}:
-      match over:
-        case True{}:
-          AErr{give.up("assignment exceeded level cap", blame)}
-        case False{}:
-          AGo{vals[rhs] <- sum, zf, cnt, True{}}
+      adj.set(over, sv, rhs, sum, e)
 
 # The sum exceeds the total: raise the total.
-def adjust.gt(+rhs: U32, +blame: Blame, +sum: U32, vals: Array<U32>, cnt: Array<U32>, p: Array<U32> & U32) -> AR:
-  (zf, z) = p
-  adjust.over(U32.is_ne(z, 0), U32.is_gt(sum, level.cap()), rhs, sum, blame, vals, zf, cnt)
+def adj.gt(+rhs: U32, +sum: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +w) = p
+  adj.over(is.zero(w), U32.is_gt(sum, level.cap()), sv, rhs, sum, e)
 
-def adjust.cmp(c: Cmp, +lhs: List<&2, U32>, +rhs: U32, +blame: Blame, +sum: U32, +t: U32, vals: Array<U32>, zf: Array<U32>, cnt: Array<U32>) -> AR:
+def adj.cmp(c: Cmp, sv: Sv, +nl: U32, +o: U32, +rhs: U32, +sum: U32, +t: U32, +e: U32) -> Sv:
   match c:
     case EQ{}:
-      AGo{vals, zf, cnt, False{}}
+      sv
     case GT{}:
-      adjust.gt(rhs, blame, sum, vals, cnt, zf[rhs])
+      adj.gt(rhs, sum, e, c.rd(sv, rhs))
     case LT{}:
-      adjust.lt(blame, (t - sum : U32), vals, cnt, a.frees(lhs, (zf, [])))
+      adj.pick((t - sum : U32), e, pk.go(U32.to_nat(nl), (o + 2 : U32), (sv, Pk{none(), none()})))
 
-def adjust.t(+lhs: List<&2, U32>, +rhs: U32, +blame: Blame, +sum: U32, zf: Array<U32>, cnt: Array<U32>, p: Array<U32> & U32) -> AR:
-  (vals, +t) = p
-  adjust.cmp(U32.cmp(sum, t), lhs, rhs, blame, sum, t, vals, zf, cnt)
+def adj.t(+nl: U32, +o: U32, +rhs: U32, +sum: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +t) = p
+  adj.cmp(U32.cmp(sum, t), sv, nl, o, rhs, sum, t, e)
 
-def adjust.sum(+lhs: List<&2, U32>, +rhs: U32, +blame: Blame, zf: Array<U32>, cnt: Array<U32>, p: Array<U32> & U32) -> AR:
-  (vals, +sum) = p
-  adjust.t(lhs, rhs, blame, sum, zf, cnt, vals[rhs])
+def adj.sum(+nl: U32, +o: U32, +rhs: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +sum) = p
+  adj.t(nl, o, rhs, sum, e, v.rd(sv, rhs))
+
+def adj.rhs(+nl: U32, +o: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +rhs) = p
+  adj.sum(nl, o, rhs, e, a.sum(U32.to_nat(nl), (o + 2 : U32), (sv, 0)))
+
+def adj.nl(+o: U32, +e: U32, p: Sv & U32) -> Sv & U32:
+  (sv, +nl) = p
+  (adj.rhs(nl, o, e, q.rd(sv, (o + 1 : U32))), (o + 2 + nl : U32))
 
 # adjust: raise the total, or one summand, so that one equation holds.
-def adjust(e: SumEq, vals: Array<U32>, zf: Array<U32>, cnt: Array<U32>) -> AR:
-  match e:
-    case SumEq{+lhs, +rhs, +blame}:
-      adjust.sum(lhs, rhs, blame, zf, cnt, a.sum(lhs, (vals, 0)))
+def adjust(sv: Sv, +o: U32, +e: U32) -> Sv & U32:
+  adj.nl(o, e, q.rd(sv, o))
 
-def ar.or(+ch: Bool, r: AR) -> AR:
-  match r:
-    case AGo{vals, zf, cnt, c}:
-      AGo{vals, zf, cnt, ch || c}
-    case AErr{e}:
-      AErr{e}
-
-def a.round(es: List<&2, SumEq>, r: AR) -> AR:
-  match es:
-    case Nil{}:
-      r
-    case Con{e, rest}:
-      match r:
-        case AGo{vals, zf, cnt, ch}:
-          a.round(rest, ar.or(ch, adjust(e, vals, zf, cnt)))
-        case AErr{x}:
-          AErr{x}
-
-def a.loop(fuel: Nat, +es: List<&2, SumEq>, r: AR) -> AR:
-  match fuel:
-    case 0n:
-      match r:
-        case AGo{vals, zf, cnt, changed}:
-          match changed:
-            case True{}:
-              AErr{GaveUp{"assignment did not converge"}}
-            case False{}:
-              AGo{vals, zf, cnt, False{}}
-        case AErr{e}:
-          AErr{e}
-    case 1n+f:
-      match r:
-        case AGo{vals, zf, cnt, changed}:
-          match changed:
-            case True{}:
-              a.loop(f, es, a.round(es, AGo{vals, zf, cnt, False{}}))
-            case False{}:
-              AGo{vals, zf, cnt, False{}}
-        case AErr{e}:
-          AErr{e}
-
-def verify.one(ok: Bool, b: Blame) -> Maybe<&2, Err>:
+def holds.at(ok: Bool, sv: Sv, +e: U32) -> Sv:
   match ok:
     case True{}:
-      None{}
+      sv
     case False{}:
-      Some{GaveUp{"assignment verification failed: " ++ blame.show(b)}}
+      a.err("assignment verification failed", qb.rd(sv, e))
 
-def holds.at(+blame: Blame, +sum: U32, p: Array<U32> & U32) -> Array<U32> & Maybe<&2, Err>:
-  (vals, t) = p
-  (vals, verify.one(U32.is_eq(sum, t), blame))
+def holds.t(+sum: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +t) = p
+  holds.at(U32.is_eq(sum, t), sv, e)
 
-def holds.sum(+rhs: U32, +blame: Blame, p: Array<U32> & U32) -> Array<U32> & Maybe<&2, Err>:
-  (vals, +sum) = p
-  holds.at(blame, sum, vals[rhs])
+def holds.sum(+rhs: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +sum) = p
+  holds.t(sum, e, v.rd(sv, rhs))
 
-def holds(e: SumEq, vals: Array<U32>) -> Array<U32> & Maybe<&2, Err>:
-  match e:
-    case SumEq{lhs, +rhs, +blame}:
-      holds.sum(rhs, blame, a.sum(lhs, (vals, 0)))
+def holds.rhs(+nl: U32, +o: U32, +e: U32, p: Sv & U32) -> Sv:
+  (sv, +rhs) = p
+  holds.sum(rhs, e, a.sum(U32.to_nat(nl), (o + 2 : U32), (sv, 0)))
 
-# Every equation holds exactly.
-def verify(es: List<&2, SumEq>, p: Array<U32> & Maybe<&2, Err>) -> Maybe<&2, Err>:
-  match es:
-    case Nil{}:
-      (vals, m) = p
-      m
-    case Con{e, rest}:
-      (vals, m) = p
-      match m:
-        case Some{x}:
-          Some{x}
-        case None{}:
-          verify(rest, holds(e, vals))
+def holds.nl(+o: U32, +e: U32, p: Sv & U32) -> Sv & U32:
+  (sv, +nl) = p
+  (holds.rhs(nl, o, e, q.rd(sv, (o + 1 : U32))), (o + 2 + nl : U32))
 
-def a.done(+es: List<&2, SumEq>, r: AR) -> Maybe<&2, Err>:
-  match r:
-    case AGo{vals, zf, cnt, changed}:
-      verify(es, (vals, None{}))
-    case AErr{e}:
-      Some{e}
+# The assignment satisfies one equation exactly.
+def holds(sv: Sv, +o: U32, +e: U32) -> Sv & U32:
+  holds.nl(o, e, q.rd(sv, o))
 
-def a.inc(+l: U32, p: Array<U32> & U32) -> Array<U32>:
-  (cnt, c) = p
-  cnt[l] <- (c + 1 : U32)
+# The passes
+# ----------
 
-def a.count.one(ls: List<&2, U32>, cnt: Array<U32>) -> Array<U32>:
-  match ls:
-    case Nil{}:
-      cnt
-    case Con{+l, rest}:
-      a.count.one(rest, a.inc(l, cnt[l]))
+def pass.step(ps: Pass, sv: Sv, +o: U32, +e: U32) -> Sv & U32:
+  match ps:
+    case PProp{}:
+      step(sv, o, e)
+    case PAdjust{}:
+      adjust(sv, o, e)
+    case PHolds{}:
+      holds(sv, o, e)
 
-# How often each root is a summand.
-def a.count(es: List<&2, SumEq>, cnt: Array<U32>) -> Array<U32>:
-  match es:
-    case Nil{}:
-      cnt
-    case Con{e, rest}:
-      match e:
-        case SumEq{lhs, rhs, blame}:
-          a.count(rest, a.count.one(lhs, cnt))
+# One pass over the k equations left, from equation e (r holds its row's
+# offset); it stops at a failure.
+def rows(k: Nat, +ps: Pass, +e: U32, r: Sv & U32) -> Sv:
+  match k:
+    case 0n:
+      (sv, o) = r
+      sv
+    case 1n+j:
+      (sv, +o) = r
+      match sv:
+        case SvErr{x}:
+          SvErr{x}
+        case Sv{c, cb, q, qb, v, n, ch}:
+          rows(j, ps, (e + 1 : U32), pass.step(ps, Sv{c, cb, q, qb, v, n, ch}, o, e))
 
-def a.init.got(+r: U32, vals: Array<U32>, zf: Array<U32>, p: Array<Class> & Class) -> AI:
-  (cls, +c) = p
-  AI{cls, vals[r] <- lower(c), zf[r] <- Bool.to_u32(is.fz(c))}
+def stuck(ps: Pass) -> Err:
+  match ps:
+    case PProp{}:
+      GaveUp{"constraint propagation did not converge"}
+    case _:
+      GaveUp{"assignment did not converge"}
 
-# Each root's value starts at its lower bound.
-def a.init(rs: List<&2, U32>, ai: AI) -> AI:
-  match rs:
-    case Nil{}:
-      ai
-    case Con{+r, rest}:
-      match ai:
-        case AI{cls, vals, zf}:
-          a.init(rest, a.init.got(r, vals, zf, Array.get(Class, cls, r)))
+# A pass round after round, while a round changes anything, within fuel
+# rounds.
+def rounds(fuel: Nat, +k: Nat, +ps: Pass, sv: Sv) -> Sv:
+  match fuel:
+    case 0n:
+      match sv:
+        case Sv{c, cb, q, qb, v, n, ch}:
+          match ch:
+            case True{}:
+              SvErr{stuck(ps)}
+            case False{}:
+              Sv{c, cb, q, qb, v, n, False{}}
+        case SvErr{e}:
+          SvErr{e}
+    case 1n+f:
+      match sv:
+        case Sv{c, cb, q, qb, v, n, ch}:
+          match ch:
+            case True{}:
+              rounds(f, k, ps, rows(k, ps, 0, (Sv{c, cb, q, qb, v, n, False{}}, 0)))
+            case False{}:
+              Sv{c, cb, q, qb, v, n, False{}}
+        case SvErr{e}:
+          SvErr{e}
 
-def assign.with(+es: List<&2, SumEq>, +d: Nat, ai: AI) -> Maybe<&2, Err>:
-  match ai:
-    case AI{cls, vals, zf}:
-      a.done(es, a.loop(U32.to_nat((U32.from_nat(List.length(&2, SumEq, es)) * 4 + 16 : U32)), es,
-        AGo{vals, zf, a.count(es, Array.new(U32, d, 0)), True{}}))
+def sv.dirty(sv: Sv) -> Sv:
+  match sv:
+    case Sv{c, cb, q, qb, v, n, ch}:
+      Sv{c, cb, q, qb, v, n, True{}}
+    case SvErr{e}:
+      SvErr{e}
 
-# assignValues: concrete bangs for every equation, from the lower bounds,
-# greedily raising free summands. Only whether it succeeds matters here.
-def assign(+es: List<&2, SumEq>, +d: Nat, r: PR) -> Maybe<&2, Err>:
-  match r:
-    case PGo{cls, changed}:
-      assign.with(es, d, a.init(eq.roots(es, []), AI{cls, Array.new(U32, d, 0), Array.new(U32, d, 0)}))
-    case PErr{e}:
-      Some{e}
+# propagate, then assignValues (from the lower bounds, greedily raising
+# free summands) and its verification; only whether it all holds matters
+# here.
+def run(+k: Nat, sv: Sv) -> Maybe<&2, Err>:
+  sv.err(rows(k, PHolds{}, 0, (rounds(U32.to_nat((U32.from_nat(k) * 4 + 16 : U32)), k, PAdjust{},
+    sv.dirty(rounds(U32.to_nat((U32.from_nat(k) * 4 + 64 : U32)), k, PProp{}, sv))), 0)))
 
 
 # The solver on the state
@@ -3241,49 +3462,54 @@ def resolve.eqs(es: List<&2, SumEq>, m: Array<U32>) -> Array<U32> & List<&2, Sum
     case Con{e, rest}:
       resolve.go(rest, [], eq.res(e, m))
 
-def class.k(free: Bool, zero: Bool, +n: U32, b: Blame) -> Class:
-  match free:
-    case True{}:
-      Unrestricted{}
-    case False{}:
-      match zero:
-        case True{}:
-          ForcedZero{b}
-        case False{}:
-          ForcedLevel{n, b}
-
-def rc.blame(+root: U32, +c: U32, r: St & Blame) -> St & RC:
-  (s, b) = r
-  (s, RC{root, class.k(U32.is_zero((c .&. 3 : U32)), U32.is_eq((c .&. 3 : U32), 1), (c >> 2n : U32), b)})
-
-def rc.c(+root: U32, r: St & U32) -> St & RC:
-  (s, +c) = r
-  rc.blame(root, c, blame.of(s, root))
-
-# A root's class, as the solver keeps it.
-def class.read(s: St, +root: U32) -> St & RC:
-  rc.c(root, rd(s, (root * 8 + 18 : U32)))
-
-def table.go(rs: List<&2, U32>, t: Array<Class>, r: St & RC) -> St & Array<Class>:
-  match rs:
+# The words the equations' rows take.
+def rows.size(es: List<&2, SumEq>, +acc: U32) -> U32:
+  match es:
     case Nil{}:
-      (s, rc) = r
-      match rc:
-        case RC{+root, c}:
-          (s, Array.set(Class, t, root, c))
-    case Con{+x, rest}:
-      (s, rc) = r
-      match rc:
-        case RC{+root, c}:
-          table.go(rest, Array.set(Class, t, root, c), class.read(s, x))
+      acc
+    case Con{e, rest}:
+      match e:
+        case SumEq{lhs, rhs, blame}:
+          rows.size(rest, (acc + 2 + U32.from_nat(List.length(&2, U32, lhs)) : U32))
 
-# The roots' classes, in a table of their own.
-def table(rs: List<&2, U32>, t: Array<Class>, s: St) -> St & Array<Class>:
-  match rs:
+def fill.b(+r: U32, +w: U32, sv: Sv, p: St & Blame) -> St & Sv:
+  (s, b) = p
+  (s, c.wr(sv, r, w, b))
+
+def fill.id(+r: U32, +w: U32, sv: Sv, p: St & U32) -> St & Sv:
+  (s, +id) = p
+  fill.b(r, w, sv, blame.get(s, id))
+
+def fill.w(+r: U32, sv: Sv, p: St & U32) -> St & Sv:
+  (s, +w) = p
+  fill.id(r, w, sv, rd(s, (r * 8 + 19 : U32)))
+
+# Root r's class word and blame, copied from the state to the tables.
+def fill.root(+r: U32, p: St & Sv) -> St & Sv:
+  (s, sv) = p
+  fill.w(r, sv, rd(s, (r * 8 + 18 : U32)))
+
+def fill.lhs(ls: List<&2, U32>, +i: U32, p: St & Sv) -> St & Sv:
+  match ls:
     case Nil{}:
-      (s, t)
-    case Con{+x, rest}:
-      table.go(rest, t, class.read(s, x))
+      p
+    case Con{+l, rest}:
+      (s, sv) = p
+      fill.lhs(rest, (i + 1 : U32), fill.root(l, (s, n.inc(q.wr(sv, i, l), l))))
+
+# The equations, resolved to roots, as rows from equation e at offset o,
+# with their roots' classes.
+def fill(es: List<&2, SumEq>, +e: U32, +o: U32, p: St & Sv) -> St & Sv:
+  match es:
+    case Nil{}:
+      p
+    case Con{x, rest}:
+      match x:
+        case SumEq{+lhs, +rhs, blame}:
+          (s, sv) = p
+          +nl = U32.from_nat(List.length(&2, U32, lhs))
+          fill(rest, (e + 1 : U32), (o + 2 + nl : U32),
+            fill.lhs(lhs, (o + 2 : U32), fill.root(rhs, (s, qb.wr(q.wr(q.wr(sv, o, nl), (o + 1 : U32), rhs), e, blame)))))
 
 def solve.done(s: St, m: Maybe<&2, Err>) -> St:
   match m:
@@ -3292,15 +3518,22 @@ def solve.done(s: St, m: Maybe<&2, Err>) -> St:
     case Some{e}:
       fail(s, e)
 
-def solve.tab(+rs: List<&2, SumEq>, +d: Nat, r: St & Array<Class>) -> St:
-  (s, cls) = r
-  solve.done(s, assign(rs, d, rounds(U32.to_nat((U32.from_nat(List.length(&2, SumEq, rs)) * 4 + 64 : U32)), rs, PGo{cls, True{}})))
+def solve.sv(+k: Nat, r: St & Sv) -> St:
+  (s, sv) = r
+  solve.done(s, run(k, sv))
 
+# The tables: a root's words by its number (as many as there may be
+# variables), and the rows.
 def solve.size(+rs: List<&2, SumEq>, r: St & U32) -> St:
   (s, +size) = r
-  solve.tab(rs, (U32.log2(size) - 3n : Nat), table(eq.roots(rs, []), Array.new(Class, (U32.log2(size) - 3n : Nat), Unrestricted{}), s))
+  +d = (U32.log2(size) - 3n : Nat)
+  +k = List.length(&2, SumEq, rs)
+  solve.sv(k, fill(rs, 0, 0, (s, Sv{Array.new(U32, d, 0), Array.new(Blame, d, blame.none()),
+    Array.new(U32, (U32.log2((rows.size(rs, 0) + 1 : U32)) + 1n : Nat), 0),
+    Array.new(Blame, (U32.log2((U32.from_nat(k) + 1 : U32)) + 1n : Nat), blame.none()),
+    Array.new(U32, d, 0), Array.new(U32, d, 0), True{}})))
 
-def solve.res(ps: Array<Pr>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & List<&2, SumEq>) -> St:
+def solve.res(ps: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & List<&2, SumEq>) -> St:
   (m, +rs) = r
   solve.size(rs, rd(St{m, ps, tg, x}, 1))
 
@@ -3308,8 +3541,8 @@ def solve.eqs(s: St) -> St:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, +eqs, err, p}:
-          solve.res(ps, tg, X{sites, bl, ct, eqs, err, p}, resolve.eqs(eqs, m))
+        case X{sites, sv, bl, ct, +eqs, err, p}:
+          solve.res(ps, tg, X{sites, sv, bl, ct, eqs, err, p}, resolve.eqs(eqs, m))
 
 def solve.ok(r: St & Bool) -> St:
   (s, ok) = r
@@ -3680,7 +3913,7 @@ def st.err(s: St) -> Maybe<&2, Err>:
   match s:
     case St{m, ps, tg, x}:
       match x:
-        case X{sites, bl, ct, eqs, err, p}:
+        case X{sites, sv, bl, ct, eqs, err, p}:
           first.err(err)
 
 def an.walked(apply: Bool, r: St & Sig) -> St & Sig:
