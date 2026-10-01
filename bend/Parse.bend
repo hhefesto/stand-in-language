@@ -26,9 +26,9 @@ type Goal is Data:
   GDef{}
 
 type Val is Data:
-  VTerm{+t: S.Surf}
-  VPat{+p: S.Pat}
-  VLPat{+lp: S.LPat}
+  VTerm{+t: S.Parsed()}
+  VPat{+p: S.ParsedPat()}
+  VLPat{+lp: S.ParsedLPat()}
   VDef{+d: S.Def}
 
 type PErr is Data:
@@ -37,34 +37,34 @@ type PErr is Data:
 # What to do with the next value parsed.
 type Frame is Data:
   FAppHead{+loc: L.Loc, +lvl: U32, +fallback: Bool}
-  FAppArg{+loc: L.Loc, +lvl: U32, +fallback: Bool, +head: S.Surf,
-          +args: List<&2, S.Surf>, +after: List<&2, Lx.Tok>}
+  FAppArg{+loc: L.Loc, +lvl: U32, +fallback: Bool, +head: S.Parsed(),
+          +args: List<&2, S.Parsed()>, +after: List<&2, Lx.Tok>}
   FHash{+loc: L.Loc}
   FParen{+loc: L.Loc}
-  FPair{+loc: L.Loc, +a: S.Surf}
+  FPair{+loc: L.Loc, +a: S.Parsed()}
   FRec1{+loc: L.Loc}
-  FRec2{+loc: L.Loc, +t: S.Surf}
-  FRec3{+loc: L.Loc, +t: S.Surf, +r: S.Surf}
-  FList{+loc: L.Loc, +xs: List<&2, S.Surf>}
+  FRec2{+loc: L.Loc, +t: S.Parsed()}
+  FRec3{+loc: L.Loc, +t: S.Parsed(), +r: S.Parsed()}
+  FList{+loc: L.Loc, +xs: List<&2, S.Parsed()>}
   FIf1{+loc: L.Loc}
-  FIf2{+loc: L.Loc, +i: S.Surf}
-  FIf3{+loc: L.Loc, +i: S.Surf, +t: S.Surf}
-  FLam{+loc: L.Loc, +pats: List<&2, S.LPat>}
-  FLamBody{+loc: L.Loc, +pats: List<&2, S.LPat>}
+  FIf2{+loc: L.Loc, +i: S.Parsed()}
+  FIf3{+loc: L.Loc, +i: S.Parsed(), +t: S.Parsed()}
+  FLam{+loc: L.Loc, +pats: List<&2, S.ParsedLPat()>}
+  FLamBody{+loc: L.Loc, +pats: List<&2, S.ParsedLPat()>}
   FLet{+loc: L.Loc, +lvl: U32, +defs: List<&2, S.Def>}
   FLetBody{+loc: L.Loc, +defs: List<&2, S.Def>}
   FCase{+loc: L.Loc}
-  FAltPat{+loc: L.Loc, +scrut: S.Surf, +alts: List<&2, S.Alt>, +first: Bool,
+  FAltPat{+loc: L.Loc, +scrut: S.Parsed(), +alts: List<&2, S.ParsedAlt()>, +first: Bool,
           +saved: List<&2, Lx.Tok>}
-  FAltBody{+loc: L.Loc, +scrut: S.Surf, +alts: List<&2, S.Alt>, +p: S.Pat,
+  FAltBody{+loc: L.Loc, +scrut: S.Parsed(), +alts: List<&2, S.ParsedAlt()>, +p: S.ParsedPat(),
            +first: Bool, +saved: List<&2, Lx.Tok>}
   FPatParen{}
-  FPatAnn{+p: S.Pat}
-  FPatPair{+a: S.Pat}
+  FPatAnn{+p: S.ParsedPat()}
+  FPatPair{+a: S.ParsedPat()}
   FLPat{+loc: L.Loc}
   FDefCheck{+name: L.Name, +cloc: L.Loc}
   FDefBody{+name: L.Name}
-  FDefChecked{+name: L.Name, +cloc: L.Loc, +check: S.Surf}
+  FDefChecked{+name: L.Name, +cloc: L.Loc, +check: S.Parsed()}
   FDefList{+loc: L.Loc, +names: List<&2, L.Name>}
 
 type Mode is Data:
@@ -196,21 +196,21 @@ def is.end(k: Lx.TK) -> Bool:
 # Values
 # ------
 
-def as.term(v: Val) -> S.Surf:
+def as.term(v: Val) -> S.Parsed():
   match v:
     case VTerm{t}:
       t
     case _:
       S.SZero{L.Unknown{}}
 
-def as.pat(v: Val) -> S.Pat:
+def as.pat(v: Val) -> S.ParsedPat():
   match v:
     case VPat{p}:
       p
     case _:
       S.PIgnore{}
 
-def as.lpat(v: Val) -> S.LPat:
+def as.lpat(v: Val) -> S.ParsedLPat():
   match v:
     case VLPat{lp}:
       lp
@@ -224,10 +224,10 @@ def as.def(v: Val) -> S.Def:
     case _:
       S.DSingle{L.Name{L.Unknown{}, ""}, S.SZero{L.Unknown{}}}
 
-def got.term(toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t: S.Surf) -> PS:
+def got.term(toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t: S.Parsed()) -> PS:
   PS{toks, stack, Got{VTerm{t}}}
 
-def got.pat(toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.Pat) -> PS:
+def got.pat(toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.ParsedPat()) -> PS:
   PS{toks, stack, Got{VPat{p}}}
 
 # Expect symbol c, then parse an expression for frame fr.
@@ -253,31 +253,31 @@ def sep.kw(+w: String, +toks: List<&2, Lx.Tok>, fr: Frame, stack: List<&2, Frame
   sep.kw.go(w, toks, fr, stack, is.kw(w, peek(toks)))
 
 # Expect closing symbol c, then hand over term t.
-def close.go(+c: U32, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t: S.Surf, ok: Bool) -> PS:
+def close.go(+c: U32, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t: S.Parsed(), ok: Bool) -> PS:
   match ok:
     case True{}:
       got.term(next(toks), stack, t)
     case False{}:
       bad(toks, stack, Sh.string(sym.text(c)))
 
-def close(+c: U32, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t: S.Surf) -> PS:
+def close(+c: U32, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t: S.Parsed()) -> PS:
   close.go(c, toks, stack, t, is.sym(c, peek(toks)))
 
-def close.pat.go(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.Pat, ok: Bool) -> PS:
+def close.pat.go(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.ParsedPat(), ok: Bool) -> PS:
   match ok:
     case True{}:
       got.pat(next(toks), stack, p)
     case False{}:
       bad(toks, stack, "\")\"")
 
-def close.pat(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.Pat) -> PS:
+def close.pat(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.ParsedPat()) -> PS:
   close.pat.go(toks, stack, p, is.sym(41, peek(toks)))
 
 # Applications
 # ------------
 
 # f a b c: left-nested applications, all at the application's Loc.
-def apps(args: List<&2, S.Surf>, +loc: L.Loc, acc: S.Surf) -> S.Surf:
+def apps(args: List<&2, S.Parsed()>, +loc: L.Loc, acc: S.Parsed()) -> S.Parsed():
   match args:
     case Nil{}:
       acc
@@ -285,10 +285,10 @@ def apps(args: List<&2, S.Surf>, +loc: L.Loc, acc: S.Surf) -> S.Surf:
       apps(rest, loc, S.SApp{loc, acc, a})
 
 def app.done(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
-             head: S.Surf, args: List<&2, S.Surf>) -> PS:
-  got.term(toks, stack, apps(List.reverse(&2, S.Surf, args), loc, head))
+             head: S.Parsed(), args: List<&2, S.Parsed()>) -> PS:
+  got.term(toks, stack, apps(List.reverse(&2, S.Parsed(), args), loc, head))
 
-def app.fallback(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, head: S.Surf,
+def app.fallback(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, head: S.Parsed(),
                  after: List<&2, Lx.Tok>, fallback: Bool) -> PS:
   match fallback:
     case True{}:
@@ -302,7 +302,7 @@ def app.fallback(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, head: S.Surf,
 # megaparsec abandon the application and fall back to the head alone
 # (`try parseApplied <|> parseSingleExpr`).
 def app.decide(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
-               +lvl: U32, +fallback: Bool, head: S.Surf, args: List<&2, S.Surf>,
+               +lvl: U32, +fallback: Bool, head: S.Parsed(), args: List<&2, S.Parsed()>,
                after: List<&2, Lx.Tok>, end: Bool, nl: Bool, left: Bool,
                atom: Bool) -> PS:
   match end nl left atom:
@@ -320,7 +320,7 @@ def app.decide(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
       app.done(toks, stack, loc, head, args)
 
 def app.look(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
-             +lvl: U32, +fallback: Bool, head: S.Surf, args: List<&2, S.Surf>,
+             +lvl: U32, +fallback: Bool, head: S.Parsed(), args: List<&2, S.Parsed()>,
              after: List<&2, Lx.Tok>, t: Lx.Tok) -> PS:
   match t:
     case Lx.Tok{+k, at, ws, nl}:
@@ -328,7 +328,7 @@ def app.look(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
                  U32.is_le(pos.col(at), lvl), atom.start(k))
 
 def app.next(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
-             +lvl: U32, +fallback: Bool, head: S.Surf, args: List<&2, S.Surf>,
+             +lvl: U32, +fallback: Bool, head: S.Parsed(), args: List<&2, S.Parsed()>,
              after: List<&2, Lx.Tok>) -> PS:
   app.look(toks, stack, loc, lvl, fallback, head, args, after, peek(toks))
 
@@ -546,7 +546,7 @@ def want(+file: String, g: Goal, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>
 # Handing a value to a frame
 # --------------------------
 
-def paren.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc, a: S.Surf, t: Lx.Tok) -> PS:
+def paren.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc, a: S.Parsed(), t: Lx.Tok) -> PS:
   match t:
     case Lx.Tok{Lx.KSym{44}, at, ws, nl}:
       PS{next(toks), FPair{loc, a} <> stack, Want{GLong{False{}}}}
@@ -556,24 +556,24 @@ def paren.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc, a: S.
       bad(toks, stack, "\",\" or \")\"")
 
 def list.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
-             xs: List<&2, S.Surf>, t: Lx.Tok) -> PS:
+             xs: List<&2, S.Parsed()>, t: Lx.Tok) -> PS:
   match t:
     case Lx.Tok{Lx.KSym{44}, at, ws, nl}:
       PS{next(toks), FList{loc, xs} <> stack, Want{GLong{False{}}}}
     case Lx.Tok{Lx.KSym{93}, at, ws, nl}:
-      got.term(next(toks), stack, S.SList{loc, List.reverse(&2, S.Surf, xs)})
+      got.term(next(toks), stack, S.SList{loc, List.reverse(&2, S.Parsed(), xs)})
     case _:
       bad(toks, stack, "\",\" or \"]\"")
 
 def lam.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
-            pats: List<&2, S.LPat>, t: Lx.Tok) -> PS:
+            pats: List<&2, S.ParsedLPat()>, t: Lx.Tok) -> PS:
   match t:
     case Lx.Tok{Lx.KSym{1}, at, ws, nl}:
-      PS{next(toks), FLamBody{loc, List.reverse(&2, S.LPat, pats)} <> stack, Want{GLong{False{}}}}
+      PS{next(toks), FLamBody{loc, List.reverse(&2, S.ParsedLPat(), pats)} <> stack, Want{GLong{False{}}}}
     case _:
       PS{toks, FLam{loc, pats} <> stack, Want{GLPat{}}}
 
-def patparen.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.Pat, t: Lx.Tok) -> PS:
+def patparen.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.ParsedPat(), t: Lx.Tok) -> PS:
   match t:
     case Lx.Tok{Lx.KSym{58}, at, ws, nl}:
       PS{next(toks), FPatAnn{p} <> stack, Want{GLong{False{}}}}
@@ -583,14 +583,14 @@ def patparen.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.Pat, t: L
       bad(toks, stack, "\":\" or \",\"")
 
 def case.done(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
-              scrut: S.Surf, alts: List<&2, S.Alt>) -> PS:
-  got.term(toks, stack, S.SCase{loc, scrut, List.reverse(&2, S.Alt, alts)})
+              scrut: S.Parsed(), alts: List<&2, S.ParsedAlt()>) -> PS:
+  got.term(toks, stack, S.SCase{loc, scrut, List.reverse(&2, S.ParsedAlt(), alts), Unit{}})
 
 # A case alternative's pattern: its arrow, or (after the first) the end of
 # the alternatives, back where the pattern started.
 def alt.pat.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
-                scrut: S.Surf, alts: List<&2, S.Alt>, first: Bool,
-                saved: List<&2, Lx.Tok>, p: S.Pat, arrow: Bool) -> PS:
+                scrut: S.Parsed(), alts: List<&2, S.ParsedAlt()>, first: Bool,
+                saved: List<&2, Lx.Tok>, p: S.ParsedPat(), arrow: Bool) -> PS:
   match first arrow:
     case _ True{}:
       PS{next(toks), FAltBody{loc, scrut, alts, p, first, saved} <> stack, Want{GLong{False{}}}}
@@ -601,7 +601,7 @@ def alt.pat.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
 
 # `case e of`: the first alternative must parse.
 def sep.kw.case(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
-                scrut: S.Surf, ok: Bool) -> PS:
+                scrut: S.Parsed(), ok: Bool) -> PS:
   match ok:
     case True{}:
       PS{next(toks), FAltPat{loc, scrut, [], True{}, next(toks)} <> stack, Want{GPat{}}}
@@ -637,11 +637,11 @@ def got(+file: String, fr: Frame, v: Val, +toks: List<&2, Lx.Tok>, stack: List<&
     case FLam{loc, pats}:
       lam.got(toks, stack, loc, as.lpat(v) <> pats, peek(toks))
     case FLamBody{loc, pats}:
-      got.term(toks, stack, S.SLamPat{loc, pats, as.term(v)})
+      got.term(toks, stack, S.SLamPat{loc, pats, as.term(v), Unit{}})
     case FLet{loc, lvl, defs}:
       let.next(toks, stack, loc, lvl, as.def(v) <> defs)
     case FLetBody{loc, defs}:
-      got.term(toks, stack, S.SLetSugar{loc, defs, as.term(v)})
+      got.term(toks, stack, S.SLetSugar{loc, defs, as.term(v), Unit{}})
     case FCase{loc}:
       sep.kw.case(toks, stack, loc, as.term(v), is.kw("of", peek(toks)))
     case FAltPat{loc, scrut, alts, first, saved}:
@@ -824,14 +824,14 @@ def render(file: String, text: String, e: PErr) -> String:
 # One complete expression (runParseExpression)
 # --------------------------------------------
 
-def expr.done(v: Val, toks: List<&2, Lx.Tok>, t: Lx.Tok) -> Result<&2, &2, PErr, S.Surf>:
+def expr.done(v: Val, toks: List<&2, Lx.Tok>, t: Lx.Tok) -> Result<&2, &2, PErr, S.Parsed()>:
   match t:
     case Lx.Tok{Lx.KEnd{}, at, ws, nl}:
       Done{as.term(v)}
     case other:
       Fail{unexpected(other, "end of input")}
 
-def expr.end(r: Result<&2, &1, PErr, Val & List<&2, Lx.Tok>>) -> Result<&2, &2, PErr, S.Surf>:
+def expr.end(r: Result<&2, &1, PErr, Val & List<&2, Lx.Tok>>) -> Result<&2, &2, PErr, S.Parsed()>:
   match r:
     case Fail{e}:
       Fail{e}
@@ -839,7 +839,7 @@ def expr.end(r: Result<&2, &1, PErr, Val & List<&2, Lx.Tok>>) -> Result<&2, &2, 
       (v, +toks) = vt
       expr.done(v, toks, peek(toks))
 
-def expr.lexed(+file: String, r: Result<&2, &2, Lx.LexErr, List<&2, Lx.Tok>>) -> Result<&2, &2, PErr, S.Surf>:
+def expr.lexed(+file: String, r: Result<&2, &2, Lx.LexErr, List<&2, Lx.Tok>>) -> Result<&2, &2, PErr, S.Parsed()>:
   match r:
     case Fail{e}:
       match e:
@@ -848,5 +848,5 @@ def expr.lexed(+file: String, r: Result<&2, &2, Lx.LexErr, List<&2, Lx.Tok>>) ->
     case Done{toks}:
       expr.end(run(run.fuel(), file, PS{toks, [], Want{GLong{False{}}}}))
 
-def expression(+file: String, text: String) -> Result<&2, &2, PErr, S.Surf>:
+def expression(+file: String, text: String) -> Result<&2, &2, PErr, S.Parsed()>:
   expr.lexed(file, Lx.lex(text))

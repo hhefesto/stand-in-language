@@ -166,14 +166,14 @@ def re.or(r: Result<&2, &2, Rs.ResErr, T.T>) -> Result<&2, &2, Err, T.C>:
     case Done{t}:
       Done{Sp.split(t)}
 
-def main.or(r: Result<&2, &2, Rs.ResErr, S.Surf>) -> Result<&2, &2, Err, S.Surf>:
+def main.or(r: Result<&2, &2, Rs.ResErr, S.Expanded()>) -> Result<&2, &2, Err, S.Desugared()>:
   match r:
     case Fail{e}:
       Fail{Unresolved{e}}
     case Done{t}:
       Done{D.desugar(t)}
 
-def lowered(+t: S.Surf) -> Result<&2, &2, Err, Terms>:
+def lowered(+t: S.Desugared()) -> Result<&2, &2, Err, Terms>:
   do Result<&2, &2, Err, Terms>:
     cert : T.C <- re.or(Lw.process(t))
     run : T.C <- re.or(Lw.process.let(t))
@@ -187,7 +187,7 @@ def terms(m: Mods, +entry: String) -> Result<&2, &2, Err, Terms>:
       match errs:
         case Nil{}:
           do Result<&2, &2, Err, Terms>:
-            t : S.Surf <- main.or(Rs.main(mods, entry))
+            t : S.Surf<Empty, Empty, Empty> <- main.or(Rs.main(mods, entry))
             lowered(t)
         case Con{e, rest}:
           Fail{Modules{e <> rest}}

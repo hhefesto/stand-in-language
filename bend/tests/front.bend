@@ -23,8 +23,8 @@ def verdict(+name: String, pass: Bool) -> String:
 def all(xs: List<&2, Bool>) -> Bool:
   List.all(~&2, ~Bool, ~(b => b), xs)
 
-def parses(r: Result<&2, &2, P.PErr, S.Surf>) -> Bool:
-  Result.is_done(&2, &2, P.PErr, S.Surf, r)
+def parses(r: Result<&2, &2, P.PErr, S.Parsed()>) -> Bool:
+  Result.is_done(&2, &2, P.PErr, S.Parsed(), r)
 
 def accepts(text: String) -> Bool:
   parses(P.expression("", text))
@@ -83,7 +83,7 @@ def rejected() -> List<&2, Bool>:
    rejects("$4294967296"),
    rejects("\\4294967296 -> 0")]
 
-def left.assoc(r: Result<&2, &2, P.PErr, S.Surf>) -> Bool:
+def left.assoc(r: Result<&2, &2, P.PErr, S.Parsed()>) -> Bool:
   match r:
     case Done{S.SApp{a, S.SApp{b, S.SVar{c, "f"}, S.SVar{d, "x"}}, S.SVar{e, "y"}}}:
       True{}
@@ -99,23 +99,23 @@ def at.pos(l: L.Loc, line: U32, col: U32) -> Bool:
 
 # Where names start: a variable at its first character, a let binding's
 # name and a lambda's binder at theirs.
-def spans.var(r: Result<&2, &2, P.PErr, S.Surf>) -> Bool:
+def spans.var(r: Result<&2, &2, P.PErr, S.Parsed()>) -> Bool:
   match r:
     case Done{S.SVar{loc, name}}:
       at.pos(loc, 1, 1)
     case _:
       False{}
 
-def spans.let(r: Result<&2, &2, P.PErr, S.Surf>) -> Bool:
+def spans.let(r: Result<&2, &2, P.PErr, S.Parsed()>) -> Bool:
   match r:
-    case Done{S.SLetSugar{loc, Con{S.DSingle{L.Name{nloc, "foo"}, body}, Nil{}}, b}}:
+    case Done{S.SLetSugar{loc, Con{S.DSingle{L.Name{nloc, "foo"}, body}, Nil{}}, b, w}}:
       at.pos(nloc, 1, 5)
     case _:
       False{}
 
-def spans.lam(r: Result<&2, &2, P.PErr, S.Surf>) -> Bool:
+def spans.lam(r: Result<&2, &2, P.PErr, S.Parsed()>) -> Bool:
   match r:
-    case Done{S.SLamPat{loc, Con{S.LPat{ploc, S.PVar{L.Name{nloc, "foo"}}}, Nil{}}, b}}:
+    case Done{S.SLamPat{loc, Con{S.LPat{ploc, S.PVar{L.Name{nloc, "foo"}}}, Nil{}}, b, w}}:
       at.pos(nloc, 1, 2)
     case _:
       False{}

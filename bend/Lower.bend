@@ -16,20 +16,24 @@ import ./Sha256.bend as Sha
 #   become lambda redexes, each recursion site a placeholder argument),
 #   debruijinizeApp and closeLams. Sizing and the run take this one.
 
+# A let binding by name, as the variable check orders them.
+type NB is Data:
+  NB{+name: String, +val: S.Desugared()}
+
 type Cyc is Data:
   CEnd{}
   CAt{+c: String, +seen: Bool}
 
 type DN is Data:
-  DT{+t: S.Surf}
-  DTs{+xs: List<&2, S.Surf>}
-  DBs{+bs: List<&2, S.Bind>}
+  DT{+t: S.Desugared()}
+  DTs{+xs: List<&2, S.Desugared()>}
+  DBs{+bs: List<&2, S.DesugaredBind()>}
 
 type VN is Data:
-  VTerm{+t: S.Surf}
-  VList{+xs: List<&2, S.Surf>}
-  VLet{+bs: List<&2, Rs.NB>, +inner: S.Surf}
-  VOrdered{+r: Result<&2, &2, Rs.ResErr, List<&2, Rs.NB>>, +inner: S.Surf}
+  VTerm{+t: S.Desugared()}
+  VList{+xs: List<&2, S.Desugared()>}
+  VLet{+bs: List<&2, NB>, +inner: S.Desugared()}
+  VOrdered{+r: Result<&2, &2, Rs.ResErr, List<&2, NB>>, +inner: S.Desugared()}
 
 type VV is Data:
   VT{+t: T.T}
@@ -43,20 +47,20 @@ type Hit is Data:
   Miss{}
 
 type AN is Data:
-  AT{+t: S.Surf}
-  ABs{+bs: List<&2, S.Bind>}
+  AT{+t: S.Desugared()}
+  ABs{+bs: List<&2, S.DesugaredBind()>}
 
 type AV is Data:
-  AVT{+t: S.Surf}
-  AVBs{+bs: List<&2, S.Bind>}
+  AVT{+t: S.Lowering()}
+  AVBs{+bs: List<&2, S.LoweringBind()>}
 
 type LB is Data:
   LB{+name: String, +t: T.T, +refs: Set(), +c: Nat}
 
 type LN is Data:
-  LNT{+t: S.Surf}
-  LNTs{+xs: List<&2, S.Surf>}
-  LNBs{+bs: List<&2, S.Bind>}
+  LNT{+t: S.Lowering()}
+  LNTs{+xs: List<&2, S.Lowering()>}
+  LNBs{+bs: List<&2, S.LoweringBind()>}
 
 type LV is Data:
   LVT{+t: T.T, +refs: Set()}
@@ -97,7 +101,7 @@ def generated.var() -> L.Loc:
 def not.term() -> Rs.ResErr:
   Rs.MissingDefinitions{["(not a term)"]}
 
-def bind.names(bs: List<&2, S.Bind>) -> List<&2, String>:
+def bind.names(bs: List<&2, S.DesugaredBind()>) -> List<&2, String>:
   match bs:
     case Nil{}:
       []
@@ -229,8 +233,8 @@ def dd(+fuel: Nat, +names: Set(), n: DN) -> Set():
               dd.var(has(names, name), name)
             case S.SLam{loc, v, body}:
               Set.del(dd(f, names, DT{body}), L.Name.text(v))
-            case S.SLamN{loc, k, v, body}:
-              Set.del(dd(f, names, DT{body}), L.Name.text(v))
+            case S.SLamN{loc, k, v, body, w}:
+              Empty.absurd(Set(), w)
             case S.SLet{loc, +binds, body}:
               +bound = bind.names(binds)
               union(minus(bound, dd(f, names, DBs{binds})), minus(bound, dd(f, names, DT{body})))
@@ -271,7 +275,7 @@ def dd(+fuel: Nat, +names: Set(), n: DN) -> Set():
                 case S.Bind{name, val}:
                   union(dd(f, names, DT{val}), dd(f, names, DBs{rest}))
 
-def let.deps(bs: List<&2, S.Bind>, +names: Set(), acc: Map<&2, Set()>) -> Map<&2, Set()>:
+def let.deps(bs: List<&2, S.DesugaredBind()>, +names: Set(), acc: Map<&2, Set()>) -> Map<&2, Set()>:
   match bs:
     case Nil{}:
       acc
@@ -295,48 +299,48 @@ def forward(names: List<&2, String>, +deps: Map<&2, Set()>) -> Bool:
     case Con{n, +rest}:
       intersects(rest, deps.of(deps, n)) || forward(rest, deps)
 
-def nbs(bs: List<&2, S.Bind>) -> List<&2, Rs.NB>:
+def nbs(bs: List<&2, S.DesugaredBind()>) -> List<&2, NB>:
   match bs:
     case Nil{}:
       []
     case Con{b, rest}:
       match b:
         case S.Bind{name, val}:
-          Rs.NB{L.Name.text(name), val} <> nbs(rest)
+          NB{L.Name.text(name), val} <> nbs(rest)
 
-def with.name.if(yes: Bool, b: Rs.NB, rest: List<&2, Rs.NB>) -> List<&2, Rs.NB>:
+def with.name.if(yes: Bool, b: NB, rest: List<&2, NB>) -> List<&2, NB>:
   match yes:
     case True{}:
       b <> rest
     case False{}:
       rest
 
-def with.name(bs: List<&2, Rs.NB>, +n: String) -> List<&2, Rs.NB>:
+def with.name(bs: List<&2, NB>, +n: String) -> List<&2, NB>:
   match bs:
     case Nil{}:
       []
     case Con{b, rest}:
       match b:
-        case Rs.NB{+name, val}:
-          with.name.if(String.eq(name, n), Rs.NB{name, val}, with.name(rest, n))
+        case NB{+name, val}:
+          with.name.if(String.eq(name, n), NB{name, val}, with.name(rest, n))
 
 # [(name, def) | name <- sorted, (name', def) <- bindings, name == name']
-def in.order(sorted: List<&2, String>, +bs: List<&2, Rs.NB>) -> List<&2, Rs.NB>:
+def in.order(sorted: List<&2, String>, +bs: List<&2, NB>) -> List<&2, NB>:
   match sorted:
     case Nil{}:
       []
     case Con{n, rest}:
-      List.append(&2, Rs.NB, with.name(bs, n), in.order(rest, bs))
+      List.append(&2, NB, with.name(bs, n), in.order(rest, bs))
 
-def let.sorted(+bs: List<&2, Rs.NB>, r: R(List<&2, String>)) -> R(List<&2, Rs.NB>):
+def let.sorted(+bs: List<&2, NB>, r: R(List<&2, String>)) -> R(List<&2, NB>):
   match r:
     case Fail{e}:
       Fail{e}
     case Done{sorted}:
       Done{in.order(sorted, bs)}
 
-def let.order.pick(+bs: List<&2, S.Bind>, +names: List<&2, String>, +deps: Map<&2, Set()>, fwd: Bool) ->
-  R(List<&2, Rs.NB>):
+def let.order.pick(+bs: List<&2, S.DesugaredBind()>, +names: List<&2, String>, +deps: Map<&2, Set()>, fwd: Bool) ->
+  R(List<&2, NB>):
   match fwd:
     case True{}:
       let.sorted(nbs(bs), topological.sort(names, deps))
@@ -345,7 +349,7 @@ def let.order.pick(+bs: List<&2, S.Bind>, +names: List<&2, String>, +deps: Map<&
 
 # The order a let's bindings are checked in: as written, unless one uses a
 # later one; then dependency order.
-def let.order(+bs: List<&2, S.Bind>) -> R(List<&2, Rs.NB>):
+def let.order(+bs: List<&2, S.DesugaredBind()>) -> R(List<&2, NB>):
   +names = bind.names(bs)
   +deps = let.deps(bs, Set.from_list(names), Map.new(&2, Set()))
   let.order.pick(bs, names, deps, forward(names, deps))
@@ -411,7 +415,7 @@ def validate(+fuel: Nat, +env: Map<&2, T.T>, n: VN) -> R(VV):
               validate(f, env, VTerm{inner})
             case Con{b, rest}:
               match b:
-                case Rs.NB{name, val}:
+                case NB{name, val}:
                   do Result<&2, &2, Rs.ResErr, VV>:
                     d : VV <- validate(f, env, VTerm{val})
                     validate(f, Map.set(&2, T.T, env, name, vt(d)), VLet{rest, inner})
@@ -432,10 +436,8 @@ def validate(+fuel: Nat, +env: Map<&2, T.T>, n: VN) -> R(VV):
               do Result<&2, &2, Rs.ResErr, VV>:
                 b2 : VV <- validate(f, Map.set(&2, T.T, env, L.Name.text(v), T.TVar{generated.var(), L.Name.text(v)}), VTerm{body})
                 return VT{open.lambda(L.Name.text(v), vt(b2))}
-            case S.SLamN{loc, k, v, body}:
-              do Result<&2, &2, Rs.ResErr, VV>:
-                b2 : VV <- validate(f, Map.set(&2, T.T, env, L.Name.text(v), T.TVar{generated.var(), L.Name.text(v)}), VTerm{body})
-                return VT{open.lambda(L.Name.text(v), vt(b2))}
+            case S.SLamN{loc, k, v, body, w}:
+              Empty.absurd(R(VV), w)
             case S.SVar{+loc, +name}:
               do Result<&2, &2, Rs.ResErr, VV>:
                 x : T.T <- var.found(loc, name, env.get(env, name))
@@ -746,7 +748,7 @@ def hashed(+t: T.T) -> T.T:
   hashes(t, T.T.loc(t))
 
 # main2Term3's Term2.
-def process(t: S.Surf) -> R(T.T):
+def process(t: S.Desugared()) -> R(T.T):
   do Result<&2, &2, Rs.ResErr, T.T>:
     v : VV <- validate(fuel(), Map.new(&2, T.T), VTerm{t})
     t2 : T.T <- debruijn(fuel(), False{}, [], vt(v))
@@ -772,14 +774,14 @@ def St.bind(-A: Data, -B: Data, m: St(A), f: A -> St(B)) -> St(B):
 def tick() -> St(Nat):
   +n => (n, 1n+n)
 
-def avt(v: AV) -> S.Surf:
+def avt(v: AV) -> S.Lowering():
   match v:
     case AVT{t}:
       t
     case _:
       S.SZero{L.Unknown{}}
 
-def avbs(v: AV) -> List<&2, S.Bind>:
+def avbs(v: AV) -> List<&2, S.LoweringBind()>:
   match v:
     case AVBs{bs}:
       bs
@@ -791,36 +793,36 @@ def site.name(n: Nat) -> String:
 
 # \:0 -> \:1 -> ... x, one placeholder lambda per recursion site the
 # binding's value holds, each knowing how many there are (cap).
-def cap.lams(+i: Nat, +k: Nat, +anno: L.Loc, x: S.Surf) -> S.Surf:
+def cap.lams(+i: Nat, +k: Nat, +anno: L.Loc, x: S.Lowering()) -> S.Lowering():
   match i:
     case 0n:
       x
     case 1n+j:
-      cap.lams(j, k, anno, S.SLamN{anno, k, L.Name{anno, site.name(j)}, x})
+      cap.lams(j, k, anno, S.SLamN{anno, k, L.Name{anno, site.name(j)}, x, Unit{}})
 
-def cap.with(+k: Nat, +x: S.Surf) -> S.Surf:
-  cap.lams(k, k, S.loc(x), x)
+def cap.with(+k: Nat, +x: S.Lowering()) -> S.Lowering():
+  cap.lams(k, k, S.loc(Empty, Empty, Unit, x), x)
 
-def cap.bind(name: L.Name, r: AV & Nat) -> S.Bind:
+def cap.bind(name: L.Name, r: AV & Nat) -> S.LoweringBind():
   (v, +k) = r
   S.Bind{name, cap.with(k, avt(v))}
 
 # (\:0 -> (\:1 -> x) :1) :0 for the sites outside every binding (capTop).
-def top.apps(+i: Nat, +anno: L.Loc, x: S.Surf) -> S.Surf:
+def top.apps(+i: Nat, +anno: L.Loc, x: S.Lowering()) -> S.Lowering():
   match i:
     case 0n:
       x
     case 1n+j:
       top.apps(j, anno, S.SApp{anno, S.SLam{anno, L.Name{anno, site.name(j)}, x}, S.SVar{anno, site.name(j)}})
 
-def cap.top.with(k: Nat, +x: S.Surf) -> S.Surf:
-  top.apps(k, S.loc(x), x)
+def cap.top.with(k: Nat, +x: S.Lowering()) -> S.Lowering():
+  top.apps(k, S.loc(Empty, Empty, Unit, x), x)
 
-def cap.top(r: AV & Nat) -> S.Surf:
+def cap.top(r: AV & Nat) -> S.Lowering():
   (v, k) = r
   cap.top.with(k, avt(v))
 
-def list.items(t: S.Surf) -> List<&2, S.Surf>:
+def list.items(t: S.Lowering()) -> List<&2, S.Lowering()>:
   match t:
     case S.SList{loc, xs}:
       xs
@@ -912,8 +914,24 @@ def annotate(+fuel: Nat, n: AN) -> St(AV):
                     x2 : AV <- annotate(f, AT{x})
                     r2 : AV <- annotate(f, AT{S.SList{loc, rest}})
                     return AVT{S.SList{loc, avt(x2) <> list.items(avt(r2))}}
-            case other:
-              St.pure(AV, AVT{other})
+            case S.SVar{loc, name}:
+              St.pure(AV, AVT{S.SVar{loc, name}})
+            case S.SZero{loc}:
+              St.pure(AV, AVT{S.SZero{loc}})
+            case S.SChurch{loc, k}:
+              St.pure(AV, AVT{S.SChurch{loc, k}})
+            case S.SInt{loc, k}:
+              St.pure(AV, AVT{S.SInt{loc, k}})
+            case S.SStr{loc, str}:
+              St.pure(AV, AVT{S.SStr{loc, str}})
+            case S.SLamPat{loc, ps, body, w}:
+              Empty.absurd(St(AV), w)
+            case S.SLetSugar{loc, ds, body, w}:
+              Empty.absurd(St(AV), w)
+            case S.SCase{loc, x, alts, w}:
+              Empty.absurd(St(AV), w)
+            case S.SLamN{loc, k, v, body, w}:
+              Empty.absurd(St(AV), w)
 
 def lv.t(v: LV) -> T.T:
   match v:
@@ -947,9 +965,9 @@ def lv.bs(v: LV) -> List<&2, LB>:
 
 # The placeholder count of a binding's value: its outer lambda's, if the
 # value is wrapped in placeholder lambdas.
-def count.of(t: S.Surf) -> Nat:
+def count.of(t: S.Lowering()) -> Nat:
   match t:
-    case S.SLamN{loc, k, v, body}:
+    case S.SLamN{loc, k, v, body, w}:
       k
     case _:
       0n
@@ -1158,7 +1176,7 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
               do Result<&2, &2, Rs.ResErr, LV>:
                 b2 : LV <- lta(f, LNT{body})
                 return lam.done(a, L.Name.text(v), b2, False{})
-            case S.SLamN{a, k, v, body}:
+            case S.SLamN{a, k, v, body, w}:
               do Result<&2, &2, Rs.ResErr, LV>:
                 b2 : LV <- lta(f, LNT{body})
                 return lam.done(a, L.Name.text(v), b2, True{})
@@ -1261,7 +1279,7 @@ def cleanup(v: LV) -> R(T.T):
       Fail{not.term()}
 
 # main2Term3let's Term2.
-def process.let(t: S.Surf) -> R(T.T):
+def process.let(t: S.Desugared()) -> R(T.T):
   do Result<&2, &2, Rs.ResErr, T.T>:
     v : LV <- lta(fuel(), LNT{cap.top(annotate(fuel(), AT{t})(0n))})
     t1 : T.T <- cleanup(v)

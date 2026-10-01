@@ -21,30 +21,30 @@ type Mod is Data:
   Mod{+name: String, +items: List<&2, S.EItem>}
 
 type NB is Data:
-  NB{+name: String, +val: S.Surf}
+  NB{+name: String, +val: S.Expanded()}
 
 # Over-approximate on purpose, as Haskell's is: a let's binders are not
 # removed, and a case adds the helpers its lowering will call.
 type FN is Data:
-  FT{+t: S.Surf}
-  FP{+p: S.Pat}
-  FTs{+xs: List<&2, S.Surf>}
-  FBs{+bs: List<&2, S.Bind>}
-  FAs{+alts: List<&2, S.Alt>}
+  FT{+t: S.Expanded()}
+  FP{+p: S.ExpandedPat()}
+  FTs{+xs: List<&2, S.Expanded()>}
+  FBs{+bs: List<&2, S.ExpandedBind()>}
+  FAs{+alts: List<&2, S.ExpandedAlt()>}
 
 type QN is Data:
-  QT{+t: S.Surf}
-  QP{+p: S.Pat}
-  QTs{+xs: List<&2, S.Surf>}
-  QBs{+bs: List<&2, S.Bind>}
-  QAs{+alts: List<&2, S.Alt>}
+  QT{+t: S.Expanded()}
+  QP{+p: S.ExpandedPat()}
+  QTs{+xs: List<&2, S.Expanded()>}
+  QBs{+bs: List<&2, S.ExpandedBind()>}
+  QAs{+alts: List<&2, S.ExpandedAlt()>}
 
 type QV is Data:
-  VT{+t: S.Surf}
-  VP{+p: S.Pat}
-  VTs{+xs: List<&2, S.Surf>}
-  VBs{+bs: List<&2, S.Bind>}
-  VAs{+alts: List<&2, S.Alt>}
+  VT{+t: S.Expanded()}
+  VP{+p: S.ExpandedPat()}
+  VTs{+xs: List<&2, S.Expanded()>}
+  VBs{+bs: List<&2, S.ExpandedBind()>}
+  VAs{+alts: List<&2, S.ExpandedAlt()>}
 
 # What to resolve: a list of items, an imported module, or an import
 # already checked.
@@ -124,7 +124,7 @@ def fv(+fuel: Nat, n: FN) -> Set():
               union(fv(f, FBs{binds}), fv(f, FT{body}))
             case S.SList{loc, xs}:
               fv(f, FTs{xs})
-            case S.SCase{loc, scrut, alts}:
+            case S.SCase{loc, scrut, alts, w}:
               union(fv(f, FT{scrut}), union(fv(f, FAs{alts}), case.refs()))
             case _:
               Set.new()
@@ -162,7 +162,7 @@ def fv(+fuel: Nat, n: FN) -> Set():
 def fuel() -> Nat:
   U32.to_nat(4294967295)
 
-def free(t: S.Surf) -> Set():
+def free(t: S.Expanded()) -> Set():
   fv(fuel(), FT{t})
 
 # Pruning (pruneBindings)
@@ -217,48 +217,48 @@ def keep(bs: List<&2, NB>, +live: Set()) -> List<&2, NB>:
           keep.if(has(live, name), NB{name, val}, keep(rest, live))
 
 # Keep the bindings main can reach, through other bindings (pruneBindings).
-def prune(root: S.Surf, +bs: List<&2, NB>) -> List<&2, NB>:
+def prune(root: S.Expanded(), +bs: List<&2, NB>) -> List<&2, NB>:
   keep(bs, reach(fuel(), deps(bs, Map.new(&2, Set())), False{}, free(root)))
 
 # Qualified imports (qualifyBindings)
 # ----------------------------------
 
-def vt(v: QV) -> S.Surf:
+def vt(v: QV) -> S.Expanded():
   match v:
     case VT{t}:
       t
     case _:
       S.SZero{L.Unknown{}}
 
-def vp(v: QV) -> S.Pat:
+def vp(v: QV) -> S.ExpandedPat():
   match v:
     case VP{p}:
       p
     case _:
       S.PIgnore{}
 
-def vts(v: QV) -> List<&2, S.Surf>:
+def vts(v: QV) -> List<&2, S.Expanded()>:
   match v:
     case VTs{xs}:
       xs
     case _:
       []
 
-def vbs(v: QV) -> List<&2, S.Bind>:
+def vbs(v: QV) -> List<&2, S.ExpandedBind()>:
   match v:
     case VBs{bs}:
       bs
     case _:
       []
 
-def vas(v: QV) -> List<&2, S.Alt>:
+def vas(v: QV) -> List<&2, S.ExpandedAlt()>:
   match v:
     case VAs{alts}:
       alts
     case _:
       []
 
-def bind.names(bs: List<&2, S.Bind>, acc: Set()) -> Set():
+def bind.names(bs: List<&2, S.ExpandedBind()>, acc: Set()) -> Set():
   match bs:
     case Nil{}:
       acc
@@ -268,7 +268,7 @@ def bind.names(bs: List<&2, S.Bind>, acc: Set()) -> Set():
           bind.names(rest, Set.add(acc, L.Name.text(name)))
 
 # The variables a pattern binds (patternBinders).
-def pat.binders(p: S.Pat, acc: Set()) -> Set():
+def pat.binders(p: S.ExpandedPat(), acc: Set()) -> Set():
   match p:
     case S.PVar{name}:
       Set.add(acc, L.Name.text(name))
@@ -279,7 +279,7 @@ def pat.binders(p: S.Pat, acc: Set()) -> Set():
     case _:
       acc
 
-def qualify.var(+loc: L.Loc, +name: String, q: String, rename: Bool) -> S.Surf:
+def qualify.var(+loc: L.Loc, +name: String, q: String, rename: Bool) -> S.Expanded():
   match rename:
     case True{}:
       S.SVar{loc, q ++ "." ++ name}
@@ -325,8 +325,8 @@ def qualify(+fuel: Nat, +names: Set(), +q: String, +bound: Set(), n: QN) -> QV:
               VT{S.SLet{loc, vbs(qualify(f, names, q, inner, QBs{binds})), vt(qualify(f, names, q, inner, QT{body}))}}
             case S.SList{loc, xs}:
               VT{S.SList{loc, vts(qualify(f, names, q, bound, QTs{xs}))}}
-            case S.SCase{loc, scrut, alts}:
-              VT{S.SCase{loc, vt(qualify(f, names, q, bound, QT{scrut})), vas(qualify(f, names, q, bound, QAs{alts}))}}
+            case S.SCase{loc, scrut, alts, w}:
+              VT{S.SCase{loc, vt(qualify(f, names, q, bound, QT{scrut})), vas(qualify(f, names, q, bound, QAs{alts})), w}}
             case other:
               VT{other}
         case QP{p}:
@@ -473,14 +473,14 @@ def resolve(+fuel: Nat, +mods: List<&2, Mod>, st: RS) -> R(List<&2, NB>):
 # main
 # ----
 
-def lookup.main.if(hit: Bool, val: S.Surf, later: Maybe<&2, S.Surf>) -> Maybe<&2, S.Surf>:
+def lookup.main.if(hit: Bool, val: S.Expanded(), later: Maybe<&2, S.Expanded()>) -> Maybe<&2, S.Expanded()>:
   match hit:
     case True{}:
       Some{val}
     case False{}:
       later
 
-def lookup.main(bs: List<&2, NB>) -> Maybe<&2, S.Surf>:
+def lookup.main(bs: List<&2, NB>) -> Maybe<&2, S.Expanded()>:
   match bs:
     case Nil{}:
       None{}
@@ -489,7 +489,7 @@ def lookup.main(bs: List<&2, NB>) -> Maybe<&2, S.Surf>:
         case NB{name, val}:
           lookup.main.if(String.eq(name, "main"), val, lookup.main(rest))
 
-def located(bs: List<&2, NB>, +loc: L.Loc) -> List<&2, S.Bind>:
+def located(bs: List<&2, NB>, +loc: L.Loc) -> List<&2, S.ExpandedBind()>:
   match bs:
     case Nil{}:
       []
@@ -498,28 +498,28 @@ def located(bs: List<&2, NB>, +loc: L.Loc) -> List<&2, S.Bind>:
         case NB{name, val}:
           S.Bind{L.Name{L.GenIn{"resolveMain.binding", loc}, name}, val} <> located(rest, loc)
 
-def main.let(x: S.Surf, bs: List<&2, NB>, +loc: L.Loc) -> S.Surf:
+def main.let(x: S.Expanded(), bs: List<&2, NB>, +loc: L.Loc) -> S.Expanded():
   S.SLet{L.GenIn{"resolveMain", loc}, located(bs, loc), x}
 
-def main.found(+m: String, +bs: List<&2, NB>, found: Maybe<&2, S.Surf>) -> R(S.Surf):
+def main.found(+m: String, +bs: List<&2, NB>, found: Maybe<&2, S.Expanded()>) -> R(S.Expanded()):
   match found:
     case None{}:
       Fail{NoMainFunction{m}}
     case Some{+x}:
-      Done{main.let(x, prune(x, bs), S.loc(x))}
+      Done{main.let(x, prune(x, bs), S.loc(Empty, Unit, Empty, x))}
 
 # The whole program as one let around main (resolveMain).
-def main.of(+m: String, +bs: List<&2, NB>) -> R(S.Surf):
+def main.of(+m: String, +bs: List<&2, NB>) -> R(S.Expanded()):
   main.found(m, bs, lookup.main(bs))
 
-def main.in(+mods: List<&2, Mod>, +m: String, found: Maybe<&2, List<&2, S.EItem>>) -> R(S.Surf):
+def main.in(+mods: List<&2, Mod>, +m: String, found: Maybe<&2, List<&2, S.EItem>>) -> R(S.Expanded()):
   match found:
     case None{}:
       Fail{ModuleNotFound{m}}
     case Some{items}:
-      do Result<&2, &2, ResErr, S.Surf>:
+      do Result<&2, &2, ResErr, S.Expanded()>:
         bs : List<&2, NB> <- resolve(fuel(), mods, RItems{[m], items})
         main.of(m, bs)
 
-def main(+mods: List<&2, Mod>, +m: String) -> R(S.Surf):
+def main(+mods: List<&2, Mod>, +m: String) -> R(S.Expanded()):
   main.in(mods, m, find.mod(mods, m))

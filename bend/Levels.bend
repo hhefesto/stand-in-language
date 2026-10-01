@@ -31,7 +31,7 @@ type Def is Data:
 
 # A definition's body, under the identity it is reported by.
 type DI is Data:
-  DI{+id: Def, +body: S.Surf}
+  DI{+id: Def, +body: S.Expanded()}
 
 # A binding in scope: who bound it, its name, and the level it was bound at.
 type B is Data:
@@ -205,9 +205,9 @@ def def.of(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +n: String) -> Maybe<&2, DI>:
 
 # A definition's leading parameters and the body under them.
 type Lams is Data:
-  Lams{+params: List<&2, String>, +body: S.Surf}
+  Lams{+params: List<&2, String>, +body: S.Expanded()}
 
-def lams.go(t: S.Surf, +ps: List<&2, String>) -> Lams:
+def lams.go(t: S.Expanded(), +ps: List<&2, String>) -> Lams:
   match t:
     case S.SLam{loc, v, body}:
       lams.go(body, L.Name.text(v) <> ps)
@@ -215,14 +215,14 @@ def lams.go(t: S.Surf, +ps: List<&2, String>) -> Lams:
       Lams{List.reverse(&2, String, ps), other}
 
 # collectLams
-def lams(t: S.Surf) -> Lams:
+def lams(t: S.Expanded()) -> Lams:
   lams.go(t, [])
 
 # An application's head and its arguments, first first.
 type Sp is Data:
-  Sp{+head: S.Surf, +args: List<&2, S.Surf>}
+  Sp{+head: S.Expanded(), +args: List<&2, S.Expanded()>}
 
-def spine.go(t: S.Surf, +args: List<&2, S.Surf>) -> Sp:
+def spine.go(t: S.Expanded(), +args: List<&2, S.Expanded()>) -> Sp:
   match t:
     case S.SApp{loc, f, x}:
       spine.go(f, x <> args)
@@ -230,10 +230,10 @@ def spine.go(t: S.Surf, +args: List<&2, S.Surf>) -> Sp:
       Sp{other, args}
 
 # spine
-def spine(t: S.Surf) -> Sp:
+def spine(t: S.Expanded()) -> Sp:
   spine.go(t, [])
 
-def bind.names(bs: List<&2, S.Bind>) -> List<&2, String>:
+def bind.names(bs: List<&2, S.ExpandedBind()>) -> List<&2, String>:
   match bs:
     case Nil{}:
       []
@@ -242,7 +242,7 @@ def bind.names(bs: List<&2, S.Bind>) -> List<&2, String>:
         case S.Bind{name, val}:
           L.Name.text(name) <> bind.names(rest)
 
-def alt.bodies(alts: List<&2, S.Alt>) -> List<&2, S.Surf>:
+def alt.bodies(alts: List<&2, S.ExpandedAlt()>) -> List<&2, S.Expanded()>:
   match alts:
     case Nil{}:
       []
@@ -254,7 +254,7 @@ def alt.bodies(alts: List<&2, S.Alt>) -> List<&2, S.Surf>:
 # The subterms the walks read alike, in Haskell's Foldable order (a case's
 # patterns are no subterms). Applications, lambdas, lets, recursions and
 # variables are read by each walk its own way.
-def kids(t: S.Surf) -> List<&2, S.Surf>:
+def kids(t: S.Expanded()) -> List<&2, S.Expanded()>:
   match t:
     case S.SPair{loc, a, b}:
       [a, b]
@@ -272,7 +272,7 @@ def kids(t: S.Surf) -> List<&2, S.Surf>:
       [x]
     case S.SList{loc, xs}:
       xs
-    case S.SCase{loc, scrut, alts}:
+    case S.SCase{loc, scrut, alts, w}:
       scrut <> alt.bodies(alts)
     case _:
       []
@@ -292,7 +292,7 @@ def max(+a: U32, +b: U32) -> U32:
 # A head's summary: the names being summarized with it, its parameters
 # and its body; or none.
 type Hd is Data:
-  Hd{+guard: Set(), +params: List<&2, String>, +body: S.Surf}
+  Hd{+guard: Set(), +params: List<&2, String>, +body: S.Expanded()}
   NoHd{}
 
 def head.lams(+guard: Set(), +v: String, l: Lams) -> Hd:
@@ -314,7 +314,7 @@ def head.var(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +guard: Set(), +v: String, guar
     case False{}:
       head.def(guard, v, def.of(ls, gs, v))
 
-def head(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +guard: Set(), h: S.Surf) -> Hd:
+def head(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +guard: Set(), h: S.Expanded()) -> Hd:
   match h:
     case S.SVar{loc, +v}:
       head.var(ls, gs, guard, v, has(guard, v))
@@ -327,15 +327,15 @@ def head(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +guard: Set(), h: S.Surf) -> Hd:
 # head's offsets) or over a let's values; or the offset a head gives its
 # j-th argument, which is how deep its j-th parameter is used.
 type OQ is Data:
-  OT{+p: String, +d: U32, +t: S.Surf}
-  OUnder{+binds: Bool, +p: String, +d: U32, +t: S.Surf}
-  OLet{+binds: Bool, +p: String, +d: U32, +bs: List<&2, S.Bind>, +t: S.Surf}
-  OTs{+p: String, +d: U32, +ts: List<&2, S.Surf>}
+  OT{+p: String, +d: U32, +t: S.Expanded()}
+  OUnder{+binds: Bool, +p: String, +d: U32, +t: S.Expanded()}
+  OLet{+binds: Bool, +p: String, +d: U32, +bs: List<&2, S.ExpandedBind()>, +t: S.Expanded()}
+  OTs{+p: String, +d: U32, +ts: List<&2, S.Expanded()>}
   OApp{+p: String, +d: U32, +sp: Sp}
-  OArgs{+p: String, +d: U32, +hd: Hd, +j: Nat, +args: List<&2, S.Surf>}
-  OBinds{+p: String, +d: U32, +bs: List<&2, S.Bind>}
+  OArgs{+p: String, +d: U32, +hd: Hd, +j: Nat, +args: List<&2, S.Expanded()>}
+  OBinds{+p: String, +d: U32, +bs: List<&2, S.ExpandedBind()>}
   OOff{+hd: Hd, +j: Nat}
-  OParam{+pj: Maybe<&2, String>, +t: S.Surf}
+  OParam{+pj: Maybe<&2, String>, +t: S.Expanded()}
 
 def occ.if(used: Bool, +d: U32) -> U32:
   match used:
@@ -419,7 +419,7 @@ def fuel() -> Nat:
   U32.to_nat(4294967295)
 
 # The offset the head h gives its j-th argument where the walk is.
-def offset(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +h: S.Surf, +j: Nat) -> U32:
+def offset(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +h: S.Expanded(), +j: Nat) -> U32:
   occ(fuel(), ls, gs, Set.new(), OOff{head(ls, gs, Set.new(), h), j})
 
 # The walk
@@ -433,7 +433,7 @@ def offset(+ls: Map<&2, DI>, +gs: Map<&2, DI>, +h: S.Surf, +j: Nat) -> U32:
 # order the Haskell's recursion threads it.
 
 type J is Data:
-  J{+ls: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, +t: S.Surf}
+  J{+ls: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, +t: S.Expanded()}
 
 # The visited (definition, level) pairs, the sites by key, the bangs by
 # binding, and the maximum nesting depth.
@@ -535,7 +535,7 @@ def seen(st: St, +k: String) -> Bool:
 def enter(+st: St, +ls: Map<&2, DI>, +gs: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, +v: String, +jobs: List<&2, J>) -> St & List<&2, J>:
   enter.if(st, ls, gs, bn, d, v, seen(st, key.visit(next.owner(owner, look(ls, v), look(gs, v)), d)), jobs)
 
-def jobs.at(+ls: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, ts: List<&2, S.Surf>, +jobs: List<&2, J>) -> List<&2, J>:
+def jobs.at(+ls: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, ts: List<&2, S.Expanded()>, +jobs: List<&2, J>) -> List<&2, J>:
   match ts:
     case Nil{}:
       jobs
@@ -543,7 +543,7 @@ def jobs.at(+ls: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, ts: List<&2
       J{ls, bn, owner, d, t} <> jobs.at(ls, bn, owner, d, rest, jobs)
 
 # An application's arguments, each at its head's offset for it.
-def jobs.args(args: List<&2, S.Surf>, +ls: Map<&2, DI>, +gs: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, +h: S.Surf, +j: Nat, +jobs: List<&2, J>) -> List<&2, J>:
+def jobs.args(args: List<&2, S.Expanded()>, +ls: Map<&2, DI>, +gs: Map<&2, DI>, +bn: Map<&2, B>, +owner: Def, +d: U32, +h: S.Expanded(), +j: Nat, +jobs: List<&2, J>) -> List<&2, J>:
   match args:
     case Nil{}:
       jobs
@@ -557,7 +557,7 @@ def local.id(owner: Def, +x: String) -> Def:
     case Def{m, n}:
       Def{m, n ++ "." ++ x}
 
-def let.locals(+owner: Def, bs: List<&2, S.Bind>, +ls: Map<&2, DI>) -> Map<&2, DI>:
+def let.locals(+owner: Def, bs: List<&2, S.ExpandedBind()>, +ls: Map<&2, DI>) -> Map<&2, DI>:
   match bs:
     case Nil{}:
       ls
@@ -567,7 +567,7 @@ def let.locals(+owner: Def, bs: List<&2, S.Bind>, +ls: Map<&2, DI>) -> Map<&2, D
           +x = L.Name.text(name)
           let.locals(owner, rest, Map.set(&2, DI, ls, x, DI{local.id(owner, x), val}))
 
-def let.binds(+owner: Def, +d: U32, bs: List<&2, S.Bind>, +bn: Map<&2, B>) -> Map<&2, B>:
+def let.binds(+owner: Def, +d: U32, bs: List<&2, S.ExpandedBind()>, +bn: Map<&2, B>) -> Map<&2, B>:
   match bs:
     case Nil{}:
       bn
@@ -649,14 +649,14 @@ def globals(mods: List<&2, Rs.Mod>, +gs: Map<&2, DI>) -> Map<&2, DI>:
         case Rs.Mod{m, items}:
           globals(rest, globals.items(m, items, gs))
 
-def entry.or(here: Bool, a: Maybe<&2, S.Surf>, b: Maybe<&2, S.Surf>) -> Maybe<&2, S.Surf>:
+def entry.or(here: Bool, a: Maybe<&2, S.Expanded()>, b: Maybe<&2, S.Expanded()>) -> Maybe<&2, S.Expanded()>:
   match here:
     case True{}:
-      Maybe.or(&2, S.Surf, a, b)
+      Maybe.or(&2, S.Expanded(), a, b)
     case False{}:
       b
 
-def entry.in(items: List<&2, S.EItem>) -> Maybe<&2, S.Surf>:
+def entry.in(items: List<&2, S.EItem>) -> Maybe<&2, S.Expanded()>:
   match items:
     case Nil{}:
       None{}
@@ -668,7 +668,7 @@ def entry.in(items: List<&2, S.EItem>) -> Maybe<&2, S.Surf>:
           entry.in(rest)
 
 # The entry module's main (lookupEntry).
-def entry(mods: List<&2, Rs.Mod>, +m: String) -> Maybe<&2, S.Surf>:
+def entry(mods: List<&2, Rs.Mod>, +m: String) -> Maybe<&2, S.Expanded()>:
   match mods:
     case Nil{}:
       None{}
@@ -748,7 +748,7 @@ def summary(st: St) -> Info:
            unkey(List.sort(~Sigma<&2, &2, String, _ => Bang>, ~le, bang.keyed(Map.to_list(&2, Bang, bangs)))),
            depth}
 
-def info.main(+mods: List<&2, Rs.Mod>, +m: String, main: Maybe<&2, S.Surf>) -> Result<&2, &2, String, Info>:
+def info.main(+mods: List<&2, Rs.Mod>, +m: String, main: Maybe<&2, S.Expanded()>) -> Result<&2, &2, String, Info>:
   match main:
     case None{}:
       Fail{"no entry definition " ++ m ++ ".main"}
