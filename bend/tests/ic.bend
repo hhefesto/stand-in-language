@@ -4,6 +4,7 @@ import ../Size.bend as Sz
 import ../Expr.bend as E
 import ../Core.bend as Co
 import ../Lift.bend as Lf
+import ../EAL.bend as EAL
 import ../IC.bend as IC
 import ../Session.bend as Ss
 import ../Text.bend as Tx
@@ -161,6 +162,84 @@ def last(r: Ss.Replay) -> String:
         case Nil{}:
           ""
 
+# Env usage
+# ---------
+#
+# DESIGN.md §7: the IC delivers a body's environment by its usage map (how
+# often each projection path is used), and EAL's guidance reads the same
+# map off the same code; a test pins that the two agree. Here: every
+# template of a program, and its entry, against EAL's usage of the code.
+
+def ic.uses(kvs: List<&2, Sigma<&2, &2, String, _ => U32>>) -> String:
+  match kvs:
+    case Nil{}:
+      ""
+    case Con{kv, rest}:
+      match kv:
+        case (path, n):
+          "[" ++ path ++ "]" ++ U32.show(n) ++ ";" ++ ic.uses(rest)
+
+def eal.uses(kvs: List<&2, Sigma<&2, &2, String, _ => EAL.Use>>) -> String:
+  match kvs:
+    case Nil{}:
+      ""
+    case Con{kv, rest}:
+      match kv:
+        case (path, u):
+          match u:
+            case EAL.Use{n, loc}:
+              "[" ++ path ++ "]" ++ U32.show(n) ++ ";" ++ eal.uses(rest)
+
+def lifted.main(t: Lf.Lifted) -> Lf.L:
+  match t:
+    case Lf.Lifted{bodies, main}:
+      main
+
+# One body: the usage the IC wires it by, and EAL's for the same code.
+def agrees(body: IC.Code, orig: Co.V) -> Bool:
+  String.eq(ic.uses(Map.to_list(&2, U32, IC.usage(body, "", Map.new(&2, U32)))),
+            eal.uses(Map.to_list(&2, EAL.Use, EAL.usage(lifted.main(Lf.defer.lift(Lf.of.expr(orig))), "", Map.new(&2, EAL.Use)))))
+
+def all.agree(srcs: List<&2, IC.Src>) -> Bool:
+  match srcs:
+    case Nil{}:
+      True{}
+    case Con{src, rest}:
+      match src:
+        case IC.Src{tid, fi, body, orig, code}:
+          agrees(body, orig) && all.agree(rest)
+
+def collected.agree(r: IC.Code & IC.Coll, whole: Co.V) -> Bool:
+  (entry, c) = r
+  match c:
+    case IC.Coll{next, srcs, seen, hs}:
+      agrees(entry, whole) && all.agree(srcs)
+
+def wired(+expr: Co.V) -> Bool:
+  +whole = Co.app(expr, Co.VEnv{})
+  collected.agree(IC.collect(whole)(IC.Coll{3, IC.selectors(), Map.new(&2, U32), None{}}), whole)
+
+def usage.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
+  match r:
+    case Fail{f}:
+      False{}
+    case Done{s}:
+      match s:
+        case Sz.Sized{counts, expr}:
+          wired(expr)
+
+def usage.terms(r: Result<&2, &2, String, Fr.Terms>) -> Bool:
+  match r:
+    case Fail{e}:
+      False{}
+    case Done{ts}:
+      match ts:
+        case Fr.Terms{cert, run}:
+          usage.sized(Sz.size(65536, True{}, E.of.term3(run)))
+
+def usage.agrees(srcs: List<&2, Fr.Src>, +entry: String) -> Bool:
+  usage.terms(Fr.compile(srcs, entry))
+
 def unlines(xs: List<&2, String>) -> String:
   match xs:
     case Nil{}:
@@ -314,6 +393,10 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
       15168230)))
+    IO.print(verdict("ic-usage-agrees", all([
+      usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
+      usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),
+      usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:

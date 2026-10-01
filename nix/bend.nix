@@ -87,6 +87,7 @@ let
       "ic-meter-tc_ultra_minimal"
       "ic-meter-simpleplus"
       "ic-meter-tictactoe"
+      "ic-usage-agrees"
     ];
     eal = [
       "sha256-vectors"
