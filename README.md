@@ -30,17 +30,24 @@ accepted and changes nothing):
 
 ```sh
 $ nix run . -- tictactoe.tel
+$ nix run . -- tictactoe.tel --certificate   # what is known without running it
+$ nix run . -- tictactoe.tel --meter         # run it, then what the run cost
 ```
 
 As in haskell-final, the program must pass EAL certification before it is
 sized (a program that does not certify is refused with the reason, exit 1),
 and the EAL capture layouts of the sized program guide the runtime's closure
-copying. haskell-final's other actions are not ported: `--certificate`,
-`--meter`, `--compile` and `.telc` programs, `--draw-net` and `--fast`. The
-sections below describe them as haskell-final has them. `test/golden/` records exactly what haskell-final printed for each
-example program and mode, and `nix flake check` runs the command on every case
-it covers (`test/golden/run.sh BIN_DIR check [PATTERN...]`). To run
-haskell-final itself:
+copying. Both reports of [Resource reporting](#resource-reporting) are
+ported: the static report (`--certificate`) as haskell-final prints it, and
+`--meter` with the interaction count only (see that section). haskell-final's
+other actions are not ported: `--ic --certificate` (the IC space
+certificate), `--compile` and `.telc` programs, `--draw-net` and `--fast`.
+The sections that describe them say so. `test/golden/` records exactly what
+haskell-final printed for each example program and mode, and `nix flake
+check` runs the command on every case it covers (`test/golden/run.sh BIN_DIR
+check [PATTERN...]`). Where the port prints something else on purpose,
+`test/golden/port/` holds what it prints instead, beside haskell-final's
+record. To run haskell-final itself:
 
 ```sh
 $ git worktree add ../telomare-haskell-final haskell-final
@@ -76,6 +83,17 @@ that is already data, and looking again at an apply site whose code has not
 changed. Every result is identical, and the capture layouts are byte for
 byte the same. The interaction net runs the tic-tac-toe test game's 15.2
 million interactions in about 3.2 s.
+
+### Design
+
+[DESIGN.md](DESIGN.md) is the maintainer's design document: Telomare's
+commitments (a simple core, totality, resource use as an output of
+compilation, one runtime, abort as a static device), the heuristic that each
+compiler stage makes the previous stage's forms unrepresentable, and the
+decisions that currently serve them. It was written against the Haskell
+code, so its module names are haskell-final's. The port meets the
+commitments and follows the decisions; where it does not yet, the work is
+in progress.
 
 ## Quick Start
 
@@ -133,7 +151,9 @@ knows without running the program, and `--meter`, which says what one run
 actually cost.
 
 ```sh
-$ telomare --certificate simpleplus.tel
+$ telomare simpleplus.tel --certificate
+static report: what the compiler knows without running the program
+
 recursion sites (iterations, over every input):
   Prelude:30:18 (#0)     <= 11
   Prelude:48:23 (#1)     <= 7
@@ -144,43 +164,49 @@ sizing budget in force: 65536 unrollings
 
 recursion nesting (structural, approximate):
   triple         function             levels
-  Prelude:11:19  Prelude.d2c          0, 1
-  Prelude:44:34  Prelude.foldr.fixed  0, 1
+  Prelude:11:17  Prelude.d2c          0, 1
+  Prelude:44:32  Prelude.foldr.fixed  0, 1
+
+maximum nesting depth: 2
+...
 ```
 
 The counts assert nothing new: they are the numbers already baked into the
 program to make it total, and they hold for every input. The nesting below them
-is a separate, structural reading of the source — it costs milliseconds rather
-than the sizing pass's minutes, and it also reports which bindings are used
+is a separate, structural reading of the source — it evaluates and searches
+nothing, so it costs far less than sizing — and it also reports which bindings are used
 below the level they were bound at (on `tictactoe.tel`, `whoWon.board : !!`),
 which is what duplicating a value across recursion levels costs. The two lists
 index differently — a count is per instantiation, a nesting row is per `{test,
 recursion, last}` as written — so they do not line up row by row, and the
 report says so.
 
-`--meter` runs the program and reports what the run cost — steps taken, and
-term nodes built. Those are measurements of one run, not predictions about the
-next:
+`--meter` runs the program and reports what the run cost: the interactions
+the net performed over the whole session, on stderr once the session ends.
+That is a measurement of one run, not a prediction about the next:
 
 ```sh
-$ printf '3 4\n' | telomare --meter simpleplus.tel
-steps (measured): 46652
-nodes built (measured): 13660
+$ printf '3 4\n' | telomare simpleplus.tel --meter
+enter two digits separated by a space
+3 plus 4 is 7
+IC interactions: 1517868
 ```
 
-Neither is a memory figure, deliberately. Telomare's evaluator shares
-environments rather than copying them, so counting the term it holds as a tree
-counts shared structure once per reference — for `tictactoe.tel` that reads
-about 1.2TB for a run that fits in a few GB. An honest memory figure needs
-reachability over distinct nodes, which is not implemented; use `+RTS -s` for
-the real thing.
+The count is haskell-final's `--ic --meter` count, interaction for
+interaction. It is not a memory figure, deliberately. haskell-final's IC also
+printed the peaks of its net's "logical storage" (agents, port entries,
+pending pairs), but those counted its own representation of the net (a map of
+ports, stale entries included), which the port does not share, so it does
+not print them; no figure is reported that the port cannot measure honestly.
+(haskell-final's reference evaluator, which `--meter` without `--ic` used,
+counted steps and term nodes instead; it is not ported.)
 
 When sizing fails, the error names the recursion, where it is, and which of the
 two failures it is — a budget that was too small, or an input that nothing
 bounds. Only the first is fixable by raising the budget. See
 `test/programs/limits/` for a worked example of each.
 
-## Compiling once
+## Compiling once (haskell-final)
 
 Sizing is the slow part — about 70 seconds for `tictactoe.tel` — and it gives
 the same answer every time, because it runs the program over a *symbolic*
@@ -197,7 +223,7 @@ and `--certificate` on it prints instantly. If the sources are still around and
 have changed since it was built, running it says so and carries on — an
 artifact is expected to outlive the checkout it came from.
 
-## Running without sizing
+## Running without sizing (haskell-final)
 
 `--fast` skips sizing altogether and runs the recursion on demand, unrolling
 one layer per call instead of a count inferred in advance. It starts
@@ -441,10 +467,10 @@ goldens in `test/golden/`.
 | Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend` |
 | Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
 | Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend` |
-| Certify | `Telomare.EAL`, the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,EAL}.bend` (the verdict and the capture layouts; the bangs and levels only the static report shows are not) |
+| Certify | `Telomare.EAL`, the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,EAL}.bend` (the verdict and the capture layouts; the per-Defer bangs and levels of the REPL's `:t` are not) |
 | IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying guided by the EAL capture layouts |
-| Drive | `Telomare.Driver`, the `telomare` command | ported for running programs: `bend/{Session,Main}.bend` |
-| Static report | `Telomare.Levels`, `Telomare.Certificate` | not ported |
+| Drive | `Telomare.Driver`, the `telomare` command | ported for running programs and `--meter`: `bend/{Session,Main}.bend` |
+| Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
 | Artifacts | `Telomare.Artifact` | not ported |
 | REPL and LSP | `app/Repl.hs`, `app/LSP.hs` | not ported |
@@ -469,7 +495,11 @@ If you'd like to contribute, please fork the repository and use a feature branch
 ## Licensing
 The code in this project is licensed under the Apache License 2.0. For more information, please refer to the [LICENSE file](https://github.com/Stand-In-Language/stand-in-language/blob/master/LICENSE).
 
-## IC logical storage
+## IC logical storage (haskell-final)
+
+This section describes haskell-final. The port's `--meter` reports the
+interaction count alone, and `--ic --certificate`, `--compile` and
+`--draw-net` are not ported.
 
 `--ic` runs a sized source program or `.telc` artifact on the interaction-net
 runtime (`Telomare.IC`) instead of the reference evaluator. The rules and

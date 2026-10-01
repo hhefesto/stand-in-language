@@ -20,6 +20,8 @@ import ./Lift.bend as Lift
 import ./EAL.bend as EAL
 import ./IC.bend as IC
 import ./Session.bend as Session
+import ./Levels.bend as Levels
+import ./Certificate.bend as Certificate
 import ./Main.bend as Main
 
 # Every module of the port, so that `bend bend/Everything.bend` checks them all

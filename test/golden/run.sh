@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # The goldens: what the Haskell implementation (tag haskell-final) printed for
 # each case in test/golden/cases, one file per case under test/golden/expected.
-# The Bend port is measured against them.
+# The Bend port is measured against them. Where the port differs from
+# haskell-final on purpose, test/golden/port/NAME holds what the port prints
+# instead, and the check compares against that; expected/NAME stays as
+# haskell-final printed it, so the two files' diff is the difference.
 #
-#   test/golden/run.sh BIN_DIR record [PATTERN...]   write expected/NAME
-#   test/golden/run.sh BIN_DIR check  [PATTERN...]   compare, report PASS/FAIL
+#   test/golden/run.sh BIN_DIR record      [PATTERN...]   write expected/NAME
+#   test/golden/run.sh BIN_DIR record-port [PATTERN...]   write port/NAME
+#   test/golden/run.sh BIN_DIR check       [PATTERN...]   compare, report PASS/FAIL
 #
 # BIN_DIR holds `telomare` (and `telomare-repl` for the repl cases). Each
 # PATTERN is a shell glob over case names; a case runs when any matches, and
@@ -29,19 +33,21 @@ shift 2
 patterns=("$@")
 if [ "${#patterns[@]}" -eq 0 ]; then patterns=('*'); fi
 case "$mode" in
-  record | check) ;;
+  record | record-port | check) ;;
   *)
-    echo "$0: mode must be record or check" >&2
+    echo "$0: mode must be record, record-port or check" >&2
     exit 2
     ;;
 esac
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 expected="$root/test/golden/expected"
+port="$root/test/golden/port"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/actual"
 if [ "$mode" = record ]; then mkdir -p "$expected"; fi
+if [ "$mode" = record-port ]; then mkdir -p "$port"; fi
 
 # One case's longest run, in seconds (sizing tictactoe takes about a minute).
 case_timeout="${GOLDEN_TIMEOUT:-1200}"
@@ -104,16 +110,21 @@ run() {
       done <<< "$written"
     fi
   } > "$out"
+  local want="$expected/$name"
+  if [ -f "$port/$name" ]; then want="$port/$name"; fi
   if [ "$mode" = record ]; then
     cp "$out" "$expected/$name"
     printf 'recorded %s (status %s)\n' "$name" "$status"
-  elif [ -f "$expected/$name" ] && cmp -s "$out" "$expected/$name"; then
+  elif [ "$mode" = record-port ]; then
+    cp "$out" "$port/$name"
+    printf 'recorded port/%s (status %s)\n' "$name" "$status"
+  elif [ -f "$want" ] && cmp -s "$out" "$want"; then
     passed=$((passed + 1))
     printf 'PASS %s\n' "$name"
   else
     failed=$((failed + 1))
     printf 'FAIL %s\n' "$name"
-    diff -u "$expected/$name" "$out" | head -40 || true
+    diff -u "$want" "$out" | head -40 || true
   fi
 }
 

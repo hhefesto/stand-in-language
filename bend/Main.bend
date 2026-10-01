@@ -8,57 +8,88 @@ import ./Lift.bend as Lf
 import ./EAL.bend as EAL
 import ./IC.bend as IC
 import ./Session.bend as Ss
+import ./Resolve.bend as Rs
+import ./Levels.bend as Lv
+import ./Certificate.bend as Ct
 
-# The `telomare` command: `telomare FILE.tel [--ic]` runs the program on the
-# IC runtime, as haskell-final's `telomare FILE.tel --ic` did (app/Main.hs
-# runSized, Driver.evalLoopIC). IC is the only runtime here, so `--ic` changes
-# nothing. The other actions (--certificate, --meter, --compile, .telc
-# programs, --draw-net, --fast) are haskell-final's alone. The goldens in
-# test/golden check the command (`test/golden/run.sh BIN_DIR check`).
+# The `telomare` command (haskell-final's app/Main.hs runSized):
+#
+#   telomare FILE.tel                 run the program on the IC runtime
+#   telomare FILE.tel --meter         run it, then report what the run cost
+#   telomare FILE.tel --certificate   report what is known without running it
+#
+# The two reports are DESIGN.md's (C3, §9): the static report holds the
+# iteration counts sizing inferred and the structural nesting reading; the
+# meter, the interactions the session spent. IC is the only runtime here, so
+# `--ic` is accepted and changes nothing, except that `--ic --certificate`
+# (haskell-final's IC space certificate) is refused. haskell-final's other
+# actions (--compile and .telc programs, --draw-net, --fast) are not
+# ported. The goldens in test/golden check the command
+# (`test/golden/run.sh BIN_DIR check`).
+
+# What to do with the program.
+type Act is Data:
+  Play{}
+  Meter{}
+  Report{}
 
 type Arg is Data:
   AFile{+path: String}
   AIc{}
+  AAct{+act: Act, +flag: String}
   AOld{+flag: String}
   AUnknown{+flag: String}
 
-# The arguments so far: no program yet, the program, or what is wrong.
+# The arguments so far: the action, the flag that chose it ("" for the
+# default, a plain run), whether `--ic` was given and, once given, the
+# program; or what is wrong.
 type Cmd is Data:
-  NoFile{}
-  Run{+file: String}
+  Cmd{+act: Act, +flag: String, +ic: Bool, +file: Maybe<&2, String>}
   Bad{+msg: String}
 
-# The loop's state: an iteration to run, its outcome to act on, or the line
-# read for the next one (evalSessionCore).
-type SS is Type:
-  SRun{net: IC.Net, i: Tx.In, input: E.X}
-  SOut{net: IC.Net, i: Tx.In, o: Ss.Outcome}
-  SLine{net: IC.Net, st: E.X, l: Tx.Line}
-
 def usage() -> String:
-  "usage: telomare FILE.tel [--ic]"
+  "usage: telomare FILE.tel [--ic] [--meter | --certificate]"
 
 # The command line
 # ----------------
 
 # haskell-final's options that the port leaves out.
 def old.flags() -> List<&2, String>:
-  ["--certificate", "--meter", "--compile", "--output", "-o", "--draw-net",
-   "--draw-limit", "--fast", "--fuel"]
+  ["--compile", "--output", "-o", "--draw-net", "--draw-limit", "--fast",
+   "--fuel"]
 
-def arg.flag(+s: String, ic: Bool, old: Bool) -> Arg:
-  match ic old:
-    case True{} _:
-      AIc{}
-    case False{} True{}:
+def arg.old(+s: String, old: Bool) -> Arg:
+  match old:
+    case True{}:
       AOld{s}
-    case False{} False{}:
+    case False{}:
       AUnknown{s}
+
+def arg.meter(+s: String, meter: Bool) -> Arg:
+  match meter:
+    case True{}:
+      AAct{Meter{}, s}
+    case False{}:
+      arg.old(s, List.contains(~String, ~String.eq, old.flags(), s))
+
+def arg.report(+s: String, report: Bool) -> Arg:
+  match report:
+    case True{}:
+      AAct{Report{}, s}
+    case False{}:
+      arg.meter(s, String.eq(s, "--meter"))
+
+def arg.ic(+s: String, ic: Bool) -> Arg:
+  match ic:
+    case True{}:
+      AIc{}
+    case False{}:
+      arg.report(s, String.eq(s, "--certificate"))
 
 def arg.if(+s: String, flag: Bool) -> Arg:
   match flag:
     case True{}:
-      arg.flag(s, String.eq(s, "--ic"), List.contains(~String, ~String.eq, old.flags(), s))
+      arg.ic(s, String.eq(s, "--ic"))
     case False{}:
       AFile{s}
 
@@ -67,10 +98,26 @@ def arg(+s: String) -> Arg:
 
 def with.file(c: Cmd, +path: String) -> Cmd:
   match c:
-    case NoFile{}:
-      Run{path}
-    case Run{f}:
-      Bad{"telomare: one program at a time\n" ++ usage()}
+    case Cmd{act, flag, ic, file}:
+      match file:
+        case None{}:
+          Cmd{act, flag, ic, Some{path}}
+        case Some{f}:
+          Bad{"telomare: one program at a time\n" ++ usage()}
+    case Bad{m}:
+      Bad{m}
+
+def act.set(+first: String, +a: Act, +flag: String, +ic: Bool, +file: Maybe<&2, String>, none: Bool) -> Cmd:
+  match none:
+    case True{}:
+      Cmd{a, flag, ic, file}
+    case False{}:
+      Bad{"telomare: " ++ first ++ " and " ++ flag ++ " are separate actions; give one\n" ++ usage()}
+
+def with.act(c: Cmd, +a: Act, +flag: String) -> Cmd:
+  match c:
+    case Cmd{act, +first, +ic, +file}:
+      act.set(first, a, flag, ic, file, String.is_empty(first))
     case Bad{m}:
       Bad{m}
 
@@ -82,25 +129,30 @@ def with.path(c: Cmd, +path: String, telc: Bool) -> Cmd:
     case False{}:
       with.file(c, path)
 
+def with.ic(c: Cmd) -> Cmd:
+  match c:
+    case Cmd{act, flag, ic, file}:
+      Cmd{act, flag, True{}, file}
+    case Bad{m}:
+      Bad{m}
+
 def with.arg(c: Cmd, a: Arg) -> Cmd:
   match a:
     case AFile{+path}:
       with.path(c, path, String.ends_with(path, ".telc"))
     case AIc{}:
-      c
+      with.ic(c)
+    case AAct{act, flag}:
+      with.act(c, act, flag)
     case AOld{flag}:
-      Bad{"telomare: " ++ flag ++ " is not in the Bend port, which only runs programs; haskell-final has it"}
+      Bad{"telomare: " ++ flag ++ " is not in the Bend port; haskell-final has it"}
     case AUnknown{flag}:
       Bad{"telomare: unknown option " ++ flag ++ "\n" ++ usage()}
 
 def args.go(xs: List<String>, c: Cmd) -> Cmd:
   match xs:
     case Nil{}:
-      match c:
-        case NoFile{}:
-          Bad{usage()}
-        case other:
-          other
+      c
     case Con{x, rest}:
       args.go(rest, with.arg(c, arg(x)))
 
@@ -133,117 +185,161 @@ def base.name(file: String) -> String:
 # The session
 # -----------
 
-def ran(i: Tx.In, r: IC.Run) -> SS:
-  match r:
-    case IC.Run{net, out, spent}:
-      SOut{net, i, Ss.outcome(out)}
+# Main's side of the session (Session.bend has the iterations): the turn to
+# act on, or the line read for the next one.
+type SS is Type:
+  STurn{i: Tx.In, t: Ss.Turn}
+  SLine{net: IC.Net, st: E.X, spent: U32, l: Tx.Line}
 
-def got(net: IC.Net, i: Tx.In, st: E.X, g: Tx.Got) -> IO(SS):
+# What `--meter` reports once the session is over: what the run cost, as
+# measured (the interactions), never a figure the port cannot measure
+# honestly.
+def metered(meter: Bool, +spent: U32) -> IO(Unit):
+  match meter:
+    case True{}:
+      IO.print_err("IC interactions: " ++ U32.show(spent))
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def got(+p: IC.Prog, net: IC.Net, i: Tx.In, st: E.X, +spent: U32, g: Tx.Got) -> IO(SS):
   match g:
     case Tx.GLine{text}:
-      IO.pure(SS, SRun{net, i, E.XPair{E.of.string(text), st}})
+      IO.pure(SS, STurn{i, Ss.answer(p, net, text, st, spent)})
     case Tx.GEnd{}:
       IO.die(SS, 1, "telomare: <stdin>: hGetLine: end of file")
     case Tx.GErr{msg}:
       IO.die(SS, 1, "telomare: <stdin>: hGetLine: " ++ msg)
 
-def session(fuel: Nat, +p: IC.Prog, s: SS) -> IO(Unit):
+def session(fuel: Nat, +p: IC.Prog, +meter: Bool, s: SS) -> IO(Unit):
   match fuel:
     case 0n:
       IO.die(Unit, 1, "telomare: too many iterations")
     case 1n+k:
       match s:
-        case SRun{net, i, input}:
-          session(k, p, ran(i, IC.run(p, net, input, IC.default.fuel())))
-        case SOut{net, i, o}:
-          match o:
-            case Ss.Continue{display, st}:
+        case STurn{i, t}:
+          match t:
+            case Ss.Asks{net, display, st, spent}:
               do IO<Unit>:
                 IO.print(display)
                 l : Tx.Line <- Tx.read_line(i)
-                session(k, p, SLine{net, st, l})
-            case Ss.Stop{display}:
-              IO.print(display)
-            case Ss.Crash{msg}:
+                session(k, p, meter, SLine{net, st, spent, l})
+            case Ss.Ends{display, spent}:
+              do IO<Unit>:
+                IO.print(display)
+                metered(meter, spent)
+            case Ss.Fails{msg, spent}:
               IO.die(Unit, 1, "telomare: " ++ msg)
-        case SLine{net, st, l}:
+        case SLine{net, st, spent, l}:
           match l:
             case Tx.Line{i, g}:
               do IO<Unit>:
-                next : SS <- got(net, i, st, g)
-                session(k, p, next)
+                next : SS <- got(p, net, i, st, spent, g)
+                session(k, p, meter, next)
 
-# The first iteration runs on 0.
-def play(+p: IC.Prog) -> IO(Unit):
-  session(U32.to_nat(4294967295), p, SRun{IC.net.new(p), Tx.Closed{}, E.XZero{}})
+def play(+p: IC.Prog, meter: Bool) -> IO(Unit):
+  session(U32.to_nat(4294967295), p, meter, STurn{Tx.Closed{}, Ss.start(p)})
 
-# The pipeline
-# ------------
+# The pipeline (compileModules, then the action)
+# ----------------------------------------------
 
-# The program ready to run: sized, then prepared under EAL's guidance.
-def ready(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Sz.SizeFail, IC.Prog>:
+# The sizing budget: unrollings per recursion site.
+def budget() -> U32:
+  65536
+
+# The sized program, run or reported on. Running prepares it under the
+# EAL capture layouts of the sized term, so closures are copied as EAL
+# planned; the static report needs neither.
+def acted(s: Sz.Sized, act: Act, +mods: List<&2, Rs.Mod>, +entry: String, +run: T.C) -> IO(Unit):
+  match s:
+    case Sz.Sized{counts, expr}:
+      match act:
+        case Play{}:
+          play(Ss.prepared(expr), False{})
+        case Meter{}:
+          play(Ss.prepared(expr), True{})
+        case Report{}:
+          IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry)))
+
+def sized(act: Act, +mods: List<&2, Rs.Mod>, +entry: String, +run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
   match r:
     case Fail{f}:
-      Fail{f}
+      IO.die(Unit, 1, Sz.render(f, run, budget()))
     case Done{s}:
-      match s:
-        case Sz.Sized{counts, expr}:
-          Done{Ss.prepared(expr)}
-
-def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, IC.Prog>) -> IO(Unit):
-  match r:
-    case Fail{f}:
-      IO.die(Unit, 1, Sz.render(f, run, 65536))
-    case Done{p}:
-      play(p)
+      acted(s, act, mods, entry, run)
 
 # certifyMain gates the program before its sizing does (Driver's
-# compileMainReporting).
-def certified(+run: T.C, c: Maybe<&2, EAL.Err>) -> IO(Unit):
+# compileMainReporting), whatever the action.
+def certified(act: Act, +mods: List<&2, Rs.Mod>, +entry: String, +run: T.C, c: Maybe<&2, EAL.Err>) -> IO(Unit):
   match c:
     case Some{e}:
       IO.die(Unit, 1, EAL.render(e))
     case None{}:
-      sized(run, ready(Sz.size(65536, True{}, E.of.term3(run))))
+      sized(act, mods, entry, run, Sz.size(budget(), True{}, E.of.term3(run)))
 
 # The certification, then the sized program. EAL forks over the bodies
 # inside each; run side by side, the two would split the lanes between
 # them and starve those forks.
-def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
+def compiled(act: Act, +mods: List<&2, Rs.Mod>, +entry: String, r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.die(Unit, 1, e)
     case Done{ts}:
       match ts:
         case Fr.Terms{cert, +run}:
-          certified(run, EAL.certify(Lf.defer.lift(cert)))
+          certified(act, mods, entry, run, EAL.certify(Lf.defer.lift(cert)))
 
-def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
+# The modules parsed and expanded once: the static report reads them as
+# written, and resolution compiles them.
+def parsed(act: Act, +entry: String, m: Fr.Mods) -> IO(Unit):
+  match m:
+    case Fr.Mods{+mods, errs}:
+      compiled(act, mods, entry, Fr.compile.mods(Fr.Mods{mods, errs}, entry))
+
+def loaded(act: Act, +entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.die(Unit, 1, "telomare: " ++ e)
     case Done{srcs}:
-      compiled(Fr.compile(srcs, entry))
+      parsed(act, entry, Fr.all(srcs))
+
+def run.file(act: Act, file: Maybe<&2, String>) -> IO(Unit):
+  match file:
+    case Some{f}:
+      +entry = base.name(f)
+      do IO<Unit>:
+        r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
+        loaded(act, entry, r)
+    case None{}:
+      IO.die(Unit, 2, usage())
+
+# haskell-final's `--ic --certificate` was another report, the IC space
+# certificate, which the port does not have: refuse it rather than answer
+# with the static report.
+def run.cmd(act: Act, ic: Bool, file: Maybe<&2, String>) -> IO(Unit):
+  match act:
+    case Report{}:
+      match ic:
+        case True{}:
+          IO.die(Unit, 2, "telomare: --ic --certificate (the IC space certificate) is not in the Bend port; haskell-final has it. --certificate alone gives the static report")
+        case False{}:
+          run.file(Report{}, file)
+    case other:
+      run.file(other, file)
 
 def command(c: Cmd) -> IO(Unit):
   match c:
-    case Run{file}:
-      +entry = base.name(file)
-      do IO<Unit>:
-        r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
-        loaded(entry, r)
+    case Cmd{act, flag, ic, file}:
+      run.cmd(act, ic, file)
     case Bad{msg}:
       IO.die(Unit, 2, msg)
-    case NoFile{}:
-      IO.die(Unit, 2, usage())
 
 # The command line, program name first (IO.args keeps argv[0]).
 def args(xs: List<String>) -> IO(Unit):
   match xs:
     case self <> rest:
-      command(args.go(rest, NoFile{}))
+      command(args.go(rest, Cmd{Play{}, "", False{}, None{}}))
     case _:
-      command(NoFile{})
+      command(Cmd{Play{}, "", False{}, None{}})
 
 def main() -> IO(Unit):
   do IO<Unit>:

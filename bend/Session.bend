@@ -147,41 +147,70 @@ def outcome(r: IC.RB) -> Outcome:
 def prepared(+expr: E.X) -> IC.Prog:
   IC.prepare(expr, EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
 
-# A session on given lines (evalLoopIC with its inputs), for the tests: the
-# displays, newest first, and the interactions every iteration spent. It
-# ends where the session would, or where the lines run out.
+# The session (evalSessionCore)
+# -----------------------------
+#
+# One iteration at a time, between the effects the drivers own: Main reads
+# standard input and prints, the tests feed given lines and keep the
+# displays. Every turn carries the interactions the session has spent so
+# far, which is what `--meter` reports.
+
+# A display to show, then either a line to read for the next iteration,
+# the end of the session, or a failure.
+type Turn is Type:
+  Asks{net: IC.Net, display: String, state: E.X, spent: U32}
+  Ends{display: String, spent: U32}
+  Fails{msg: String, spent: U32}
+
+def turn.of(net: IC.Net, o: Outcome, +spent: U32) -> Turn:
+  match o:
+    case Continue{display, st}:
+      Asks{net, display, st, spent}
+    case Stop{display}:
+      Ends{display, spent}
+    case Crash{msg}:
+      Fails{msg, spent}
+
+def turn(r: IC.Run, +before: U32) -> Turn:
+  match r:
+    case IC.Run{net, out, spent}:
+      turn.of(net, outcome(out), (before + spent : U32))
+
+# The first iteration runs on 0.
+def start(+p: IC.Prog) -> Turn:
+  turn(IC.run(p, IC.net.new(p), E.XZero{}, IC.default.fuel()), 0)
+
+# The next iteration runs on the line read and the state the last one left.
+def answer(+p: IC.Prog, net: IC.Net, +line: String, st: E.X, +spent: U32) -> Turn:
+  turn(IC.run(p, net, E.XPair{E.of.string(line), st}, IC.default.fuel()), spent)
+
+# A session on given lines, for the tests: the displays, newest first, and
+# the interactions spent. It ends where the session would, or where the
+# lines run out.
 type Replay is Data:
   Replay{+shown: List<&2, String>, +spent: U32}
 
-type RS is Type:
-  RSRun{net: IC.Net, input: E.X}
-  RSOut{net: IC.Net, o: Outcome, spent: U32}
+# What the session showed when it stopped: the turn's display (or its
+# failure) and what it spent.
+def replay.end(t: Turn, +shown: List<&2, String>) -> Replay:
+  match t:
+    case Asks{net, display, st, spent}:
+      Replay{display <> shown, spent}
+    case Ends{display, spent}:
+      Replay{display <> shown, spent}
+    case Fails{msg, spent}:
+      Replay{msg <> shown, spent}
 
-def ran(r: IC.Run) -> RS:
-  match r:
-    case IC.Run{net, out, spent}:
-      RSOut{net, outcome(out), spent}
-
-def replay.go(fuel: Nat, +p: IC.Prog, s: RS, lines: List<&2, String>, +shown: List<&2, String>, +spent: U32) -> Replay:
-  match fuel:
-    case 0n:
-      Replay{shown, spent}
-    case 1n+k:
-      match s:
-        case RSRun{net, input}:
-          replay.go(k, p, ran(IC.run(p, net, input, IC.default.fuel())), lines, shown, spent)
-        case RSOut{net, o, n}:
-          match o:
-            case Continue{display, st}:
-              match lines:
-                case Nil{}:
-                  Replay{display <> shown, (spent + n : U32)}
-                case Con{line, rest}:
-                  replay.go(k, p, RSRun{net, E.XPair{E.of.string(line), st}}, rest, display <> shown, (spent + n : U32))
-            case Stop{display}:
-              Replay{display <> shown, (spent + n : U32)}
-            case Crash{msg}:
-              Replay{msg <> shown, (spent + n : U32)}
+def replay.go(lines: List<&2, String>, +p: IC.Prog, t: Turn, +shown: List<&2, String>) -> Replay:
+  match lines:
+    case Nil{}:
+      replay.end(t, shown)
+    case Con{line, rest}:
+      match t:
+        case Asks{net, display, st, spent}:
+          replay.go(rest, p, answer(p, net, line, st, spent), display <> shown)
+        case other:
+          replay.end(other, shown)
 
 def replay(+p: IC.Prog, lines: List<&2, String>) -> Replay:
-  replay.go(U32.to_nat(65536), p, RSRun{IC.net.new(p), E.XZero{}}, lines, [], 0)
+  replay.go(lines, p, start(p), [])

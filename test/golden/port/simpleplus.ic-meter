@@ -1,0 +1,6 @@
+status 0
+--- stdout
+enter two digits separated by a space
+3 plus 4 is 7
+--- stderr
+IC interactions: 1517868

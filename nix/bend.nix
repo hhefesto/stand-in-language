@@ -35,15 +35,18 @@ let
   };
 
   # The golden cases the port covers: runs on IC (the plain runs too, whose
-  # output is the same), and compile errors. The others are haskell-final's
-  # other actions (--certificate, --meter, --compile, .telc, --draw-net) and
-  # the REPL.
+  # output is the same), compile errors, the static report (--certificate)
+  # and the meter (--ic --meter; its expectation is test/golden/port's). The
+  # others are haskell-final's other actions (--ic --certificate, --compile,
+  # .telc, --draw-net) and the REPL.
   goldenPatterns = [
     "*.run"
     "*.run-*"
     "*.ic"
     "*.ic-abort"
     "*.ic-carry"
+    "*.ic-meter"
+    "*.certificate"
     "*.test-game"
     "*.test-game-ic"
   ];
