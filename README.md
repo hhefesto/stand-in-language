@@ -91,9 +91,30 @@ commitments (a simple core, totality, resource use as an output of
 compilation, one runtime, abort as a static device), the heuristic that each
 compiler stage makes the previous stage's forms unrepresentable, and the
 decisions that currently serve them. It was written against the Haskell
-code, so its module names are haskell-final's. The port meets the
-commitments and follows the decisions; where it does not yet, the work is
-in progress.
+code, so its module names are haskell-final's.
+
+The port meets the commitments and follows the heuristic and the decisions:
+the bounds sizing infers and the cost of a run are both reported (C3); IC is
+the one runtime (C4); every stage hands the next a type without the previous
+stage's forms (H1, see [Compiler stages](#compiler-stages)); failures are one
+union with a case per stage (§9); a closure body is one template however
+often it occurs (§7), and a test pins that the IC's environment wiring and
+EAL's usage map agree (§7). It differs on purpose in these places:
+
+- `--meter` reports interactions only. haskell-final's IC also printed
+  "logical storage" counted on its own map-of-ports net, which the port
+  does not share and so cannot report honestly.
+- `--fast`, `.telc` artifacts (`--compile`) and `--draw-net` are not
+  ported. `--fast` is a second evaluator (C4 makes that transitional), and
+  sizing tictactoe takes 0.2 s here, so compiling once buys little.
+- Like haskell-final, the port certifies the sized program only for the
+  capture layouts that guide the IC; it does not refuse to run a program
+  whose sized form fails certification (DESIGN.md's `admitIC` is not in
+  master or haskell-final).
+
+DESIGN.md's open questions (§11) stay as haskell-final has them: the
+certified term is not the executed one, abort is a core form, `if` is
+strict, `trace` does nothing.
 
 ## Quick Start
 
@@ -466,7 +487,7 @@ goldens in `test/golden/`.
 | Lexical facts | `Telomare.Lexical` | ported: `bend/Lexical.bend` |
 | Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend` |
 | Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
-| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend` |
+| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend`, handing on `bend/Core.bend`'s CompiledExpr |
 | Certify | `Telomare.EAL`, the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,EAL}.bend` (the verdict and the capture layouts; the per-Defer bangs and levels of the REPL's `:t` are not) |
 | IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying guided by the EAL capture layouts |
 | Drive | `Telomare.Driver`, the `telomare` command | ported for running programs and `--meter`: `bend/{Session,Main}.bend` |
@@ -477,6 +498,15 @@ goldens in `test/golden/`.
 
 Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and
 `Telomare.Fast`.
+
+Each stage hands the next a type in which the previous stage's forms cannot
+be written (DESIGN.md's H1): the surface term `Syntax.Surf` is indexed by
+stage (`Parsed`, `Expanded`, `Desugared`, `Lowering`; a stage's eliminated
+constructors carry a witness of type `Empty`); `Term.T` is over names
+(Term1) or de Bruijn indices (Term2); `Term.C` is Term3; and sizing hands
+the IC `Core.V`, the runnable core, whose input and state are `Core.D`
+data. The IC's own collected code (`IC.Code`) has closures as template
+references.
 
 `bend/Lexical.bend` holds the lexical facts of the language (the reserved
 words, the identifier character classes, the comment delimiters), so that the
