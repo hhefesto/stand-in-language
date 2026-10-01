@@ -1,0 +1,8 @@
+import Prelude
+b = \x -> if x then "1" else "0"
+main = \input ->
+  ( concat [ b (dEqual (dPlus 1 2) 3), b (dEqual (dMinus 5 3) 2), b (dEqual (dMinus 0 1) 0)
+           , b (dEqual (dTimes 3 4) 12), b (dEqual (dDiv 8 2) 4), b (dEqual (dEqual 3 3) 1)
+           , b (dEqual (dEqual 3 4) 0), b (dEqual (dMod 10 3) 1)
+           ]
+  , 0)

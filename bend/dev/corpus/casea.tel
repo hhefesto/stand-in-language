@@ -1,0 +1,9 @@
+import Prelude
+main =
+  let toCase = ("Hello", ("sam", "!"))
+      caseTest =
+        case toCase of
+          (0, (1,2)) -> "False"
+          ("Hello", ("sam", x)) -> concat ["Hi, ", "sam", x]
+          ("Hello", ("world", "!")) -> "False"
+  in \input -> (caseTest, 0)

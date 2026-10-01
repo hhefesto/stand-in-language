@@ -1,0 +1,2 @@
+import Prelude
+main = \input -> (if dEqual (left (right (rPlus (fromRational 1 2) (fromRational 1 2)))) 1 then "ok" else "bad", 0)

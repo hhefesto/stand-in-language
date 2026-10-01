@@ -1,0 +1,3 @@
+import Prelude
+main = \input -> let f = \(a, b) -> b
+                 in (f (0, "pat"), 0)

@@ -1,0 +1,9 @@
+import Prelude
+main =
+  let toCase = (0,(8,2))
+      caseTest =
+        case toCase of
+          (0, (1,2)) -> "False"
+          (1, (8,2)) -> "False"
+          (0,(8,2)) -> "True"
+  in \input -> (caseTest, 0)

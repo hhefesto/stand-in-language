@@ -1,0 +1,6 @@
+import Prelude
+main = \input ->
+  let r = case 3 of
+            0 -> "zero"
+            1 -> "one"
+  in (r, 0)

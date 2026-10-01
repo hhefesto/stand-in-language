@@ -1,0 +1,3 @@
+import Prelude
+import qualified Other as O
+main = \input -> (if dEqual O.foo 3 then "ok" else "bad", 0)

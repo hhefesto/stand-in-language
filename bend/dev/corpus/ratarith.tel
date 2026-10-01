@@ -1,0 +1,10 @@
+import Prelude
+b = \x -> if x then "1" else "0"
+rEq = \r n d -> and (dEqual (left (right r)) n) (dEqual (right (right r)) d)
+main = \input ->
+  ( concat [ b (rEq (rPlus (fromRational 1 2) (fromRational 1 2)) 1 1)
+           , b (rEq (rMinus (fromRational 1 2) (fromRational 1 2)) 0 1)
+           , b (rEq (rTimes (fromRational 1 2) (fromRational 1 2)) 1 4)
+           , b (rEq (rDiv (fromRational 1 2) (fromRational 1 2)) 1 1)
+           ]
+  , 0)

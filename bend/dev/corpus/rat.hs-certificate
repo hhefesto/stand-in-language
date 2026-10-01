@@ -1,0 +1,49 @@
+static report: what the compiler knows without running the program
+
+recursion sites (iterations, over every input):
+  Prelude:18:17 (#0)   <= 3
+  Prelude:22:18 (#1)   <= 3
+  Prelude:30:18 (#2)   <= 5
+  Prelude:67:42 (#3)   <= 4
+  Prelude:135:36 (#4)  <= 2
+  Prelude:150:29 (#5)  <= 3
+  Prelude:151:29 (#6)  <= 1
+  Prelude:151:39 (#7)  <= 2
+
+sizing budget in force: 65536 unrollings
+
+recursion nesting (structural, approximate):
+  triple         function      levels
+  Prelude:11:17  Prelude.d2c   0, 1, 2
+  Prelude:73:18  Prelude.dDiv  0, 1
+  Prelude:138:3  Prelude.gcd   0
+
+maximum nesting depth: 3
+
+bindings used below the level they were bound at:
+  Prelude.rPlus.a           !!!  (3 levels below its binding)
+  Prelude.rPlus.rNum        !!!  (3 levels below its binding)
+  Prelude.dMod.b            !!  (2 levels below its binding)
+  Prelude.dTimes.a          !!  (2 levels below its binding)
+  Prelude.gcd.p             !!  (2 levels below its binding)
+  Prelude.rPlus.b           !!  (2 levels below its binding)
+  Prelude.rPlus.rDen        !!  (2 levels below its binding)
+  Prelude.__udt_Rational.h  !  (1 level below its binding)
+  Prelude.d2c.b             !  (1 level below its binding)
+  Prelude.d2c.f             !  (1 level below its binding)
+  Prelude.dDiv.p            !  (1 level below its binding)
+  Prelude.dEqual.b          !  (1 level below its binding)
+  Prelude.dMinus.a          !  (1 level below its binding)
+  Prelude.dMod.a            !  (1 level below its binding)
+  Prelude.dPlus.a           !  (1 level below its binding)
+
+The two lists index differently: a count above is per instantiation (a
+recursion reached from two places is sized separately at each), while a
+row below is one {t, r, b} as written. They do not line up row by row.
+
+A site at level d has its test, recursion and last one level deeper.
+Several levels for one triple mean it is reached from several places.
+Levels are structural: a parameter applied as a function whose shape is
+unknown counts as level 0, so a level can be reported too shallow. They
+are not bounds, and not a termination argument -- the counts are.
+status 0

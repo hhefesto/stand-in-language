@@ -1,0 +1,9 @@
+import Prelude
+main =
+  let toCase = ("a string",("Hi, sam!","str"))
+      caseTest =
+        case toCase of
+          ("a string", ("Hi, sam!",2)) -> "False"
+          (1, (8,2)) -> "False"
+          ("a string",(x,"str")) -> x
+  in \input -> (caseTest, 0)

@@ -1,0 +1,12 @@
+import Prelude
+[Nat, toNat, fromNat, nPlus, nMinus] = \h ->
+  [ \x -> (h, x)
+  , \(x : Nat) -> x
+  , \(aa : Nat) (bb : Nat) -> (h, d2c aa succ bb)
+  , \(aa : Nat) (bb : Nat) ->
+      let sLeft = \x -> case x of
+                          (l, _) -> l
+                          y      -> abort "can't subtract larger number from smaller one"
+      in (h, d2c bb sLeft aa)
+  ]
+main = \input -> (if dEqual (right (nPlus (toNat 2) (toNat 3))) 5 then "ok" else "bad", 0)

@@ -1,0 +1,8 @@
+import Prelude
+main =
+  let toCase = ((3,"s1"),(0,0))
+      caseTest =
+        case toCase of
+          ((3,"s1"),(var0,var1)) -> "True"
+          _ -> "False"
+  in \input -> (caseTest, 0)
