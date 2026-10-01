@@ -36,8 +36,8 @@ type VN is Data:
   VOrdered{+r: Result<&2, &2, Rs.ResErr, List<&2, NB>>, +inner: S.Desugared()}
 
 type VV is Data:
-  VT{+t: T.T}
-  VTs{+xs: List<&2, T.T>}
+  VT{+t: T.Term1()}
+  VTs{+xs: List<&2, T.Term1()>}
 
 type Ctx is Data:
   Ctx{+k: T.LamKind, +name: String}
@@ -55,7 +55,7 @@ type AV is Data:
   AVBs{+bs: List<&2, S.LoweringBind()>}
 
 type LB is Data:
-  LB{+name: String, +t: T.T, +refs: Set(), +c: Nat}
+  LB{+name: String, +t: T.Term1(), +refs: Set(), +c: Nat}
 
 type LN is Data:
   LNT{+t: S.Lowering()}
@@ -63,16 +63,16 @@ type LN is Data:
   LNBs{+bs: List<&2, S.LoweringBind()>}
 
 type LV is Data:
-  LVT{+t: T.T, +refs: Set()}
-  LVTs{+ts: List<&2, T.T>, +refs: Set()}
+  LVT{+t: T.Term1(), +refs: Set()}
+  LVTs{+ts: List<&2, T.Term1()>, +refs: Set()}
   LVBs{+bs: List<&2, LB>}
 
 type TSt is Data:
   TSt{+todo: List<&2, String>, +acc: Set()}
 
 type ARS is Data:
-  ARGo{+empty: Bool, +refs: Set(), +t: T.T}
-  ARFound{+found: Bool, +a: L.Loc, +x: T.T, +v: String, +refs: Set()}
+  ARGo{+empty: Bool, +refs: Set(), +t: T.Term1()}
+  ARFound{+found: Bool, +a: L.Loc, +x: T.Term1(), +v: String, +refs: Set()}
 
 def R(-A: Data) -> Data:
   Result<&2, &2, Rs.ResErr, A>
@@ -354,50 +354,50 @@ def let.order(+bs: List<&2, S.DesugaredBind()>) -> R(List<&2, NB>):
   +deps = let.deps(bs, Set.from_list(names), Map.new(&2, Set()))
   let.order.pick(bs, names, deps, forward(names, deps))
 
-def env.get.if(yes: Bool, +env: Map<&2, T.T>, +n: String) -> Maybe<&2, T.T>:
+def env.get.if(yes: Bool, +env: Map<&2, T.Term1()>, +n: String) -> Maybe<&2, T.Term1()>:
   match yes:
     case True{}:
-      Some{Pair.snd(Map<&2, T.T>, T.T, Map.get(T.T, T.TZero{L.Unknown{}}, env, n))}
+      Some{Pair.snd(Map<&2, T.Term1()>, T.Term1(), Map.get(T.Term1(), T.TZero{L.Unknown{}}, env, n))}
     case False{}:
       None{}
 
-def env.get(+env: Map<&2, T.T>, +n: String) -> Maybe<&2, T.T>:
-  env.get.if(Pair.snd(Map<&2, T.T>, Bool, Map.has(&2, T.T, env, n)), env, n)
+def env.get(+env: Map<&2, T.Term1()>, +n: String) -> Maybe<&2, T.Term1()>:
+  env.get.if(Pair.snd(Map<&2, T.Term1()>, Bool, Map.has(&2, T.Term1(), env, n)), env, n)
 
-def var.found(+loc: L.Loc, +n: String, m: Maybe<&2, T.T>) -> R(T.T):
+def var.found(+loc: L.Loc, +n: String, m: Maybe<&2, T.Term1()>) -> R(T.Term1()):
   match m:
     case Some{t}:
       Done{t}
     case None{}:
       Fail{Rs.MissingDefinitionAt{loc, n}}
 
-def pairs(+loc: L.Loc, xs: List<&2, T.T>) -> T.T:
+def pairs(+loc: L.Loc, xs: List<&2, T.Term1()>) -> T.Term1():
   match xs:
     case Nil{}:
       T.TZero{loc}
     case Con{x, rest}:
       T.TPair{loc, x, pairs(loc, rest)}
 
-def vt(v: VV) -> T.T:
+def vt(v: VV) -> T.Term1():
   match v:
     case VT{t}:
       t
     case _:
       T.TZero{L.Unknown{}}
 
-def vts(v: VV) -> List<&2, T.T>:
+def vts(v: VV) -> List<&2, T.Term1()>:
   match v:
     case VTs{xs}:
       xs
     case _:
       []
 
-def open.lambda(+name: String, +body: T.T) -> T.T:
-  T.TLam{T.T.loc(body), T.Open{}, name, body}
+def open.lambda(+name: String, +body: T.Term1()) -> T.Term1():
+  T.TLam{T.T.loc(String, body), T.Open{}, name, body}
 
 # Check every variable, inlining each let binding's checked value at every
 # use (validateVariables).
-def validate(+fuel: Nat, +env: Map<&2, T.T>, n: VN) -> R(VV):
+def validate(+fuel: Nat, +env: Map<&2, T.Term1()>, n: VN) -> R(VV):
   match fuel:
     case 0n:
       Fail{Rs.MissingDefinitions{["(nesting too deep)"]}}
@@ -418,7 +418,7 @@ def validate(+fuel: Nat, +env: Map<&2, T.T>, n: VN) -> R(VV):
                 case NB{name, val}:
                   do Result<&2, &2, Rs.ResErr, VV>:
                     d : VV <- validate(f, env, VTerm{val})
-                    validate(f, Map.set(&2, T.T, env, name, vt(d)), VLet{rest, inner})
+                    validate(f, Map.set(&2, T.Term1(), env, name, vt(d)), VLet{rest, inner})
         case VList{xs}:
           match xs:
             case Nil{}:
@@ -434,13 +434,13 @@ def validate(+fuel: Nat, +env: Map<&2, T.T>, n: VN) -> R(VV):
               validate(f, env, VOrdered{let.order(binds), inner})
             case S.SLam{loc, v, body}:
               do Result<&2, &2, Rs.ResErr, VV>:
-                b2 : VV <- validate(f, Map.set(&2, T.T, env, L.Name.text(v), T.TVar{generated.var(), L.Name.text(v)}), VTerm{body})
+                b2 : VV <- validate(f, Map.set(&2, T.Term1(), env, L.Name.text(v), T.TVar{generated.var(), L.Name.text(v)}), VTerm{body})
                 return VT{open.lambda(L.Name.text(v), vt(b2))}
             case S.SLamN{loc, k, v, body, w}:
               Empty.absurd(R(VV), w)
             case S.SVar{+loc, +name}:
               do Result<&2, &2, Rs.ResErr, VV>:
-                x : T.T <- var.found(loc, name, env.get(env, name))
+                x : T.Term1() <- var.found(loc, name, env.get(env, name))
                 return VT{x}
             case S.SIte{loc, a, b, c}:
               do Result<&2, &2, Rs.ResErr, VV>:
@@ -449,9 +449,9 @@ def validate(+fuel: Nat, +env: Map<&2, T.T>, n: VN) -> R(VV):
                 c2 : VV <- validate(f, env, VTerm{c})
                 return VT{T.TIte{loc, vt(a2), vt(b2), vt(c2)}}
             case S.SInt{loc, k}:
-              Done{VT{T.ints.i2t(U32.to_nat(k), loc)}}
+              Done{VT{T.ints.i2t(String, U32.to_nat(k), loc)}}
             case S.SStr{loc, s}:
-              Done{VT{T.ints.s2t(s, loc)}}
+              Done{VT{T.ints.s2t(String, s, loc)}}
             case S.SZero{loc}:
               Done{VT{T.TZero{loc}}}
             case S.SPair{loc, a, b}:
@@ -526,7 +526,7 @@ def conv.kind(k: T.LamKind) -> T.LamKind:
     case other:
       other
 
-def repeaters(c: Nat, +anno: L.Loc, ix: T.T) -> T.T:
+def repeaters(c: Nat, +anno: L.Loc, ix: T.Term2()) -> T.Term2():
   match c:
     case 0n:
       ix
@@ -535,7 +535,7 @@ def repeaters(c: Nat, +anno: L.Loc, ix: T.T) -> T.T:
 
 # A variable's index; under debruijinizeApp a let-bound one also takes its
 # binding's placeholders, fresh at each use.
-def index.of(+anno: L.Loc, +n: String, app: Bool, h: Hit) -> R(T.T):
+def index.of(+anno: L.Loc, +n: String, app: Bool, h: Hit) -> R(T.Term2()):
   match app:
     case True{}:
       match h:
@@ -544,84 +544,88 @@ def index.of(+anno: L.Loc, +n: String, app: Bool, h: Hit) -> R(T.T):
         case Hit{i, k}:
           match k:
             case T.LetB{c}:
-              Done{repeaters(c, anno, T.TIdx{generated.var(), i})}
+              Done{repeaters(c, anno, T.TVar{generated.var(), i})}
             case _:
-              Done{T.TIdx{generated.var(), i}}
+              Done{T.TVar{generated.var(), i}}
     case False{}:
       match h:
         case Miss{}:
           Fail{Rs.MissingDefinitions{["undefined identifier " ++ n]}}
         case Hit{i, k}:
-          Done{T.TIdx{generated.var(), i}}
+          Done{T.TVar{generated.var(), i}}
 
-def debruijn(+fuel: Nat, +app: Bool, +ctx: List<&2, Ctx>, t: T.T) -> R(T.T):
+def debruijn(+fuel: Nat, +app: Bool, +ctx: List<&2, Ctx>, t: T.Term1()) -> R(T.Term2()):
   match fuel:
     case 0n:
       Fail{Rs.MissingDefinitions{["(nesting too deep)"]}}
     case 1n+f:
       match t:
         case T.TLam{a, +k, +name, body}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            b2 : T.T <- debruijn(f, app, Ctx{k, name} <> ctx, body)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            b2 : T.T<Nat> <- debruijn(f, app, Ctx{k, name} <> ctx, body)
             return T.TLam{a, conv.kind(k), name, b2}
         case T.TVar{+a, +name}:
           index.of(a, name, app, lookup.at(ctx, name, 0n))
         case T.TApp{a, x, y}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
-            y2 : T.T <- debruijn(f, app, ctx, y)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
+            y2 : T.T<Nat> <- debruijn(f, app, ctx, y)
             return T.TApp{a, x2, y2}
         case T.TPair{a, x, y}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
-            y2 : T.T <- debruijn(f, app, ctx, y)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
+            y2 : T.T<Nat> <- debruijn(f, app, ctx, y)
             return T.TPair{a, x2, y2}
         case T.TCheck{a, x, y}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
-            y2 : T.T <- debruijn(f, app, ctx, y)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
+            y2 : T.T<Nat> <- debruijn(f, app, ctx, y)
             return T.TCheck{a, x2, y2}
         case T.TIte{a, x, y, z}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
-            y2 : T.T <- debruijn(f, app, ctx, y)
-            z2 : T.T <- debruijn(f, app, ctx, z)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
+            y2 : T.T<Nat> <- debruijn(f, app, ctx, y)
+            z2 : T.T<Nat> <- debruijn(f, app, ctx, z)
             return T.TIte{a, x2, y2, z2}
         case T.TRec{a, x, y, z}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
-            y2 : T.T <- debruijn(f, app, ctx, y)
-            z2 : T.T <- debruijn(f, app, ctx, z)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
+            y2 : T.T<Nat> <- debruijn(f, app, ctx, y)
+            z2 : T.T<Nat> <- debruijn(f, app, ctx, z)
             return T.TRec{a, x2, y2, z2}
         case T.TLeft{a, x}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
             return T.TLeft{a, x2}
         case T.TRight{a, x}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
             return T.TRight{a, x2}
         case T.TTrace{a, x}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
             return T.TTrace{a, x2}
         case T.THash{a, x}:
-          do Result<&2, &2, Rs.ResErr, T.T>:
-            x2 : T.T <- debruijn(f, app, ctx, x)
+          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
             return T.THash{a, x2}
-        case other:
-          Done{other}
+        case T.TZero{a}:
+          Done{T.TZero{a}}
+        case T.TChurch{a, n}:
+          Done{T.TChurch{a, n}}
+        case T.TRep{a}:
+          Done{T.TRep{a}}
 
-def close.lam(naked: Bool, k: T.LamKind, name: String, +body: T.T) -> T.T:
+def close.lam(naked: Bool, k: T.LamKind, name: String, +body: T.Term2()) -> T.Term2():
   match naked:
     case True{}:
-      T.TLam{T.T.loc(body), T.Closed{}, name, body}
+      T.TLam{T.T.loc(Nat, body), T.Closed{}, name, body}
     case False{}:
-      T.TLam{T.T.loc(body), k, name, body}
+      T.TLam{T.T.loc(Nat, body), k, name, body}
 
 # A lambda outside every lambda is closed; every lambda takes its body's
 # annotation (closeLams).
-def close.lams(+fuel: Nat, +naked: Bool, t: T.T) -> T.T:
+def close.lams(+fuel: Nat, +naked: Bool, t: T.Term2()) -> T.Term2():
   match fuel:
     case 0n:
       t
@@ -675,15 +679,13 @@ def rp(paren: Bool, acc: String) -> String:
 # `show (forget term2)` onto acc: data-fix's Show (`Fix `, parenthesized as
 # an argument) over ParserTermF's Show1 instances, whose basic
 # constructors quote their text.
-def show(t: T.T, +paren: Bool, acc: String) -> String:
+def show(t: T.Term2(), +paren: Bool, acc: String) -> String:
   match t:
     case T.TZero{a}:
       lp(paren) ++ "Fix \"ZeroSF\"" ++ rp(paren, acc)
     case T.TPair{a, x, y}:
       lp(paren) ++ "Fix \"PairSF (\"" ++ show(x, False{}, "\", \"" ++ show(y, False{}, "\")\"" ++ rp(paren, acc)))
-    case T.TVar{a, name}:
-      lp(paren) ++ "Fix VarUPF " ++ Sh.string(name) ++ rp(paren, acc)
-    case T.TIdx{a, i}:
+    case T.TVar{a, i}:
       lp(paren) ++ "Fix VarUPF " ++ U32.show(U32.from_nat(i)) ++ rp(paren, acc)
     case T.TApp{a, f, x}:
       lp(paren) ++ "Fix AppUPF " ++ show(f, True{}, " " ++ show(x, True{}, rp(paren, acc)))
@@ -709,17 +711,17 @@ def show(t: T.T, +paren: Bool, acc: String) -> String:
       lp(paren) ++ "Fix TUnsizedRepeaterF" ++ rp(paren, acc)
 
 # ints2t
-def ints(bs: List<&2, U32>, +loc: L.Loc) -> T.T:
+def ints(bs: List<&2, U32>, +loc: L.Loc) -> T.Term2():
   match bs:
     case Nil{}:
       T.TZero{loc}
     case Con{b, rest}:
-      T.TPair{loc, T.ints.i2t(U32.to_nat(b), loc), ints(rest, loc)}
+      T.TPair{loc, T.ints.i2t(Nat, U32.to_nat(b), loc), ints(rest, loc)}
 
 # generateAllHashes: every `#` (HashF), innermost first, becomes a number
 # for its term: the last 8 bytes of the SHA-256 of the term's `show`, as a
 # list, at the whole term's location.
-def hashes(t: T.T, +loc: L.Loc) -> T.T:
+def hashes(t: T.Term2(), +loc: L.Loc) -> T.Term2():
   match t:
     case T.THash{a, x}:
       ints(List.drop(&2, U32, Sha.raw(show(hashes(x, loc), False{}, "")), 24n), loc)
@@ -744,14 +746,14 @@ def hashes(t: T.T, +loc: L.Loc) -> T.T:
     case other:
       other
 
-def hashed(+t: T.T) -> T.T:
-  hashes(t, T.T.loc(t))
+def hashed(+t: T.Term2()) -> T.Term2():
+  hashes(t, T.T.loc(Nat, t))
 
 # main2Term3's Term2.
-def process(t: S.Desugared()) -> R(T.T):
-  do Result<&2, &2, Rs.ResErr, T.T>:
-    v : VV <- validate(fuel(), Map.new(&2, T.T), VTerm{t})
-    t2 : T.T <- debruijn(fuel(), False{}, [], vt(v))
+def process(t: S.Desugared()) -> R(T.Term2()):
+  do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
+    v : VV <- validate(fuel(), Map.new(&2, T.Term1()), VTerm{t})
+    t2 : T.T<Nat> <- debruijn(fuel(), False{}, [], vt(v))
     return hashed(t2)
 
 # annotateUnsizedCount (the let path)
@@ -933,7 +935,7 @@ def annotate(+fuel: Nat, n: AN) -> St(AV):
             case S.SLamN{loc, k, v, body, w}:
               Empty.absurd(St(AV), w)
 
-def lv.t(v: LV) -> T.T:
+def lv.t(v: LV) -> T.Term1():
   match v:
     case LVT{t, refs}:
       t
@@ -949,7 +951,7 @@ def lv.refs(v: LV) -> Set():
     case _:
       Set.new()
 
-def lv.ts(v: LV) -> List<&2, T.T>:
+def lv.ts(v: LV) -> List<&2, T.Term1()>:
   match v:
     case LVTs{ts, refs}:
       ts
@@ -1052,12 +1054,12 @@ def transitive(fuel: Nat, +deps: Map<&2, Set()>, st: TSt) -> Set():
             case Con{+n, rest}:
               transitive(f, deps, trans.step(has(acc, n), n, rest, acc, deps))
 
-def make.binding(name: String, d: T.T, c: Nat, +body: T.T) -> T.T:
-  T.TApp{T.T.loc(body), T.TLam{T.T.loc(body), T.LetB{c}, name, body}, d}
+def make.binding(name: String, d: T.Term1(), c: Nat, +body: T.Term1()) -> T.Term1():
+  T.TApp{T.T.loc(String, body), T.TLam{T.T.loc(String, body), T.LetB{c}, name, body}, d}
 
 # (\n -> body) value, the lambda a let binding with c placeholders
 # (makeBinding).
-def bindings.wrap(bs: List<&2, LB>, body: T.T) -> T.T:
+def bindings.wrap(bs: List<&2, LB>, body: T.Term1()) -> T.Term1():
   match bs:
     case Nil{}:
       body
@@ -1077,19 +1079,19 @@ def let.build(+inner: LV, +bs: List<&2, LB>, sorted: List<&2, String>) -> LV:
 def lb.cons(name: String, +v: LV, c: Nat, r: LV) -> LV:
   LVBs{LB{name, lv.t(v), lv.refs(v), c} <> lv.bs(r)}
 
-def left.mk(a: L.Loc, x: T.T) -> T.T:
+def left.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
   T.TLeft{a, x}
 
-def right.mk(a: L.Loc, x: T.T) -> T.T:
+def right.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
   T.TRight{a, x}
 
-def trace.mk(a: L.Loc, x: T.T) -> T.T:
+def trace.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
   T.TTrace{a, x}
 
-def hash.mk(a: L.Loc, x: T.T) -> T.T:
+def hash.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
   T.THash{a, x}
 
-def one(~k: L.Loc -> T.T -> T.T, +x: LV, a: L.Loc) -> LV:
+def one(~k: L.Loc -> T.Term1() -> T.Term1(), +x: LV, a: L.Loc) -> LV:
   LVT{k(a, lv.t(x)), lv.refs(x)}
 
 def list.lv(+a: L.Loc, +x: LV) -> LV:
@@ -1098,25 +1100,25 @@ def list.lv(+a: L.Loc, +x: LV) -> LV:
 def lts.cons(+x: LV, +r: LV) -> LV:
   LVTs{lv.t(x) <> lv.ts(r), union(lv.refs(x), lv.refs(r))}
 
-def app.mk(a: L.Loc, x: T.T, y: T.T) -> T.T:
+def app.mk(a: L.Loc, x: T.Term1(), y: T.Term1()) -> T.Term1():
   T.TApp{a, x, y}
 
-def pair.mk(a: L.Loc, x: T.T, y: T.T) -> T.T:
+def pair.mk(a: L.Loc, x: T.Term1(), y: T.Term1()) -> T.Term1():
   T.TPair{a, x, y}
 
-def check.mk(a: L.Loc, x: T.T, y: T.T) -> T.T:
+def check.mk(a: L.Loc, x: T.Term1(), y: T.Term1()) -> T.Term1():
   T.TCheck{a, x, y}
 
-def ite.mk(a: L.Loc, x: T.T, y: T.T, z: T.T) -> T.T:
+def ite.mk(a: L.Loc, x: T.Term1(), y: T.Term1(), z: T.Term1()) -> T.Term1():
   T.TIte{a, x, y, z}
 
-def rec.mk(a: L.Loc, x: T.T, y: T.T, z: T.T) -> T.T:
+def rec.mk(a: L.Loc, x: T.Term1(), y: T.Term1(), z: T.Term1()) -> T.Term1():
   T.TRec{a, x, y, z}
 
-def two(~k: L.Loc -> T.T -> T.T -> T.T, +x: LV, +y: LV, a: L.Loc) -> LV:
+def two(~k: L.Loc -> T.Term1() -> T.Term1() -> T.Term1(), +x: LV, +y: LV, a: L.Loc) -> LV:
   LVT{k(a, lv.t(x), lv.t(y)), union(lv.refs(x), lv.refs(y))}
 
-def three(~k: L.Loc -> T.T -> T.T -> T.T -> T.T, +x: LV, +y: LV, +z: LV, a: L.Loc) -> LV:
+def three(~k: L.Loc -> T.Term1() -> T.Term1() -> T.Term1() -> T.Term1(), +x: LV, +y: LV, +z: LV, a: L.Loc) -> LV:
   LVT{k(a, lv.t(x), lv.t(y), lv.t(z)), union(lv.refs(x), union(lv.refs(y), lv.refs(z)))}
 
 def lam.kind.of(+refs: Set(), placeholder: Bool) -> T.LamKind:
@@ -1233,9 +1235,9 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
                 x2 : LV <- lta(f, LNTs{xs})
                 return list.lv(a, x2)
             case S.SInt{a, k}:
-              Done{LVT{T.ints.i2t(U32.to_nat(k), a), Set.new()}}
+              Done{LVT{T.ints.i2t(String, U32.to_nat(k), a), Set.new()}}
             case S.SStr{a, s}:
-              Done{LVT{T.ints.s2t(s, a), Set.new()}}
+              Done{LVT{T.ints.s2t(String, s, a), Set.new()}}
             case S.SZero{a}:
               Done{LVT{T.TZero{a}, Set.new()}}
             case S.SChurch{a, k}:
@@ -1245,7 +1247,7 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
 
 # The references left over at the top are the placeholders of recursion
 # sites outside every binding, each applied in turn (addRepeaters).
-def add.repeaters(fuel: Nat, st: ARS) -> R(T.T):
+def add.repeaters(fuel: Nat, st: ARS) -> R(T.Term1()):
   match fuel:
     case 0n:
       Fail{Rs.MissingDefinitions{["(nesting too deep)"]}}
@@ -1267,11 +1269,11 @@ def add.repeaters(fuel: Nat, st: ARS) -> R(T.T):
               Fail{Rs.MissingDefinitions{Set.to_list(refs)}}
             case True{}:
               +rest = Set.del(refs, v)
-              do Result<&2, &2, Rs.ResErr, T.T>:
-                x2 : T.T <- add.repeaters(f, ARGo{Nat.is_eq(Set.size(rest), 0n), rest, x})
+              do Result<&2, &2, Rs.ResErr, T.Term1()>:
+                x2 : T.Term1() <- add.repeaters(f, ARGo{Nat.is_eq(Set.size(rest), 0n), rest, x})
                 return T.TApp{a, x2, T.TRep{a}}
 
-def cleanup(v: LV) -> R(T.T):
+def cleanup(v: LV) -> R(T.Term1()):
   match v:
     case LVT{t, +refs}:
       add.repeaters(fuel(), ARGo{Nat.is_eq(Set.size(refs), 0n), refs, t})
@@ -1279,9 +1281,9 @@ def cleanup(v: LV) -> R(T.T):
       Fail{not.term()}
 
 # main2Term3let's Term2.
-def process.let(t: S.Desugared()) -> R(T.T):
-  do Result<&2, &2, Rs.ResErr, T.T>:
+def process.let(t: S.Desugared()) -> R(T.Term2()):
+  do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
     v : LV <- lta(fuel(), LNT{cap.top(annotate(fuel(), AT{t})(0n))})
-    t1 : T.T <- cleanup(v)
-    t2 : T.T <- debruijn(fuel(), True{}, [], t1)
+    t1 : T.T<String> <- cleanup(v)
+    t2 : T.T<Nat> <- debruijn(fuel(), True{}, [], t1)
     return hashed(close.lams(fuel(), True{}, t2))

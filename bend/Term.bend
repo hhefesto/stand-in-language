@@ -1,9 +1,11 @@
 import Base
 import ./Loc.bend as L
 
-# The resolver's term types (haskell-final's Telomare.IR.Core): Term1 and
-# Term2 share one type (names in Term1, de Bruijn indices in Term2), and
-# Term3 is the closure-converted core that sizing takes.
+# The resolver's term types (haskell-final's Telomare.IR.Core). Term1 and
+# Term2 are one type over what a variable is, as in Haskell's ParserTermF:
+# a name in Term1, a de Bruijn index in Term2, so neither can hold the
+# other's variables (DESIGN.md H1). Term3 is the closure-converted core
+# that sizing takes.
 
 # LamType: Open, Closed, or a let binding with c recursion placeholders
 # (LetBinding c).
@@ -12,23 +14,30 @@ type LamKind is Data:
   Closed{}
   LetB{+c: Nat}
 
-# Term1 / Term2 (ParserTermF over LocTag). TIdx appears in Term2 only.
-type T is Data:
+# ParserTermF over LocTag, its variables V.
+type T<-V: Data> is Data:
   TZero{+loc: L.Loc}
-  TPair{+loc: L.Loc, +a: T, +b: T}
-  TVar{+loc: L.Loc, +name: String}
-  TIdx{+loc: L.Loc, +i: Nat}
-  TApp{+loc: L.Loc, +f: T, +x: T}
-  TLam{+loc: L.Loc, +k: LamKind, +name: String, +body: T}
-  TCheck{+loc: L.Loc, +tc: T, +c: T}
-  TIte{+loc: L.Loc, +i: T, +t: T, +e: T}
-  TLeft{+loc: L.Loc, +x: T}
-  TRight{+loc: L.Loc, +x: T}
-  TTrace{+loc: L.Loc, +x: T}
-  THash{+loc: L.Loc, +x: T}
+  TPair{+loc: L.Loc, +a: T<V>, +b: T<V>}
+  TVar{+loc: L.Loc, +v: V}
+  TApp{+loc: L.Loc, +f: T<V>, +x: T<V>}
+  TLam{+loc: L.Loc, +k: LamKind, +name: String, +body: T<V>}
+  TCheck{+loc: L.Loc, +tc: T<V>, +c: T<V>}
+  TIte{+loc: L.Loc, +i: T<V>, +t: T<V>, +e: T<V>}
+  TLeft{+loc: L.Loc, +x: T<V>}
+  TRight{+loc: L.Loc, +x: T<V>}
+  TTrace{+loc: L.Loc, +x: T<V>}
+  THash{+loc: L.Loc, +x: T<V>}
   TChurch{+loc: L.Loc, +n: U32}
-  TRec{+loc: L.Loc, +t: T, +r: T, +b: T}
+  TRec{+loc: L.Loc, +t: T<V>, +r: T<V>, +b: T<V>}
   TRep{+loc: L.Loc}
+
+# Variables by name.
+def Term1() -> Data:
+  T<String>
+
+# Variables by de Bruijn index.
+def Term2() -> Data:
+  T<Nat>
 
 # Term3 (Term3F over LocTag): zero, pairs, the environment, SetEnv, Defer
 # with its function index, Gate, Left, Right, Abort, a recursion
@@ -47,15 +56,13 @@ type C is Data:
   CUnsized{+loc: L.Loc, +tok: U32}
   CCheck{+loc: L.Loc, +cloc: L.Loc, +tc: C, +c: C}
 
-def T.loc(t: T) -> L.Loc:
+def T.loc(-V: Data, t: T<V>) -> L.Loc:
   match t:
     case TZero{loc}:
       loc
     case TPair{loc, a, b}:
       loc
-    case TVar{loc, name}:
-      loc
-    case TIdx{loc, i}:
+    case TVar{loc, v}:
       loc
     case TApp{loc, f, x}:
       loc
@@ -132,17 +139,17 @@ def C.retag(+l: L.Loc, t: C) -> C:
       CCheck{l, cloc, tc, c}
 
 # i2t: n as nested pairs, every node at one Loc.
-def ints.i2t(n: Nat, +loc: L.Loc) -> T:
+def ints.i2t(-V: Data, n: Nat, +loc: L.Loc) -> T<V>:
   match n:
     case 0n:
       TZero{loc}
     case 1n+k:
-      TPair{loc, ints.i2t(k, loc), TZero{loc}}
+      TPair{loc, ints.i2t(V, k, loc), TZero{loc}}
 
 # s2t: a string as a list of its code points.
-def ints.s2t(s: String, +loc: L.Loc) -> T:
+def ints.s2t(-V: Data, s: String, +loc: L.Loc) -> T<V>:
   match s:
     case SNil{}:
       TZero{loc}
     case SCon{Chr{c}, rest}:
-      TPair{loc, ints.i2t(U32.to_nat(c), loc), ints.s2t(rest, loc)}
+      TPair{loc, ints.i2t(V, U32.to_nat(c), loc), ints.s2t(V, rest, loc)}

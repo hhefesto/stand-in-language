@@ -131,7 +131,7 @@ def open.fr(+a: L.Loc, +b: FR) -> FR:
   +o = outer(fr.frees(b))
   FR{FOpen{a, o, fr.t(b)}, o}
 
-def frees(+fuel: Nat, t: T.T) -> FR:
+def frees(+fuel: Nat, t: T.Term2()) -> FR:
   match fuel:
     case 0n:
       FR{FZero{L.Unknown{}}, []}
@@ -141,7 +141,7 @@ def frees(+fuel: Nat, t: T.T) -> FR:
           FR{FZero{a}, []}
         case T.TPair{a, x, y}:
           fr2(~mk.pair, a, frees(f, x), frees(f, y))
-        case T.TIdx{a, +i}:
+        case T.TVar{a, +i}:
           FR{FIdx{a, i}, [i]}
         case T.TApp{a, x, y}:
           fr2(~mk.app, a, frees(f, x), frees(f, y))
@@ -382,5 +382,5 @@ def first(r: T.C & BS) -> T.C:
   t
 
 # splitExpr
-def split(t: T.T) -> T.C:
+def split(t: T.Term2()) -> T.C:
   first(build(fuel(), RTop{}, fr.t(frees(fuel(), t)))(BS{0, 0}))

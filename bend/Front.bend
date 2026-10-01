@@ -159,7 +159,7 @@ def all(srcs: List<&2, Src>) -> Mods:
     case Con{s, rest}:
       all.add(one(s), all(rest))
 
-def re.or(r: Result<&2, &2, Rs.ResErr, T.T>) -> Result<&2, &2, Err, T.C>:
+def re.or(r: Result<&2, &2, Rs.ResErr, T.Term2()>) -> Result<&2, &2, Err, T.C>:
   match r:
     case Fail{e}:
       Fail{Unresolved{e}}
