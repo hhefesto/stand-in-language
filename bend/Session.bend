@@ -1,5 +1,5 @@
 import Base
-import ./Expr.bend as E
+import ./Core.bend as Co
 import ./Lift.bend as Lf
 import ./EAL.bend as EAL
 import ./IC.bend as IC
@@ -13,7 +13,7 @@ import ./IC.bend as IC
 # Print the display and go on with the state; print it and end; or fail
 # as the Haskell did with `error`.
 type Outcome is Data:
-  Continue{+display: String, +state: E.X}
+  Continue{+display: String, +state: Co.D}
   Stop{+display: String}
   Crash{+msg: String}
 
@@ -24,26 +24,26 @@ def maybe.int(m: Maybe<&2, U32>) -> String:
     case None{}:
       "Nothing"
 
-def user.abort(+s: E.X, m: Maybe<&2, String>) -> String:
+def user.abort(+s: Co.D, m: Maybe<&2, String>) -> String:
   match m:
     case Some{t}:
       "user abort: " ++ t
     case None{}:
-      "user abort invalid data: " ++ E.show(s)
+      "user abort invalid data: " ++ Co.show.data(s)
 
 # convertAbortMessage
-def abort.message(+x: E.X) -> String:
+def abort.message(+x: Co.D) -> String:
   match x:
-    case E.XPair{E.XZero{}, t}:
-      "recursion overflow (should be caught by other means) for rt: " ++ maybe.int(E.to.int(t))
-    case E.XPair{E.XPair{E.XZero{}, E.XZero{}}, +s}:
-      user.abort(s, E.to.string(s))
-    case E.XPair{E.XPair{E.XPair{E.XZero{}, E.XZero{}}, E.XZero{}}, E.XZero{}}:
+    case Co.DPair{Co.DZero{}, t}:
+      "recursion overflow (should be caught by other means) for rt: " ++ maybe.int(Co.to.int(t))
+    case Co.DPair{Co.DPair{Co.DZero{}, Co.DZero{}}, +s}:
+      user.abort(s, Co.to.string.d(s))
+    case Co.DPair{Co.DPair{Co.DPair{Co.DZero{}, Co.DZero{}}, Co.DZero{}}, Co.DZero{}}:
       "user abort of all possible abort reasons (non-deterministic input)"
     case other:
-      "unexpected abort: " ++ E.show(other)
+      "unexpected abort: " ++ Co.show.data(other)
 
-def first.aborted(a: Maybe<&2, E.X>, b: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
+def first.aborted(a: Maybe<&2, Co.D>, b: Maybe<&2, Co.D>) -> Maybe<&2, Co.D>:
   match a:
     case Some{x}:
       Some{x}
@@ -51,83 +51,75 @@ def first.aborted(a: Maybe<&2, E.X>, b: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
       b
 
 # The leftmost aborted message anywhere in the result (icRuntimeResult).
-def aborted(x: E.X) -> Maybe<&2, E.X>:
+def aborted(x: Co.V) -> Maybe<&2, Co.D>:
   match x:
-    case E.XAborted{m}:
+    case Co.VAborted{m}:
       Some{m}
-    case E.XPair{a, b}:
+    case Co.VPair{a, b}:
       first.aborted(aborted(a), aborted(b))
-    case E.XDefer{fi, b}:
+    case Co.VDefer{fi, b}:
       aborted(b)
-    case E.XSetEnv{a}:
+    case Co.VSetEnv{a}:
       aborted(a)
-    case E.XLeft{a}:
+    case Co.VLeft{a}:
       aborted(a)
-    case E.XRight{a}:
+    case Co.VRight{a}:
       aborted(a)
     case _:
       None{}
 
 # An Abort left in the result (a CompiledExpr that is no StuckExpr).
-def has.abort(x: E.X) -> Bool:
+def has.abort(x: Co.V) -> Bool:
   match x:
-    case E.XAbort{}:
+    case Co.VAbort{}:
       True{}
-    case E.XPair{a, b}:
+    case Co.VPair{a, b}:
       has.abort(a) || has.abort(b)
-    case E.XDefer{fi, b}:
+    case Co.VDefer{fi, b}:
       has.abort(b)
-    case E.XSetEnv{a}:
+    case Co.VSetEnv{a}:
       has.abort(a)
-    case E.XLeft{a}:
+    case Co.VLeft{a}:
       has.abort(a)
-    case E.XRight{a}:
+    case Co.VRight{a}:
       has.abort(a)
-    case _:
-      False{}
-
-def is.data(x: E.X) -> Bool:
-  match x:
-    case E.XZero{}:
-      True{}
-    case E.XPair{a, b}:
-      is.data(a) && is.data(b)
     case _:
       False{}
 
 # A state of 0 ends the session after this display.
-def next(+text: String, st: E.X) -> Outcome:
+def next(+text: String, st: Co.D) -> Outcome:
   match st:
-    case E.XZero{}:
+    case Co.DZero{}:
       Stop{text}
     case other:
       Continue{text, other}
 
-def shown(+d: E.X, +st: E.X, m: Maybe<&2, String>, data: Bool) -> Outcome:
+# The display shown, and the state carried on, which must be data.
+def shown(+d: Co.V, m: Maybe<&2, String>, st: Maybe<&2, Co.D>) -> Outcome:
   match m:
     case Some{text}:
-      match data:
-        case True{}:
-          next(text, st)
-        case False{}:
+      match st:
+        case Some{s}:
+          next(text, s)
+        case None{}:
           Crash{"funWrap conversion error3"}
     case None{}:
-      Stop{"error converting display value:\n" ++ E.pretty(d)}
+      Stop{"error converting display value:\n" ++ Co.pretty(d)}
 
-def converted(abort: Bool, +x: E.X) -> Outcome:
+def converted(abort: Bool, +x: Co.V) -> Outcome:
   match abort:
     case True{}:
-      Stop{"error converting iteration value:\n" ++ E.show(x)}
+      Stop{"error converting iteration value:\n" ++ Co.show(x)}
     case False{}:
       match x:
-        case E.XZero{}:
+        case Co.VZero{}:
           Stop{"aborted"}
-        case E.XPair{+d, +st}:
-          shown(d, st, E.to.string(d), is.data(st))
+        case Co.VPair{+d, st}:
+          shown(d, Co.to.string(d), Co.data(st))
         case _:
           Crash{"Telomare.Driver.funWrapWith: unexpected iteration value"}
 
-def value(m: Maybe<&2, E.X>, +x: E.X) -> Outcome:
+def value(m: Maybe<&2, Co.D>, +x: Co.V) -> Outcome:
   match m:
     case Some{msg}:
       Stop{"runtime error:\nAborted, " ++ abort.message(msg)}
@@ -138,13 +130,13 @@ def value(m: Maybe<&2, E.X>, +x: E.X) -> Outcome:
 def outcome(r: IC.RB) -> Outcome:
   match r:
     case IC.RBErr{e}:
-      Stop{"runtime error:\nGeneric Runtime Error: IC runtime: " ++ e ++ " -- " ++ E.show(E.XZero{})}
+      Stop{"runtime error:\nGeneric Runtime Error: IC runtime: " ++ e ++ " -- " ++ Co.show(Co.VZero{})}
     case IC.RBOk{+x}:
       value(aborted(x), x)
 
 # prepareEntry: the sized program prepared for runs under EAL's capture
 # layouts for it, so closures are copied as EAL planned.
-def prepared(+expr: E.X) -> IC.Prog:
+def prepared(+expr: Co.V) -> IC.Prog:
   IC.prepare(expr, EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
 
 # The session (evalSessionCore)
@@ -158,7 +150,7 @@ def prepared(+expr: E.X) -> IC.Prog:
 # A display to show, then either a line to read for the next iteration,
 # the end of the session, or a failure.
 type Turn is Type:
-  Asks{net: IC.Net, display: String, state: E.X, spent: U32}
+  Asks{net: IC.Net, display: String, state: Co.D, spent: U32}
   Ends{display: String, spent: U32}
   Fails{msg: String, spent: U32}
 
@@ -178,11 +170,11 @@ def turn(r: IC.Run, +before: U32) -> Turn:
 
 # The first iteration runs on 0.
 def start(+p: IC.Prog) -> Turn:
-  turn(IC.run(p, IC.net.new(p), E.XZero{}, IC.default.fuel()), 0)
+  turn(IC.run(p, IC.net.new(p), Co.DZero{}, IC.default.fuel()), 0)
 
 # The next iteration runs on the line read and the state the last one left.
-def answer(+p: IC.Prog, net: IC.Net, +line: String, st: E.X, +spent: U32) -> Turn:
-  turn(IC.run(p, net, E.XPair{E.of.string(line), st}, IC.default.fuel()), spent)
+def answer(+p: IC.Prog, net: IC.Net, +line: String, st: Co.D, +spent: U32) -> Turn:
+  turn(IC.run(p, net, Co.DPair{Co.of.string(line), st}, IC.default.fuel()), spent)
 
 # A session on given lines, for the tests: the displays, newest first, and
 # the interactions spent. It ends where the session would, or where the

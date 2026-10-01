@@ -13,6 +13,7 @@ import ./Term.bend as Term
 import ./Lower.bend as Lower
 import ./Split.bend as Split
 import ./Expr.bend as Expr
+import ./Core.bend as Core
 import ./Size.bend as Size
 import ./Front.bend as Front
 import ./Sha256.bend as Sha256

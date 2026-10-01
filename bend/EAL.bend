@@ -1,7 +1,7 @@
 import Base
 import ./Show.bend as Sh
 import ./Loc.bend as Lc
-import ./Expr.bend as E
+import ./Core.bend as Co
 import ./Lift.bend as Lf
 
 # Elementary Affine Logic certification (haskell-final's Telomare.EAL):
@@ -2461,7 +2461,7 @@ def dup.derive(d: Maybe<&2, Dup>, s: St, +b: U32, +fi: U32) -> St:
     case Some{x}:
       match x:
         case Dup{path, loc}:
-          drop.b(constrain(s, b, 2, 1, Blame{loc, "env path " ++ steps.show(path) ++ " duplicated in " ++ E.fi.show(fi)}))
+          drop.b(constrain(s, b, 2, 1, Blame{loc, "env path " ++ steps.show(path) ++ " duplicated in " ++ Co.fi.show(fi)}))
     case None{}:
       s
 
@@ -2937,7 +2937,7 @@ def dispatch.counted(over: Bool, s: St, +count: U32, +rk: U32, +site: Site, +bd:
     case True{}:
       match bd:
         case Bd{h, fi, dup, t}:
-          fail(s, GaveUp{"polyvariance budget: body " ++ E.fi.show(fi)
+          fail(s, GaveUp{"polyvariance budget: body " ++ Co.fi.show(fi)
             ++ " needed more than 16384 derivations (dispatch structure likely exploding)"})
     case False{}:
       match site:
@@ -4400,7 +4400,7 @@ def failure.of(r: St & Sig) -> Maybe<&2, Err>:
 def standalone(+p: P, b: Bd) -> Maybe<&2, Err>:
   match b:
     case Bd{h, +fi, +dup, +t}:
-      failure.of(analyze(st.new(p), False{}, "env of lifted body " ++ E.fi.show(fi), dup, t))
+      failure.of(analyze(st.new(p), False{}, "env of lifted body " ++ Co.fi.show(fi), dup, t))
 
 def verdict.one(+p: P, m: Maybe<&2, Bd>) -> List<&2, HB>:
   match m:

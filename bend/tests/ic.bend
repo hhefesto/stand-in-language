@@ -2,6 +2,7 @@ import Base
 import ../Front.bend as Fr
 import ../Size.bend as Sz
 import ../Expr.bend as E
+import ../Core.bend as Co
 import ../Lift.bend as Lf
 import ../IC.bend as IC
 import ../Session.bend as Ss
@@ -22,33 +23,33 @@ def verdict(+name: String, pass: Bool) -> String:
 # Term construction (ICTests' helpers)
 # ------------------------------------
 
-def z() -> E.X:
-  E.XZero{}
+def z() -> Co.V:
+  Co.VZero{}
 
-def p(a: E.X, b: E.X) -> E.X:
-  E.XPair{a, b}
+def p(a: Co.V, b: Co.V) -> Co.V:
+  Co.VPair{a, b}
 
-def se(x: E.X) -> E.X:
-  E.XSetEnv{x}
+def se(x: Co.V) -> Co.V:
+  Co.VSetEnv{x}
 
-def d(+n: U32, x: E.X) -> E.X:
-  E.XDefer{n, x}
+def d(+n: U32, x: Co.V) -> Co.V:
+  Co.VDefer{n, x}
 
-def env() -> E.X:
-  E.XEnv{}
+def env() -> Co.V:
+  Co.VEnv{}
 
-def left(x: E.X) -> E.X:
-  E.XLeft{x}
+def left(x: Co.V) -> Co.V:
+  Co.VLeft{x}
 
 # \f x -> f (f x), a closed closure: the church numeral two.
-def church.two() -> E.X:
-  p(d(20, p(d(21, E.app(E.var(1n), E.app(E.var(1n), E.var(0n)))), env())), z())
+def church.two() -> Co.V:
+  p(d(20, p(d(21, Co.app(Co.var(1n), Co.app(Co.var(1n), Co.var(0n)))), env())), z())
 
 # \x -> (0, x)
-def succ.c() -> E.X:
-  p(d(22, p(z(), E.var(0n))), z())
+def succ.c() -> Co.V:
+  p(d(22, p(z(), Co.var(0n))), z())
 
-def num(n: Nat) -> E.X:
+def num(n: Nat) -> Co.V:
   match n:
     case 0n:
       z()
@@ -56,22 +57,22 @@ def num(n: Nat) -> E.X:
       p(z(), num(k))
 
 # Unapplied, a value; applied to itself, it never stops.
-def omega() -> E.X:
+def omega() -> Co.V:
   d(1, se(p(left(env()), env())))
 
-def omega.applied() -> E.X:
+def omega.applied() -> Co.V:
   se(p(omega(), p(omega(), z())))
 
 # Outcomes
 # --------
 
 # What icEval gives: the value, the abort it carries, or the runtime error.
-def result.of(m: Maybe<&2, E.X>, +x: E.X) -> String:
+def result.of(m: Maybe<&2, Co.D>, +x: Co.V) -> String:
   match m:
     case Some{msg}:
-      "abort " ++ E.show(msg)
+      "abort " ++ Co.show.data(msg)
     case None{}:
-      E.show(x)
+      Co.show(x)
 
 def result(r: IC.Run) -> String:
   match r:
@@ -82,17 +83,17 @@ def result(r: IC.Run) -> String:
         case IC.RBErr{e}:
           "error " ++ e
 
-def eval(t: E.X, +fuel: U32) -> String:
+def eval(t: Co.V, +fuel: U32) -> String:
   +prog = IC.prepare.closed(t)
-  result(IC.run(prog, IC.net.new(prog), z(), fuel))
+  result(IC.run(prog, IC.net.new(prog), Co.DZero{}, fuel))
 
-def gives(t: E.X, v: E.X) -> Bool:
-  String.eq(eval(t, IC.default.fuel()), E.show(v))
+def gives(t: Co.V, v: Co.V) -> Bool:
+  String.eq(eval(t, IC.default.fuel()), Co.show(v))
 
-def aborts(t: E.X, m: E.X) -> Bool:
-  String.eq(eval(t, IC.default.fuel()), "abort " ++ E.show(m))
+def aborts(t: Co.V, m: Co.V) -> Bool:
+  String.eq(eval(t, IC.default.fuel()), "abort " ++ Co.show(m))
 
-def runs.dry(t: E.X, +fuel: U32) -> Bool:
+def runs.dry(t: Co.V, +fuel: U32) -> Bool:
   String.starts_with(eval(t, fuel), "error ICFuelExhausted")
 
 def all(bs: List<&2, Bool>) -> Bool:
@@ -105,7 +106,7 @@ def all(bs: List<&2, Bool>) -> Bool:
 # Sessions
 # --------
 
-def prepared(guided: Bool, +expr: E.X) -> IC.Prog:
+def prepared(guided: Bool, +expr: Co.V) -> IC.Prog:
   match guided:
     case True{}:
       Ss.prepared(expr)
@@ -253,11 +254,11 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
     IO.print(verdict("ic-application", all([
       gives(se(p(d(100, env()), z())), z()),
       gives(se(p(d(107, z()), p(z(), z()))), z()),
-      gives(E.app(p(d(106, left(env())), z()), p(z(), z())), p(z(), z())),
+      gives(Co.app(p(d(106, left(env())), z()), p(z(), z())), p(z(), z())),
       gives(se(p(d(108, p(d(109, left(env())), env())), z())), p(d(109, left(env())), z()))])))
     IO.print(verdict("ic-projection", all([
       gives(left(p(p(z(), z()), z())), p(z(), z())),
-      gives(E.XRight{p(p(z(), z()), z())}, z()),
+      gives(Co.VRight{p(p(z(), z()), z())}, z()),
       gives(left(z()), z()),
       gives(left(se(p(d(112, env()), p(z(), p(z(), z()))))), z())])))
     IO.print(verdict("ic-duplication", all([
@@ -266,25 +267,25 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       gives(se(p(d(110, p(se(p(env(), z())), se(p(env(), p(z(), z()))))), d(111, env()))),
         p(z(), p(z(), z())))])))
     IO.print(verdict("ic-gates", all([
-      gives(E.gate.switch(p(z(), z()), z(), z()), p(z(), z())),
-      gives(E.gate.switch(p(z(), z()), z(), p(z(), z())), z()),
-      gives(E.gate.switch(d(105, env()), z(), p(z(), z())), z()),
-      gives(E.gate.switch(z(), p(z(), z()), se(p(d(113, env()), p(z(), z())))), p(z(), z()))])))
+      gives(Co.gate.switch(p(z(), z()), z(), z()), p(z(), z())),
+      gives(Co.gate.switch(p(z(), z()), z(), p(z(), z())), z()),
+      gives(Co.gate.switch(d(105, env()), z(), p(z(), z())), z()),
+      gives(Co.gate.switch(z(), p(z(), z()), se(p(d(113, env()), p(z(), z())))), p(z(), z()))])))
     IO.print(verdict("ic-abort", all([
-      gives(se(p(E.XAbort{}, z())), d(E.abort.ind(), env())),
-      gives(se(p(se(p(E.XAbort{}, z())), p(z(), z()))), p(z(), z())),
-      aborts(se(p(E.XAbort{}, p(z(), z()))), p(z(), z())),
-      aborts(left(se(p(E.XAbort{}, p(z(), z())))), p(z(), z())),
-      gives(E.gate.switch(z(), left(se(p(E.XAbort{}, p(z(), z())))), z()), z())])))
+      gives(se(p(Co.VAbort{}, z())), d(Co.abort.ind(), env())),
+      gives(se(p(se(p(Co.VAbort{}, z())), p(z(), z()))), p(z(), z())),
+      aborts(se(p(Co.VAbort{}, p(z(), z()))), p(z(), z())),
+      aborts(left(se(p(Co.VAbort{}, p(z(), z())))), p(z(), z())),
+      gives(Co.gate.switch(z(), left(se(p(Co.VAbort{}, p(z(), z())))), z()), z())])))
     IO.print(verdict("ic-church", all([
-      gives(E.app(E.app(church.two(), succ.c()), z()), num(2n)),
-      gives(E.app(E.app(church.two(), E.app(church.two(), succ.c())), z()), num(4n)),
-      gives(E.app(E.app(church.two(), E.app(church.two(), E.app(church.two(), succ.c()))), z()), num(8n))])))
-    IO.print(verdict("ic-fuel", runs.dry(E.app(E.app(church.two(), succ.c()), z()), 3)))
+      gives(Co.app(Co.app(church.two(), succ.c()), z()), num(2n)),
+      gives(Co.app(Co.app(church.two(), Co.app(church.two(), succ.c())), z()), num(4n)),
+      gives(Co.app(Co.app(church.two(), Co.app(church.two(), Co.app(church.two(), succ.c()))), z()), num(8n))])))
+    IO.print(verdict("ic-fuel", runs.dry(Co.app(Co.app(church.two(), succ.c()), z()), 3)))
     IO.print(verdict("ic-laziness", all([
-      gives(se(p(d(200, E.ite(p(z(), z()), left(env()), omega.applied())), p(z(), z()))), z()),
-      runs.dry(se(p(d(201, se(p(se(p(E.XGate{}, p(z(), z()))), p(omega.applied(), left(env()))))), p(z(), z()))), 50000),
-      gives(se(p(d(202, se(p(se(p(E.XGate{}, p(z(), z()))), p(se(p(p(z(), z()), z())), left(env()))))), p(z(), z()))), z())])))
+      gives(se(p(d(200, Co.ite(p(z(), z()), left(env()), omega.applied())), p(z(), z()))), z()),
+      runs.dry(se(p(d(201, se(p(se(p(Co.VGate{}, p(z(), z()))), p(omega.applied(), left(env()))))), p(z(), z()))), 50000),
+      gives(se(p(d(202, se(p(se(p(Co.VGate{}, p(z(), z()))), p(se(p(p(z(), z()), z())), left(env()))))), p(z(), z()))), z())])))
     IO.print(verdict("ic-omega", runs.dry(omega.applied(), 100000)))
     IO.print(verdict("ic-case", all([
       shows(prelude, case.ints(), "True"),

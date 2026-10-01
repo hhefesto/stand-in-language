@@ -1,6 +1,6 @@
 import Base
 import ./Loc.bend as Lc
-import ./Expr.bend as E
+import ./Core.bend as Co
 import ./Show.bend as Sh
 import ./Lift.bend as Lf
 
@@ -15,6 +15,22 @@ import ./Lift.bend as Lf
 # is never used, so 0 ends the free list. Active pairs sit on a LIFO list,
 # as in Haskell, and every rule consumes the pair it fires, so the count of
 # interactions does not depend on the order they fire in.
+
+# A closure body as the net compiles it: the runnable core with every
+# closure taken out into its template, a reference (template, function
+# index) in its place (§7: code is a pointer). An aborted value can only be
+# a run's input or result, but the core allows it, so it compiles.
+type Code is Data:
+  CdZero{}
+  CdPair{+a: Code, +b: Code}
+  CdEnv{}
+  CdSetEnv{+x: Code}
+  CdGate{}
+  CdLeft{+x: Code}
+  CdRight{+x: Code}
+  CdAbort{}
+  CdAborted{+m: Co.D}
+  CdRef{+tid: U32, +fi: U32}
 
 # Agent kinds
 # -----------
@@ -130,14 +146,14 @@ type WJ is Data:
   WAfter{+desc: Bool, +here: Map<&2, List<&2, U32>>, +rest: List<&2, U32>, +subl: Map<&2, U32>, +subr: Map<&2, U32>}
 
 type CJ is Data:
-  CTerm{+x: E.X}
-  CProj{+path: Maybe<&2, String>, +k: U32, +x: E.X}
+  CTerm{+x: Code}
+  CProj{+path: Maybe<&2, String>, +k: U32, +x: Code}
 
 # A closure body to compile: its template number, function index, body
 # (nested closures already templates), the body as written, and its code's
 # hash (tplHash) when there is guidance to look up by it.
 type Src is Data:
-  Src{+tid: U32, +fi: U32, +body: E.X, +orig: E.X, +code: String}
+  Src{+tid: U32, +fi: U32, +body: Code, +orig: Co.V, +code: String}
 
 # The templates so far and, when there is guidance, their codes' hashes.
 type Coll is Data:
@@ -152,7 +168,7 @@ type Ser is Data:
 # closures templates), the templates' bodies for reading closures back,
 # and the template store.
 type Prog is Data:
-  Prog{+entry: E.X, +bodies: Map<&2, E.X>, +words: List<&2, U32>, +maxk: U32}
+  Prog{+entry: Code, +bodies: Map<&2, Co.V>, +words: List<&2, U32>, +maxk: U32}
 
 type RJ is Data:
   RVisit{+p: U32, +data: Bool}
@@ -160,7 +176,7 @@ type RJ is Data:
   RMkAborted{}
 
 type RB is Data:
-  RBOk{+x: E.X}
+  RBOk{+x: Co.V}
   RBErr{+msg: String}
 
 # A step of copying a value region (dupRegion): the value at a port, by
@@ -176,8 +192,8 @@ type RgSt is Type:
   RgSt{net: Net, jobs: List<&2, RG>, vals: List<&2, U32>}
 
 type RSt is Type:
-  RLoop{net: Net, jobs: List<&2, RJ>, vals: List<&2, E.X>}
-  RSeen{data: Bool, r: Net & NI, jobs: List<&2, RJ>, vals: List<&2, E.X>}
+  RLoop{net: Net, jobs: List<&2, RJ>, vals: List<&2, Co.V>}
+  RSeen{data: Bool, r: Net & NI, jobs: List<&2, RJ>, vals: List<&2, Co.V>}
 
 # What a run gives: the net back (for the next run), the result or the
 # error as Haskell shows an ICError, and the interactions spent.
@@ -874,29 +890,29 @@ def usage.add(m: Map<&2, U32>, +k: String) -> Map<&2, U32>:
 
 # How often the body uses each environment path, not looking inside
 # closures; a projection chain over Env is one use of its path.
-def usage(x: E.X, +path: String, acc: Map<&2, U32>) -> Map<&2, U32>:
+def usage(x: Code, +path: String, acc: Map<&2, U32>) -> Map<&2, U32>:
   match x:
-    case E.XEnv{}:
+    case CdEnv{}:
       usage.add(acc, path)
-    case E.XLeft{c}:
+    case CdLeft{c}:
       usage(c, "L" ++ path, acc)
-    case E.XRight{c}:
+    case CdRight{c}:
       usage(c, "R" ++ path, acc)
-    case E.XPair{a, b}:
+    case CdPair{a, b}:
       usage(b, "", usage(a, "", acc))
-    case E.XSetEnv{c}:
+    case CdSetEnv{c}:
       usage(c, "", acc)
     case _:
       acc
 
 # The path of a pure projection chain over Env (envPathOf).
-def env.path(x: E.X, +path: String) -> Maybe<&2, String>:
+def env.path(x: Code, +path: String) -> Maybe<&2, String>:
   match x:
-    case E.XEnv{}:
+    case CdEnv{}:
       Some{path}
-    case E.XLeft{c}:
+    case CdLeft{c}:
       env.path(c, "L" ++ path)
-    case E.XRight{c}:
+    case CdRight{c}:
       env.path(c, "R" ++ path)
     case _:
       None{}
@@ -1251,7 +1267,7 @@ def r.scrut.pair.go(+i: NI, +j: NI, a: Net & Ids) -> Net:
   match ids:
     case Ids{el, er, x, y}:
       r.select.go(ni.p1(i), alloc(connect(connect(net, port(el, 0), ni.p1(j)), port(er, 0), ni.p2(j)),
-                                  ref(), 1, E.right.gate.ind()))
+                                  ref(), 1, Co.right.gate.ind()))
 
 # A gate's scrutinee is a pair: erase it, the right selector.
 def r.scrut.pair(net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
@@ -1664,13 +1680,13 @@ def apply.rule(r: Rule, net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
     case RApplyNonFunction{}:
       r.apply.nonfunction(net, n, i, m, j)
     case RSelectGate{}:
-      r.select(net, n, i, m, 0, E.left.gate.ind())
+      r.select(net, n, i, m, 0, Co.left.gate.ind())
     case RScrutPair{}:
       r.scrut.pair(net, n, i, m, j)
     case RNonDataGate{}:
       r.nondata(net, n, i, m, j, "gate scrutinee")
     case RSelectAbort{}:
-      r.select(net, n, i, m, 2, E.abort.ind())
+      r.select(net, n, i, m, 2, Co.abort.ind())
     case RAbortPair{}:
       r.abort.pair(net, n, i, m)
     case RNonDataAbort{}:
@@ -1915,6 +1931,14 @@ def value(+k: U32, +a: U32, +b: U32) -> M(U32):
     return (id * 4 : U32)
 
 # A term's net; the port it delivers its value on.
+# Data as code: a run's input, an aborted value's message.
+def of.data(d: Co.D) -> Code:
+  match d:
+    case Co.DZero{}:
+      CdZero{}
+    case Co.DPair{a, b}:
+      CdPair{of.data(a), of.data(b)}
+
 def compile(+fuel: Nat, j: CJ) -> M(U32):
   match fuel:
     case 0n:
@@ -1923,9 +1947,9 @@ def compile(+fuel: Nat, j: CJ) -> M(U32):
       match j:
         case CTerm{x}:
           match x:
-            case E.XZero{}:
+            case CdZero{}:
               value(zero(), 0, 0)
-            case E.XPair{a, b}:
+            case CdPair{a, b}:
               do M<U32>:
                 +p : U32 <- m.alloc(pair(), 0, 0)
                 pa : U32 <- compile(f, CTerm{a})
@@ -1933,28 +1957,26 @@ def compile(+fuel: Nat, j: CJ) -> M(U32):
                 pb : U32 <- compile(f, CTerm{b})
                 u2 : Unit <- m.connect((p * 4 + 2 : U32), pb)
                 return (p * 4 : U32)
-            case E.XEnv{}:
+            case CdEnv{}:
               m.take("")
-            case E.XSetEnv{c}:
+            case CdSetEnv{c}:
               compile(f, CProj{None{}, setenv(), c})
-            case E.XLeft{+c}:
+            case CdLeft{+c}:
               compile(f, CProj{env.path(c, "L"), left(), c})
-            case E.XRight{+c}:
+            case CdRight{+c}:
               compile(f, CProj{env.path(c, "R"), right(), c})
-            case E.XGate{}:
+            case CdGate{}:
               value(gate(), 0, 0)
-            case E.XAbort{}:
+            case CdAbort{}:
               value(abort(), 0, 0)
-            case E.XAborted{m}:
+            case CdAborted{m}:
               do M<U32>:
                 +a : U32 <- m.alloc(aborted(), 0, 0)
-                pm : U32 <- compile(f, CTerm{m})
+                pm : U32 <- compile(f, CTerm{of.data(m)})
                 u : Unit <- m.connect((a * 4 + 1 : U32), pm)
                 return (a * 4 : U32)
-            case E.XTpl{tid, fi}:
+            case CdRef{tid, fi}:
               value(ref(), tid, fi)
-            case _:
-              m.fail("compileTerm: not a compiled expression")
         case CProj{path, +k, c}:
           match path:
             case Some{p}:
@@ -1968,7 +1990,7 @@ def compile(+fuel: Nat, j: CJ) -> M(U32):
 
 # A body between a boundary agent's env port (0) and result port (1)
 # (compileBody); the boundary.
-def body(+x: E.X) -> M(U32):
+def body(+x: Code) -> M(U32):
   do M<U32>:
     +ext : U32 <- m.alloc(ext(), 0, 0)
     q : Map<&2, List<&2, U32>> <- wiring(fuel(), WStart{(ext * 4 : U32), usage(x, "", Map.new(&2, U32))})
@@ -1995,84 +2017,94 @@ def C.bind(-A: Data, -B: Data, m: C(A), f: A -> C(B)) -> C(B):
 
 # A collected body as EAL lifts it (Lift), each template reference its
 # code's hash. Locations do not reach the hash.
-def lifted(+hs: Map<&2, String>, x: E.X) -> Lf.L:
+def lifted(+hs: Map<&2, String>, x: Code) -> Lf.L:
   match x:
-    case E.XZero{}:
+    case CdZero{}:
       Lf.LZero{Lc.Unknown{}}
-    case E.XPair{a, b}:
+    case CdPair{a, b}:
       Lf.LPair{Lc.Unknown{}, lifted(hs, a), lifted(hs, b)}
-    case E.XEnv{}:
+    case CdEnv{}:
       Lf.LEnv{Lc.Unknown{}}
-    case E.XSetEnv{a}:
+    case CdSetEnv{a}:
       Lf.LSetEnv{Lc.Unknown{}, lifted(hs, a)}
-    case E.XGate{}:
+    case CdGate{}:
       Lf.LGate{Lc.Unknown{}}
-    case E.XLeft{a}:
+    case CdLeft{a}:
       Lf.LLeft{Lc.Unknown{}, lifted(hs, a)}
-    case E.XRight{a}:
+    case CdRight{a}:
       Lf.LRight{Lc.Unknown{}, lifted(hs, a)}
-    case E.XTpl{tid, fi}:
+    case CdRef{tid, fi}:
       Lf.LRef{Lc.Unknown{}, Pair.snd(Map<&2, String>, String, Map.get(String, "", hs, U32.show(tid)))}
-    case _:
+    case CdAbort{}:
+      Lf.LAbort{Lc.Unknown{}}
+    case CdAborted{m}:
       Lf.LAbort{Lc.Unknown{}}
 
 # A body's code hash (tplHash, hashLiftedBody).
-def code.of(+hs: Map<&2, String>, x: E.X) -> String:
+def code.of(+hs: Map<&2, String>, x: Code) -> String:
   Lf.hash(lifted(hs, x))
 
-def c.named(+next: U32, +fi: U32, +body: E.X, orig: E.X, srcs: List<&2, Src>, hs: Maybe<&2, Map<&2, String>>) -> E.X & Coll:
+def c.named(+next: U32, +fi: U32, +body: Code, orig: Co.V, srcs: List<&2, Src>, hs: Maybe<&2, Map<&2, String>>) -> Code & Coll:
   match hs:
     case None{}:
-      (E.XTpl{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, ""} <> srcs, None{}})
+      (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, ""} <> srcs, None{}})
     case Some{+m}:
       +code = code.of(m, body)
-      (E.XTpl{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, code} <> srcs,
-                             Some{Map.set(&2, String, m, U32.show(next), code)}})
+      (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, code} <> srcs,
+                            Some{Map.set(&2, String, m, U32.show(next), code)}})
 
-def c.add.go(+fi: U32, body: E.X, orig: E.X, c: Coll) -> E.X & Coll:
+def c.add.go(+fi: U32, body: Code, orig: Co.V, c: Coll) -> Code & Coll:
   match c:
     case Coll{+next, srcs, hs}:
       c.named(next, fi, body, orig, srcs, hs)
 
-def c.add(+fi: U32, body: E.X, orig: E.X) -> C(E.X):
+def c.add(+fi: U32, body: Code, orig: Co.V) -> C(Code):
   c => c.add.go(fi, body, orig, c)
 
 # Every closure body becomes a template, innermost first, each Defer a
 # reference to its template.
-def collect(x: E.X) -> C(E.X):
+def collect(x: Co.V) -> C(Code):
   match x:
-    case E.XDefer{fi, +b}:
-      do C<E.X>:
-        b2 : E.X <- collect(b)
+    case Co.VDefer{fi, +b}:
+      do C<Code>:
+        b2 : Code <- collect(b)
         c.add(fi, b2, b)
-    case E.XPair{a, b}:
-      do C<E.X>:
-        a2 : E.X <- collect(a)
-        b2 : E.X <- collect(b)
-        return E.XPair{a2, b2}
-    case E.XSetEnv{a}:
-      do C<E.X>:
-        a2 : E.X <- collect(a)
-        return E.XSetEnv{a2}
-    case E.XLeft{a}:
-      do C<E.X>:
-        a2 : E.X <- collect(a)
-        return E.XLeft{a2}
-    case E.XRight{a}:
-      do C<E.X>:
-        a2 : E.X <- collect(a)
-        return E.XRight{a2}
-    case other:
-      C.pure(E.X, other)
+    case Co.VPair{a, b}:
+      do C<Code>:
+        a2 : Code <- collect(a)
+        b2 : Code <- collect(b)
+        return CdPair{a2, b2}
+    case Co.VSetEnv{a}:
+      do C<Code>:
+        a2 : Code <- collect(a)
+        return CdSetEnv{a2}
+    case Co.VLeft{a}:
+      do C<Code>:
+        a2 : Code <- collect(a)
+        return CdLeft{a2}
+    case Co.VRight{a}:
+      do C<Code>:
+        a2 : Code <- collect(a)
+        return CdRight{a2}
+    case Co.VZero{}:
+      C.pure(Code, CdZero{})
+    case Co.VEnv{}:
+      C.pure(Code, CdEnv{})
+    case Co.VGate{}:
+      C.pure(Code, CdGate{})
+    case Co.VAbort{}:
+      C.pure(Code, CdAbort{})
+    case Co.VAborted{m}:
+      C.pure(Code, CdAborted{m})
 
-def selector(+tid: U32, +fi: U32, +body: E.X) -> Src:
-  Src{tid, fi, body, body, code.of(Map.new(&2, String), body)}
+def selector(+tid: U32, +fi: U32, +body: Code, orig: Co.V) -> Src:
+  Src{tid, fi, body, orig, code.of(Map.new(&2, String), body)}
 
 # The gate's selectors and the identity abort gives: templates 0, 1, 2.
 def selectors() -> List<&2, Src>:
-  [selector(2, E.abort.ind(), E.XEnv{}),
-   selector(1, E.right.gate.ind(), E.XRight{E.XEnv{}}),
-   selector(0, E.left.gate.ind(), E.XLeft{E.XEnv{}})]
+  [selector(2, Co.abort.ind(), CdEnv{}, Co.VEnv{}),
+   selector(1, Co.right.gate.ind(), CdRight{CdEnv{}}, Co.VRight{Co.VEnv{}}),
+   selector(0, Co.left.gate.ind(), CdLeft{CdEnv{}}, Co.VLeft{Co.VEnv{}})]
 
 def ser.wire.at(lower: Bool, +p: U32, +q: U32, s: Ser) -> Ser:
   match lower:
@@ -2150,7 +2182,7 @@ def tpl.assemble(+c: Ctl, s: Ser) -> List<&2, U32>:
         <> List.append(&2, U32, List.reverse(&2, U32, nodes), List.reverse(&2, U32, wires))
 
 # One template's words: its body compiled in a fresh scratch net, read out.
-def tpl.words(+x: E.X) -> M(List<&2, U32>):
+def tpl.words(+x: Code) -> M(List<&2, U32>):
   do M<List<&2, U32>>:
     ext : U32 <- body(x)
     +c : Ctl <- m.ctl()
@@ -2173,7 +2205,7 @@ def cs.net(cs: CS) -> Net:
     case CS{net, q}:
       net
 
-def src.body(s: Src) -> E.X:
+def src.body(s: Src) -> Code:
   match s:
     case Src{tid, fi, body, orig, code}:
       body
@@ -2289,14 +2321,14 @@ def store(+ws: List<&2, List<&2, U32>>, +ps: List<&2, Maybe<&2, Lf.Shape>>) -> L
     <> List.append(&2, U32, lens(ws, (2 + 2 * t : U32)),
          List.append(&2, U32, plan.offs(ps, at), List.append(&2, U32, flat, pw)))
 
-def bodies(srcs: List<&2, Src>, acc: Map<&2, E.X>) -> Map<&2, E.X>:
+def bodies(srcs: List<&2, Src>, acc: Map<&2, Co.V>) -> Map<&2, Co.V>:
   match srcs:
     case Nil{}:
       acc
     case Con{s, rest}:
       match s:
         case Src{tid, fi, body, orig, code}:
-          bodies(rest, Map.set(&2, E.X, acc, U32.show(tid), orig))
+          bodies(rest, Map.set(&2, Co.V, acc, U32.show(tid), orig))
 
 def depth.of(+n: U32) -> Nat:
   1n+U32.log2(n)
@@ -2304,12 +2336,12 @@ def depth.of(+n: U32) -> Nat:
 def scratch() -> Net:
   Net{Array.new(U32, 16n, 0), Array.new(U32, 2n, 0), Ctl{[], cold.none(0), 1, 0, 0, 0, 0, 8192}}
 
-def prepared.with(+g: Map<&2, Lf.Shape>, entry: E.X, +srcs: List<&2, Src>) -> Prog:
+def prepared.with(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>) -> Prog:
   +ws = tpls(srcs, (CS{scratch(), Map.new(&2, List<&2, U32>)}, []), [])
-  Prog{entry, bodies(srcs, Map.new(&2, E.X)),
+  Prog{entry, bodies(srcs, Map.new(&2, Co.V)),
        store(List.drop(&2, List<&2, U32>, ws, 1n), plans(g, srcs)), max.k(ws, 0)}
 
-def prepared(+g: Map<&2, Lf.Shape>, r: E.X & Coll) -> Prog:
+def prepared(+g: Map<&2, Lf.Shape>, r: Code & Coll) -> Prog:
   (entry, c) = r
   match c:
     case Coll{next, srcs, hs}:
@@ -2326,12 +2358,12 @@ def hashes.for(g: Map<&2, Lf.Shape>) -> Maybe<&2, Map<&2, String>>:
 # prepareIC: the sized program applied to the environment, its closures
 # compiled into templates, each with its plan from EAL's capture layouts
 # (ealCaptureLayouts), keyed by code hash.
-def prepare(sized: E.X, +g: Map<&2, Lf.Shape>) -> Prog:
-  prepared(g, collect(E.app(sized, E.XEnv{}))(Coll{3, selectors(), hashes.for(g)}))
+def prepare(sized: Co.V, +g: Map<&2, Lf.Shape>) -> Prog:
+  prepared(g, collect(Co.app(sized, Co.VEnv{}))(Coll{3, selectors(), hashes.for(g)}))
 
 # A closed term on its own, as icEvalDetailed runs one: prepared like a
 # program, unguided, then run on an input it never looks at.
-def prepare.closed(t: E.X) -> Prog:
+def prepare.closed(t: Co.V) -> Prog:
   prepared(Map.new(&2, Lf.Shape), collect(t)(Coll{3, selectors(), None{}}))
 
 # A net ready for runs: room for agents, the template store filled in.
@@ -2363,13 +2395,13 @@ def attach(same: Bool, +env: U32, +res: U32, +root: U32, +v: U32) -> M(Unit):
 
 # The entry net around the input, and a root to read the result from
 # (initializeIC); the root.
-def start(+entry: E.X, input: E.X) -> M(U32):
+def start(+entry: Code, input: Co.D) -> M(U32):
   do M<U32>:
     +ext : U32 <- body(entry)
     +env : U32 <- m.peer((ext * 4 : U32))
     res : U32 <- m.peer((ext * 4 + 1 : U32))
     +root : U32 <- m.alloc(root(), 0, 0)
-    v : U32 <- compile(fuel(), CTerm{input})
+    v : U32 <- compile(fuel(), CTerm{of.data(input)})
     u : Unit <- m.delete(ext)
     u2 : Unit <- attach(U32.is_eq(node.of(env), ext), env, res, root, v)
     return root
@@ -2377,15 +2409,24 @@ def start(+entry: E.X, input: E.X) -> M(U32):
 # Reading back
 # ------------
 
-def body.of(+bodies: Map<&2, E.X>, +tid: U32) -> E.X:
-  Pair.snd(Map<&2, E.X>, E.X, Map.get(E.X, E.XZero{}, bodies, U32.show(tid)))
+def body.of(+bodies: Map<&2, Co.V>, +tid: U32) -> Co.V:
+  Pair.snd(Map<&2, Co.V>, Co.V, Map.get(Co.V, Co.VZero{}, bodies, U32.show(tid)))
 
 def rb.stuck(net: Net, +a: U32) -> Net & RB:
   match net:
     case Net{mem, tpl, +ctl}:
       (Net{mem, tpl, ctl}, RBErr{"ICStuck " ++ Sh.string(msg.at(c.msgs(ctl), c.nmsg(ctl), a))})
 
-def rb.first(vals: List<&2, E.X>) -> RB:
+# An aborted value: its message is read as data (RVisit's data mode), so
+# anything else cannot occur; it would read as 0, as under Aborted.
+def aborted.of(m: Maybe<&2, Co.D>) -> Co.V:
+  match m:
+    case Some{d}:
+      Co.VAborted{d}
+    case None{}:
+      Co.VAborted{Co.DZero{}}
+
+def rb.first(vals: List<&2, Co.V>) -> RB:
   match vals:
     case Con{x, rest}:
       RBOk{x}
@@ -2394,7 +2435,7 @@ def rb.first(vals: List<&2, E.X>) -> RB:
 
 # The value at a port, as a CompiledExpr (readback); under Aborted only
 # data counts, anything else reads as 0 (readbackData).
-def readback(fuel: Nat, +bodies: Map<&2, E.X>, st: RSt) -> Net & RB:
+def readback(fuel: Nat, +bodies: Map<&2, Co.V>, st: RSt) -> Net & RB:
   match fuel:
     case 0n:
       match st:
@@ -2414,13 +2455,13 @@ def readback(fuel: Nat, +bodies: Map<&2, E.X>, st: RSt) -> Net & RB:
             case Con{RMkPair{}, rest}:
               match vals:
                 case Con{b, Con{a, more}}:
-                  readback(f, bodies, RLoop{net, rest, E.XPair{a, b} <> more})
+                  readback(f, bodies, RLoop{net, rest, Co.VPair{a, b} <> more})
                 case _:
                   (net, RBErr{"ICInternal \"readback: pair\""})
             case Con{RMkAborted{}, rest}:
               match vals:
                 case Con{m, more}:
-                  readback(f, bodies, RLoop{net, rest, E.XAborted{m} <> more})
+                  readback(f, bodies, RLoop{net, rest, aborted.of(Co.data(m)) <> more})
                 case _:
                   (net, RBErr{"ICInternal \"readback: aborted\""})
         case RSeen{data, r, jobs, vals}:
@@ -2431,22 +2472,22 @@ def readback(fuel: Nat, +bodies: Map<&2, E.X>, st: RSt) -> Net & RB:
                 case NI{8, a, b, p1, p2}:
                   readback(f, bodies, RLoop{net, RVisit{p1, True{}} <> RVisit{p2, True{}} <> RMkPair{} <> jobs, vals})
                 case NI{4, a, b, p1, p2}:
-                  readback(f, bodies, RLoop{net, jobs, E.XZero{} <> vals})
+                  readback(f, bodies, RLoop{net, jobs, Co.VZero{} <> vals})
                 case _:
-                  readback(f, bodies, RLoop{net, jobs, E.XZero{} <> vals})
+                  readback(f, bodies, RLoop{net, jobs, Co.VZero{} <> vals})
             case False{}:
               (net, ni) = r
               match ni:
                 case NI{4, a, b, p1, p2}:
-                  readback(f, bodies, RLoop{net, jobs, E.XZero{} <> vals})
+                  readback(f, bodies, RLoop{net, jobs, Co.VZero{} <> vals})
                 case NI{8, a, b, p1, p2}:
                   readback(f, bodies, RLoop{net, RVisit{p1, False{}} <> RVisit{p2, False{}} <> RMkPair{} <> jobs, vals})
                 case NI{7, a, b, p1, p2}:
-                  readback(f, bodies, RLoop{net, jobs, E.XDefer{b, body.of(bodies, a)} <> vals})
+                  readback(f, bodies, RLoop{net, jobs, Co.VDefer{b, body.of(bodies, a)} <> vals})
                 case NI{5, a, b, p1, p2}:
-                  readback(f, bodies, RLoop{net, jobs, E.XGate{} <> vals})
+                  readback(f, bodies, RLoop{net, jobs, Co.VGate{} <> vals})
                 case NI{6, a, b, p1, p2}:
-                  readback(f, bodies, RLoop{net, jobs, E.XAbort{} <> vals})
+                  readback(f, bodies, RLoop{net, jobs, Co.VAbort{} <> vals})
                 case NI{9, a, b, p1, p2}:
                   readback(f, bodies, RLoop{net, RVisit{p1, True{}} <> RMkAborted{} <> jobs, vals})
                 case NI{18, a, b, p1, p2}:
@@ -2465,7 +2506,7 @@ def finish.read(+spent: U32, r: Net & RB) -> Run:
 
 # How the run ended: every pair fired (ok), the fuel ran out (out), or an
 # internal error.
-def finish.err(ok: Bool, out: Bool, +bodies: Map<&2, E.X>, +root: U32, +c: Ctl, net: Net) -> Run:
+def finish.err(ok: Bool, out: Bool, +bodies: Map<&2, Co.V>, +root: U32, +c: Ctl, net: Net) -> Run:
   match ok:
     case True{}:
       finish.read(c.spent(c), readback(U32.to_nat(4294967295), bodies,
@@ -2477,20 +2518,20 @@ def finish.err(ok: Bool, out: Bool, +bodies: Map<&2, E.X>, +root: U32, +c: Ctl, 
         case False{}:
           Run{net, RBErr{"ICInternal " ++ Sh.string(c.emsg(c))}, c.spent(c)}
 
-def finish.ctl(+bodies: Map<&2, E.X>, +p: U32, r: Net & Ctl) -> Run:
+def finish.ctl(+bodies: Map<&2, Co.V>, +p: U32, r: Net & Ctl) -> Run:
   (net, +c) = r
   finish.err(U32.is_zero(c.stop(c)), U32.is_eq(c.stop(c), 1), bodies, node.of(p), c, net)
 
-def finish.root(+bodies: Map<&2, E.X>, +root: U32, r: Net & U32) -> Run:
+def finish.root(+bodies: Map<&2, Co.V>, +root: U32, r: Net & U32) -> Run:
   (net, p) = r
   finish.ctl(bodies, p, ctl.of(net))
 
-def finish(+bodies: Map<&2, E.X>, r: CS & U32) -> Run:
+def finish(+bodies: Map<&2, Co.V>, r: CS & U32) -> Run:
   (cs, +root) = r
   finish.root(bodies, root, peer(reduce(U32.to_nat(4294967295), pop(cs.net(cs))), (root * 4 : U32)))
 
 # runICProgram: one iteration on input, at the given fuel.
-def run(p: Prog, net: Net, input: E.X, +fuel: U32) -> Run:
+def run(p: Prog, net: Net, input: Co.D, +fuel: U32) -> Run:
   match p:
     case Prog{entry, +bodies, words, maxk}:
       finish(bodies, start(entry, input)(CS{reset(net, fuel), Map.new(&2, List<&2, U32>)}))

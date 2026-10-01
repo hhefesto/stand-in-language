@@ -1,5 +1,6 @@
 import Base
 import ./Expr.bend as E
+import ./Core.bend as Co
 import ./Term.bend as T
 import ./Loc.bend as L
 
@@ -53,15 +54,17 @@ type GR is Data:
 type IRX is Data:
   IRX{+z: Set(), +p: Set(), +v: E.X}
 
-# Why sizing failed.
+# Why sizing failed. Leftover is sizing's own bug: the program it would
+# hand the runtime still holds a form only sizing uses.
 type SizeFail is Data:
   Unsizable{+tok: U32}
   Overfueled{+tok: U32}
   Crash{+msg: String}
+  Leftover{+form: String}
 
-# The sized program and the counts that sized it.
+# The sized program, as the runnable core, and the counts that sized it.
 type Sized is Data:
-  Sized{+counts: List<&2, E.TS>, +expr: E.X}
+  Sized{+counts: List<&2, E.TS>, +expr: Co.V}
 
 type InSt is Data:
   InSt{+split: Bool, +p: String}
@@ -267,7 +270,7 @@ def merge2(n: Maybe<&2, String>, ra: R, rb: R) -> R:
 def is.gate.selector(x: E.X) -> Bool:
   match x:
     case E.XDefer{+fi, b}:
-      U32.is_eq(fi, E.left.gate.ind()) || U32.is_eq(fi, E.right.gate.ind())
+      U32.is_eq(fi, Co.left.gate.ind()) || U32.is_eq(fi, Co.right.gate.ind())
     case _:
       False{}
 
@@ -427,7 +430,7 @@ def unsized.test(+zeros: Set(), +tok: U32, v: E.X) -> E.X:
 def stub.expand(+tok: U32, v: E.X) -> E.X:
   match v:
     case E.XPair{E.XPair{E.XPair{E.XDefer{sid, tf}, e}, rest}, x}:
-      E.XPair{E.XDefer{E.step.rfa(), E.step.body(tok, 1)},
+      E.XPair{E.XDefer{Co.step.rfa(), E.step.body(tok, 1)},
               E.XPair{E.XPair{E.XDefer{sid, E.XTest{tok, tf}}, e}, rest}}
     case _:
       E.XError{"unsizedStepM''' unexpected oracle operand"}
@@ -435,7 +438,7 @@ def stub.expand(+tok: U32, v: E.X) -> E.X:
 def step.next(+tok: U32, +n: U32, v: E.X) -> E.X:
   match v:
     case E.XPair{x, trb}:
-      E.XPair{E.XDefer{E.step.rfa(), E.step.body(tok, (n + 1 : U32))}, trb}
+      E.XPair{E.XDefer{Co.step.rfa(), E.step.body(tok, (n + 1 : U32))}, trb}
     case _:
       E.XError{"unsizedStepM''' unexpected step operand"}
 
@@ -514,7 +517,7 @@ def abort.on(+cfg: Cfg, e: E.X) -> E.X:
     case E.XAborted{m}:
       E.XAborted{m}
     case E.XZero{}:
-      E.XDefer{E.abort.ind(), E.XEnv{}}
+      E.XDefer{Co.abort.ind(), E.XEnv{}}
     case E.XPair{a, b}:
       E.XAborted{trunc(E.XPair{a, b})}
     case E.XVar{p}:
@@ -903,6 +906,8 @@ def fail.pick(x: SizeFail, y: SizeFail) -> SizeFail:
   match x:
     case Crash{m}:
       Crash{m}
+    case Leftover{f}:
+      Leftover{f}
     case Unsizable{t}:
       match y:
         case Crash{m}:
@@ -1001,6 +1006,15 @@ def r.p(r: R) -> Set():
     case R{v, s, z, p}:
       p
 
+# The sized program handed on as the runnable core (H1: the runtime cannot
+# be given a sizing form).
+def cored(+counts: List<&2, E.TS>, r: Result<&2, &2, String, Co.V>) -> Result<&2, &2, SizeFail, Sized>:
+  match r:
+    case Done{v}:
+      Done{Sized{counts, v}}
+    case Fail{form}:
+      Fail{Leftover{form}}
+
 def tidy(m: Maybe<&2, SizeFail>, +run: R, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match m:
     case Some{fail}:
@@ -1008,9 +1022,9 @@ def tidy(m: Maybe<&2, SizeFail>, +run: R, +cm: E.X, cap: Bool) -> Result<&2, &2,
     case None{}:
       match cap:
         case True{}:
-          Done{Sized{r.s(run), uncap(set.sizes(r.s(run), cm))}}
+          cored(r.s(run), E.core(uncap(set.sizes(r.s(run), cm))))
         case False{}:
-          Done{Sized{r.s(run), set.sizes(r.s(run), cm)}}
+          cored(r.s(run), E.core(set.sizes(r.s(run), cm)))
 
 def main.run.from(+max: U32, +cm: E.X, zeros: Set(), mx: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   +run = eval(fuel(), Cfg{MSize{}, zeros, max}, JEval{E.remove.checks(mx), E.XZero{}})
@@ -1097,3 +1111,5 @@ def render(f: SizeFail, t: T.C, +max: U32) -> String:
         ++ "  (`x : someValidator`) or an `assert` before recursing on it."
     case Crash{msg}:
       msg
+    case Leftover{form}:
+      "sizing left " ++ form ++ " in the compiled program (a bug in sizing)"

@@ -2,7 +2,7 @@ import Base
 import ./Show.bend as Sh
 import ./Loc.bend as Lc
 import ./Term.bend as T
-import ./Expr.bend as E
+import ./Core.bend as Co
 import ./Sha256.bend as Sha
 
 # Defer lifting (haskell-final's Resolve.deferLift, Term3Lifting,
@@ -212,27 +212,29 @@ def defer.lift(t: T.C) -> Lifted:
   lifted(lift(t)(Map.new(&2, Body)))
 
 # compiled2Term3: a sized program as Term3, every node at one generated
-# location.
-def of.expr.at(x: E.X, +loc: Lc.Loc) -> T.C:
-  match x:
-    case E.XZero{}:
+# location. An aborted value (a result, never a program) reads as Abort.
+def of.expr.at(v: Co.V, +loc: Lc.Loc) -> T.C:
+  match v:
+    case Co.VZero{}:
       T.CZero{loc}
-    case E.XPair{a, b}:
+    case Co.VPair{a, b}:
       T.CPair{loc, of.expr.at(a, loc), of.expr.at(b, loc)}
-    case E.XEnv{}:
+    case Co.VEnv{}:
       T.CEnv{loc}
-    case E.XSetEnv{a}:
+    case Co.VSetEnv{a}:
       T.CSetEnv{loc, of.expr.at(a, loc)}
-    case E.XDefer{fi, a}:
+    case Co.VDefer{fi, a}:
       T.CDefer{loc, fi, of.expr.at(a, loc)}
-    case E.XGate{}:
+    case Co.VGate{}:
       T.CGate{loc}
-    case E.XLeft{a}:
+    case Co.VLeft{a}:
       T.CLeft{loc, of.expr.at(a, loc)}
-    case E.XRight{a}:
+    case Co.VRight{a}:
       T.CRight{loc, of.expr.at(a, loc)}
-    case _:
+    case Co.VAbort{}:
+      T.CAbort{loc}
+    case Co.VAborted{m}:
       T.CAbort{loc}
 
-def of.expr(x: E.X) -> T.C:
-  of.expr.at(x, Lc.Gen{"compiled2Term3"})
+def of.expr(v: Co.V) -> T.C:
+  of.expr.at(v, Lc.Gen{"compiled2Term3"})

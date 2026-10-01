@@ -1,12 +1,13 @@
 import Base
 import ./Term.bend as T
+import ./Core.bend as Co
 
-# The core expression (haskell-final's IR.Base and Size.IR): Term3 without
-# its locations, plus the abstract values sizing works with. The sized,
-# compiled program (CompiledExpr) uses only the first ten constructors.
-# XError is where Haskell's sizing would have thrown: it travels with the
-# value, and is reported only if it reaches the result. XTpl is a Defer
-# whose body the IC has compiled to template tid.
+# Sizing's expression (haskell-final's IR.Base and Size.IR): Term3 without
+# its locations, plus the abstract values sizing works with. Sizing ends by
+# handing the runtime the runnable core (Core.bend), in which none of these
+# values can be written (`core`). XError is where Haskell's sizing would
+# have thrown: it travels with the value, and is reported only if it
+# reaches the result.
 #
 # An input position (IVarF) is its path from the root, 'L' and 'R' for
 # left and right, where Haskell numbers positions 2n+1 and 2n+2: a
@@ -40,42 +41,6 @@ type X is Data:
   XLefts{+n: U32, +x: X}
   XRights{+n: U32, +x: X}
   XError{+msg: String}
-  XTpl{+tid: U32, +fi: U32}
-
-# Negative function indices name the machinery's own closures; as a U32
-# they wrap (-1 is 4294967295).
-def neg(k: U32) -> U32:
-  (0 - k : U32)
-
-def twiddle.ind() -> U32:
-  neg(1)
-
-def left.gate.ind() -> U32:
-  neg(2)
-
-def right.gate.ind() -> U32:
-  neg(3)
-
-def step.e.ind() -> U32:
-  neg(4)
-
-def step.t.ind() -> U32:
-  neg(5)
-
-def step.rfa() -> U32:
-  neg(7)
-
-def step.rfb() -> U32:
-  neg(8)
-
-def step.w() -> U32:
-  neg(9)
-
-def refinement.tc() -> U32:
-  neg(10)
-
-def abort.ind() -> U32:
-  neg(11)
 
 # Term3 without locations (term3ToUnsizedExpr): a recursion placeholder
 # becomes its stub over the environment.
@@ -119,7 +84,7 @@ def var(n: Nat) -> X:
   XLeft{rights(n, XEnv{})}
 
 def twiddle() -> X:
-  XDefer{twiddle.ind(), XPair{XLeft{XRight{XEnv{}}}, XPair{XLeft{XEnv{}}, XRight{XRight{XEnv{}}}}}}
+  XDefer{Co.twiddle.ind(), XPair{XLeft{XRight{XEnv{}}}, XPair{XLeft{XEnv{}}, XRight{XRight{XEnv{}}}}}}
 
 # appB: c applied to i.
 def app(c: X, i: X) -> X:
@@ -134,13 +99,13 @@ def gate.switch(l: X, r: X, s: X) -> X:
 
 # The lazy if (iteB): the branches stay deferred until chosen.
 def ite(i: X, t: X, e: X) -> X:
-  fill(fill(fill(XGate{}, i), XPair{XDefer{step.e.ind(), e}, XDefer{step.t.ind(), t}}), XEnv{})
+  fill(fill(fill(XGate{}, i), XPair{XDefer{Co.step.e.ind(), e}, XDefer{Co.step.t.ind(), t}}), XEnv{})
 
 def do.left() -> X:
-  XDefer{left.gate.ind(), XLeft{XEnv{}}}
+  XDefer{Co.left.gate.ind(), XLeft{XEnv{}}}
 
 def do.right() -> X:
-  XDefer{right.gate.ind(), XRight{XEnv{}}}
+  XDefer{Co.right.gate.ind(), XRight{XEnv{}}}
 
 # intB / i2B: n as nested pairs.
 def int(n: Nat) -> X:
@@ -180,10 +145,10 @@ def approx.body() -> X:
 def chain(n: Nat, +tok: U32) -> X:
   match n:
     case 0n:
-      XPair{XDefer{step.w(), fill(fill(XAbort{}, XRight{XEnv{}}), XLeft{XEnv{}})},
+      XPair{XDefer{Co.step.w(), fill(fill(XAbort{}, XRight{XEnv{}}), XLeft{XEnv{}})},
             XPair{XZero{}, int.u32(tok)}}
     case 1n+k:
-      XPair{XDefer{step.rfb(), approx.body()}, XPair{chain(k, tok), XLeft{XEnv{}}}}
+      XPair{XDefer{Co.step.rfb(), approx.body()}, XPair{chain(k, tok), XLeft{XEnv{}}}}
 
 # A recursion sized to n iterations: n links over a base that aborts with
 # (0, token) (sizedRecursionChain).
@@ -195,7 +160,7 @@ def sized.chain(+tok: U32, n: U32) -> X:
 def remove.checks(t: X) -> X:
   match t:
     case XCheck{tc, c}:
-      fill(XDefer{refinement.tc(), fill(fill(XAbort{}, app(XLeft{XEnv{}}, XRight{XEnv{}})), XRight{XEnv{}})},
+      fill(XDefer{Co.refinement.tc(), fill(fill(XAbort{}, app(XLeft{XEnv{}}, XRight{XEnv{}})), XRight{XEnv{}})},
            XPair{remove.checks(tc), remove.checks(c)})
     case XPair{a, b}:
       XPair{remove.checks(a), remove.checks(b)}
@@ -229,98 +194,120 @@ def to.int(x: X) -> Maybe<&2, U32>:
     case _:
       None{}
 
-def to.string.cons(c: Maybe<&2, U32>, rest: Maybe<&2, String>) -> Maybe<&2, String>:
-  match c:
-    case Some{k}:
-      match rest:
-        case Some{s}:
-          Some{SCon{Chr{k}, s}}
-        case None{}:
-          None{}
-    case None{}:
-      None{}
+# The runnable core
+# -----------------
 
-# b2s: a list of unary code points, if it is one.
-def to.string(x: X) -> Maybe<&2, String>:
+def core.pair(a: Result<&2, &2, String, Co.V>, b: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
+  match a:
+    case Done{x}:
+      match b:
+        case Done{y}:
+          Done{Co.VPair{x, y}}
+        case Fail{e}:
+          Fail{e}
+    case Fail{e}:
+      Fail{e}
+
+def core.defer(+fi: U32, a: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
+  match a:
+    case Done{x}:
+      Done{Co.VDefer{fi, x}}
+    case Fail{e}:
+      Fail{e}
+
+def core.setenv(a: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
+  match a:
+    case Done{x}:
+      Done{Co.VSetEnv{x}}
+    case Fail{e}:
+      Fail{e}
+
+def core.left(a: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
+  match a:
+    case Done{x}:
+      Done{Co.VLeft{x}}
+    case Fail{e}:
+      Fail{e}
+
+def core.right(a: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
+  match a:
+    case Done{x}:
+      Done{Co.VRight{x}}
+    case Fail{e}:
+      Fail{e}
+
+def core.data.pair(a: Result<&2, &2, String, Co.D>, b: Result<&2, &2, String, Co.D>) -> Result<&2, &2, String, Co.D>:
+  match a:
+    case Done{x}:
+      match b:
+        case Done{y}:
+          Done{Co.DPair{x, y}}
+        case Fail{e}:
+          Fail{e}
+    case Fail{e}:
+      Fail{e}
+
+def core.data(x: X) -> Result<&2, &2, String, Co.D>:
   match x:
     case XZero{}:
-      Some{SNil{}}
-    case XPair{c, rest}:
-      to.string.cons(to.int(c), to.string(rest))
-    case _:
-      None{}
-
-# s2b
-def of.string(s: String) -> X:
-  match s:
-    case SNil{}:
-      XZero{}
-    case SCon{Chr{c}, rest}:
-      XPair{int.u32(c), of.string(rest)}
-
-def fi.signed(neg: Bool, +n: U32) -> String:
-  match neg:
-    case True{}:
-      "-" ++ U32.show((0 - n : U32))
-    case False{}:
-      U32.show(n)
-
-def fi.show(+fi: U32) -> String:
-  "FunctionIndex {unFunctionIndex = " ++ fi.signed(U32.is_ge(fi, 2147483648), fi) ++ "}"
-
-# How Haskell shows a CompiledExpr (data-fix's Show over the Show1
-# instances, which quote their constructor text): Pair 0 0 is
-# Fix "PairSF ("Fix "ZeroSF"", "Fix "ZeroSF"")".
-def show(x: X) -> String:
-  match x:
-    case XZero{}:
-      "Fix \"ZeroSF\""
+      Done{Co.DZero{}}
     case XPair{a, b}:
-      "Fix \"PairSF (\"" ++ show(a) ++ "\", \"" ++ show(b) ++ "\")\""
+      core.data.pair(core.data(a), core.data(b))
+    case _:
+      Fail{"a non-data abort message"}
+
+def core.aborted(m: Result<&2, &2, String, Co.D>) -> Result<&2, &2, String, Co.V>:
+  match m:
+    case Done{d}:
+      Done{Co.VAborted{d}}
+    case Fail{e}:
+      Fail{e}
+
+# The sized program as the runnable core, or the first form sizing should
+# have removed from it (a sizing bug).
+def core(x: X) -> Result<&2, &2, String, Co.V>:
+  match x:
+    case XZero{}:
+      Done{Co.VZero{}}
+    case XPair{a, b}:
+      core.pair(core(a), core(b))
     case XEnv{}:
-      "Fix \"EnvSF\""
+      Done{Co.VEnv{}}
     case XSetEnv{a}:
-      "Fix \"SetEnvSF (\"" ++ show(a) ++ "\")\""
-    case XDefer{fi, a}:
-      "Fix \"DeferSF \"" ++ fi.show(fi) ++ "\" (\"" ++ show(a) ++ "\")\""
+      core.setenv(core(a))
+    case XDefer{+fi, a}:
+      core.defer(fi, core(a))
     case XGate{}:
-      "Fix \"GateSF\""
+      Done{Co.VGate{}}
     case XLeft{a}:
-      "Fix \"LeftSF (\"" ++ show(a) ++ "\")\""
+      core.left(core(a))
     case XRight{a}:
-      "Fix \"RightSF (\"" ++ show(a) ++ "\")\""
+      core.right(core(a))
     case XAbort{}:
-      "Fix \"AbortF\""
+      Done{Co.VAbort{}}
     case XAborted{m}:
-      "Fix \"(AbortedF \"" ++ show(m) ++ "\")\""
-    case _:
-      "?"
-
-# Haskell's prettyPrint of a StuckExpr: one child continues the line, a
-# pair's second child goes on the next line under the first.
-def pretty.at(x: X, +col: Nat) -> String:
-  match x:
-    case XZero{}:
-      "Z"
-    case XPair{a, b}:
-      "P " ++ pretty.at(a, (col + 2n : Nat)) ++ "\n" ++ String.repeat(" ", (col + 2n : Nat)) ++ pretty.at(b, (col + 2n : Nat))
-    case XEnv{}:
-      "E"
-    case XSetEnv{a}:
-      "S " ++ pretty.at(a, (col + 2n : Nat))
-    case XDefer{fi, a}:
-      "F" ++ fi.signed(U32.is_ge(fi, 2147483648), fi) ++ " "
-        ++ pretty.at(a, (col + 2n + String.length(fi.signed(U32.is_ge(fi, 2147483648), fi)) : Nat))
-    case XGate{}:
-      "G"
-    case XLeft{a}:
-      "L " ++ pretty.at(a, (col + 2n : Nat))
-    case XRight{a}:
-      "R " ++ pretty.at(a, (col + 2n : Nat))
-    case XAbort{}:
-      "!"
-    case _:
-      "?"
-
-def pretty(x: X) -> String:
-  pretty.at(x, 0n)
+      core.aborted(core.data(m))
+    case XEither{n, a, b}:
+      Fail{"a superposition"}
+    case XTest{tok, a}:
+      Fail{"a recursion test"}
+    case XStub{tok, a}:
+      Fail{"an unsized recursion"}
+    case XStage{sr, a}:
+      Fail{"a sizing stage"}
+    case XCheck{tc, c}:
+      Fail{"a refinement check"}
+    case XStep{tok, n, a}:
+      Fail{"an unrolling step"}
+    case XVar{v}:
+      Fail{"an input variable"}
+    case XAny{}:
+      Fail{"an unknown value"}
+    case XBarrier{a}:
+      Fail{"a barrier"}
+    case XLefts{n, a}:
+      Fail{"a left projection chain"}
+    case XRights{n, a}:
+      Fail{"a right projection chain"}
+    case XError{msg}:
+      Fail{"a sizing error (" ++ msg ++ ")"}

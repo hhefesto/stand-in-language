@@ -1,6 +1,7 @@
 import Base
 import ./Text.bend as Tx
 import ./Expr.bend as E
+import ./Core.bend as Co
 import ./Term.bend as T
 import ./Front.bend as Fr
 import ./Size.bend as Sz
@@ -189,7 +190,7 @@ def base.name(file: String) -> String:
 # act on, or the line read for the next one.
 type SS is Type:
   STurn{i: Tx.In, t: Ss.Turn}
-  SLine{net: IC.Net, st: E.X, spent: U32, l: Tx.Line}
+  SLine{net: IC.Net, st: Co.D, spent: U32, l: Tx.Line}
 
 # What `--meter` reports once the session is over: what the run cost, as
 # measured (the interactions), never a figure the port cannot measure
@@ -201,7 +202,7 @@ def metered(meter: Bool, +spent: U32) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
-def got(+p: IC.Prog, net: IC.Net, i: Tx.In, st: E.X, +spent: U32, g: Tx.Got) -> IO(SS):
+def got(+p: IC.Prog, net: IC.Net, i: Tx.In, st: Co.D, +spent: U32, g: Tx.Got) -> IO(SS):
   match g:
     case Tx.GLine{text}:
       IO.pure(SS, STurn{i, Ss.answer(p, net, text, st, spent)})
