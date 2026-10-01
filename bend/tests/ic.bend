@@ -80,8 +80,8 @@ def result(r: IC.Run) -> String:
       match out:
         case IC.RBOk{+x}:
           result.of(Ss.aborted(x), x)
-        case IC.RBErr{e}:
-          "error " ++ e
+        case IC.RBErr{f}:
+          "error " ++ IC.fault.show(f)
 
 def eval(t: Co.V, +fuel: U32) -> String:
   +prog = IC.prepare.closed(t)

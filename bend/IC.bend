@@ -175,9 +175,16 @@ type RJ is Data:
   RMkPair{}
   RMkAborted{}
 
+# Why a run failed (ICError): the fuel ran out after so many interactions,
+# the result holds a stuck value that was demanded, or the runtime broke.
+type Fault is Data:
+  FuelExhausted{+spent: U32}
+  Stuck{+msg: String}
+  Internal{+msg: String}
+
 type RB is Data:
   RBOk{+x: Co.V}
-  RBErr{+msg: String}
+  RBErr{+f: Fault}
 
 # A step of copying a value region (dupRegion): the value at a port, by
 # the shape at an offset of the store, or the last two regions' copies to
@@ -2415,7 +2422,7 @@ def body.of(+bodies: Map<&2, Co.V>, +tid: U32) -> Co.V:
 def rb.stuck(net: Net, +a: U32) -> Net & RB:
   match net:
     case Net{mem, tpl, +ctl}:
-      (Net{mem, tpl, ctl}, RBErr{"ICStuck " ++ Sh.string(msg.at(c.msgs(ctl), c.nmsg(ctl), a))})
+      (Net{mem, tpl, ctl}, RBErr{Stuck{msg.at(c.msgs(ctl), c.nmsg(ctl), a)}})
 
 # An aborted value: its message is read as data (RVisit's data mode), so
 # anything else cannot occur; it would read as 0, as under Aborted.
@@ -2431,7 +2438,7 @@ def rb.first(vals: List<&2, Co.V>) -> RB:
     case Con{x, rest}:
       RBOk{x}
     case Nil{}:
-      RBErr{"ICInternal \"readback: nothing read\""}
+      RBErr{Internal{"readback: nothing read"}}
 
 # The value at a port, as a CompiledExpr (readback); under Aborted only
 # data counts, anything else reads as 0 (readbackData).
@@ -2440,10 +2447,10 @@ def readback(fuel: Nat, +bodies: Map<&2, Co.V>, st: RSt) -> Net & RB:
     case 0n:
       match st:
         case RLoop{net, jobs, vals}:
-          (net, RBErr{"ICInternal \"readback: too deep\""})
+          (net, RBErr{Internal{"readback: too deep"}})
         case RSeen{data, r, jobs, vals}:
           (net, ni) = r
-          (net, RBErr{"ICInternal \"readback: too deep\""})
+          (net, RBErr{Internal{"readback: too deep"}})
     case 1n+f:
       match st:
         case RLoop{net, jobs, vals}:
@@ -2457,13 +2464,13 @@ def readback(fuel: Nat, +bodies: Map<&2, Co.V>, st: RSt) -> Net & RB:
                 case Con{b, Con{a, more}}:
                   readback(f, bodies, RLoop{net, rest, Co.VPair{a, b} <> more})
                 case _:
-                  (net, RBErr{"ICInternal \"readback: pair\""})
+                  (net, RBErr{Internal{"readback: pair"}})
             case Con{RMkAborted{}, rest}:
               match vals:
                 case Con{m, more}:
                   readback(f, bodies, RLoop{net, rest, aborted.of(Co.data(m)) <> more})
                 case _:
-                  (net, RBErr{"ICInternal \"readback: aborted\""})
+                  (net, RBErr{Internal{"readback: aborted"}})
         case RSeen{data, r, jobs, vals}:
           match data:
             case True{}:
@@ -2493,7 +2500,7 @@ def readback(fuel: Nat, +bodies: Map<&2, Co.V>, st: RSt) -> Net & RB:
                 case NI{18, a, b, p1, p2}:
                   rb.stuck(net, a)
                 case NI{k, +a, +b, p1, p2}:
-                  (net, RBErr{"ICStuck " ++ Sh.string("result contains a non-value: " ++ show.kind(k, a, b))})
+                  (net, RBErr{Stuck{"result contains a non-value: " ++ show.kind(k, a, b)}})
 
 def c.stop(c: Ctl) -> U32:
   match c:
@@ -2514,9 +2521,9 @@ def finish.err(ok: Bool, out: Bool, +bodies: Map<&2, Co.V>, +root: U32, +c: Ctl,
     case False{}:
       match out:
         case True{}:
-          Run{net, RBErr{"ICFuelExhausted " ++ U32.show(c.spent(c))}, c.spent(c)}
+          Run{net, RBErr{FuelExhausted{c.spent(c)}}, c.spent(c)}
         case False{}:
-          Run{net, RBErr{"ICInternal " ++ Sh.string(c.emsg(c))}, c.spent(c)}
+          Run{net, RBErr{Internal{c.emsg(c)}}, c.spent(c)}
 
 def finish.ctl(+bodies: Map<&2, Co.V>, +p: U32, r: Net & Ctl) -> Run:
   (net, +c) = r
@@ -2529,6 +2536,16 @@ def finish.root(+bodies: Map<&2, Co.V>, +root: U32, r: Net & U32) -> Run:
 def finish(+bodies: Map<&2, Co.V>, r: CS & U32) -> Run:
   (cs, +root) = r
   finish.root(bodies, root, peer(reduce(U32.to_nat(4294967295), pop(cs.net(cs))), (root * 4 : U32)))
+
+# A fault as Haskell shows an ICError.
+def fault.show(f: Fault) -> String:
+  match f:
+    case FuelExhausted{n}:
+      "ICFuelExhausted " ++ U32.show(n)
+    case Stuck{msg}:
+      "ICStuck " ++ Sh.string(msg)
+    case Internal{msg}:
+      "ICInternal " ++ Sh.string(msg)
 
 # runICProgram: one iteration on input, at the given fuel.
 def run(p: Prog, net: Net, input: Co.D, +fuel: U32) -> Run:

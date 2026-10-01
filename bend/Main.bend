@@ -247,59 +247,93 @@ def play(+p: IC.Prog, meter: Bool) -> IO(Unit):
 def budget() -> U32:
   65536
 
-# The sized program, run or reported on. Running prepares it under the
-# EAL capture layouts of the sized term, so closures are copied as EAL
-# planned; the static report needs neither.
-def acted(s: Sz.Sized, act: Act, +mods: List<&2, Rs.Mod>, +entry: String, +run: T.C) -> IO(Unit):
-  match s:
-    case Sz.Sized{counts, expr}:
-      match act:
-        case Play{}:
-          play(Ss.prepared(expr), False{})
-        case Meter{}:
-          play(Ss.prepared(expr), True{})
-        case Report{}:
-          IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry)))
+# Why a program did not run (EvalError): one case per stage, each rendered
+# once, below, as the text the command prints (DESIGN.md §9).
+type Failure is Data:
+  Unread{+msg: String}
+  Refused{+e: Fr.Err}
+  Uncertified{+e: EAL.Err}
+  Unsized{+f: Sz.SizeFail, +run: T.C}
 
-def sized(act: Act, +mods: List<&2, Rs.Mod>, +entry: String, +run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
+def failed(f: Failure) -> String:
+  match f:
+    case Unread{msg}:
+      "telomare: " ++ msg
+    case Refused{e}:
+      Fr.render(e)
+    case Uncertified{e}:
+      EAL.render(e)
+    case Unsized{sf, run}:
+      Sz.render(sf, run, budget())
+
+# The program compiled: Term3 as run (for locating its recursion sites)
+# and the sized program.
+type Compiled is Data:
+  Compiled{+run: T.C, +sized: Sz.Sized}
+
+def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{f}:
-      IO.die(Unit, 1, Sz.render(f, run, budget()))
+      Fail{Unsized{f, run}}
     case Done{s}:
-      acted(s, act, mods, entry, run)
+      Done{Compiled{run, s}}
 
 # certifyMain gates the program before its sizing does (Driver's
-# compileMainReporting), whatever the action.
-def certified(act: Act, +mods: List<&2, Rs.Mod>, +entry: String, +run: T.C, c: Maybe<&2, EAL.Err>) -> IO(Unit):
+# compileMainReporting), whatever the action. Certification runs first and
+# sizing after it, never side by side: EAL forks over the bodies, and run
+# alongside sizing the two would split the lanes and starve those forks.
+def certified(+run: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
   match c:
     case Some{e}:
-      IO.die(Unit, 1, EAL.render(e))
+      Fail{Uncertified{e}}
     case None{}:
-      sized(act, mods, entry, run, Sz.size(budget(), True{}, E.of.term3(run)))
+      sized(run, Sz.size(budget(), True{}, E.of.term3(run)))
 
-# The certification, then the sized program. EAL forks over the bodies
-# inside each; run side by side, the two would split the lanes between
-# them and starve those forks.
-def compiled(act: Act, +mods: List<&2, Rs.Mod>, +entry: String, r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
+def resolved(r: Result<&2, &2, Fr.Err, Fr.Terms>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{e}:
-      IO.die(Unit, 1, e)
+      Fail{Refused{e}}
     case Done{ts}:
       match ts:
         case Fr.Terms{cert, +run}:
-          certified(act, mods, entry, run, EAL.certify(Lf.defer.lift(cert)))
+          certified(run, EAL.certify(Lf.defer.lift(cert)))
 
-# The modules parsed and expanded once: the static report reads them as
-# written, and resolution compiles them.
+# The parsed modules compiled: resolved, certified, sized.
+def compile(m: Fr.Mods, +entry: String) -> Result<&2, &2, Failure, Compiled>:
+  resolved(Fr.terms(m, entry))
+
+# The action, on the compiled program. Running prepares it under the EAL
+# capture layouts of the sized term, so closures are copied as EAL
+# planned; the static report needs neither, and reads the modules as
+# written.
+def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod>, +entry: String) -> IO(Unit):
+  match r:
+    case Fail{f}:
+      IO.die(Unit, 1, failed(f))
+    case Done{c}:
+      match c:
+        case Compiled{run, s}:
+          match s:
+            case Sz.Sized{counts, expr}:
+              match act:
+                case Play{}:
+                  play(Ss.prepared(expr), False{})
+                case Meter{}:
+                  play(Ss.prepared(expr), True{})
+                case Report{}:
+                  IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry)))
+
+# The modules parsed and expanded once, for both the compiler and the
+# static report.
 def parsed(act: Act, +entry: String, m: Fr.Mods) -> IO(Unit):
   match m:
     case Fr.Mods{+mods, errs}:
-      compiled(act, mods, entry, Fr.compile.mods(Fr.Mods{mods, errs}, entry))
+      acted(compile(Fr.Mods{mods, errs}, entry), act, mods, entry)
 
 def loaded(act: Act, +entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
     case Fail{e}:
-      IO.die(Unit, 1, "telomare: " ++ e)
+      IO.die(Unit, 1, failed(Unread{e}))
     case Done{srcs}:
       parsed(act, entry, Fr.all(srcs))
 

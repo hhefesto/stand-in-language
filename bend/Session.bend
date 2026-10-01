@@ -129,8 +129,8 @@ def value(m: Maybe<&2, Co.D>, +x: Co.V) -> Outcome:
 # What an iteration's result means for the session.
 def outcome(r: IC.RB) -> Outcome:
   match r:
-    case IC.RBErr{e}:
-      Stop{"runtime error:\nGeneric Runtime Error: IC runtime: " ++ e ++ " -- " ++ Co.show(Co.VZero{})}
+    case IC.RBErr{f}:
+      Stop{"runtime error:\nGeneric Runtime Error: IC runtime: " ++ IC.fault.show(f) ++ " -- " ++ Co.show(Co.VZero{})}
     case IC.RBOk{+x}:
       value(aborted(x), x)
 

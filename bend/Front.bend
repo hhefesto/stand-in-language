@@ -28,8 +28,18 @@ type LSt is Data:
   LCheck{+seen: Bool, +m: String, +queue: List<&2, String>, +srcs: List<&2, Src>}
   LRead{+m: String, +queue: List<&2, String>, +srcs: List<&2, Src>, +r: Result<&2, &2, String, String>}
 
+# Why the front end refused the program: modules that do not parse or
+# expand (every one of them), or a main that does not resolve.
+type ModErr is Data:
+  NoParse{+name: String, +text: String, +e: P.PErr}
+  NoExpand{+name: String, +e: E.ExpErr}
+
+type Err is Data:
+  Modules{+errs: List<&2, ModErr>}
+  Unresolved{+e: Rs.ResErr}
+
 type Mods is Data:
-  Mods{+mods: List<&2, Rs.Mod>, +errs: List<&2, String>}
+  Mods{+mods: List<&2, Rs.Mod>, +errs: List<&2, ModErr>}
 
 # The program's two Term3s: main2Term3's, which EAL certifies, and
 # main2Term3let's, which is sized and run.
@@ -109,32 +119,29 @@ def modules(+entry: String) -> IO(Result<&1, &1, String, List<&2, Src>>):
 # Compiling
 # ---------
 
-def in.module(+name: String, err: String) -> String:
-  "Error in module " ++ name ++ ":\n" ++ err
-
 def expanded(+name: String, r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>) ->
-  Result<&2, &2, String, Rs.Mod>:
+  Result<&2, &2, ModErr, Rs.Mod>:
   match r:
     case Fail{e}:
-      Fail{in.module(name, E.render(e))}
+      Fail{NoExpand{name, e}}
     case Done{items}:
       Done{Rs.Mod{name, items}}
 
 def parsed(+name: String, +text: String, r: Result<&2, &2, P.PErr, List<&2, S.Item>>) ->
-  Result<&2, &2, String, Rs.Mod>:
+  Result<&2, &2, ModErr, Rs.Mod>:
   match r:
     case Fail{e}:
-      Fail{in.module(name, P.render(name, text, e))}
+      Fail{NoParse{name, text, e}}
     case Done{items}:
       expanded(name, E.module(items))
 
 # One module parsed and expanded under its name.
-def one(s: Src) -> Result<&2, &2, String, Rs.Mod>:
+def one(s: Src) -> Result<&2, &2, ModErr, Rs.Mod>:
   match s:
     case Src{+name, +text}:
       parsed(name, text, P.module(name, text))
 
-def all.add(r: Result<&2, &2, String, Rs.Mod>, rest: Mods) -> Mods:
+def all.add(r: Result<&2, &2, ModErr, Rs.Mod>, rest: Mods) -> Mods:
   match r:
     case Fail{e}:
       match rest:
@@ -152,49 +159,76 @@ def all(srcs: List<&2, Src>) -> Mods:
     case Con{s, rest}:
       all.add(one(s), all(rest))
 
-# The Haskell shows a resolver error as `RE (...)`.
-def re(e: Rs.ResErr) -> String:
-  "RE (" ++ Rs.render(e) ++ ")"
-
-def re.or(r: Result<&2, &2, Rs.ResErr, T.T>) -> Result<&2, &2, String, T.C>:
+def re.or(r: Result<&2, &2, Rs.ResErr, T.T>) -> Result<&2, &2, Err, T.C>:
   match r:
     case Fail{e}:
-      Fail{re(e)}
+      Fail{Unresolved{e}}
     case Done{t}:
       Done{Sp.split(t)}
 
-def main.or(r: Result<&2, &2, Rs.ResErr, S.Surf>) -> Result<&2, &2, String, S.Surf>:
+def main.or(r: Result<&2, &2, Rs.ResErr, S.Surf>) -> Result<&2, &2, Err, S.Surf>:
   match r:
     case Fail{e}:
-      Fail{re(e)}
+      Fail{Unresolved{e}}
     case Done{t}:
       Done{D.desugar(t)}
 
-def terms(+t: S.Surf) -> Result<&2, &2, String, Terms>:
-  do Result<&2, &2, String, Terms>:
+def lowered(+t: S.Surf) -> Result<&2, &2, Err, Terms>:
+  do Result<&2, &2, Err, Terms>:
     cert : T.C <- re.or(Lw.process(t))
     run : T.C <- re.or(Lw.process.let(t))
     return Terms{cert, run}
 
-def unlines(xs: List<&2, String>) -> String:
-  match xs:
-    case Nil{}:
-      ""
-    case Con{x, rest}:
-      x ++ "\n" ++ unlines(rest)
-
-def compile.mods(m: Mods, +entry: String) -> Result<&2, &2, String, Terms>:
+# From the parsed modules to the program's two Term3s (compileModules, up
+# to sizing).
+def terms(m: Mods, +entry: String) -> Result<&2, &2, Err, Terms>:
   match m:
     case Mods{+mods, errs}:
       match errs:
         case Nil{}:
-          do Result<&2, &2, String, Terms>:
+          do Result<&2, &2, Err, Terms>:
             t : S.Surf <- main.or(Rs.main(mods, entry))
-            terms(t)
+            lowered(t)
         case Con{e, rest}:
-          Fail{unlines(e <> rest)}
+          Fail{Modules{e <> rest}}
+
+# Rendering
+# ---------
+
+def in.module(+name: String, err: String) -> String:
+  "Error in module " ++ name ++ ":\n" ++ err
+
+def render.mod(e: ModErr) -> String:
+  match e:
+    case NoParse{+name, text, pe}:
+      in.module(name, P.render(name, text, pe))
+    case NoExpand{+name, ee}:
+      in.module(name, E.render(ee))
+
+def render.mods(es: List<&2, ModErr>) -> String:
+  match es:
+    case Nil{}:
+      ""
+    case Con{e, rest}:
+      render.mod(e) ++ "\n" ++ render.mods(rest)
+
+# The text the command prints for a refusal: every module's error, one
+# after another, or the resolver's (shown, as Haskell shows it, `RE (...)`).
+def render(e: Err) -> String:
+  match e:
+    case Modules{es}:
+      render.mods(es)
+    case Unresolved{re}:
+      "RE (" ++ Rs.render(re) ++ ")"
+
+def rendered(r: Result<&2, &2, Err, Terms>) -> Result<&2, &2, String, Terms>:
+  match r:
+    case Fail{e}:
+      Fail{render(e)}
+    case Done{ts}:
+      Done{ts}
 
 # From the modules' texts to Term3, every problem as the text the command
-# prints (compileModules, up to sizing).
+# prints.
 def compile(srcs: List<&2, Src>, +entry: String) -> Result<&2, &2, String, Terms>:
-  compile.mods(all(srcs), entry)
+  rendered(terms(all(srcs), entry))

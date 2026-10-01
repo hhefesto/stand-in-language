@@ -54,12 +54,18 @@ type GR is Data:
 type IRX is Data:
   IRX{+z: Set(), +p: Set(), +v: E.X}
 
-# Why sizing failed. Leftover is sizing's own bug: the program it would
-# hand the runtime still holds a form only sizing uses.
+# Why sizing failed (SizingFailure). A program can fail in exactly two
+# ways, which need different advice (DESIGN.md §4): a recursion's test
+# reads input nothing bounds, so no budget helps (UnboundedInput); or the
+# test has not stopped within the budget (FuelExhausted). The rest are
+# sizing's own failures, each named: an abort on any input (sizeTermM's
+# AbortAny), a case haskell-final's sizing threw on (Internal, its message),
+# and a sizing form left in the program handed to the runtime (Leftover).
 type SizeFail is Data:
-  Unsizable{+tok: U32}
-  Overfueled{+tok: U32}
-  Crash{+msg: String}
+  UnboundedInput{+tok: U32}
+  FuelExhausted{+tok: U32}
+  AbortAny{}
+  Internal{+msg: String}
   Leftover{+form: String}
 
 # The sized program, as the runnable core, and the counts that sized it.
@@ -894,32 +900,34 @@ def fail.tok(m: Maybe<&2, U32>) -> U32:
 def fail.of.abort(m: E.X) -> Maybe<&2, SizeFail>:
   match m:
     case E.XPair{E.XZero{}, t}:
-      Some{Overfueled{fail.tok(E.to.int(t))}}
+      Some{FuelExhausted{fail.tok(E.to.int(t))}}
     case E.XPair{E.XPair{E.XPair{E.XZero{}, E.XZero{}}, E.XZero{}}, E.XZero{}}:
-      Some{Crash{"sizeTermM AbortAny hit"}}
+      Some{AbortAny{}}
     case E.XPair{E.XPair{E.XPair{E.XPair{E.XZero{}, E.XZero{}}, E.XZero{}}, E.XZero{}}, t}:
-      Some{Unsizable{fail.tok(E.to.int(t))}}
+      Some{UnboundedInput{fail.tok(E.to.int(t))}}
     case _:
       None{}
 
+# Sizing's own failures outweigh the program's; of the program's, an
+# unbounded input outweighs an exhausted budget.
 def fail.pick(x: SizeFail, y: SizeFail) -> SizeFail:
   match x:
-    case Crash{m}:
-      Crash{m}
-    case Leftover{f}:
-      Leftover{f}
-    case Unsizable{t}:
+    case UnboundedInput{t}:
       match y:
-        case Crash{m}:
-          Crash{m}
-        case _:
-          Unsizable{t}
-    case Overfueled{t}:
-      match y:
-        case Overfueled{u}:
-          Overfueled{t}
+        case UnboundedInput{u}:
+          UnboundedInput{t}
+        case FuelExhausted{u}:
+          UnboundedInput{t}
         case other:
           other
+    case FuelExhausted{t}:
+      match y:
+        case FuelExhausted{u}:
+          FuelExhausted{t}
+        case other:
+          other
+    case own:
+      own
 
 # SizedResult's semigroup: an unbounded input outweighs an exhausted budget.
 def fail.or(a: Maybe<&2, SizeFail>, b: Maybe<&2, SizeFail>) -> Maybe<&2, SizeFail>:
@@ -940,7 +948,7 @@ def fold.aborted(v: E.X) -> Maybe<&2, SizeFail>:
     case E.XAborted{m}:
       fail.of.abort(m)
     case E.XError{msg}:
-      Some{Crash{msg}}
+      Some{Internal{msg}}
     case E.XPair{a, b}:
       fail.or(fold.aborted(a), fold.aborted(b))
     case E.XEither{n, a, b}:
@@ -1099,17 +1107,19 @@ def site.render(+tok: U32, loc: Maybe<&2, L.Loc>) -> String:
 # renderSizingFailure, the site located in the Term3 (locateSizingFailure).
 def render(f: SizeFail, t: T.C, +max: U32) -> String:
   match f:
-    case Overfueled{+tok}:
+    case FuelExhausted{+tok}:
       "could not size " ++ site.render(tok, site.loc(t, tok)) ++ ":\n"
         ++ "  its test had still not stopped after " ++ U32.show((max + 1 : U32)) ++ " unrollings.\n"
         ++ "  Either it needs a deeper recursion than the sizing budget allows, or\n"
         ++ "  its test never stops."
-    case Unsizable{+tok}:
+    case UnboundedInput{+tok}:
       "could not size " ++ site.render(tok, site.loc(t, tok)) ++ ":\n"
         ++ "  its test depends on input that nothing bounds, so no finite iteration\n"
         ++ "  count can be proven for it. Constrain that input with a refinement\n"
         ++ "  (`x : someValidator`) or an `assert` before recursing on it."
-    case Crash{msg}:
+    case AbortAny{}:
+      "sizeTermM AbortAny hit"
+    case Internal{msg}:
       msg
     case Leftover{form}:
       "sizing left " ++ form ++ " in the compiled program (a bug in sizing)"
