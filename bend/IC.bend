@@ -155,9 +155,10 @@ type CJ is Data:
 type Src is Data:
   Src{+tid: U32, +fi: U32, +body: Code, +orig: Co.V, +code: String}
 
-# The templates so far and, when there is guidance, their codes' hashes.
+# The templates so far, each body's exact key to its template (a body met
+# again reuses it), and, when there is guidance, their codes' hashes.
 type Coll is Data:
-  Coll{+next: U32, +srcs: List<&2, Src>, +hs: Maybe<&2, Map<&2, String>>}
+  Coll{+next: U32, +srcs: List<&2, Src>, +seen: Map<&2, U32>, +hs: Maybe<&2, Map<&2, String>>}
 
 # A compiled template, read out of the scratch net where it was built:
 # its agents (kind, a, b) and its wires, each from the lower port.
@@ -2051,19 +2052,70 @@ def lifted(+hs: Map<&2, String>, x: Code) -> Lf.L:
 def code.of(+hs: Map<&2, String>, x: Code) -> String:
   Lf.hash(lifted(hs, x))
 
-def c.named(+next: U32, +fi: U32, +body: Code, orig: Co.V, srcs: List<&2, Src>, hs: Maybe<&2, Map<&2, String>>) -> Code & Coll:
+def c.named(+next: U32, +fi: U32, +body: Code, orig: Co.V, srcs: List<&2, Src>, seen: Map<&2, U32>, hs: Maybe<&2, Map<&2, String>>) -> Code & Coll:
   match hs:
     case None{}:
-      (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, ""} <> srcs, None{}})
+      (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, ""} <> srcs, seen, None{}})
     case Some{+m}:
       +code = code.of(m, body)
-      (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, code} <> srcs,
+      (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, code} <> srcs, seen,
                             Some{Map.set(&2, String, m, U32.show(next), code)}})
 
-def c.add.go(+fi: U32, body: Code, orig: Co.V, c: Coll) -> Code & Coll:
+# A body's exact key: its collected code written out, nested closures by
+# template and function index, so two bodies share a key exactly when they
+# are equal (the exact check haskell-final makes after its hash, which
+# ignores nested indices).
+def key.data(d: Co.D, acc: String) -> String:
+  match d:
+    case Co.DZero{}:
+      "0" ++ acc
+    case Co.DPair{a, b}:
+      "P" ++ key.data(a, key.data(b, acc))
+
+def key.of(c: Code, acc: String) -> String:
   match c:
-    case Coll{+next, srcs, hs}:
-      c.named(next, fi, body, orig, srcs, hs)
+    case CdZero{}:
+      "0" ++ acc
+    case CdPair{a, b}:
+      "P" ++ key.of(a, key.of(b, acc))
+    case CdEnv{}:
+      "E" ++ acc
+    case CdSetEnv{x}:
+      "S" ++ key.of(x, acc)
+    case CdGate{}:
+      "G" ++ acc
+    case CdLeft{x}:
+      "L" ++ key.of(x, acc)
+    case CdRight{x}:
+      "R" ++ key.of(x, acc)
+    case CdAbort{}:
+      "A" ++ acc
+    case CdAborted{m}:
+      "B" ++ key.data(m, acc)
+    case CdRef{tid, fi}:
+      "T" ++ U32.show(tid) ++ "," ++ U32.show(fi) ++ ";" ++ acc
+
+def c.found(r: Map<&2, U32> & Maybe<&2, U32>, c: Coll, +fi: U32, +key: String, +body: Code, orig: Co.V) -> Code & Coll:
+  (seen, old) = r
+  match old:
+    case Some{tid}:
+      (CdRef{tid, fi}, c)
+    case None{}:
+      match c:
+        case Coll{+next, srcs, s, hs}:
+          c.named(next, fi, body, orig, srcs, Map.set(&2, U32, seen, key, next), hs)
+
+def c.seen(c: Coll) -> Map<&2, U32>:
+  match c:
+    case Coll{next, srcs, seen, hs}:
+      seen
+
+# A body's template: the one an equal body already has (code is a
+# pointer: DESIGN.md §7), or a new one. The reference keeps this site's
+# function index.
+def c.add.go(+fi: U32, +body: Code, orig: Co.V, +c: Coll) -> Code & Coll:
+  +key = key.of(body, "")
+  c.found(Map.pop(&2, U32, c.seen(c), key), c, fi, key, body, orig)
 
 def c.add(+fi: U32, body: Code, orig: Co.V) -> C(Code):
   c => c.add.go(fi, body, orig, c)
@@ -2351,7 +2403,7 @@ def prepared.with(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>) -> P
 def prepared(+g: Map<&2, Lf.Shape>, r: Code & Coll) -> Prog:
   (entry, c) = r
   match c:
-    case Coll{next, srcs, hs}:
+    case Coll{next, srcs, seen, hs}:
       prepared.with(g, entry, List.reverse(&2, Src, srcs))
 
 # Hashes only guidance looks up by: none without it.
@@ -2366,12 +2418,12 @@ def hashes.for(g: Map<&2, Lf.Shape>) -> Maybe<&2, Map<&2, String>>:
 # compiled into templates, each with its plan from EAL's capture layouts
 # (ealCaptureLayouts), keyed by code hash.
 def prepare(sized: Co.V, +g: Map<&2, Lf.Shape>) -> Prog:
-  prepared(g, collect(Co.app(sized, Co.VEnv{}))(Coll{3, selectors(), hashes.for(g)}))
+  prepared(g, collect(Co.app(sized, Co.VEnv{}))(Coll{3, selectors(), Map.new(&2, U32), hashes.for(g)}))
 
 # A closed term on its own, as icEvalDetailed runs one: prepared like a
 # program, unguided, then run on an input it never looks at.
 def prepare.closed(t: Co.V) -> Prog:
-  prepared(Map.new(&2, Lf.Shape), collect(t)(Coll{3, selectors(), None{}}))
+  prepared(Map.new(&2, Lf.Shape), collect(t)(Coll{3, selectors(), Map.new(&2, U32), None{}}))
 
 # A net ready for runs: room for agents, the template store filled in.
 def fill(ws: List<&2, U32>, +i: U32, a: Array<U32>) -> Array<U32>:
