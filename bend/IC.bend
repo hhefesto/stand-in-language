@@ -12,9 +12,11 @@ import ./Lift.bend as Lf
 # The net is one Array<U32>, eight words per agent: kind, the peers of its
 # ports 0-2 (a port is agent*4+slot), and two payload words (a Dup's label;
 # a Ref's template and function index; a StuckV's message number). Agent 0
-# is never used, so 0 ends the free list. Active pairs sit on a LIFO list,
+# is never used, so 0 ends the free list. Active pairs sit on a LIFO stack,
 # as in Haskell, and every rule consumes the pair it fires, so the count of
-# interactions does not depend on the order they fire in.
+# interactions does not depend on the order they fire in. The stack lives
+# in the agents' last two words, which no agent uses: entry k is words 6
+# and 7 of slot k, whatever agent is there.
 
 # A closure body as the net compiles it: the runnable core with every
 # closure taken out into its template, a reference (template, function
@@ -41,13 +43,13 @@ type Code is Data:
 type Cold is Data:
   Cold{+msgs: List<&2, String>, +nmsg: U32, +emsg: String, +given: U32}
 
-# What is not the agents: the active pairs (a flat list, a then b), the
-# cold part, the allocation state, the fuel left and an error. The record
+# What is not the agents: how many active pairs are stacked, the cold
+# part, the allocation state, the fuel left and an error. The record
 # is flattened into words at every call, so it is kept narrow: the cold
 # part is a list of one, which is one boxed word, and what was spent is
 # the fuel given less the fuel left.
 type Ctl is Data:
-  Ctl{+stk: List<&2, U32>, +cold: List<&2, Cold>, +bump: U32, +free: U32, +label: U32, +fuel: U32,
+  Ctl{+sp: U32, +cold: List<&2, Cold>, +bump: U32, +free: U32, +label: U32, +fuel: U32,
       +err: U32, +cap: U32}
 
 # The agents, the templates, and the rest.
@@ -444,12 +446,12 @@ def with.ctl(net: Net, ctl: Ctl) -> Net:
 
 def c.bump(c: Ctl) -> U32:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       bump
 
 def c.cap(c: Ctl) -> U32:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       cap
 
 # Copy words i.. of an array into another (for growing the agents).
@@ -461,12 +463,25 @@ def copy(n: Nat, +i: U32, r: Array<U32> & U32, dst: Array<U32>) -> Array<U32>:
       (src, v) = r
       copy(k, (i + 1 : U32), src[(i + 1 : U32)], dst[i] <- v)
 
+def c.set.cap(c: Ctl, +v: U32) -> Ctl:
+  match c:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
+      Ctl{sp, cold, bump, free, label, fuel, err, v}
+
+# Twice the room for agents and stacked pairs, the old ones copied over.
+def grow(net: Net) -> Net:
+  match net:
+    case Net{mem, tpl, +ctl}:
+      Net{copy(U32.to_nat((c.cap(ctl) * 8 : U32)), 0, mem[0],
+               Array.new(U32, 1n+U32.log2((c.cap(ctl) * 8 : U32)), 0)),
+          tpl, c.set.cap(ctl, (c.cap(ctl) * 2 : U32))}
+
 def init(net: Net, +id: U32, +k: U32, +a: U32, +b: U32) -> Net & U32:
   (wr(wr(wr(net, (id * 8 : U32), k), (id * 8 + 4 : U32), a), (id * 8 + 5 : U32), b), id)
 
 def c.label(c: Ctl) -> U32:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       label
 
 def cold.none(+given: U32) -> List<&2, Cold>:
@@ -475,7 +490,7 @@ def cold.none(+given: U32) -> List<&2, Cold>:
 # The cold part.
 def c.cold(c: Ctl) -> Cold:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       match cold:
         case Con{x, rest}:
           x
@@ -810,13 +825,8 @@ def rule.of(ka: AK, +kb: AK) -> Rule:
 
 def c.err(c: Ctl) -> U32:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       err
-
-def c.stk(c: Ctl) -> List<&2, U32>:
-  match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
-      stk
 
 def pop.done(net: Net, facing: Bool, +a: U32, +b: U32) -> Popped:
   match facing:
@@ -989,13 +999,13 @@ def fuel() -> Nat:
 
 def fuel.of(c: Ctl) -> U32:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       fuel
 
 def c.set.free(c: Ctl, +v: U32) -> Ctl:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
-      Ctl{stk, cold, bump, v, label, fuel, err, cap}
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
+      Ctl{sp, cold, bump, v, label, fuel, err, cap}
 
 def alloc.reuse(+id: U32, +k: U32, +a: U32, +b: U32, r: Net & U32) -> Net & U32:
   (net, +next) = r
@@ -1008,12 +1018,28 @@ def free(net: Net, +n: U32) -> Net:
     case Net{mem, tpl, ctl}:
       Net{mem[(n * 8 : U32)] <- 0, tpl, c.set.free(ctl, n)} 
 
+def push.wr(net: Net, +a: U32, +b: U32) -> Net:
+  match net:
+    case Net{mem, tpl, ctl}:
+      match ctl:
+        case Ctl{+sp, cold, bump, free, label, fuel, err, cap}:
+          Net{(mem[(sp * 8 + 6 : U32)] <- a)[(sp * 8 + 7 : U32)] <- b, tpl,
+              Ctl{(sp + 1 : U32), cold, bump, free, label, fuel, err, cap}}
+
+def push.room(full: Bool, net: Net, +a: U32, +b: U32) -> Net:
+  match full:
+    case True{}:
+      push.wr(grow(net), a, b)
+    case False{}:
+      push.wr(net, a, b)
+
+# Stack the pair (a, b), growing the agents when the stack fills them.
 def push(net: Net, +a: U32, +b: U32) -> Net:
   match net:
     case Net{mem, tpl, ctl}:
       match ctl:
-        case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
-          Net{mem, tpl, Ctl{a <> b <> stk, cold, bump, free, label, fuel, err, cap}}
+        case Ctl{+sp, cold, bump, free, label, fuel, err, +cap}:
+          push.room(U32.is_ge(sp, cap), Net{mem, tpl, Ctl{sp, cold, bump, free, label, fuel, err, cap}}, a, b)
 
 def push.if(net: Net, yes: Bool, +a: U32, +b: U32) -> Net:
   match yes:
@@ -1042,47 +1068,34 @@ def connect(net: Net, +p: U32, +q: U32) -> Net:
   connect.push(wr(wr(net, idx(p), q), idx(q), p),
                U32.is_eq(slot.of(p), 0) && U32.is_eq(slot.of(q), 0), node.of(p), node.of(q))
 
-def spend.ctl(out: Bool, stk: List<&2, U32>, cold: List<&2, Cold>, +bump: U32, +free: U32, +label: U32,
+def spend.ctl(out: Bool, +sp: U32, cold: List<&2, Cold>, +bump: U32, +free: U32, +label: U32,
               +fuel: U32, +err: U32, +cap: U32) -> Ctl:
   match out:
     case True{}:
-      Ctl{stk, cold, bump, free, label, fuel, 1, cap}
+      Ctl{sp, cold, bump, free, label, fuel, 1, cap}
     case False{}:
-      Ctl{stk, cold, bump, free, label, (fuel - 1 : U32), err, cap}
+      Ctl{sp, cold, bump, free, label, (fuel - 1 : U32), err, cap}
 
 # One interaction, or the error that fuel ran out (spend).
 def spend(net: Net) -> Net:
   match net:
     case Net{mem, tpl, ctl}:
       match ctl:
-        case Ctl{stk, cold, bump, free, label, +fuel, err, cap}:
-          Net{mem, tpl, spend.ctl(U32.is_zero(fuel), stk, cold, bump, free, label, fuel, err, cap)}
+        case Ctl{sp, cold, bump, free, label, +fuel, err, cap}:
+          Net{mem, tpl, spend.ctl(U32.is_zero(fuel), sp, cold, bump, free, label, fuel, err, cap)}
 
 # Allocation
 # ----------
 
 def c.free(c: Ctl) -> U32:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       free
 
 def c.set.bump(c: Ctl, +v: U32) -> Ctl:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
-      Ctl{stk, cold, v, free, label, fuel, err, cap}
-
-def c.set.cap(c: Ctl, +v: U32) -> Ctl:
-  match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
-      Ctl{stk, cold, bump, free, label, fuel, err, v}
-
-# Twice the room for agents, the old ones copied over.
-def grow(net: Net) -> Net:
-  match net:
-    case Net{mem, tpl, +ctl}:
-      Net{copy(U32.to_nat((c.cap(ctl) * 8 : U32)), 0, mem[0],
-               Array.new(U32, 1n+U32.log2((c.cap(ctl) * 8 : U32)), 0)),
-          tpl, c.set.cap(ctl, (c.cap(ctl) * 2 : U32))}
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
+      Ctl{sp, cold, v, free, label, fuel, err, cap}
 
 def alloc.at(net: Net, +id: U32, +k: U32, +a: U32, +b: U32) -> Net & U32:
   match net:
@@ -1109,8 +1122,8 @@ def alloc(net: Net, +k: U32, +a: U32, +b: U32) -> Net & U32:
   match net:
     case Net{mem, tpl, ctl}:
       match ctl:
-        case Ctl{stk, cold, +bump, +free, label, fuel, err, +cap}:
-          alloc.pick(Net{mem, tpl, Ctl{stk, cold, bump, free, label, fuel, err, cap}},
+        case Ctl{sp, cold, +bump, +free, label, fuel, err, +cap}:
+          alloc.pick(Net{mem, tpl, Ctl{sp, cold, bump, free, label, fuel, err, cap}},
                      Bool.not(U32.is_zero(free)), free, bump, cap, k, a, b)
 
 # Free: the agent's kind cleared and it heads the free list.
@@ -1118,21 +1131,21 @@ def delete(net: Net, +n: U32) -> Net:
   match net:
     case Net{mem, tpl, ctl}:
       match ctl:
-        case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
-          Net{(mem[(n * 8 + 1 : U32)] <- free)[(n * 8 : U32)] <- 0, tpl, Ctl{stk, cold, bump, n, label, fuel, err, cap}}
+        case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
+          Net{(mem[(n * 8 + 1 : U32)] <- free)[(n * 8 : U32)] <- 0, tpl, Ctl{sp, cold, bump, n, label, fuel, err, cap}}
 
 def c.add.label(c: Ctl, +n: U32) -> Ctl:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
-      Ctl{stk, cold, bump, free, (label + n : U32), fuel, err, cap}
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
+      Ctl{sp, cold, bump, free, (label + n : U32), fuel, err, cap}
 
 # A label no Dup has yet (freshLabel).
 def fresh.label(net: Net) -> Net & U32:
   match net:
     case Net{mem, tpl, ctl}:
       match ctl:
-        case Ctl{stk, cold, bump, free, +label, fuel, err, cap}:
-          (Net{mem, tpl, Ctl{stk, cold, bump, free, (label + 1 : U32), fuel, err, cap}}, label)
+        case Ctl{sp, cold, bump, free, +label, fuel, err, cap}:
+          (Net{mem, tpl, Ctl{sp, cold, bump, free, (label + 1 : U32), fuel, err, cap}}, label)
 
 def cold.msg(c: Cold, m: String) -> List<&2, Cold>:
   match c:
@@ -1146,12 +1159,12 @@ def cold.fail(c: Cold, m: String) -> List<&2, Cold>:
 
 def c.add.msg(c: Ctl, m: String) -> Ctl:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       match cold:
         case Con{x, rest}:
-          Ctl{stk, cold.msg(x, m), bump, free, label, fuel, err, cap}
+          Ctl{sp, cold.msg(x, m), bump, free, label, fuel, err, cap}
         case Nil{}:
-          Ctl{stk, [], bump, free, label, fuel, err, cap}
+          Ctl{sp, [], bump, free, label, fuel, err, cap}
 
 # A stuck value's message, kept aside; its number goes in the agent.
 def add.msg(net: Net, m: String) -> Net & U32:
@@ -1161,12 +1174,12 @@ def add.msg(net: Net, m: String) -> Net & U32:
 
 def c.fail(c: Ctl, m: String) -> Ctl:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       match cold:
         case Con{x, rest}:
-          Ctl{stk, cold.fail(x, m), bump, free, label, fuel, 2, cap}
+          Ctl{sp, cold.fail(x, m), bump, free, label, fuel, 2, cap}
         case Nil{}:
-          Ctl{stk, [], bump, free, label, fuel, 2, cap}
+          Ctl{sp, [], bump, free, label, fuel, 2, cap}
 
 # An internal error (ICInternal): the run stops.
 def fail(net: Net, m: String) -> Net:
@@ -1633,8 +1646,8 @@ def inst.labels(+off: U32, +k: U32, +e: U32, +w: U32, +env: U32, +res: U32, +map
   match net:
     case Net{mem, tpl, ctl}:
       match ctl:
-        case Ctl{stk, cold, bump, free, +label, fuel, err, cap}:
-          inst.body(off, k, e, w, env, res, map, label, Net{mem, tpl, Ctl{stk, cold, bump, free, (label + l : U32), fuel, err, cap}})
+        case Ctl{sp, cold, bump, free, +label, fuel, err, cap}:
+          inst.body(off, k, e, w, env, res, map, label, Net{mem, tpl, Ctl{sp, cold, bump, free, (label + l : U32), fuel, err, cap}})
 
 def inst.w(+off: U32, +k: U32, +e: U32, +l: U32, +env: U32, +res: U32, +map: U32, r: Net & U32) -> Net:
   (net, +w) = r
@@ -1761,38 +1774,31 @@ def fire(net: Net, +a: U32, +b: U32) -> Net:
 # The loop
 # --------
 
-def c.set.stk(c: Ctl, stk: List<&2, U32>) -> Ctl:
-  match c:
-    case Ctl{old, cold, bump, free, label, fuel, err, cap}:
-      Ctl{stk, cold, bump, free, label, fuel, err, cap}
+def pop.b(+a: U32, r: Net & U32) -> Popped:
+  (net, +b) = r
+  pop.ka(a, b, rd(net, (a * 8 : U32)))
 
-def set.stk(net: Net, stk: List<&2, U32>) -> Net:
-  match net:
-    case Net{mem, tpl, ctl}:
-      Net{mem, tpl, c.set.stk(ctl, stk)}
+def pop.a(+top: U32, r: Net & U32) -> Popped:
+  (net, +a) = r
+  pop.b(a, rd(net, (top * 8 + 7 : U32)))
 
-def pop.list(net: Net, stk: List<&2, U32>) -> Popped:
-  match stk:
-    case Con{+a, Con{+b, rest}}:
-      pop.ka(a, b, rd(set.stk(net, rest), (a * 8 : U32)))
-    case _:
-      PEmpty{net}
-
-def pop.err(ok: Bool, net: Net, stk: List<&2, U32>) -> Popped:
-  match ok:
+def pop.ctl(go: Bool, mem: Array<U32>, tpl: Array<U32>, +sp: U32, cold: List<&2, Cold>, +bump: U32,
+            +free: U32, +label: U32, +fuel: U32, +err: U32, +cap: U32) -> Popped:
+  match go:
     case True{}:
-      pop.list(net, stk)
+      pop.a((sp - 1 : U32), rd(Net{mem, tpl, Ctl{(sp - 1 : U32), cold, bump, free, label, fuel, err, cap}},
+                               ((sp - 1) * 8 + 6 : U32)))
     case False{}:
-      PEmpty{set.stk(net, stk)}
+      PEmpty{Net{mem, tpl, Ctl{sp, cold, bump, free, label, fuel, err, cap}}}
 
-# The next active pair, if it is still facing (pop). The stack comes out
-# of the control record whole, which leaves the record unshared.
+# The next active pair, if it is still facing (pop): none when the stack
+# is empty or a rule failed.
 def pop(net: Net) -> Popped:
   match net:
     case Net{mem, tpl, ctl}:
       match ctl:
-        case Ctl{stk, cold, bump, free, label, fuel, +err, cap}:
-          pop.err(U32.is_zero(err), Net{mem, tpl, Ctl{[], cold, bump, free, label, fuel, err, cap}}, stk)
+        case Ctl{+sp, cold, bump, free, label, fuel, +err, cap}:
+          pop.ctl(U32.is_zero(err) && Bool.not(U32.is_zero(sp)), mem, tpl, sp, cold, bump, free, label, fuel, err, cap)
 
 # Fire active pairs until none is left, the fuel runs out or a rule fails
 # (reduce).
@@ -2250,8 +2256,8 @@ def tpl.words(+x: Code) -> M(List<&2, U32>):
 
 def reset.ctl(c: Ctl, +fuel: U32) -> Ctl:
   match c:
-    case Ctl{stk, cold, bump, free, label, old, err, cap}:
-      Ctl{[], cold.none(fuel), 1, 0, 0, fuel, 0, cap}
+    case Ctl{sp, cold, bump, free, label, old, err, cap}:
+      Ctl{0, cold.none(fuel), 1, 0, 0, fuel, 0, cap}
 
 # A net emptied for a new run: no agents, all fuel.
 def reset(net: Net, +fuel: U32) -> Net:
@@ -2393,7 +2399,7 @@ def depth.of(+n: U32) -> Nat:
   1n+U32.log2(n)
 
 def scratch() -> Net:
-  Net{Array.new(U32, 16n, 0), Array.new(U32, 2n, 0), Ctl{[], cold.none(0), 1, 0, 0, 0, 0, 8192}}
+  Net{Array.new(U32, 16n, 0), Array.new(U32, 2n, 0), Ctl{0, cold.none(0), 1, 0, 0, 0, 0, 8192}}
 
 def prepared.with(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>) -> Prog:
   +ws = tpls(srcs, (CS{scratch(), Map.new(&2, List<&2, U32>)}, []), [])
@@ -2438,7 +2444,7 @@ def net.new(p: Prog) -> Net:
     case Prog{entry, bodies, +words, +maxk}:
       Net{Array.new(U32, 21n, 0),
           fill(words, 0, Array.new(U32, depth.of((U32.from_nat(List.length(&2, U32, words)) + maxk + 2 : U32)), 0)),
-          Ctl{[], cold.none(0), 1, 0, 0, 0, 0, 262144}}
+          Ctl{0, cold.none(0), 1, 0, 0, 0, 0, 262144}}
 
 # Running
 # -------
@@ -2556,7 +2562,7 @@ def readback(fuel: Nat, +bodies: Map<&2, Co.V>, st: RSt) -> Net & RB:
 
 def c.stop(c: Ctl) -> U32:
   match c:
-    case Ctl{stk, cold, bump, free, label, fuel, err, cap}:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       err
 
 def finish.read(+spent: U32, r: Net & RB) -> Run:
