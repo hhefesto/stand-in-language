@@ -2,6 +2,7 @@ import Base
 import ../Front.bend as Fr
 import ../Size.bend as Sz
 import ../Expr.bend as E
+import ../Core.bend as Co
 import ../Lift.bend as Lf
 import ../EAL.bend as EAL
 import ../IC.bend as IC
@@ -26,7 +27,7 @@ def verdict(m: Maybe<&2, EAL.Err>) -> String:
     case Some{e}:
       "fails"
 
-def run(+expr: E.X, lines: List<&2, String>, +t2: Nat) -> IO(Unit):
+def run(+expr: Co.V, lines: List<&2, String>, +t2: Nat) -> IO(Unit):
   do IO<Unit>:
     +lay : Map<&2, Lf.Shape> = EAL.layouts(Lf.defer.lift(Lf.of.expr(expr)))
     +t3 : Nat <- IO.now()
