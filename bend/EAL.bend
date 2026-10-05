@@ -285,14 +285,22 @@ type CK is Data:
   CLevel{}
 
 # The solver's state: each root's class word (as a variable's) and blame
-# (by the root's number), the equations as rows of words in q, each
-# [summands, total, summand roots...], with their blames in qb, each
+# (as a reference, ref.own or ref.eq; by the root's number), the equations
+# as rows of words in q, each [summands, total, summand roots...], each
 # root's value (its class's lower bound until the assignment) and how many
 # equations it is a summand of, and whether the pass's round changed
-# anything; or the first failure.
+# anything; or the first failure. It is all words, so freeing it is one
+# step per array.
 type Sv is Type:
-  Sv{c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, ch: Bool}
-  SvErr{e: Err}
+  Sv{c: Array<U32>, cb: Array<U32>, q: Array<U32>, v: Array<U32>, n: Array<U32>, ch: Bool}
+  SvErr{f: SvF}
+
+# A failure of the solver, its blames as references, resolved against the
+# state once the solver is done (solve.done).
+type SvF is Data:
+  SfConflict{+need: U32, +forbid: U32}
+  SfGaveUp{+what: String, +b: U32}
+  SfErr{+e: Err}
 
 # An equation's summands: whether all are forced to zero, the sum of their
 # lower bounds, how many may be boxed, and the last of those.
@@ -3327,6 +3335,75 @@ def derived(+what: String, b: Blame) -> Blame:
 def give.up(+what: String, b: Blame) -> Err:
   GaveUp{what ++ ": " ++ blame.show(b)}
 
+# A blame as the solver keeps it, a word: the state's blame n is n*2, and
+# equation e's (its place in the rows) e*16+1, or e*16+k*2+1 derived for
+# reason k (why.text).
+def ref.own(+n: U32) -> U32:
+  (n * 2 : U32)
+
+def ref.eq(+e: U32, +k: U32) -> U32:
+  (e * 16 + k * 2 + 1 : U32)
+
+# Why the solver forces a class (constrainB's callers), by number.
+def why.summand() -> U32:
+  1
+
+def why.all() -> U32:
+  2
+
+def why.sum() -> U32:
+  3
+
+def why.lone() -> U32:
+  4
+
+def why.text.at(summand: Bool, all: Bool, sum: Bool) -> String:
+  match summand:
+    case True{}:
+      "summand of an unboxed total"
+    case False{}:
+      match all:
+        case True{}:
+          "all summands unboxed"
+        case False{}:
+          match sum:
+            case True{}:
+              "sum of summand lower bounds"
+            case False{}:
+              "only boxable summand"
+
+def why.text(+k: U32) -> String:
+  why.text.at(U32.is_eq(k, why.summand()), U32.is_eq(k, why.all()), U32.is_eq(k, why.sum()))
+
+# Equation e's blame, of the equations the rows were made from.
+def eq.blame(m: Maybe<&2, SumEq>) -> Blame:
+  match m:
+    case Some{x}:
+      match x:
+        case SumEq{lhs, rhs, blame}:
+          blame
+    case None{}:
+      blame.none()
+
+def ref.derived(bare: Bool, +k: U32, b: Blame) -> Blame:
+  match bare:
+    case True{}:
+      b
+    case False{}:
+      derived(why.text(k), b)
+
+def ref.at(own: Bool, s: St, rs: List<&2, SumEq>, +ref: U32) -> St & Blame:
+  match own:
+    case True{}:
+      blame.get(s, (ref >> 1n : U32))
+    case False{}:
+      (s, ref.derived(U32.is_zero(((ref >> 1n) .&. 7 : U32)), ((ref >> 1n) .&. 7 : U32),
+                      eq.blame(List.get(&2, SumEq, rs, U32.to_nat((ref >> 4n : U32))))))
+
+# The blame a reference names, over the state and the equations rs.
+def blame.ref(s: St, rs: List<&2, SumEq>, +ref: U32) -> St & Blame:
+  ref.at(U32.is_zero((ref .&. 1 : U32)), s, rs, ref)
+
 # A class word's kind.
 def ck(+w: U32) -> CK:
   Bool.pick(CK, U32.is_zero((w .&. 3 : U32)), CFree{}, Bool.pick(CK, U32.is_eq((w .&. 3 : U32), 1), CZero{}, CLevel{}))
@@ -3334,220 +3411,184 @@ def ck(+w: U32) -> CK:
 def is.zero(+w: U32) -> Bool:
   U32.is_eq((w .&. 3 : U32), 1)
 
-def sv.fail(sv: Sv, e: Err) -> Sv:
+def sv.fail(sv: Sv, f: SvF) -> Sv:
   match sv:
-    case Sv{c, cb, q, qb, v, n, ch}:
-      SvErr{e}
+    case Sv{c, cb, q, v, n, ch}:
+      SvErr{f}
     case SvErr{x}:
       SvErr{x}
 
-def c.got(cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+def c.got(cb: Array<U32>, q: Array<U32>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
   (c, w) = r
-  (Sv{c, cb, q, qb, v, n, ch}, w)
+  (Sv{c, cb, q, v, n, ch}, w)
 
 # Root r's class word.
 def c.rd(sv: Sv, +r: U32) -> Sv & U32:
   match sv:
-    case Sv{c, cb, q, qb, v, n, +ch}:
-      c.got(cb, q, qb, v, n, ch, Array.get(U32, c, r))
+    case Sv{c, cb, q, v, n, +ch}:
+      c.got(cb, q, v, n, ch, Array.get(U32, c, r))
     case SvErr{e}:
       (SvErr{e}, 0)
 
-# Root r's class becomes word w, blamed on b: a change. Until the
-# assignment, a root's value is its class's lower bound.
-def c.wr(sv: Sv, +r: U32, +w: U32, b: Blame) -> Sv:
+# Root r's class becomes word w, blamed on b (a reference): a change.
+# Until the assignment, a root's value is its class's lower bound.
+def c.wr(sv: Sv, +r: U32, +w: U32, +b: U32) -> Sv:
   match sv:
-    case Sv{c, cb, q, qb, v, n, ch}:
-      Sv{Array.set(U32, c, r, w), Array.set(Blame, cb, r, b), q, qb, Array.set(U32, v, r, (w >> 2n : U32)), n, True{}}
+    case Sv{c, cb, q, v, n, ch}:
+      Sv{Array.set(U32, c, r, w), Array.set(U32, cb, r, b), q, Array.set(U32, v, r, (w >> 2n : U32)), n, True{}}
     case SvErr{e}:
       SvErr{e}
 
-def cb.got(c: Array<U32>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<Blame> & Blame) -> Sv & Blame:
+def cb.got(c: Array<U32>, q: Array<U32>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
   (cb, b) = r
-  (Sv{c, cb, q, qb, v, n, ch}, b)
+  (Sv{c, cb, q, v, n, ch}, b)
 
 # Root r's class's blame.
-def cb.rd(sv: Sv, +r: U32) -> Sv & Blame:
+def cb.rd(sv: Sv, +r: U32) -> Sv & U32:
   match sv:
-    case Sv{c, cb, q, qb, v, n, +ch}:
-      cb.got(c, q, qb, v, n, ch, Array.get(Blame, cb, r))
+    case Sv{c, cb, q, v, n, +ch}:
+      cb.got(c, q, v, n, ch, Array.get(U32, cb, r))
     case SvErr{e}:
-      (SvErr{e}, blame.none())
+      (SvErr{e}, 0)
 
-def q.got(c: Array<U32>, cb: Array<Blame>, qb: Array<Blame>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+def q.got(c: Array<U32>, cb: Array<U32>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
   (q, w) = r
-  (Sv{c, cb, q, qb, v, n, ch}, w)
+  (Sv{c, cb, q, v, n, ch}, w)
 
 # Word i of the equations' rows.
 def q.rd(sv: Sv, +i: U32) -> Sv & U32:
   match sv:
-    case Sv{c, cb, q, qb, v, n, +ch}:
-      q.got(c, cb, qb, v, n, ch, Array.get(U32, q, i))
+    case Sv{c, cb, q, v, n, +ch}:
+      q.got(c, cb, v, n, ch, Array.get(U32, q, i))
     case SvErr{e}:
       (SvErr{e}, 0)
 
-def qb.got(c: Array<U32>, cb: Array<Blame>, q: Array<U32>, v: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<Blame> & Blame) -> Sv & Blame:
-  (qb, b) = r
-  (Sv{c, cb, q, qb, v, n, ch}, b)
-
-# Equation e's blame.
-def qb.rd(sv: Sv, +e: U32) -> Sv & Blame:
-  match sv:
-    case Sv{c, cb, q, qb, v, n, +ch}:
-      qb.got(c, cb, q, v, n, ch, Array.get(Blame, qb, e))
-    case SvErr{x}:
-      (SvErr{x}, blame.none())
-
-def v.got(c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+def v.got(c: Array<U32>, cb: Array<U32>, q: Array<U32>, n: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
   (v, x) = r
-  (Sv{c, cb, q, qb, v, n, ch}, x)
+  (Sv{c, cb, q, v, n, ch}, x)
 
 # Root r's value.
 def v.rd(sv: Sv, +r: U32) -> Sv & U32:
   match sv:
-    case Sv{c, cb, q, qb, v, n, +ch}:
-      v.got(c, cb, q, qb, n, ch, Array.get(U32, v, r))
+    case Sv{c, cb, q, v, n, +ch}:
+      v.got(c, cb, q, n, ch, Array.get(U32, v, r))
     case SvErr{e}:
       (SvErr{e}, 0)
 
 # Root r's value becomes x: a change.
 def v.wr(sv: Sv, +r: U32, +x: U32) -> Sv:
   match sv:
-    case Sv{c, cb, q, qb, v, n, ch}:
-      Sv{c, cb, q, qb, Array.set(U32, v, r, x), n, True{}}
+    case Sv{c, cb, q, v, n, ch}:
+      Sv{c, cb, q, Array.set(U32, v, r, x), n, True{}}
     case SvErr{e}:
       SvErr{e}
 
-def n.got(c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
+def n.got(c: Array<U32>, cb: Array<U32>, q: Array<U32>, v: Array<U32>, +ch: Bool, r: Array<U32> & U32) -> Sv & U32:
   (n, x) = r
-  (Sv{c, cb, q, qb, v, n, ch}, x)
+  (Sv{c, cb, q, v, n, ch}, x)
 
 # How many equations root r is a summand of.
 def n.rd(sv: Sv, +r: U32) -> Sv & U32:
   match sv:
-    case Sv{c, cb, q, qb, v, n, +ch}:
-      n.got(c, cb, q, qb, v, ch, Array.get(U32, n, r))
+    case Sv{c, cb, q, v, n, +ch}:
+      n.got(c, cb, q, v, ch, Array.get(U32, n, r))
     case SvErr{e}:
       (SvErr{e}, 0)
 
 
 def q.wr(sv: Sv, +i: U32, +w: U32) -> Sv:
   match sv:
-    case Sv{c, cb, q, qb, v, n, ch}:
-      Sv{c, cb, Array.set(U32, q, i, w), qb, v, n, ch}
+    case Sv{c, cb, q, v, n, ch}:
+      Sv{c, cb, Array.set(U32, q, i, w), v, n, ch}
     case SvErr{e}:
       SvErr{e}
 
-def qb.wr(sv: Sv, +e: U32, b: Blame) -> Sv:
-  match sv:
-    case Sv{c, cb, q, qb, v, n, ch}:
-      Sv{c, cb, q, Array.set(Blame, qb, e, b), v, n, ch}
-    case SvErr{x}:
-      SvErr{x}
-
-def n.inc.at(+r: U32, c: Array<U32>, cb: Array<Blame>, q: Array<U32>, qb: Array<Blame>, v: Array<U32>, +ch: Bool, p: Array<U32> & U32) -> Sv:
+def n.inc.at(+r: U32, c: Array<U32>, cb: Array<U32>, q: Array<U32>, v: Array<U32>, +ch: Bool, p: Array<U32> & U32) -> Sv:
   (n, +x) = p
-  Sv{c, cb, q, qb, v, Array.set(U32, n, r, (x + 1 : U32)), ch}
+  Sv{c, cb, q, v, Array.set(U32, n, r, (x + 1 : U32)), ch}
 
 # One more equation has root r as a summand.
 def n.inc(sv: Sv, +r: U32) -> Sv:
   match sv:
-    case Sv{c, cb, q, qb, v, n, +ch}:
-      n.inc.at(r, c, cb, q, qb, v, ch, Array.get(U32, n, r))
+    case Sv{c, cb, q, v, n, +ch}:
+      n.inc.at(r, c, cb, q, v, ch, Array.get(U32, n, r))
     case SvErr{e}:
       SvErr{e}
 
-def sv.err(sv: Sv) -> Maybe<&2, Err>:
+def sv.err(sv: Sv) -> Maybe<&2, SvF>:
   match sv:
-    case Sv{c, cb, q, qb, v, n, ch}:
+    case Sv{c, cb, q, v, n, ch}:
       None{}
-    case SvErr{e}:
-      Some{e}
+    case SvErr{f}:
+      Some{f}
 
 # propagate
 # ---------
 
-def zero.clash(+ob: Blame, +what: String, r: Sv & Blame) -> Sv:
-  (sv, b) = r
-  sv.fail(sv, BoxConflict{ob, derived(what, b)})
-
-def zero.old(+what: String, +e: U32, r: Sv & Blame) -> Sv:
+def zero.old(+why: U32, +e: U32, r: Sv & U32) -> Sv:
   (sv, +ob) = r
-  zero.clash(ob, what, qb.rd(sv, e))
+  sv.fail(sv, SfConflict{ob, ref.eq(e, why)})
 
-def zero.set(+r: U32, +what: String, p: Sv & Blame) -> Sv:
-  (sv, b) = p
-  c.wr(sv, r, 1, derived(what, b))
-
-def zero.at(k: CK, sv: Sv, +r: U32, +what: String, +e: U32) -> Sv:
+def zero.at(k: CK, sv: Sv, +r: U32, +why: U32, +e: U32) -> Sv:
   match k:
     case CFree{}:
-      zero.set(r, what, qb.rd(sv, e))
+      c.wr(sv, r, 1, ref.eq(e, why))
     case CZero{}:
       sv
     case CLevel{}:
-      zero.old(what, e, cb.rd(sv, r))
+      zero.old(why, e, cb.rd(sv, r))
 
-def zero.w(+r: U32, +what: String, +e: U32, p: Sv & U32) -> Sv:
+def zero.w(+r: U32, +why: U32, +e: U32, p: Sv & U32) -> Sv:
   (sv, +w) = p
-  zero.at(ck(w), sv, r, what, e)
+  zero.at(ck(w), sv, r, why, e)
 
 # constrainB to forced zero, on root r, for equation e (whose blame the
-# class's derives from).
-def zero(sv: Sv, +r: U32, +what: String, +e: U32) -> Sv:
-  zero.w(r, what, e, c.rd(sv, r))
+# class's derives from, for reason why).
+def zero(sv: Sv, +r: U32, +why: U32, +e: U32) -> Sv:
+  zero.w(r, why, e, c.rd(sv, r))
 
-def level.set(+r: U32, +lv: U32, +what: String, p: Sv & Blame) -> Sv:
-  (sv, b) = p
-  c.wr(sv, r, (lv * 4 + 2 : U32), derived(what, b))
+def level.set(sv: Sv, +r: U32, +lv: U32, +why: U32, +e: U32) -> Sv:
+  c.wr(sv, r, (lv * 4 + 2 : U32), ref.eq(e, why))
 
-def level.clash(+ob: Blame, +what: String, p: Sv & Blame) -> Sv:
-  (sv, b) = p
-  sv.fail(sv, BoxConflict{derived(what, b), ob})
-
-def level.old(+what: String, +e: U32, p: Sv & Blame) -> Sv:
+def level.old(+why: U32, +e: U32, p: Sv & U32) -> Sv:
   (sv, +ob) = p
-  level.clash(ob, what, qb.rd(sv, e))
+  sv.fail(sv, SfConflict{ref.eq(e, why), ob})
 
-def level.keep(keep: Bool, sv: Sv, +r: U32, +lv: U32, +what: String, +e: U32) -> Sv:
+def level.keep(keep: Bool, sv: Sv, +r: U32, +lv: U32, +why: U32, +e: U32) -> Sv:
   match keep:
     case True{}:
       sv
     case False{}:
-      level.set(r, lv, what, qb.rd(sv, e))
+      level.set(sv, r, lv, why, e)
 
-def level.at(k: CK, sv: Sv, +r: U32, +lv: U32, +la: U32, +what: String, +e: U32) -> Sv:
+def level.at(k: CK, sv: Sv, +r: U32, +lv: U32, +la: U32, +why: U32, +e: U32) -> Sv:
   match k:
     case CFree{}:
-      level.set(r, lv, what, qb.rd(sv, e))
+      level.set(sv, r, lv, why, e)
     case CZero{}:
-      level.old(what, e, cb.rd(sv, r))
+      level.old(why, e, cb.rd(sv, r))
     case CLevel{}:
-      level.keep(U32.is_ge(la, lv), sv, r, lv, what, e)
+      level.keep(U32.is_ge(la, lv), sv, r, lv, why, e)
 
-def level.w(+r: U32, +lv: U32, +what: String, +e: U32, p: Sv & U32) -> Sv:
+def level.w(+r: U32, +lv: U32, +why: U32, +e: U32, p: Sv & U32) -> Sv:
   (sv, +w) = p
-  level.at(ck(w), sv, r, lv, (w >> 2n : U32), what, e)
+  level.at(ck(w), sv, r, lv, (w >> 2n : U32), why, e)
 
-def level.over.at(+what: String, p: Sv & Blame) -> Sv:
-  (sv, b) = p
-  sv.fail(sv, GaveUp{"bang level exceeded cap of 4096: " ++ blame.show(derived(what, b))})
-
-def level.over(over: Bool, sv: Sv, +r: U32, +lv: U32, +what: String, +e: U32) -> Sv:
+def level.over(over: Bool, sv: Sv, +r: U32, +lv: U32, +why: U32, +e: U32) -> Sv:
   match over:
     case True{}:
-      level.over.at(what, qb.rd(sv, e))
+      sv.fail(sv, SfGaveUp{"bang level exceeded cap of 4096", ref.eq(e, why)})
     case False{}:
-      level.w(r, lv, what, e, c.rd(sv, r))
+      level.w(r, lv, why, e, c.rd(sv, r))
 
 # constrainB to forced level lv, on root r, for equation e; past the level
 # cap, it gives up.
-def level(sv: Sv, +r: U32, +lv: U32, +what: String, +e: U32) -> Sv:
-  level.over(U32.is_gt(lv, level.cap()), sv, r, lv, what, e)
+def level(sv: Sv, +r: U32, +lv: U32, +why: U32, +e: U32) -> Sv:
+  level.over(U32.is_gt(lv, level.cap()), sv, r, lv, why, e)
 
 def zero.q(+e: U32, p: Sv & U32) -> Sv:
   (sv, +l) = p
-  zero(sv, l, "summand of an unboxed total", e)
+  zero(sv, l, why.summand(), e)
 
 # The k summands from row word i are forced to zero.
 def zeros(k: Nat, +e: U32, +i: U32, sv: Sv) -> Sv:
@@ -3592,7 +3633,7 @@ def prop.c1(fz: Bool, sv: Sv, +nl: U32, +o: U32, +e: U32) -> Sv:
 def prop.c2(all: Bool, sv: Sv, +rhs: U32, +e: U32) -> Sv:
   match all:
     case True{}:
-      zero(sv, rhs, "all summands unboxed", e)
+      zero(sv, rhs, why.all(), e)
     case False{}:
       sv
 
@@ -3600,14 +3641,14 @@ def prop.c2(all: Bool, sv: Sv, +rhs: U32, +e: U32) -> Sv:
 def prop.c3(some: Bool, sv: Sv, +rhs: U32, +sum: U32, +e: U32) -> Sv:
   match some:
     case True{}:
-      level(sv, rhs, sum, "sum of summand lower bounds", e)
+      level(sv, rhs, sum, why.sum(), e)
     case False{}:
       sv
 
 def c4.at(k: CK, sv: Sv, +lone: U32, +lb: U32, +e: U32) -> Sv:
   match k:
     case CLevel{}:
-      level(sv, lone, lb, "only boxable summand", e)
+      level(sv, lone, lb, why.lone(), e)
     case _:
       sv
 
@@ -3649,9 +3690,8 @@ def step(sv: Sv, +o: U32, +e: U32) -> Sv & U32:
 # assignValues
 # ------------
 
-def a.err(+what: String, p: Sv & Blame) -> Sv:
-  (sv, b) = p
-  sv.fail(sv, give.up(what, b))
+def a.err(+what: String, sv: Sv, +e: U32) -> Sv:
+  sv.fail(sv, SfGaveUp{what, ref.eq(e, 0)})
 
 def a.plus(+acc: U32, p: Sv & U32) -> Sv & U32:
   (sv, +x) = p
@@ -3709,7 +3749,7 @@ def pk.go(k: Nat, +i: U32, p: Sv & Pk) -> Sv & Pk:
 def adj.set(over: Bool, sv: Sv, +r: U32, +x: U32, +e: U32) -> Sv:
   match over:
     case True{}:
-      a.err("assignment exceeded level cap", qb.rd(sv, e))
+      a.err("assignment exceeded level cap", sv, e)
     case False{}:
       v.wr(sv, r, x)
 
@@ -3720,7 +3760,7 @@ def adj.raise(+short: U32, +e: U32, +r: U32, p: Sv & U32) -> Sv:
 def adj.empty(empty: Bool, sv: Sv, +best: U32, +short: U32, +e: U32) -> Sv:
   match empty:
     case True{}:
-      a.err("no boxable position to absorb required boxes", qb.rd(sv, e))
+      a.err("no boxable position to absorb required boxes", sv, e)
     case False{}:
       adj.raise(short, e, best, v.rd(sv, best))
 
@@ -3734,7 +3774,7 @@ def adj.pick(+short: U32, +e: U32, p: Sv & Pk) -> Sv:
 def adj.over(zero: Bool, over: Bool, sv: Sv, +rhs: U32, +sum: U32, +e: U32) -> Sv:
   match zero:
     case True{}:
-      a.err("sum exceeds an unboxed total", qb.rd(sv, e))
+      a.err("sum exceeds an unboxed total", sv, e)
     case False{}:
       adj.set(over, sv, rhs, sum, e)
 
@@ -3777,7 +3817,7 @@ def holds.at(ok: Bool, sv: Sv, +e: U32) -> Sv:
     case True{}:
       sv
     case False{}:
-      a.err("assignment verification failed", qb.rd(sv, e))
+      a.err("assignment verification failed", sv, e)
 
 def holds.t(+sum: U32, +e: U32, p: Sv & U32) -> Sv:
   (sv, +t) = p
@@ -3823,8 +3863,8 @@ def rows(k: Nat, +ps: Pass, +e: U32, r: Sv & U32) -> Sv:
       match sv:
         case SvErr{x}:
           SvErr{x}
-        case Sv{c, cb, q, qb, v, n, ch}:
-          rows(j, ps, (e + 1 : U32), pass.step(ps, Sv{c, cb, q, qb, v, n, ch}, o, e))
+        case Sv{c, cb, q, v, n, ch}:
+          rows(j, ps, (e + 1 : U32), pass.step(ps, Sv{c, cb, q, v, n, ch}, o, e))
 
 def stuck(ps: Pass) -> Err:
   match ps:
@@ -3839,36 +3879,36 @@ def rounds(fuel: Nat, +k: Nat, +ps: Pass, sv: Sv) -> Sv:
   match fuel:
     case 0n:
       match sv:
-        case Sv{c, cb, q, qb, v, n, ch}:
+        case Sv{c, cb, q, v, n, ch}:
           match ch:
             case True{}:
-              SvErr{stuck(ps)}
+              SvErr{SfErr{stuck(ps)}}
             case False{}:
-              Sv{c, cb, q, qb, v, n, False{}}
+              Sv{c, cb, q, v, n, False{}}
         case SvErr{e}:
           SvErr{e}
     case 1n+f:
       match sv:
-        case Sv{c, cb, q, qb, v, n, ch}:
+        case Sv{c, cb, q, v, n, ch}:
           match ch:
             case True{}:
-              rounds(f, k, ps, rows(k, ps, 0, (Sv{c, cb, q, qb, v, n, False{}}, 0)))
+              rounds(f, k, ps, rows(k, ps, 0, (Sv{c, cb, q, v, n, False{}}, 0)))
             case False{}:
-              Sv{c, cb, q, qb, v, n, False{}}
+              Sv{c, cb, q, v, n, False{}}
         case SvErr{e}:
           SvErr{e}
 
 def sv.dirty(sv: Sv) -> Sv:
   match sv:
-    case Sv{c, cb, q, qb, v, n, ch}:
-      Sv{c, cb, q, qb, v, n, True{}}
+    case Sv{c, cb, q, v, n, ch}:
+      Sv{c, cb, q, v, n, True{}}
     case SvErr{e}:
       SvErr{e}
 
 # propagate, then assignValues (from the lower bounds, greedily raising
 # free summands) and its verification; only whether it all holds matters
 # here.
-def run(+k: Nat, sv: Sv) -> Maybe<&2, Err>:
+def run(+k: Nat, sv: Sv) -> Maybe<&2, SvF>:
   sv.err(rows(k, PHolds{}, 0, (rounds(U32.to_nat((U32.from_nat(k) * 4 + 16 : U32)), k, PAdjust{},
     sv.dirty(rounds(U32.to_nat((U32.from_nat(k) * 4 + 64 : U32)), k, PProp{}, sv))), 0)))
 
@@ -3933,13 +3973,9 @@ def rows.size(es: List<&2, SumEq>, +acc: U32) -> U32:
         case SumEq{lhs, rhs, blame}:
           rows.size(rest, (acc + 2 + U32.from_nat(List.length(&2, U32, lhs)) : U32))
 
-def fill.b(+r: U32, +w: U32, sv: Sv, p: St & Blame) -> St & Sv:
-  (s, b) = p
-  (s, c.wr(sv, r, w, b))
-
 def fill.id(+r: U32, +w: U32, sv: Sv, p: St & U32) -> St & Sv:
   (s, +id) = p
-  fill.b(r, w, sv, blame.get(s, id))
+  (s, c.wr(sv, r, w, ref.own(id)))
 
 def fill.w(+r: U32, sv: Sv, p: St & U32) -> St & Sv:
   (s, +w) = p
@@ -3959,7 +3995,7 @@ def fill.lhs(ls: List<&2, U32>, +i: U32, p: St & Sv) -> St & Sv:
       fill.lhs(rest, (i + 1 : U32), fill.root(l, (s, n.inc(q.wr(sv, i, l), l))))
 
 # The equations, resolved to roots, as rows from equation e at offset o,
-# with their roots' classes.
+# with their roots' classes (an equation's blame is its number).
 def fill(es: List<&2, SumEq>, +e: U32, +o: U32, p: St & Sv) -> St & Sv:
   match es:
     case Nil{}:
@@ -3970,18 +4006,38 @@ def fill(es: List<&2, SumEq>, +e: U32, +o: U32, p: St & Sv) -> St & Sv:
           (s, sv) = p
           +nl = U32.from_nat(List.length(&2, U32, lhs))
           fill(rest, (e + 1 : U32), (o + 2 + nl : U32),
-            fill.lhs(lhs, (o + 2 : U32), fill.root(rhs, (s, qb.wr(q.wr(q.wr(sv, o, nl), (o + 1 : U32), rhs), e, blame)))))
+            fill.lhs(lhs, (o + 2 : U32), fill.root(rhs, (s, q.wr(q.wr(sv, o, nl), (o + 1 : U32), rhs)))))
 
-def solve.done(s: St, m: Maybe<&2, Err>) -> St:
+def sf.conflict(need: Blame, r: St & Blame) -> St:
+  (s, forbid) = r
+  fail(s, BoxConflict{need, forbid})
+
+def sf.need(+forbid: U32, +rs: List<&2, SumEq>, r: St & Blame) -> St:
+  (s, need) = r
+  sf.conflict(need, blame.ref(s, rs, forbid))
+
+def sf.gave.up(+what: String, r: St & Blame) -> St:
+  (s, b) = r
+  fail(s, give.up(what, b))
+
+# The solver's failure, if any, its blames resolved (rs: the equations it
+# was given).
+def solve.done(s: St, +rs: List<&2, SumEq>, m: Maybe<&2, SvF>) -> St:
   match m:
     case None{}:
       s
-    case Some{e}:
-      fail(s, e)
+    case Some{f}:
+      match f:
+        case SfConflict{+need, +forbid}:
+          sf.need(forbid, rs, blame.ref(s, rs, need))
+        case SfGaveUp{what, +b}:
+          sf.gave.up(what, blame.ref(s, rs, b))
+        case SfErr{e}:
+          fail(s, e)
 
-def solve.sv(+k: Nat, r: St & Sv) -> St:
+def solve.sv(+k: Nat, +rs: List<&2, SumEq>, r: St & Sv) -> St:
   (s, sv) = r
-  solve.done(s, run(k, sv))
+  solve.done(s, rs, run(k, sv))
 
 # The tables: a root's words by its number (as many as there may be
 # variables), and the rows.
@@ -3989,9 +4045,8 @@ def solve.size(+rs: List<&2, SumEq>, r: St & U32) -> St:
   (s, +size) = r
   +d = (U32.log2(size) - 3n : Nat)
   +k = List.length(&2, SumEq, rs)
-  solve.sv(k, fill(rs, 0, 0, (s, Sv{Array.new(U32, d, 0), Array.new(Blame, d, blame.none()),
+  solve.sv(k, rs, fill(rs, 0, 0, (s, Sv{Array.new(U32, d, 0), Array.new(U32, d, 0),
     Array.new(U32, (U32.log2((rows.size(rs, 0) + 1 : U32)) + 1n : Nat), 0),
-    Array.new(Blame, (U32.log2((U32.from_nat(k) + 1 : U32)) + 1n : Nat), blame.none()),
     Array.new(U32, d, 0), Array.new(U32, d, 0), True{}})))
 
 def solve.res(ps: Array<U32>, tg: Array<List<&2, TE>>, x: X, r: Array<U32> & List<&2, SumEq>) -> St:
