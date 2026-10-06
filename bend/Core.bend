@@ -159,6 +159,17 @@ def refinement.tc() -> U32:
 def abort.ind() -> U32:
   neg(11)
 
+# From -12 down, the step of an unbounded recursion (--fast): -12 less its
+# site's token.
+def limit.ind(+tok: U32) -> U32:
+  neg((12 + tok : U32))
+
+def is.limit(+fi: U32) -> Bool:
+  U32.is_ge(fi, 2147483648) && U32.is_le(fi, neg(12))
+
+def limit.tok(+fi: U32) -> U32:
+  (neg(fi) - 12 : U32)
+
 # Builders (IR.Builder)
 # ---------------------
 

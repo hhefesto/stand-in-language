@@ -1,0 +1,13 @@
+status 0
+--- stdout
+O
+--- stderr
+function applications (measured): 19
+gate selections (measured):       2
+recursion unrolls (measured):     2 across 1 site
+
+  site   source                 function               unrolls
+  #0     tc_ultra_minimal:6:25  tc_ultra_minimal.main  2
+
+Unrolls are totals over the run, not depths, so they are not the same
+measurement as --certificate's per-instantiation iteration counts.

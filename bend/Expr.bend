@@ -155,6 +155,42 @@ def chain(n: Nat, +tok: U32) -> X:
 def sized.chain(+tok: U32, n: U32) -> X:
   chain(U32.to_nat(n), tok)
 
+# Unbounded recursion (--fast)
+# ----------------------------
+
+# The step of an unbounded recursion. Its environment is (input, (itself,
+# trb)): it rebuilds its recursion value, itself closed over (itself, trb),
+# and runs one approximant step on (input, (recursion, trb)). So applying
+# it unrolls one layer, and building the recursion value unrolls none
+# (haskell-final's VRec, forced when applied).
+def limit.code(+tok: U32) -> X:
+  XDefer{Co.limit.ind(tok),
+    fill(XDefer{Co.step.rfb(), approx.body()},
+         XPair{var(0n), XPair{XPair{var(1n), XPair{var(1n), rights(2n, XEnv{})}}, rights(2n, XEnv{})}})}
+
+# A recursion site with no bound (FUnbounded): the step closed over itself
+# and the site's {t, r, b}, where a sized chain would be.
+def limit(+tok: U32) -> X:
+  XPair{limit.code(tok), XPair{limit.code(tok), XLeft{XEnv{}}}}
+
+# The program to run unsized: every recursion site unbounded.
+def unbounded(x: X) -> X:
+  match x:
+    case XStub{+tok, y}:
+      limit(tok)
+    case XPair{a, b}:
+      XPair{unbounded(a), unbounded(b)}
+    case XSetEnv{a}:
+      XSetEnv{unbounded(a)}
+    case XDefer{fi, a}:
+      XDefer{fi, unbounded(a)}
+    case XLeft{a}:
+      XLeft{unbounded(a)}
+    case XRight{a}:
+      XRight{unbounded(a)}
+    case other:
+      other
+
 # A refinement check becomes: apply the check, abort with its answer if
 # that is not 0, else the value (removeRefinementWrappers).
 def remove.checks(t: X) -> X:
@@ -311,3 +347,8 @@ def core(x: X) -> Result<&2, &2, String, Co.V>:
       Fail{"a right projection chain"}
     case XError{msg}:
       Fail{"a sizing error (" ++ msg ++ ")"}
+
+# The program run unsized (term3ToFast): its checks removed and every
+# recursion site unbounded, as the runnable core.
+def fast(t: T.C) -> Result<&2, &2, String, Co.V>:
+  core(unbounded(remove.checks(of.term3(t))))

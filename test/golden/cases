@@ -56,11 +56,24 @@ case_ tictactoe.ic-compile tictactoe.tel '' --ic --compile
 case_ tictactoe.telc-ic tictactoe.telc '1\n4\n2\n5\n3\n' --ic
 case_ tictactoe.telc-ic-certificate tictactoe.telc '' --ic --certificate
 
+# Unsized (--fast): the same displays with every recursion unbounded, the
+# unrolls each site made, the static report without counts, and the fuel
+# cap. The port's meter counts interactions and each unroll once, and its
+# fuel is interactions (test/golden/port).
+case_ simpleplus.fast simpleplus.tel '3 4\n' --fast
+case_ simpleplus.fast-meter simpleplus.tel '3 4\n' --fast --meter
+case_ simpleplus.fast-certificate simpleplus.tel '' --fast --certificate
+case_ simpleplus.fast-fuel simpleplus.tel '3 4\n' --fast --fuel 20
+case_ tc_ultra_minimal.fast-meter tc_ultra_minimal.tel '' --fast --meter
+case_ tictactoe.fast tictactoe.tel '1\n9\n2\n8\n3\n' --fast
+
 # Where sizing stops (test/programs/limits/README.md).
 case_ unbounded-input-recursion.certificate test/programs/limits/unbounded-input-recursion.tel '' --certificate
 case_ unbounded-input-recursion.ic test/programs/limits/unbounded-input-recursion.tel '' --ic
 case_ over-budget-recursion.certificate test/programs/limits/over-budget-recursion.tel '' --certificate
 case_ over-budget-recursion.ic-certificate test/programs/limits/over-budget-recursion.tel '' --ic --certificate
+# Unsized, the program sizing rejects runs.
+case_ unbounded-input-recursion.fast test/programs/limits/unbounded-input-recursion.tel 'a\n' --fast
 
 # The REPL over the Prelude (CI's smoke test is the first).
 repl_ repl.succ 'succ 7'

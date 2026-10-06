@@ -20,9 +20,10 @@ This project is in active development. Do expect bugs and general trouble, and p
 Telomare is being rewritten in [Bend 2](https://github.com/bendlang/bend). The
 Haskell implementation was removed after the tag `haskell-final`, the last
 commit that has it. The port keeps one runtime, the interaction-net runtime
-(`--ic`). haskell-final's other three runtimes are not coming back: the
-reference evaluator behind the plain run, the REPL and the LSP; the metered
-evaluator behind `--meter` without `--ic`; and `--fast`.
+(`--ic`), and runs `--fast` on it too. haskell-final's other runtimes are
+not coming back: the reference evaluator behind the plain run, the REPL and
+the LSP; the metered evaluator behind `--meter` without `--ic`; and the
+Fast interpreter.
 
 The Bend `telomare` command is the flake's default app. It runs a program on
 the IC runtime, as haskell-final's `telomare FILE.tel --ic` did (`--ic` is
@@ -32,6 +33,7 @@ accepted and changes nothing):
 $ nix run . -- tictactoe.tel
 $ nix run . -- tictactoe.tel --certificate   # what is known without running it
 $ nix run . -- tictactoe.tel --meter         # run it, then what the run cost
+$ nix run . -- tictactoe.tel --fast          # run it unsized
 ```
 
 As in haskell-final, the program must pass EAL certification before it is
@@ -41,7 +43,7 @@ copying. Both reports of [Resource reporting](#resource-reporting) are
 ported: the static report (`--certificate`) as haskell-final prints it, and
 `--meter` with the interaction count only (see that section). haskell-final's
 other actions are not ported: `--ic --certificate` (the IC space
-certificate), `--compile` and `.telc` programs, `--draw-net` and `--fast`.
+certificate), `--compile` and `.telc` programs, and `--draw-net`.
 The sections that describe them say so. `test/golden/` records exactly what
 haskell-final printed for each example program and mode, and `nix flake
 check` runs the command on every case it covers (`test/golden/run.sh BIN_DIR
@@ -111,9 +113,17 @@ in these places:
 - `--meter` reports interactions only. haskell-final's IC also printed
   "logical storage" counted on its own map-of-ports net, which the port
   does not share and so cannot report honestly.
-- `--fast`, `.telc` artifacts (`--compile`) and `--draw-net` are not
-  ported. `--fast` is a second evaluator (C4 makes that transitional), and
-  sizing tictactoe takes 0.2 s here, so compiling once buys little.
+- `.telc` artifacts (`--compile`) and `--draw-net` are not ported; sizing
+  tictactoe takes 0.2 s here, so compiling once buys little.
+- `--fast` runs on the IC (C4: one runtime), not on a second evaluator.
+  Sizing is skipped, and every recursion site becomes a closure that
+  rebuilds itself when applied, so each application unrolls one layer;
+  only the branch an `if` chooses runs. The displays are haskell-final's.
+  What it counts is the IC's: fuel and the meter are interactions, there
+  are no application or gate counts, and each unroll counts once
+  (haskell-final's Fast forced a recursion value at each projection, twice
+  per application, so its unroll counts are double). It runs unguided:
+  EAL's capture layouts are the sized program's.
 - EAL certifies the term that is sized and run (DESIGN.md §3, §11.4).
   haskell-final certified a second term, built with every let binding
   inlined at each use; the port no longer builds it. Every example
@@ -276,26 +286,25 @@ and `--certificate` on it prints instantly. If the sources are still around and
 have changed since it was built, running it says so and carries on — an
 artifact is expected to outlive the checkout it came from.
 
-## Running without sizing (haskell-final)
+## Running without sizing
 
 `--fast` skips sizing altogether and runs the recursion on demand, unrolling
-one layer per call instead of a count inferred in advance. It starts
-immediately, plays `tictactoe.tel` identically, and will even run programs the
-sizing pass rejects:
+one layer per call instead of a count inferred in advance. It runs on the
+interaction net like everything else, plays `tictactoe.tel` identically, and
+will even run programs the sizing pass rejects:
 
 ```sh
 $ printf '3 4\n' | telomare simpleplus.tel --fast --meter
 enter two digits separated by a space
 3 plus 4 is 7
-function applications (measured): 2,560
-gate selections (measured):       83
-recursion unrolls (measured):     110 across 4 sites
+IC interactions: 728870
+recursion unrolls (measured):     55 across 4 sites
 
   site   source            function          unrolls
-  #1     Prelude:48:23     Prelude.foldr     48
-  #0     Prelude:30:18     Prelude.dMinus    40
-  #2     simpleplus:12:42  simpleplus.doAdd  12
-  #3     simpleplus:12:28  simpleplus.doAdd  10
+  #1     Prelude:48:23     Prelude.foldr     24
+  #0     Prelude:30:18     Prelude.dMinus    20
+  #2     simpleplus:12:42  simpleplus.doAdd  6
+  #3     simpleplus:12:28  simpleplus.doAdd  5
 ```
 
 Per-site unrolls are only available this way: sizing compiles each site into a
@@ -305,9 +314,9 @@ the same measurement as the certificate's per-instantiation counts.
 
 What `--fast` gives up is the thing sizing is for: **nothing proves the program
 terminates**. A recursion that would not have sized runs until a fuel cap stops
-it (default 16777216 applications and unrollings per iteration of `main`,
-`--fuel N` to change it, `--fuel 0` to lift it). That is why it is a flag and
-why sizing remains the default.
+it (default 16777216 interactions per iteration of `main`, `--fuel N` to change
+it, `--fuel 0` to lift it). That is why it is a flag and why sizing remains the
+default. `--fast --certificate` prints the static report with no counts.
 
 ## Telomare REPL
 
@@ -522,14 +531,15 @@ goldens in `test/golden/`.
 | Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend`, handing on `bend/Core.bend`'s CompiledExpr |
 | Certify | `Telomare.EAL`, the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,EAL}.bend` (the verdict and the capture layouts; the per-Defer bangs and levels of the REPL's `:t` are not) |
 | IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying guided by the EAL capture layouts |
-| Drive | `Telomare.Driver`, the `telomare` command | ported for running programs and `--meter`: `bend/{Session,Main}.bend` |
+| Drive | `Telomare.Driver`, the `telomare` command | ported for running programs, `--meter` and `--fast`: `bend/{Session,Meter,Main}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
 | Artifacts | `Telomare.Artifact` | not ported |
 | REPL and LSP | `app/Repl.hs`, `app/LSP.hs` | not ported |
 
-Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and
-`Telomare.Fast`.
+Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and the
+evaluator of `Telomare.Fast` (`--fast` runs on the IC; its unbounded
+recursion is `Expr.limit`).
 
 Each stage hands the next a type in which the previous stage's forms cannot
 be written (DESIGN.md's H1): the surface term `Syntax.Surf` is indexed by

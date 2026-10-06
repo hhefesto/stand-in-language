@@ -79,7 +79,7 @@ def result.of(m: Maybe<&2, Co.D>, +x: Co.V) -> String:
 
 def result(r: IC.Run) -> String:
   match r:
-    case IC.Run{net, out, spent}:
+    case IC.Run{net, out, spent, unrolls}:
       match out:
         case IC.RBOk{+x}:
           result.of(Ss.aborted(x), x)
@@ -119,16 +119,16 @@ def prepared(guided: Bool, +expr: Co.V) -> IC.Prog:
 def sized(guided: Bool, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
-      Ss.Replay{["sizing failed"], 0}
+      Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
         case Sz.Sized{counts, expr}:
-          Ss.replay(prepared(guided, expr), lines)
+          Ss.replay(prepared(guided, expr), Ss.Sized{}, lines)
 
 def compiled(guided: Bool, r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
-      Ss.Replay{[e], 0}
+      Ss.Replay{[e], Ss.cost.none()}
     case Done{run}:
       sized(guided, Sz.size(65536, True{}, E.of.term3(run)), lines)
 
@@ -142,8 +142,8 @@ def plain(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss
 
 def spent(r: Ss.Replay) -> U32:
   match r:
-    case Ss.Replay{shown, n}:
-      n
+    case Ss.Replay{shown, c}:
+      Ss.cost.spent(c)
 
 def text(r: Result<&1, &1, String, String>) -> String:
   match r:
@@ -155,7 +155,7 @@ def text(r: Result<&1, &1, String, String>) -> String:
 # The last display (displays are newest first).
 def last(r: Ss.Replay) -> String:
   match r:
-    case Ss.Replay{shown, n}:
+    case Ss.Replay{shown, c}:
       match shown:
         case Con{x, rest}:
           x

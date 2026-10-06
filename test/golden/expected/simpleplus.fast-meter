@@ -1,0 +1,17 @@
+status 0
+--- stdout
+enter two digits separated by a space
+3 plus 4 is 7
+--- stderr
+function applications (measured): 2,479
+gate selections (measured):       83
+recursion unrolls (measured):     110 across 4 sites
+
+  site   source            function          unrolls
+  #1     Prelude:48:23     Prelude.foldr     48
+  #0     Prelude:30:18     Prelude.dMinus    40
+  #2     simpleplus:12:42  simpleplus.doAdd  12
+  #3     simpleplus:12:28  simpleplus.doAdd  10
+
+Unrolls are totals over the run, not depths, so they are not the same
+measurement as --certificate's per-instantiation iteration counts.

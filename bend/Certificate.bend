@@ -277,3 +277,13 @@ def report(+counts: List<&2, E.TS>, run: T.C, +budget: U32, +info: Result<&2, &2
     [""],
     structural(info),
     closing(found(info))]))
+
+# The static report of a program run unsized (--fast): no counts, so no
+# lists to set beside each other (staticReport Nothing Nothing).
+def report.unsized(+info: Result<&2, &2, String, Lv.Info>) -> String:
+  unlines(List.concat(&2, String, [
+    ["static report: what the compiler knows without running the program", "",
+     "iterations: not inferred, because this program was not sized.",
+     "  Nothing here says it terminates. Compile it without --fast for that.", ""],
+    structural(info),
+    closing(False{})]))

@@ -3,6 +3,7 @@ import ./Core.bend as Co
 import ./Lift.bend as Lf
 import ./EAL.bend as EAL
 import ./IC.bend as IC
+import ./Meter.bend as Mt
 
 # One iteration's outcome, as the session prints it (haskell-final's
 # Driver.funWrapWith and evalSessionCore, with IC.icRuntimeResult and
@@ -126,11 +127,44 @@ def value(m: Maybe<&2, Co.D>, +x: Co.V) -> Outcome:
     case None{}:
       converted(has.abort(x), x)
 
+# How a program runs: sized, under the IC's default fuel; or unsized
+# (--fast), each iteration capped at fuel interactions, 0 for no cap (the
+# most a U32 counts).
+type How is Data:
+  Sized{}
+  Fast{+fuel: U32}
+
+def fuel(h: How) -> U32:
+  match h:
+    case Sized{}:
+      IC.default.fuel()
+    case Fast{+n}:
+      Bool.pick(U32, U32.is_zero(n), 4294967295, n)
+
+def failed(f: IC.Fault) -> Outcome:
+  Stop{"runtime error:\nGeneric Runtime Error: IC runtime: " ++ IC.fault.show(f) ++ " -- " ++ Co.show(Co.VZero{})}
+
+# Out of fuel, an unsized run says why nothing stopped it sooner.
+def failed.fast(f: IC.Fault) -> Outcome:
+  match f:
+    case IC.FuelExhausted{n}:
+      Stop{"runtime error: out of fuel after " ++ Mt.commas(n) ++ " interactions.\n"
+        ++ "This run is not sized, so nothing proved it terminates. Raise the cap with --fuel N, or lift it entirely with --fuel 0."}
+    case other:
+      failed(other)
+
+def failed.how(h: How, f: IC.Fault) -> Outcome:
+  match h:
+    case Sized{}:
+      failed(f)
+    case Fast{n}:
+      failed.fast(f)
+
 # What an iteration's result means for the session.
-def outcome(r: IC.RB) -> Outcome:
+def outcome(h: How, r: IC.RB) -> Outcome:
   match r:
     case IC.RBErr{f}:
-      Stop{"runtime error:\nGeneric Runtime Error: IC runtime: " ++ IC.fault.show(f) ++ " -- " ++ Co.show(Co.VZero{})}
+      failed.how(h, f)
     case IC.RBOk{+x}:
       value(aborted(x), x)
 
@@ -144,65 +178,93 @@ def prepared(+expr: Co.V) -> IC.Prog:
 #
 # One iteration at a time, between the effects the drivers own: Main reads
 # standard input and prints, the tests feed given lines and keep the
-# displays. Every turn carries the interactions the session has spent so
-# far, which is what `--meter` reports.
+# displays. Every turn carries what the session has spent so far, which is
+# what `--meter` reports.
+
+# What the session has spent: interactions and, unsized, each recursion
+# site's unrolls.
+type Cost is Data:
+  Cost{+spent: U32, +unrolls: List<&2, IC.Unroll>}
+
+def cost.none() -> Cost:
+  Cost{0, []}
+
+def cost.spent(c: Cost) -> U32:
+  match c:
+    case Cost{spent, unrolls}:
+      spent
+
+# vs's unrolls added to us.
+def unrolls.plus(vs: List<&2, IC.Unroll>, us: List<&2, IC.Unroll>) -> List<&2, IC.Unroll>:
+  match vs:
+    case Nil{}:
+      us
+    case Con{v, rest}:
+      match v:
+        case IC.Unroll{tok, n}:
+          unrolls.plus(rest, IC.unroll.add(us, tok, n))
+
+def cost.plus(c: Cost, +spent: U32, us: List<&2, IC.Unroll>) -> Cost:
+  match c:
+    case Cost{+before, vs}:
+      Cost{(before + spent : U32), unrolls.plus(us, vs)}
 
 # A display to show, then either a line to read for the next iteration,
 # the end of the session, or a failure.
 type Turn is Type:
-  Asks{net: IC.Net, display: String, state: Co.D, spent: U32}
-  Ends{display: String, spent: U32}
-  Fails{msg: String, spent: U32}
+  Asks{net: IC.Net, display: String, state: Co.D, cost: Cost}
+  Ends{display: String, cost: Cost}
+  Fails{msg: String, cost: Cost}
 
-def turn.of(net: IC.Net, o: Outcome, +spent: U32) -> Turn:
+def turn.of(net: IC.Net, o: Outcome, cost: Cost) -> Turn:
   match o:
     case Continue{display, st}:
-      Asks{net, display, st, spent}
+      Asks{net, display, st, cost}
     case Stop{display}:
-      Ends{display, spent}
+      Ends{display, cost}
     case Crash{msg}:
-      Fails{msg, spent}
+      Fails{msg, cost}
 
-def turn(r: IC.Run, +before: U32) -> Turn:
+def turn(h: How, r: IC.Run, before: Cost) -> Turn:
   match r:
-    case IC.Run{net, out, spent}:
-      turn.of(net, outcome(out), (before + spent : U32))
+    case IC.Run{net, out, +spent, unrolls}:
+      turn.of(net, outcome(h, out), cost.plus(before, spent, unrolls))
 
 # The first iteration runs on 0.
-def start(+p: IC.Prog) -> Turn:
-  turn(IC.run(p, IC.net.new(p), Co.DZero{}, IC.default.fuel()), 0)
+def start(+p: IC.Prog, +h: How) -> Turn:
+  turn(h, IC.run(p, IC.net.new(p), Co.DZero{}, fuel(h)), cost.none())
 
 # The next iteration runs on the line read and the state the last one left.
-def answer(+p: IC.Prog, net: IC.Net, +line: String, st: Co.D, +spent: U32) -> Turn:
-  turn(IC.run(p, net, Co.DPair{Co.of.string(line), st}, IC.default.fuel()), spent)
+def answer(+p: IC.Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> Turn:
+  turn(h, IC.run(p, net, Co.DPair{Co.of.string(line), st}, fuel(h)), cost)
 
 # A session on given lines, for the tests: the displays, newest first, and
-# the interactions spent. It ends where the session would, or where the
-# lines run out.
+# what it spent. It ends where the session would, or where the lines run
+# out.
 type Replay is Data:
-  Replay{+shown: List<&2, String>, +spent: U32}
+  Replay{+shown: List<&2, String>, +cost: Cost}
 
 # What the session showed when it stopped: the turn's display (or its
 # failure) and what it spent.
 def replay.end(t: Turn, +shown: List<&2, String>) -> Replay:
   match t:
-    case Asks{net, display, st, spent}:
-      Replay{display <> shown, spent}
-    case Ends{display, spent}:
-      Replay{display <> shown, spent}
-    case Fails{msg, spent}:
-      Replay{msg <> shown, spent}
+    case Asks{net, display, st, cost}:
+      Replay{display <> shown, cost}
+    case Ends{display, cost}:
+      Replay{display <> shown, cost}
+    case Fails{msg, cost}:
+      Replay{msg <> shown, cost}
 
-def replay.go(lines: List<&2, String>, +p: IC.Prog, t: Turn, +shown: List<&2, String>) -> Replay:
+def replay.go(lines: List<&2, String>, +p: IC.Prog, +h: How, t: Turn, +shown: List<&2, String>) -> Replay:
   match lines:
     case Nil{}:
       replay.end(t, shown)
     case Con{line, rest}:
       match t:
-        case Asks{net, display, st, spent}:
-          replay.go(rest, p, answer(p, net, line, st, spent), display <> shown)
+        case Asks{net, display, st, cost}:
+          replay.go(rest, p, h, answer(p, h, net, line, st, cost), display <> shown)
         case other:
           replay.end(other, shown)
 
-def replay(+p: IC.Prog, lines: List<&2, String>) -> Replay:
-  replay.go(lines, p, start(p), [])
+def replay(+p: IC.Prog, +h: How, lines: List<&2, String>) -> Replay:
+  replay.go(lines, p, h, start(p, h), [])

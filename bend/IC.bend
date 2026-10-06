@@ -52,11 +52,16 @@ def ite.run(s: Code, el: Code, er: Code, cap: Code) -> Code:
 # Agent kinds
 # -----------
 
+# An unbounded recursion's unrolls (--fast): its site's token, and how
+# many times its step was applied.
+type Unroll is Data:
+  Unroll{+tok: U32, +n: U32}
+
 # What a run rarely reads: the stuck values' messages (newest first,
 # numbered from 0) and how many there are, an internal error's message,
-# and the fuel the run was given.
+# the fuel the run was given, and the unrolls of each recursion site.
 type Cold is Data:
-  Cold{+msgs: List<&2, String>, +nmsg: U32, +emsg: String, +given: U32}
+  Cold{+msgs: List<&2, String>, +nmsg: U32, +emsg: String, +given: U32, +unrolls: List<&2, Unroll>}
 
 # What is not the agents: how many active pairs are stacked, the cold
 # part, the allocation state, the fuel left and an error. The record
@@ -221,9 +226,10 @@ type RSt is Type:
   RSeen{data: Bool, r: Net & NI, jobs: List<&2, RJ>, vals: List<&2, Co.V>}
 
 # What a run gives: the net back (for the next run), the result or the
-# error as Haskell shows an ICError, and the interactions spent.
+# error as Haskell shows an ICError, the interactions spent, and (--fast)
+# each recursion site's unrolls.
 type Run is Type:
-  Run{net: Net, out: RB, spent: U32}
+  Run{net: Net, out: RB, spent: U32, unrolls: List<&2, Unroll>}
 
 def root() -> U32:
   1
@@ -500,7 +506,7 @@ def c.label(c: Ctl) -> U32:
       label
 
 def cold.none(+given: U32) -> List<&2, Cold>:
-  [Cold{[], 0, "", given}]
+  [Cold{[], 0, "", given, []}]
 
 # The cold part.
 def c.cold(c: Ctl) -> Cold:
@@ -510,11 +516,11 @@ def c.cold(c: Ctl) -> Cold:
         case Con{x, rest}:
           x
         case Nil{}:
-          Cold{[], 0, "", 0}
+          Cold{[], 0, "", 0, []}
 
 def cold.nmsg(c: Cold) -> U32:
   match c:
-    case Cold{msgs, nmsg, emsg, given}:
+    case Cold{msgs, nmsg, emsg, given, unrolls}:
       nmsg
 
 def c.nmsg(c: Ctl) -> U32:
@@ -1168,13 +1174,51 @@ def fresh.label(net: Net) -> Net & U32:
 
 def cold.msg(c: Cold, m: String) -> List<&2, Cold>:
   match c:
-    case Cold{msgs, +nmsg, emsg, given}:
-      [Cold{m <> msgs, (nmsg + 1 : U32), emsg, given}]
+    case Cold{msgs, +nmsg, emsg, given, unrolls}:
+      [Cold{m <> msgs, (nmsg + 1 : U32), emsg, given, unrolls}]
 
 def cold.fail(c: Cold, m: String) -> List<&2, Cold>:
   match c:
-    case Cold{msgs, nmsg, emsg, given}:
-      [Cold{msgs, nmsg, m, given}]
+    case Cold{msgs, nmsg, emsg, given, unrolls}:
+      [Cold{msgs, nmsg, m, given, unrolls}]
+
+# k more unrolls of site tok.
+def unroll.add(us: List<&2, Unroll>, +tok: U32, +k: U32) -> List<&2, Unroll>:
+  match us:
+    case Nil{}:
+      [Unroll{tok, k}]
+    case Con{u, +rest}:
+      match u:
+        case Unroll{+t, +n}:
+          Bool.pick(List<&2, Unroll>, U32.is_eq(t, tok), Unroll{t, (n + k : U32)} <> rest, Unroll{t, n} <> unroll.add(rest, tok, k))
+
+def cold.unroll(c: Cold, +tok: U32) -> List<&2, Cold>:
+  match c:
+    case Cold{msgs, nmsg, emsg, given, unrolls}:
+      [Cold{msgs, nmsg, emsg, given, unroll.add(unrolls, tok, 1)}]
+
+def c.unroll(c: Ctl, +tok: U32) -> Ctl:
+  match c:
+    case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
+      match cold:
+        case Con{x, rest}:
+          Ctl{sp, cold.unroll(x, tok), bump, free, label, fuel, err, cap}
+        case Nil{}:
+          Ctl{sp, [], bump, free, label, fuel, err, cap}
+
+def unrolled.if(limit: Bool, net: Net, +fi: U32) -> Net:
+  match limit:
+    case True{}:
+      match net:
+        case Net{mem, tpl, ctl}:
+          Net{mem, tpl, c.unroll(ctl, Co.limit.tok(fi))}
+    case False{}:
+      net
+
+# A closure's code applied: when it is an unbounded recursion's step
+# (--fast), one more unroll of its site.
+def unrolled(net: Net, +fi: U32) -> Net:
+  unrolled.if(Co.is.limit(fi), net, fi)
 
 def c.add.msg(c: Ctl, m: String) -> Ctl:
   match c:
@@ -1710,7 +1754,7 @@ def apply.rule(r: Rule, net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
     case RSetEnvNonPair{}:
       r.setenv.nonpair(net, n, i, m, j)
     case RApplyRef{}:
-      instantiate(del2(spend(net), n, m), ni.a(j), ni.p1(i), ni.p2(i))
+      instantiate(unrolled(del2(spend(net), n, m), ni.b(j)), ni.a(j), ni.p1(i), ni.p2(i))
     case RAwaitGate{}:
       r.await(net, n, i, m, scrut())
     case RAwaitAbort{}:
@@ -2353,7 +2397,7 @@ def ser.nodes(n: Nat, +id: U32, s: Ser) -> M(Ser):
 
 def given.less(c: Cold, +fuel: U32) -> U32:
   match c:
-    case Cold{msgs, nmsg, emsg, given}:
+    case Cold{msgs, nmsg, emsg, given, unrolls}:
       (given - fuel : U32)
 
 # The interactions spent: the fuel given less the fuel left.
@@ -2362,7 +2406,7 @@ def c.spent(+c: Ctl) -> U32:
 
 def cold.emsg(c: Cold) -> String:
   match c:
-    case Cold{msgs, nmsg, emsg, given}:
+    case Cold{msgs, nmsg, emsg, given, unrolls}:
       emsg
 
 def c.emsg(c: Ctl) -> String:
@@ -2370,7 +2414,7 @@ def c.emsg(c: Ctl) -> String:
 
 def cold.msgs(c: Cold) -> List<&2, String>:
   match c:
-    case Cold{msgs, nmsg, emsg, given}:
+    case Cold{msgs, nmsg, emsg, given, unrolls}:
       msgs
 
 def c.msgs(c: Ctl) -> List<&2, String>:
@@ -2701,23 +2745,31 @@ def c.stop(c: Ctl) -> U32:
     case Ctl{sp, cold, bump, free, label, fuel, err, cap}:
       err
 
-def finish.read(+spent: U32, r: Net & RB) -> Run:
+def cold.unrolls(c: Cold) -> List<&2, Unroll>:
+  match c:
+    case Cold{msgs, nmsg, emsg, given, unrolls}:
+      unrolls
+
+def c.unrolls(c: Ctl) -> List<&2, Unroll>:
+  cold.unrolls(c.cold(c))
+
+def finish.read(+spent: U32, us: List<&2, Unroll>, r: Net & RB) -> Run:
   (net, out) = r
-  Run{net, out, spent}
+  Run{net, out, spent, us}
 
 # How the run ended: every pair fired (ok), the fuel ran out (out), or an
 # internal error.
 def finish.err(ok: Bool, out: Bool, +bodies: Map<&2, Co.V>, +root: U32, +c: Ctl, net: Net) -> Run:
   match ok:
     case True{}:
-      finish.read(c.spent(c), readback(U32.to_nat(4294967295), bodies,
+      finish.read(c.spent(c), c.unrolls(c), readback(U32.to_nat(4294967295), bodies,
         RLoop{net, [RVisit{(root * 4 : U32), False{}}], []}))
     case False{}:
       match out:
         case True{}:
-          Run{net, RBErr{FuelExhausted{c.spent(c)}}, c.spent(c)}
+          Run{net, RBErr{FuelExhausted{c.spent(c)}}, c.spent(c), c.unrolls(c)}
         case False{}:
-          Run{net, RBErr{Internal{c.emsg(c)}}, c.spent(c)}
+          Run{net, RBErr{Internal{c.emsg(c)}}, c.spent(c), c.unrolls(c)}
 
 def finish.ctl(+bodies: Map<&2, Co.V>, +p: U32, r: Net & Ctl) -> Run:
   (net, +c) = r

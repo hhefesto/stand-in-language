@@ -1,0 +1,31 @@
+status 0
+--- stdout
+static report: what the compiler knows without running the program
+
+iterations: not inferred, because this program was not sized.
+  Nothing here says it terminates. Compile it without --fast for that.
+
+recursion nesting (structural, approximate):
+  triple         function             levels
+  Prelude:11:17  Prelude.d2c          0, 1
+  Prelude:44:32  Prelude.foldr.fixed  0, 1
+
+maximum nesting depth: 2
+
+bindings used below the level they were bound at:
+  Prelude.d2c.b             !  (1 level below its binding)
+  Prelude.d2c.f             !  (1 level below its binding)
+  Prelude.dMinus.a          !  (1 level below its binding)
+  Prelude.foldr.f           !  (1 level below its binding)
+  simpleplus.main.inString  !  (1 level below its binding)
+  simpleplus.main.input     !  (1 level below its binding)
+  simpleplus.main.r         !  (1 level below its binding)
+  simpleplus.main.x         !  (1 level below its binding)
+  simpleplus.main.y         !  (1 level below its binding)
+
+A site at level d has its test, recursion and last one level deeper.
+Several levels for one triple mean it is reached from several places.
+Levels are structural: a parameter applied as a function whose shape is
+unknown counts as level 0, so a level can be reported too shallow. They
+are not bounds, and not a termination argument -- the counts are.
+--- stderr

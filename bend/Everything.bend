@@ -23,6 +23,7 @@ import ./IC.bend as IC
 import ./Session.bend as Session
 import ./Levels.bend as Levels
 import ./Certificate.bend as Certificate
+import ./Meter.bend as Meter
 import ./Main.bend as Main
 
 # Every module of the port, so that `bend bend/Everything.bend` checks them all

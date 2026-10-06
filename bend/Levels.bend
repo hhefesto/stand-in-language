@@ -760,3 +760,60 @@ def info.main(+mods: List<&2, Rs.Mod>, +m: String, main: Maybe<&2, S.Expanded()>
 # main (levelsInfo).
 def info(+mods: List<&2, Rs.Mod>, +m: String) -> Result<&2, &2, String, Info>:
   info.main(mods, m, entry(mods, m))
+
+# Owners
+# ------
+
+def items.of(mods: List<&2, Rs.Mod>, +file: String) -> List<&2, S.EItem>:
+  match mods:
+    case Nil{}:
+      []
+    case Con{md, rest}:
+      match md:
+        case Rs.Mod{+m, items}:
+          Bool.pick(List<&2, S.EItem>, String.eq(m, file), items, items.of(rest, file))
+
+def starts.by(m: Maybe<&2, L.Pos>, +off: U32) -> Bool:
+  match m:
+    case Some{p}:
+      match p:
+        case L.Pos{line, col, o}:
+          U32.is_le(o, off)
+    case None{}:
+      False{}
+
+def written.by(l: L.Loc, +off: U32) -> Bool:
+  starts.by(L.start(l), off)
+
+def owner.pick(yes: Bool, +m: String, +x: String, best: String) -> String:
+  match yes:
+    case True{}:
+      m ++ "." ++ x
+    case False{}:
+      best
+
+def owner.in(items: List<&2, S.EItem>, +m: String, +off: U32, best: String) -> String:
+  match items:
+    case Nil{}:
+      best
+    case Con{item, rest}:
+      match item:
+        case S.EBind{name, val}:
+          owner.in(rest, m, off, owner.pick(written.by(L.Name.loc(name), off), m, L.Name.text(name), best))
+        case S.EImport{imp}:
+          owner.in(rest, m, off, best)
+
+# The top-level definition a source position is in, as "Module.def"
+# (ownerMap), or "?": in the position's module, the binding written last
+# before it, since definitions do not overlap. A generated location is its
+# parent's.
+def owner(+mods: List<&2, Rs.Mod>, l: L.Loc) -> String:
+  match l:
+    case L.Src{+file, start, stop}:
+      match start:
+        case L.Pos{line, col, +off}:
+          owner.in(items.of(mods, file), file, off, "?")
+    case L.GenIn{reason, parent}:
+      owner(mods, parent)
+    case _:
+      "?"
