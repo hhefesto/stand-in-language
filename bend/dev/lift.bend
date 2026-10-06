@@ -42,7 +42,7 @@ def defers(t: T.C) -> U32:
       defers(x)
     case T.CRight{loc, x}:
       defers(x)
-    case T.CCheck{loc, cloc, tc, c}:
+    case T.CCheck{loc, cloc, site, tc, c}:
       (defers(tc) + defers(c) : U32)
     case _:
       0

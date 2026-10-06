@@ -17,7 +17,7 @@ def x.show(+fuel: Nat, x: E.X) -> String:
           "(" ++ x.show(f, a) ++ "," ++ x.show(f, b) ++ ")"
         case E.XDefer{fi, b}:
           "<closure>"
-        case E.XAborted{m}:
+        case E.XAborted{at, m}:
           "ABORTED " ++ x.show(f, m)
         case _:
           "?"
