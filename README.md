@@ -62,18 +62,21 @@ The Bend `telomare` does the same work as haskell-final's `telomare FILE.tel
 net, reducing to the same interaction counts and printing the same output. It
 does it in a fraction of the time. Wall-clock times for a whole run, from
 reading the program to the session's end, both printing identical output (an
-AMD Ryzen 7 3700X, 8 cores and 16 threads):
+Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 
 | Program | haskell-final `--ic` | Bend | Speedup |
 |---|---:|---:|---:|
-| `tc_ultra_minimal.tel` | 0.07 s | 0.02 s | 3× |
-| `simpleplus.tel`, input `3 4` | 10.9 s | 1.2 s | 9× |
-| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 81.0 s | 7.9 s | 10× |
-| a CaseTests program (integer cases) | 38.2 s | 1.6 s | 23× |
-| a CaseTests program (property shapes) | 206.0 s | 4.9 s | 42× |
-| UDTTests' natural arithmetic | 13.9 s | 1.3 s | 10× |
-| NatUDTTests' `Nat` | 61.1 s | 3.3 s | 19× |
-| the Prelude's `Rational` | 30.6 s | 2.4 s | 13× |
+| `tc_ultra_minimal.tel` | 0.06 s | 0.02 s | 3× |
+| `simpleplus.tel`, input `3 4` | 9.6 s | 0.9 s | 10× |
+| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 6.3 s | 12× |
+| a CaseTests program (integer cases) | 36.4 s | 1.4 s | 26× |
+| a CaseTests program (property shapes) | 289.9 s | 4.9 s | 59× |
+| UDTTests' natural arithmetic | 16.3 s | 1.2 s | 13× |
+| NatUDTTests' `Nat` | 61.8 s | 4.1 s | 15× |
+| the Prelude's `Rational` | 31.3 s | 2.5 s | 12× |
+
+haskell-final ran the property-shapes program with its heap capped at 8 GB
+(`GHCRTS=-M8G`); uncapped, it ran this machine low on memory.
 
 Most of the difference is in EAL. The Bend analysis keeps its state in flat
 arrays of words, as the runtime keeps its net, instead of maps in a state
@@ -82,7 +85,7 @@ also skips steps that the Haskell repeats with no effect: collapsing a pair
 that is already data, and looking again at an apply site whose code has not
 changed. Every result is identical, and the capture layouts are byte for
 byte the same. The interaction net runs the tic-tac-toe test game's 15.2
-million interactions in about 3.2 s.
+million interactions in about 1.9 s.
 
 ### Design
 
