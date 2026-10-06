@@ -180,8 +180,14 @@ whole Bend run against haskell-final `--ic` gave:
 - natudt 3.3 vs 61 s
 - rat 2.4 vs 30.6 s
 
-The README's "Speed: Haskell to Bend" table holds these. Re-baseline on the
-new machine before any perf work (`bend/dev/bench.sh`).
+The README's "Speed: Haskell to Bend" table held these. After P1 it was
+re-measured on the new laptop (`0ccf9c3`, 2026-10-05/06; port first,
+haskell-final second, outputs identical): tc 0.02 vs 0.06 s, simpleplus
+0.93 vs 9.6 s, tictactoe 6.3 vs 73.7 s, casea 1.4 vs 36.4 s, ctprop 4.9
+vs 289.9 s, natarith 1.2 vs 16.3 s, natudt 4.1 vs 61.8 s, rat 2.5 vs
+31.3 s. haskell-final's ctprop peaked at 7.7 GB under `GHCRTS=-M8G`; run
+uncapped beside the session, it ran the laptop low on memory and was
+stopped.
 
 **A finding to keep:** `bend/dev/corpus/ratarith.tel` (Rational arithmetic)
 dies of fuel under both haskell-final `--ic` and the port:
@@ -209,9 +215,10 @@ expected to change that (section 4).
 - `--fast`: on the IC. This was not asked as a question: C4 ("one
   runtime") and an IC-only port leave no other choice.
 
-**Status (2026-10-05):**
+**Status (2026-10-06):**
 - P1 is done: `74c4cc5` (P1a) and `f0fb389` (P1b). Results are under P1.
-- P2 is next.
+- P2 is done: `c28a8c8`.
+- P3 is next.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -277,6 +284,8 @@ Every step:
   - `holds.at` always failing.
 
   Together they drive every failure path of the solver.
+- **The README's speed table** was re-measured after P1 (`0ccf9c3`;
+  section 3 has the numbers).
 
 The original analysis follows.
 
@@ -436,6 +445,13 @@ becomes an ordinary (undefined) name. Also:
   side channel through the IC (C1/C4)").
 
 Gate: the full checks; outputs are unchanged.
+
+**Done (2026-10-06), `c28a8c8`.** As planned; the gate and outputs are
+unchanged. `front.bend:53` stays, since `accepts` only parses. A program
+that uses `trace` now fails as any undefined name does,
+`RE (missing definition "trace" at line 1, column 19)`, exit 1, where
+haskell-final printed its argument (section 7). The `parsedump` change is
+in the dev fixup; that tool was already stale.
 
 ### P3. Certify the term that runs (DESIGN §3 [open], §11.4)
 
@@ -1297,6 +1313,9 @@ The alignment steps that were done:
 - `--ic --certificate` (haskell-final's IC space certificate) is refused,
   exit 2. `--certificate` alone gives the static report.
 - `--draw-net`, the REPL and the LSP are not ported.
+- `trace` is not a builtin (P2): a program using it fails with "missing
+  definition", where haskell-final treated it as the identity. No program
+  in the repo or the corpus uses it.
 - P4–P7 will add their lines here: counts, the fuel text, the
   certificate's checks section.
 
@@ -1415,6 +1434,8 @@ The patch is not applied to the flake.
   `--ic`, and compares their outputs. `NOHS=1` times the port only.
 - It runs the three golden programs and the corpus. The default set is the
   README table's programs.
+- On this 16 GB laptop, cap the oracle's heap: `GHCRTS=-M8G` (ctprop peaks
+  at 7.7 GB; the rest stay under 1.2 GB). Run nothing else heavy beside it.
 
 **`bend/dev/corpus/`:** 15 programs beyond the goldens, with
 haskell-final's outputs. Run them from that directory: `Prelude.tel` is a
