@@ -54,7 +54,7 @@ let
     "*.fast"
     "*.fast-*"
     "*.compile"
-    "*.telc"
+    "*.telc-run"
     "*.telc-certificate"
   ];
 
