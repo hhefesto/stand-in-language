@@ -338,7 +338,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       String.eq(uses(p(lft(env()), defer(90, p(env(), env())))), "[L] 1 UnknownLoc;"),
       String.eq(contraction(p(lft(env()), defer(90, p(env(), env())))), "none"),
       String.eq(uses(lft(p(env(), rgt(env())))), "[] 1 UnknownLoc;[R] 1 UnknownLoc;"),
-      String.eq(uses(lft(T.CCheck{l(), l(), p(env(), env()), T.CEnv{Lc.Gen{"value occurrence"}}})),
+      String.eq(uses(lft(T.CCheck{l(), l(), 0, p(env(), env()), T.CEnv{Lc.Gen{"value occurrence"}}})),
         "[L] 1 GeneratedLoc \"value occurrence\" Nothing;"),
       String.eq(uses(p(rgt(T.CUnsized{Lc.Gen{"first hole"}, 1}), rgt(T.CEnv{Lc.Gen{"second env"}}))),
         "[R] 2 GeneratedLoc \"first hole\" Nothing;"),

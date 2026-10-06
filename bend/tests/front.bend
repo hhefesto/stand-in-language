@@ -206,7 +206,7 @@ def walk(+fuel: Nat, t: T.C, acc: List<&2, Site>) -> List<&2, Site>:
           walk(f, x, acc)
         case T.CRight{a, x}:
           walk(f, x, acc)
-        case T.CCheck{a, c, x, y}:
+        case T.CCheck{a, c, s, x, y}:
           walk(f, y, walk(f, x, acc))
         case _:
           acc

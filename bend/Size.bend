@@ -225,7 +225,8 @@ def data.eq(a: E.X, b: E.X) -> Bool:
       False{}
 
 # The same outcome at the top (ShallowEq1): a superposition of two equal
-# outcomes is just the outcome.
+# outcomes is just the outcome. Aborts are equal only from the same site,
+# so merging keeps every site.
 def shallow.eq(a: E.X, b: E.X) -> Bool:
   match a:
     case E.XZero{}:
@@ -240,16 +241,16 @@ def shallow.eq(a: E.X, b: E.X) -> Bool:
           U32.is_eq(fa, fb)
         case _:
           False{}
-    case E.XAborted{ma}:
+    case E.XAborted{sa, ma}:
       match b:
-        case E.XAborted{mb}:
-          data.eq(ma, mb)
+        case E.XAborted{sb, mb}:
+          E.site.eq(sa, sb) && data.eq(ma, mb)
         case _:
           False{}
-    case E.XAbort{}:
+    case E.XAbort{sa}:
       match b:
-        case E.XAbort{}:
-          True{}
+        case E.XAbort{sb}:
+          E.site.eq(sa, sb)
         case _:
           False{}
     case _:
@@ -304,8 +305,8 @@ def gate.result(v: E.X) -> GR:
       GR{True{}, False{}, None{}}
     case E.XPair{a, b}:
       GR{False{}, True{}, None{}}
-    case E.XAborted{m}:
-      GR{False{}, False{}, Some{E.XAborted{m}}}
+    case E.XAborted{at, m}:
+      GR{False{}, False{}, Some{E.XAborted{at, m}}}
     case E.XVar{p}:
       GR{True{}, True{}, None{}}
     case E.XEither{+n, a, b}:
@@ -396,7 +397,7 @@ def filter.side(n: Maybe<&2, String>, sel: Bool, +left: Bool, e: E.X) -> E.X:
 
 def is.unsizeable(x: E.X) -> Bool:
   match x:
-    case E.XAborted{E.XPair{E.XPair{E.XPair{E.XPair{E.XZero{}, E.XZero{}}, E.XZero{}}, E.XZero{}}, t}}:
+    case E.XAborted{at, E.XPair{E.XPair{E.XPair{E.XPair{E.XZero{}, E.XZero{}}, E.XZero{}}, E.XZero{}}, t}}:
       True{}
     case _:
       False{}
@@ -413,7 +414,7 @@ def test.pick(n: Maybe<&2, String>, a: Bool, b: Bool, +na: E.X, +nb: E.X) -> E.X
 def test.var(ub: Bool, +zeros: Set(), +tok: U32, +p: String) -> E.X:
   match ub:
     case True{}:
-      E.XAborted{E.abort.unsizeable(tok)}
+      E.XAborted{E.AtRecursion{tok}, E.abort.unsizeable(tok)}
     case False{}:
       res(zeros, p)
 
@@ -451,7 +452,7 @@ def step.next(+tok: U32, +n: U32, v: E.X) -> E.X:
 def step.over(over: Bool, +tok: U32, +n: U32, v: E.X) -> E.X:
   match over:
     case True{}:
-      E.XAborted{E.abort.recursion(tok)}
+      E.XAborted{E.AtRecursion{tok}, E.abort.recursion(tok)}
     case False{}:
       step.next(tok, n, v)
 
@@ -498,8 +499,8 @@ def gate.on(+cfg: Cfg, e: E.X) -> E.X:
       E.do.left()
     case E.XPair{a, b}:
       E.do.right()
-    case E.XAborted{m}:
-      E.XAborted{m}
+    case E.XAborted{at, m}:
+      E.XAborted{at, m}
     case E.XAny{}:
       gate.any(mode.of(cfg))
     case E.XVar{p}:
@@ -511,25 +512,26 @@ def gate.on(+cfg: Cfg, e: E.X) -> E.X:
     case _:
       E.XError{"sizeTermM unhandled gate"}
 
-def abort.var(m: Mode) -> E.X:
+def abort.var(m: Mode, at: E.Site) -> E.X:
   match m:
     case MSize{}:
-      E.XAborted{E.abort.any()}
+      E.XAborted{at, E.abort.any()}
     case _:
       E.XError{"unexpected abort on input in a check"}
 
-def abort.on(+cfg: Cfg, e: E.X) -> E.X:
+# An abort from site at, applied to e.
+def abort.on(+cfg: Cfg, +at: E.Site, e: E.X) -> E.X:
   match e:
-    case E.XAborted{m}:
-      E.XAborted{m}
+    case E.XAborted{at2, m}:
+      E.XAborted{at2, m}
     case E.XZero{}:
       E.XDefer{Co.abort.ind(), E.XEnv{}}
     case E.XPair{a, b}:
-      E.XAborted{trunc(E.XPair{a, b})}
+      E.XAborted{at, trunc(E.XPair{a, b})}
     case E.XVar{p}:
-      abort.var(mode.of(cfg))
+      abort.var(mode.of(cfg), at)
     case E.XBarrier{x}:
-      E.XBarrier{E.fill(E.XAbort{}, x)}
+      E.XBarrier{E.fill(E.XAbort{at}, x)}
     case _:
       E.XError{"sizeTermM unhandled abort"}
 
@@ -562,8 +564,8 @@ def strip(x: E.X) -> E.X:
       E.XRights{n, strip(a)}
     case E.XEither{n, a, b}:
       E.XEither{n, strip(a), strip(b)}
-    case E.XAborted{m}:
-      E.XAborted{strip(m)}
+    case E.XAborted{at, m}:
+      E.XAborted{at, strip(m)}
     case other:
       other
 
@@ -657,7 +659,7 @@ def extract(+fuel: Nat, x: E.X, +expected: Maybe<&2, Bool>) -> Maybe<&2, IRX>:
           irx.pair(expected)
         case E.XVar{p}:
           irx.var(expected, p)
-        case E.XSetEnv{E.XPair{E.XAbort{}, i}}:
+        case E.XSetEnv{E.XPair{E.XAbort{at}, i}}:
           extract(f, i, Some{False{}})
         case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, s}}, E.XPair{l, r}}}:
           +nl = extract(f, l, expected)
@@ -675,9 +677,10 @@ def irx.result(m: Maybe<&2, IRX>, +c: E.X) -> R:
     case None{}:
       ret(c)
 
-# The check applied to its value, over the symbolic input (performTC).
-def perform.tc(tc: E.X, c: E.X) -> E.X:
-  E.fill(E.XAbort{}, E.app(tc, c))
+# Check site's test applied to its value, over the symbolic input
+# (performTC).
+def perform.tc(+site: U32, tc: E.X, c: E.X) -> E.X:
+  E.fill(E.XAbort{E.AtCheck{site}}, E.app(tc, c))
 
 # The evaluator
 # -------------
@@ -718,11 +721,11 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
               plus(rx, eval(f, cfg, JStep{E.XStep{tok, n, r.v(rx)}}))
             case E.XStage{sr, x}:
               staged(sr, eval(f, cfg, JEval{x, env}))
-            case E.XCheck{tc, c}:
+            case E.XCheck{+site, tc, c}:
               +rtc = eval(f, cfg, JEval{tc, env})
               +rc = eval(f, cfg, JEval{c, env})
               plus(rtc, plus(rc, irx.result(
-                extract(fuel(), strip(r.v(eval(f, cfg.check(cfg), JEval{perform.tc(r.v(rtc), r.v(rc)), E.XZero{}}))), None{}),
+                extract(fuel(), strip(r.v(eval(f, cfg.check(cfg), JEval{perform.tc(site, r.v(rtc), r.v(rc)), E.XZero{}}))), None{}),
                 r.v(rc))))
             case E.XEither{n, a, b}:
               merge2(n, eval(f, cfg, JEval{a, env}), eval(f, cfg, JEval{b, env}))
@@ -747,15 +750,15 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                       eval(f, cfg, JEval{d, e})
                     case E.XGate{}:
                       ret(gate.on(cfg, e))
-                    case E.XAborted{m}:
-                      ret(E.XAborted{m})
-                    case E.XAbort{}:
+                    case E.XAborted{at, m}:
+                      ret(E.XAborted{at, m})
+                    case E.XAbort{+at}:
                       match e:
                         case E.XEither{n, a, b}:
-                          merge2(n, eval(f, cfg, JStep{E.fill(E.XAbort{}, a)}),
-                                    eval(f, cfg, JStep{E.fill(E.XAbort{}, b)}))
+                          merge2(n, eval(f, cfg, JStep{E.fill(E.XAbort{at}, a)}),
+                                    eval(f, cfg, JStep{E.fill(E.XAbort{at}, b)}))
                         case other:
-                          ret(abort.on(cfg, other))
+                          ret(abort.on(cfg, at, other))
                     case E.XAny{}:
                       ret(any.on(mode.of(cfg)))
                     case E.XEither{+n, +sca, +scb}:
@@ -765,8 +768,8 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                       ret(E.XBarrier{E.fill(c2, e)})
                     case _:
                       bad("sizeTermM unhandled application")
-                case E.XAborted{m}:
-                  ret(E.XAborted{m})
+                case E.XAborted{at, m}:
+                  ret(E.XAborted{at, m})
                 case E.XAny{}:
                   ret(any.on(mode.of(cfg)))
                 case E.XEither{n, a, b}:
@@ -781,8 +784,8 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                   ret(E.XZero{})
                 case E.XPair{a, b}:
                   ret(a)
-                case E.XAborted{m}:
-                  ret(E.XAborted{m})
+                case E.XAborted{at, m}:
+                  ret(E.XAborted{at, m})
                 case E.XVar{p}:
                   ret(cfg.res(cfg, p ++ "L"))
                 case E.XAny{}:
@@ -801,8 +804,8 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                   ret(E.XZero{})
                 case E.XPair{a, b}:
                   ret(b)
-                case E.XAborted{m}:
-                  ret(E.XAborted{m})
+                case E.XAborted{at, m}:
+                  ret(E.XAborted{at, m})
                 case E.XVar{p}:
                   ret(cfg.res(cfg, p ++ "R"))
                 case E.XAny{}:
@@ -844,8 +847,8 @@ def convert.is(x: E.X) -> E.X:
       E.XLeft{convert.is(a)}
     case E.XRight{a}:
       E.XRight{convert.is(a)}
-    case E.XCheck{a, b}:
-      E.XCheck{convert.is(a), convert.is(b)}
+    case E.XCheck{s, a, b}:
+      E.XCheck{s, convert.is(a), convert.is(b)}
     case other:
       other
 
@@ -865,8 +868,8 @@ def naked.envs(x: E.X) -> E.X:
       E.XRight{naked.envs(a)}
     case E.XStub{tok, a}:
       E.XStub{tok, naked.envs(a)}
-    case E.XCheck{a, b}:
-      E.XCheck{naked.envs(a), naked.envs(b)}
+    case E.XCheck{s, a, b}:
+      E.XCheck{s, naked.envs(a), naked.envs(b)}
     case other:
       other
 
@@ -945,7 +948,7 @@ def fail.or(a: Maybe<&2, SizeFail>, b: Maybe<&2, SizeFail>) -> Maybe<&2, SizeFai
 # Defer holds none.
 def fold.aborted(v: E.X) -> Maybe<&2, SizeFail>:
   match v:
-    case E.XAborted{m}:
+    case E.XAborted{at, m}:
       fail.of.abort(m)
     case E.XError{msg}:
       Some{Internal{msg}}
@@ -1085,7 +1088,7 @@ def site.loc(t: T.C, +tok: U32) -> Maybe<&2, L.Loc>:
       site.loc(x, tok)
     case T.CRight{a, x}:
       site.loc(x, tok)
-    case T.CCheck{a, c, x, y}:
+    case T.CCheck{a, c, s, x, y}:
       Maybe.or(&2, L.Loc, site.loc(x, tok), site.loc(y, tok))
     case _:
       None{}

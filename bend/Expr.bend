@@ -13,6 +13,38 @@ import ./Core.bend as Co
 # left and right, where Haskell numbers positions 2n+1 and 2n+2: a
 # position descends from another when its path extends the other's.
 
+# Where an abort comes from: a refinement check, by its number; a recursion,
+# by token, run past its size (a sized chain's bottom, or sizing's own
+# aborts as it unrolls); or an Abort in the program as written (Split
+# builds none). Aborted values keep their site, so sizing can tell which
+# checks can reach the result.
+
+type Site is Data:
+  AtCheck{+n: U32}
+  AtRecursion{+tok: U32}
+  AtAbort{}
+
+def site.eq(a: Site, b: Site) -> Bool:
+  match a:
+    case AtCheck{+n}:
+      match b:
+        case AtCheck{+k}:
+          U32.is_eq(n, k)
+        case _:
+          False{}
+    case AtRecursion{+t}:
+      match b:
+        case AtRecursion{+u}:
+          U32.is_eq(t, u)
+        case _:
+          False{}
+    case AtAbort{}:
+      match b:
+        case AtAbort{}:
+          True{}
+        case _:
+          False{}
+
 # Sizing's per-token iteration counts (SizedRecursion), ascending by token.
 
 type TS is Data:
@@ -27,13 +59,13 @@ type X is Data:
   XGate{}
   XLeft{+x: X}
   XRight{+x: X}
-  XAbort{}
-  XAborted{+m: X}
+  XAbort{+at: Site}
+  XAborted{+at: Site, +m: X}
   XEither{+n: Maybe<&2, String>, +a: X, +b: X}
   XTest{+tok: U32, +x: X}
   XStub{+tok: U32, +x: X}
   XStage{+sr: List<&2, TS>, +x: X}
-  XCheck{+tc: X, +c: X}
+  XCheck{+site: U32, +tc: X, +c: X}
   XStep{+tok: U32, +n: U32, +x: X}
   XVar{+p: String}
   XAny{}
@@ -63,11 +95,11 @@ def of.term3(t: T.C) -> X:
     case T.CRight{loc, x}:
       XRight{of.term3(x)}
     case T.CAbort{loc}:
-      XAbort{}
+      XAbort{AtAbort{}}
     case T.CUnsized{loc, tok}:
       XStub{tok, XEnv{}}
-    case T.CCheck{loc, cloc, tc, c}:
-      XCheck{of.term3(tc), of.term3(c)}
+    case T.CCheck{loc, cloc, site, tc, c}:
+      XCheck{site, of.term3(tc), of.term3(c)}
 
 # Builders (Machine.hs)
 # ---------------------
@@ -145,7 +177,7 @@ def approx.body() -> X:
 def chain(n: Nat, +tok: U32) -> X:
   match n:
     case 0n:
-      XPair{XDefer{Co.step.w(), fill(fill(XAbort{}, XRight{XEnv{}}), XLeft{XEnv{}})},
+      XPair{XDefer{Co.step.w(), fill(fill(XAbort{AtRecursion{tok}}, XRight{XEnv{}}), XLeft{XEnv{}})},
             XPair{XZero{}, int.u32(tok)}}
     case 1n+k:
       XPair{XDefer{Co.step.rfb(), approx.body()}, XPair{chain(k, tok), XLeft{XEnv{}}}}
@@ -195,8 +227,8 @@ def unbounded(x: X) -> X:
 # that is not 0, else the value (removeRefinementWrappers).
 def remove.checks(t: X) -> X:
   match t:
-    case XCheck{tc, c}:
-      fill(XDefer{Co.refinement.tc(), fill(fill(XAbort{}, app(XLeft{XEnv{}}, XRight{XEnv{}})), XRight{XEnv{}})},
+    case XCheck{+site, tc, c}:
+      fill(XDefer{Co.refinement.tc(), fill(fill(XAbort{AtCheck{site}}, app(XLeft{XEnv{}}, XRight{XEnv{}})), XRight{XEnv{}})},
            XPair{remove.checks(tc), remove.checks(c)})
     case XPair{a, b}:
       XPair{remove.checks(a), remove.checks(b)}
@@ -319,9 +351,9 @@ def core(x: X) -> Result<&2, &2, String, Co.V>:
       core.left(core(a))
     case XRight{a}:
       core.right(core(a))
-    case XAbort{}:
+    case XAbort{at}:
       Done{Co.VAbort{}}
-    case XAborted{m}:
+    case XAborted{at, m}:
       core.aborted(core.data(m))
     case XEither{n, a, b}:
       Fail{"a superposition"}
@@ -331,7 +363,7 @@ def core(x: X) -> Result<&2, &2, String, Co.V>:
       Fail{"an unsized recursion"}
     case XStage{sr, a}:
       Fail{"a sizing stage"}
-    case XCheck{tc, c}:
+    case XCheck{site, tc, c}:
       Fail{"a refinement check"}
     case XStep{tok, n, a}:
       Fail{"an unrolling step"}

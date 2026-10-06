@@ -83,7 +83,7 @@ def locs(t: T.C, acc: Map<&2, L.Loc>) -> Map<&2, L.Loc>:
       locs(x, acc)
     case T.CRight{a, x}:
       locs(x, acc)
-    case T.CCheck{a, c, x, y}:
+    case T.CCheck{a, c, s, x, y}:
       locs(y, locs(x, acc))
     case _:
       acc

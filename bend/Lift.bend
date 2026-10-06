@@ -198,7 +198,7 @@ def lift(t: T.C) -> D(L):
       D.pure(L, LAbort{loc})
     case T.CUnsized{loc, tok}:
       D.pure(L, LUnsized{loc, tok})
-    case T.CCheck{loc, cloc, tc, c}:
+    case T.CCheck{loc, cloc, site, tc, c}:
       do D<L>:
         tc2 : L <- lift(tc)
         c2 : L <- lift(c)

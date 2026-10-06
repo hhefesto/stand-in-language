@@ -11,7 +11,9 @@ import ./Resolve.bend as Rs
 # allocated in the builder's order: a pair builds left then right, an
 # application its twiddle, then its argument, then its function, and a
 # lambda its body before its own index. Sizing reports tokens by that
-# order, so it must be exact.
+# order, so it must be exact. A third counter numbers the refinement
+# checks, each before its parts, so sizing can tell which check an abort
+# came from.
 
 # Pass 1: each open lambda's captured variables
 # ----------------------------------------------
@@ -35,7 +37,7 @@ type FR is Data:
   FR{+t: F, +fv: List<&2, Nat>}
 
 type BS is Data:
-  BS{+fi: U32, +tok: U32}
+  BS{+fi: U32, +tok: U32, +chk: U32}
 
 # The renaming of de Bruijn indices under an open lambda: 0 stays the
 # argument, n its captured variable's position.
@@ -182,8 +184,8 @@ def B.bind(-A: Data, -X: Data, m: B(A), f: A -> B(X)) -> B(X):
 
 def next.fi.go(s: BS) -> U32 & BS:
   match s:
-    case BS{+fi, tok}:
-      (fi, BS{(fi + 1 : U32), tok})
+    case BS{+fi, tok, chk}:
+      (fi, BS{(fi + 1 : U32), tok, chk})
 
 # The next function index (deferS).
 def next.fi() -> B(U32):
@@ -191,12 +193,21 @@ def next.fi() -> B(U32):
 
 def next.tok.go(s: BS) -> U32 & BS:
   match s:
-    case BS{fi, +tok}:
-      (tok, BS{fi, (tok + 1 : U32)})
+    case BS{fi, +tok, chk}:
+      (tok, BS{fi, (tok + 1 : U32), chk})
 
 # The next recursion token.
 def next.tok() -> B(U32):
   s => next.tok.go(s)
+
+def next.chk.go(s: BS) -> U32 & BS:
+  match s:
+    case BS{fi, tok, +chk}:
+      (chk, BS{fi, tok, (chk + 1 : U32)})
+
+# The next check's number.
+def next.chk() -> B(U32):
+  s => next.chk.go(s)
 
 def gs() -> L.Loc:
   L.Gen{"StuckBase Cofree instance"}
@@ -327,9 +338,10 @@ def build(+fuel: Nat, +ren: Ren, t: F) -> B(T.C):
             return T.CPair{a, T.CDefer{gs(), fi, b2}, T.CZero{gb()}}
         case FCheck{+a, x, y}:
           do B<T.C>:
+            site : U32 <- next.chk()
             x2 : T.C <- build(f, ren, x)
             y2 : T.C <- build(f, ren, y)
-            return T.CCheck{a, a, x2, y2}
+            return T.CCheck{a, a, site, x2, y2}
         case FIte{a, x, y, z}:
           do B<T.C>:
             x2 : T.C <- build(f, ren, x)
@@ -373,4 +385,4 @@ def first(r: T.C & BS) -> T.C:
 
 # splitExpr
 def split(t: T.Term2()) -> T.C:
-  first(build(fuel(), RTop{}, fr.t(frees(fuel(), t)))(BS{0, 0}))
+  first(build(fuel(), RTop{}, fr.t(frees(fuel(), t)))(BS{0, 0, 0}))

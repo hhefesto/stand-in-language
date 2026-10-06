@@ -40,8 +40,8 @@ def Term2() -> Data:
 
 # Term3 (Term3F over LocTag): zero, pairs, the environment, SetEnv, Defer
 # with its function index, Gate, Left, Right, Abort, a recursion
-# placeholder with its token, and a refinement check (its own Loc, the
-# check, the value).
+# placeholder with its token, and a refinement check (its own Loc, its
+# number, the check, the value).
 type C is Data:
   CZero{+loc: L.Loc}
   CPair{+loc: L.Loc, +a: C, +b: C}
@@ -53,7 +53,7 @@ type C is Data:
   CRight{+loc: L.Loc, +x: C}
   CAbort{+loc: L.Loc}
   CUnsized{+loc: L.Loc, +tok: U32}
-  CCheck{+loc: L.Loc, +cloc: L.Loc, +tc: C, +c: C}
+  CCheck{+loc: L.Loc, +cloc: L.Loc, +site: U32, +tc: C, +c: C}
 
 def T.loc(-V: Data, t: T<V>) -> L.Loc:
   match t:
@@ -106,7 +106,7 @@ def C.loc(t: C) -> L.Loc:
       loc
     case CUnsized{loc, tok}:
       loc
-    case CCheck{loc, cloc, tc, c}:
+    case CCheck{loc, cloc, site, tc, c}:
       loc
 
 # rewriteOuterTag
@@ -132,8 +132,8 @@ def C.retag(+l: L.Loc, t: C) -> C:
       CAbort{l}
     case CUnsized{loc, tok}:
       CUnsized{l, tok}
-    case CCheck{loc, cloc, tc, c}:
-      CCheck{l, cloc, tc, c}
+    case CCheck{loc, cloc, site, tc, c}:
+      CCheck{l, cloc, site, tc, c}
 
 # i2t: n as nested pairs, every node at one Loc.
 def ints.i2t(-V: Data, n: Nat, +loc: L.Loc) -> T<V>:
