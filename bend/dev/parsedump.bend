@@ -50,8 +50,6 @@ def pr(+fuel: Nat, n: N) -> String:
               "(left " ++ pr(f, NS{x}) ++ ")"
             case S.SRight{loc, x}:
               "(right " ++ pr(f, NS{x}) ++ ")"
-            case S.STrace{loc, x}:
-              "(trace " ++ pr(f, NS{x}) ++ ")"
             case S.SHash{loc, x}:
               "(# " ++ pr(f, NS{x}) ++ ")"
             case S.SChurch{loc, k}:
