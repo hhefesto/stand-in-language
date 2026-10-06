@@ -4,6 +4,11 @@ Written 2026-10-01, just before a move to a new computer. It replaces the
 2026-09-30 handoff, which mapped DESIGN.md onto the port. That work is done;
 its map is kept in full under "Done: DESIGN alignment" below.
 
+**Updated 2026-10-05 on the new computer** (an i7-1160G7 laptop, 4 cores
+and 8 threads, 15 GB). The user asked to go through P1–P7 in order, one
+local commit per step, stopping only at the decision points named below.
+Section 4 opens with where that stands.
+
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
 parity corpus, committed for the move too). Drop both commits ("Hand off
@@ -87,6 +92,18 @@ On the old machine it sat at
 `/tmp/claude-1000/-home-hhefesto-src-telomare/df6c1806-08ed-4cba-89db-b2556657b09e/scratchpad/oracle/bin/telomare`.
 That copy is gone after the move.
 
+**On the new machine (2026-10-02):**
+- The local tag `haskell-final` was missing and was recreated.
+- The worktree is `../telomare-haskell-final`.
+- The oracle was built with `--out-link` into the session scratchpad
+  (`roots/oracle`). The cachix substituters were not picked up (the user
+  is not a trusted user), so the Haskell dependencies built from source,
+  in about 15 minutes.
+- A remote `olimpo` (a LAN host) exists here.
+- `perf` comes from `nix build nixpkgs#perf --out-link …`. User-space
+  profiling works (`perf_event_paranoid` = 2).
+- A port build takes about 2 minutes and peaks at 2.2 GB.
+
 **What did not travel.** Copy these by hand if you want them:
 - Claude's memory directory (above), and `~/.claude/plans/`.
 - `notes.md` at the repo root. It is the private timesheet notes and is
@@ -141,7 +158,8 @@ Pushed: `origin/bend-port` (hhefesto/stand-in-language) was force-pushed at
 **Interaction counts that tests pin** (guided, as in haskell-final):
 - tc_ultra_minimal: 524
 - simpleplus `3 4`: 1,517,868
-- tictactoe test game (`1 9 2 8 3`): 15,168,230
+- tictactoe `1 4 2 5 3` (the `.ic-meter` golden's game): 15,168,230. The
+  test game (`1 9 2 8 3`) spends 15,208,930; no test pins it.
 
 **Templates after `7103aa53`** (one per exactly-equal body):
 - tc 34 → 17
@@ -191,9 +209,17 @@ expected to change that (section 4).
 - `--fast`: on the IC. This was not asked as a question: C4 ("one
   runtime") and an IC-only port leave no other choice.
 
-**Nothing in P1–P7 is implemented yet.** The user said to stop after the
-handoff. The order below runs from output-preserving work to work that
-changes outputs. P5 needs P4.
+**Status (2026-10-05):**
+- P1 is done: `74c4cc5` (P1a) and `f0fb389` (P1b). Results are under P1.
+- P2 is next.
+
+The order below runs from output-preserving work to work that changes
+outputs. P5 needs P4. The user wants the work to stop only at these
+decision points:
+- P3 step 3 (run is rejected somewhere);
+- P4b (a certificate count changes);
+- P7.2 (the report's format);
+- P7.5.
 
 Every step:
 - is gated on section 9's checks;
@@ -202,6 +228,57 @@ Every step:
 - is pushed only when the user asks.
 
 ### P1. Performance, output-preserving
+
+**Done (2026-10-05).** Both commits passed the gate (section 9) and
+`nix flake check`.
+
+- **`74c4cc5` P1a, option 2:** the stack lives in agent words 6–7, and
+  `Ctl.sp` is its depth. `push` grows the agents when `sp` reaches `cap`.
+  To make that possible, `grow` and `c.set.cap` moved up beside `copy`.
+  - tictactoe test-game session (`phases`, median of 5 with 20 s
+    cool-downs): base 2,646 ms; option 1 (a `Stk` type, one cell per pair)
+    2,469 ms, −7%; option 2 1,901 ms, −28%. Option 3 was not tried.
+  - Whole run: tictactoe test game 7.39 → 6.49 s; simpleplus 1.10 → 1.01 s.
+- **`f0fb389` P1b, candidate 1:** the solver keeps blame references, words
+  rather than `Blame`s:
+  - `ref.own(n) = n*2` names the state's blame n;
+  - `ref.eq(e, k) = e*16+k*2+1` names equation e's blame, derived for
+    reason k (`why.summand/all/sum/lone`, rendered by `why.text`), with
+    k = 0 for the blame as it stands;
+  - `qb` is gone;
+  - failures are `SvF` (`SfConflict`, `SfGaveUp`, `SfErr`), and
+    `solve.done` resolves them through `blame.ref` against `bl` and the
+    resolved equations `rs`.
+
+  Results:
+  - `ealtime tictactoe` (median of 5): certify main 808 → 673 ms,
+    verdicts 1,040 → 874 ms; sized verdicts 813 → 629 ms.
+  - Whole run: tictactoe 6.46 → 6.28 s; simpleplus 1.02 → 0.93 s.
+- **Candidate 2 was measured and dropped.** It used a nullary `NoBlame`
+  and `TpNone` for empty slots, and changed nothing measurable: the
+  atomic decrements come from real blames (their shared `loc`/`why`)
+  and from values read out of arrays, not from the none slots.
+- **Candidate 3 was not tried.** Per the profile after P1b, freeing each
+  body's `St` after its standalone verdict (`STANDALONE` → a spin →
+  `term_drop`) is 10.7% of `ealtime tictactoe`, and main's `St` 3.1%. What
+  is freed is the blames (their strings are built eagerly; `derived` and
+  the contraction blames concatenate), the sites (each with a shared
+  `Loc`), the tag lists and the equations. Reusing the arrays would not
+  avoid freeing their contents, so the next lead is lazy blame text
+  (store the parts, render on failure). Measure it first.
+- **How the failure texts were checked:** the eal tests compare only
+  failure kinds, and no real program fails inside the solver. So
+  `bodyerrs` was built over the old and the new EAL, each with the same
+  mutation, and the texts were compared over the three golden programs
+  and the corpus (54 identical per round). The mutations:
+  - `level.cap` = 1;
+  - `prop.c1`, `prop.c2`, `prop.c4` forced to fire;
+  - the solver's `level` capped at 0;
+  - `holds.at` always failing.
+
+  Together they drive every failure path of the solver.
+
+The original analysis follows.
 
 Re-baseline first: build the port and the oracle, then run
 `bend/dev/bench.sh` plus `ealtime tictactoe` and `icmeter tictactoe 1 9 2 8 3`.
@@ -1291,12 +1368,32 @@ and run it from the repo root: modules load as `M.tel` from the cwd.
 - `ealonly`: certification only.
 - `sha`, `shabench`: SHA-256.
 
+- `phases MODULE [LINE…]`: per-phase times (front, certify, size, layouts,
+  prepare, session). Fixed in the dev fixup after `74c4cc5`.
+
+**Profiling** (how P1 was measured):
+1. `bend bend/dev/ealtime.bend -o X.c` emits the C.
+2. Compile it with frame pointers. Use the clang from bend's wrapper
+   (`head $(which bend)` shows the store path):
+   `clang -std=c11 -O3 -g -fno-omit-frame-pointer X.c -lpthread -lm -o X`.
+3. `perf record -F 999 -g --call-graph fp -o D X tictactoe`.
+4. Report flat: `perf report -i D --no-children -g none --no-inline
+   --sort symbol --stdio`. Reports with call graphs are slow, so use
+   `-S term_drop -G` to see one symbol's callers.
+
+`perf annotate -s term_drop --no-source` shows where it spends: a
+`lock xadd` (a refcount decrement on a shared value) was 31% of it.
+
+**Timing on this laptop:**
+- Thermal throttling makes back-to-back runs drift by 30%.
+- Interleave the variants and `sleep 15`–`20` before each run.
+- Take medians of 5.
+
 **Stale** (they fail to check since the alignment round changed types;
 fix them when needed):
 
 | Tool | First error |
 |---|---|
-| `phases` (per-phase times: front, certify, size, layouts, prepare, session) | expected `../Core.V` |
 | `eal`, `ic1`, `meter` | "expected: a defined name"; `eal`'s `main.only` calls `EAL.main.of`, which no longer exists |
 | `ealphase` | expects `Result<…, EAL.St>` |
 | `expr` | "write `../Syntax.Surf<..>`" |
