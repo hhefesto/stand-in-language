@@ -224,7 +224,8 @@ expected to change that (section 4).
 - P4 is done: `2359df8`, with capture trimming (see P4).
 - P4b was measured and **skipped** (the user's decision, 2026-10-06):
   it changes certificates (data under P4b). Sizing keeps `Expr.ite`.
-- P5 is next.
+- P5 is done: `3fd770f` (`--fast` on the IC; see P5 for the design).
+- P6 is next.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -863,6 +864,52 @@ way `Syntax.Surf<P,C,N>` uses `Empty` witnesses.
 
 **README "Design":** `--fast` is an IC mode (C4); list its differences.
 
+**Done (2026-10-06), `3fd770f`.** The design differs from the plan above
+in one place, deliberately:
+- **No `VLimit`, no type parameter.** `V<U>` would have reached every
+  `Co.V` function and call site (generic Bend functions take their type
+  argument at each call). An unbounded recursion needs no new form: it is
+  a closure that carries its own code. `Expr.limit(tok)` is
+  `(A, (A, trb))`, where `A = Expr.limit.code(tok)`, with env
+  `(i, (a, trb))`, rebuilds `recur = (a, (a, trb))` and runs
+  `approx.body` on `(i, (recur, trb))`. Building `recur` unrolls nothing;
+  applying it unrolls one layer, and P4 keeps the recursion branch from
+  running unchosen. `Expr.unbounded` puts a limit at every `XStub`, and
+  `Expr.fast(run)` = `core(unbounded(remove.checks(of.term3(run))))`.
+  `IC.collect` is unchanged (no token map, no cyclic templates): `A` is an
+  ordinary Defer, one template shared by every site.
+- **Counting:** `A`'s function index is `Co.limit.ind(tok)` = −12 − tok.
+  The `RApplyRef` rule bumps the site's count in `Cold.unrolls` when the
+  applied reference's index is a limit's (`Co.is.limit`). `IC.Run` carries
+  the run's unrolls; `Session.Cost` adds them up over the session.
+- **Session:** `Ss.How` is `Sized{}` or `Fast{fuel}` (0: the most a U32
+  counts). `start`/`answer`/`replay` take it. Out of fuel, `--fast` stops
+  with haskell-final's text, "interactions" for "applications and
+  unrollings", exit 0.
+- **Main:** `--fast` and `--fuel N` parse; `--fast --ic`, `--fuel` without
+  `--fast`, and `--fuel` without a number are refused with exit 2.
+  `--fast --certificate` prints `Ct.report.unsized`, with no EAL on that
+  path. `--fast` runs certify, then `E.fast`, then the IC unguided.
+  `--fast --meter` prints `IC interactions: N`, then `Mt.unrolls`
+  (`bend/Meter.bend`: haskell-final's table and footer, with owners from
+  `Lv.owner`, the binding written last before the site in its module).
+- **Measured against haskell-final:** every display is identical
+  (simpleplus, tc, the tictactoe test game, `unbounded-input-recursion`
+  with `a`), and so is `--fast --certificate`. Every site's unroll count
+  is exactly half of haskell-final's: its `project` forced the lazy
+  `VRec` at each projection, and twice per application (twiddle reads the
+  closure's code and its env), so it built and counted two layers per
+  application. tictactoe test game: 3,931 unrolls across 14 sites (7,862
+  there), 3,494,356 interactions, 1.3 s (17.9 s there).
+- **Tests:** `bend/tests/fast.bend` (fast-agrees, fast-base-case,
+  fast-sites, fast-unsized, fast-fuel), registered in `nix/bend.nix`.
+- **Goldens:** `simpleplus.fast`, `simpleplus.fast-meter`,
+  `simpleplus.fast-certificate`, `simpleplus.fast-fuel`,
+  `tc_ultra_minimal.fast-meter`, `tictactoe.fast`,
+  `unbounded-input-recursion.fast`. `expected/` recorded with the oracle;
+  `port/` for the two meters and the fuel text. `goldenPatterns` gained
+  `*.fast`, `*.fast-*`.
+
 ### P6. `.telc` artifacts in haskell-final's version 4 (user's decision)
 
 The format and messages are in section 5.2.
@@ -1446,6 +1493,14 @@ The alignment steps that were done:
 - A program whose unchosen branch never ends now finishes (P4):
   `ratarith` gives haskell-final's reference evaluator's `1111`, where
   haskell-final `--ic` ran out of fuel.
+- `--fast` (P5) runs on the IC. Its fuel and meter are interactions; the
+  meter has no "function applications" or "gate selections" lines; each
+  unroll counts once, where haskell-final counted two per application
+  (`port/*.fast-meter`, `port/simpleplus.fast-fuel`). A stuck run reads as
+  the IC's runtime error, where haskell-final's Fast printed `runtime
+  error (stuck): …`. `--fast --ic` and `--fuel` without `--fast` are
+  refused with the port's usage errors (exit 2), where haskell-final's
+  optparse printed its own (exit 1).
 - `trace` is not a builtin (P2): a program using it fails with "missing
   definition", where haskell-final treated it as the identity. No program
   in the repo or the corpus uses it.
@@ -1455,8 +1510,7 @@ The alignment steps that were done:
   certification: HASH`, where haskell-final, on the inlined term, reported
   it in main (EALTests' second PINNED program). No golden or corpus
   program fails certification.
-- P5–P7 will add their lines here: the fuel text, the certificate's
-  checks section.
+- P7 will add its line here: the certificate's checks section.
 
 ## 8. Left open
 
