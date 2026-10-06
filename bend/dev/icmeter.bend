@@ -1,5 +1,6 @@
 import Base
 import ../Front.bend as Fr
+import ../Term.bend as T
 import ../Size.bend as Sz
 import ../Expr.bend as E
 import ../Session.bend as Ss
@@ -33,14 +34,12 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> 
         case Sz.Sized{counts, expr}:
           report(Ss.replay(Ss.prepared(expr), lines))
 
-def compiled(r: Result<&2, &2, String, Fr.Terms>, lines: List<&2, String>) -> IO(Unit):
+def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.print(e)
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, run}:
-          sized(Sz.size(65536, True{}, E.of.term3(run)), lines)
+    case Done{run}:
+      sized(Sz.size(65536, True{}, E.of.term3(run)), lines)
 
 def loaded(+entry: String, lines: List<&2, String>, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

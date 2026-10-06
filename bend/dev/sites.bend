@@ -97,17 +97,14 @@ def show(xs: List<&2, Site>) -> IO(Unit):
             IO.print("  " ++ loc ++ " (#" ++ U32.show(tok) ++ ")")
             show(rest)
 
-def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
+def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.print("ERROR:\n" ++ e)
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, +run}:
-          do IO<Unit>:
-            IO.print("cert nodes: " ++ Nat.show(count(U32.to_nat(4000000000), cert)))
-            IO.print("run nodes: " ++ Nat.show(count(U32.to_nat(4000000000), run)))
-            show(sort(walk(U32.to_nat(4000000000), run, []), []))
+    case Done{+run}:
+      do IO<Unit>:
+        IO.print("nodes: " ++ Nat.show(count(U32.to_nat(4000000000), run)))
+        show(sort(walk(U32.to_nat(4000000000), run, []), []))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

@@ -1,5 +1,6 @@
 import Base
 import ../Front.bend as Fr
+import ../Term.bend as T
 import ../Size.bend as Sz
 import ../Expr.bend as E
 import ../Lift.bend as Lf
@@ -74,16 +75,14 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
         case Sz.Sized{counts, expr}:
           run("sized", Lf.defer.lift(Lf.of.expr(expr)))
 
-def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
+def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.print("ERROR:\n" ++ e)
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, rn}:
-          do IO<Unit>:
-            run("cert", Lf.defer.lift(cert))
-            sized(Sz.size(65536, True{}, E.of.term3(rn)))
+    case Done{+t}:
+      do IO<Unit>:
+        run("term", Lf.defer.lift(t))
+        sized(Sz.size(65536, True{}, E.of.term3(t)))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

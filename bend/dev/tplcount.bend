@@ -2,6 +2,7 @@ import Base
 import ../Text.bend as Tx
 import ../Expr.bend as E
 import ../Front.bend as Fr
+import ../Term.bend as T
 import ../Size.bend as Sz
 import ../IC.bend as IC
 import ../Session.bend as Ss
@@ -25,14 +26,12 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
         case Sz.Sized{counts, expr}:
           count(Ss.prepared(expr))
 
-def compiled(r: Result<&2, &2, String, Fr.Terms>) -> String:
+def compiled(r: Result<&2, &2, String, T.C>) -> String:
   match r:
     case Fail{e}:
       e
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, run}:
-          sized(Sz.size(65536, True{}, E.of.term3(run)))
+    case Done{run}:
+      sized(Sz.size(65536, True{}, E.of.term3(run)))
 
 def loaded(r: Result<&1, &1, String, List<&2, Fr.Src>>, +m: String) -> String:
   match r:

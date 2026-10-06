@@ -23,14 +23,12 @@ def size.of(+t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
         case Sz.Sized{cs, expr}:
           IO.print("counts: " ++ counts(cs))
 
-def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
+def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.print("ERROR:\n" ++ e)
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, +run}:
-          size.of(run, Sz.size(65536, True{}, E.of.term3(run)))
+    case Done{+run}:
+      size.of(run, Sz.size(65536, True{}, E.of.term3(run)))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

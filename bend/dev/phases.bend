@@ -1,5 +1,6 @@
 import Base
 import ../Front.bend as Fr
+import ../Term.bend as T
 import ../Size.bend as Sz
 import ../Expr.bend as E
 import ../Core.bend as Co
@@ -48,23 +49,21 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>, +t2
         case Sz.Sized{counts, expr}:
           run(expr, lines, t2)
 
-def compiled(r: Result<&2, &2, String, Fr.Terms>, lines: List<&2, String>, +t0: Nat) -> IO(Unit):
+def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>, +t0: Nat) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.print(e)
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, run}:
-          do IO<Unit>:
-            +t1 : Nat <- IO.now()
-            IO.print("front " ++ ms(t0, t1))
-            +c : String = verdict(EAL.certify(Lf.defer.lift(cert)))
-            +t2 : Nat <- IO.now()
-            IO.print("certify " ++ ms(t1, t2) ++ ": " ++ c)
-            +z : Result<&2, &2, Sz.SizeFail, Sz.Sized> = Sz.size(65536, True{}, E.of.term3(run))
-            +t3 : Nat <- IO.now()
-            IO.print("size " ++ ms(t2, t3))
-            sized(z, lines, t3)
+    case Done{+run}:
+      do IO<Unit>:
+        +t1 : Nat <- IO.now()
+        IO.print("front " ++ ms(t0, t1))
+        +c : String = verdict(EAL.certify(Lf.defer.lift(run)))
+        +t2 : Nat <- IO.now()
+        IO.print("certify " ++ ms(t1, t2) ++ ": " ++ c)
+        +z : Result<&2, &2, Sz.SizeFail, Sz.Sized> = Sz.size(65536, True{}, E.of.term3(run))
+        +t3 : Nat <- IO.now()
+        IO.print("size " ++ ms(t2, t3))
+        sized(z, lines, t3)
 
 def loaded(+entry: String, lines: List<&2, String>, r: Result<&1, &1, String, List<&2, Fr.Src>>, +t0: Nat) -> IO(Unit):
   match r:

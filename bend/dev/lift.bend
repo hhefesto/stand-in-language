@@ -47,16 +47,14 @@ def defers(t: T.C) -> U32:
     case _:
       0
 
-def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
+def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.print("ERROR:\n" ++ e)
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, run}:
-          do IO<Unit>:
-            IO.print("defers " ++ U32.show(defers(cert)))
-            IO.print("cert\n" ++ dump(Lf.defer.lift(cert)))
+    case Done{+t}:
+      do IO<Unit>:
+        IO.print("defers " ++ U32.show(defers(t)))
+        IO.print("lifted\n" ++ dump(Lf.defer.lift(t)))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
