@@ -67,13 +67,13 @@ Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 | Program | haskell-final `--ic` | Bend | Speedup |
 |---|---:|---:|---:|
 | `tc_ultra_minimal.tel` | 0.06 s | 0.02 s | 3× |
-| `simpleplus.tel`, input `3 4` | 9.6 s | 0.9 s | 10× |
-| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 6.3 s | 12× |
-| a CaseTests program (integer cases) | 36.4 s | 1.4 s | 26× |
-| a CaseTests program (property shapes) | 289.9 s | 4.9 s | 59× |
-| UDTTests' natural arithmetic | 16.3 s | 1.2 s | 13× |
-| NatUDTTests' `Nat` | 61.8 s | 4.1 s | 15× |
-| the Prelude's `Rational` | 31.3 s | 2.5 s | 12× |
+| `simpleplus.tel`, input `3 4` | 9.6 s | 0.9 s | 11× |
+| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 3.6 s | 21× |
+| a CaseTests program (integer cases) | 36.4 s | 1.9 s | 20× |
+| a CaseTests program (property shapes) | 289.9 s | 5.0 s | 58× |
+| UDTTests' natural arithmetic | 16.3 s | 1.0 s | 16× |
+| NatUDTTests' `Nat` | 61.8 s | 3.0 s | 20× |
+| the Prelude's `Rational` | 31.3 s | 1.5 s | 21× |
 
 haskell-final ran the property-shapes program with its heap capped at 8 GB
 (`GHCRTS=-M8G`); uncapped, it ran this machine low on memory.
@@ -83,9 +83,11 @@ arrays of words, as the runtime keeps its net, instead of maps in a state
 monad. Its tags are small numbers instead of hashes compared as strings. It
 also skips steps that the Haskell repeats with no effect: collapsing a pair
 that is already data, and looking again at an apply site whose code has not
-changed. Every result is identical, and the capture layouts are byte for
-byte the same. The interaction net runs the tic-tac-toe test game's 15.2
-million interactions in about 1.9 s.
+changed. And it certifies the term that runs, where haskell-final built and
+certified a second one with every let binding inlined (3,054 bodies for
+tic-tac-toe, against 176). Every result is identical, and the capture
+layouts are byte for byte the same. The interaction net runs the
+tic-tac-toe test game's 15.2 million interactions in about 1.9 s.
 
 ### Design
 
