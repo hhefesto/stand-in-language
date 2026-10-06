@@ -226,7 +226,12 @@ expected to change that (section 4).
   it changes certificates (data under P4b). Sizing keeps `Expr.ite`.
 - P5 is done: `3fd770f` (`--fast` on the IC; see P5 for the design).
 - P6 is done: `db9c827` (`.telc` v4; see P6).
-- P7 is next; it stops at P7.2 (the report's format) and P7.5.
+- P7.1 is done: `f44a2bc` (check numbers; aborts keep their site).
+- P7.2 is done (see P7). It stopped as planned and the user decided
+  (2026-10-06): the report lists **every check** with its verdict, and
+  P7.3/P7.4 erase **only where sound**: in programs with no
+  input-validating check.
+- P7.3 is next, then P7.4; P7 stops at P7.5.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -1065,6 +1070,83 @@ The facts are in section 5.3. The plan follows DESIGN §10's three parts:
   runnable core, so C5 holds for it.
 - Counts drop: re-record the `port/` meters and the tests.
 
+**Done: P7.1 (2026-10-06), `f44a2bc`.**
+- Split numbers each check as it builds it (a third counter, `BS.chk`,
+  each check before its parts): `T.CCheck{loc, cloc, site, tc, c}`, and
+  `E.XCheck{site, tc, c}`.
+- `E.Site` is `AtCheck{n}` | `AtRecursion{tok}` | `AtAbort{}`:
+  - `XAbort{at}` and `XAborted{at, m}` carry it;
+  - a chain's bottom is `AtRecursion{tok}`, and so are sizing's own aborts
+    on a recursion (`step.over`, `test.var`);
+  - `abort.on` gives an aborted value its Abort's site, and one already
+    aborted keeps its own;
+  - `shallow.eq` merges two aborts only from the same site, so a
+    superposition keeps every site.
+- No output changed.
+
+**Done: P7.2 (2026-10-06).** The finding that shaped the user's decisions:
+- **The premise above was wrong.** Sizing's main run does not explore
+  every input. The limits pass learns, from each check, which input
+  positions must be 0 or pairs, and the main run runs on that restricted
+  input (`res`, `initial.input`). It assumes every input-restricting check
+  passes.
+- So "reaches the result" in the main run never sees input validation
+  fail. The first draft called simpleplus's `validInput` and tictactoe's
+  three refinements discharged, though `simpleplus.run-abort` shows
+  `invalid input` firing.
+- **The fix:** a check the limits pass learned a restriction from
+  *validates input*, and is left to run time. `R` gained `c`, the checks
+  its restrictions came from (`irx.result(site, …)`).
+- **Soundness:** where a check validates input, the main run explored only
+  input that passes it. So for any other check or bottom there, "never
+  fires" is proven only for valid input.
+  - The user chose to erase only where that gap is absent (2026-10-06).
+  - "Everywhere, documented" and "the session boundary first (P7.5(b))"
+    were the other options.
+- `Sz.Checks{validating, reaching, proven}` is in `Sized`:
+  - `reaching`: the checks whose aborted value is in the main run's
+    result, through pairs and superpositions;
+  - `proven`: no check validates input, and the result is data on every
+    path (no code a session would print).
+  - Every check that is neither validating nor reaching is discharged
+    exactly when `proven` holds.
+- **Granularity:** a site is a check as written. Every `abort` (in `case`,
+  UDT validators, pattern lambdas, Prelude) is a call to Prelude's one
+  `abort`, whose `x : (\y -> (1, str)) = 1` is one check
+  (`Prelude:111:23`). So a program with one reachable `case` abort keeps
+  every abort.
+  - On the corpus: discharged in 13 programs, left (reaches the result)
+    in `nonex`. `qual` has no check.
+  - The goldens: simpleplus 1 and tictactoe 3, all validating input;
+    `over-budget-recursion` 1, validating; tc none.
+- **The report** (the user's choice, "every check"), after the budget
+  line:
+  ```
+  refinement checks: 0 discharged statically, 3 left to run time:
+    tictactoe:68:30  at run time (validates input)
+  ```
+  - The verdicts are `discharged`, `at run time (validates input)`,
+    `(reaches the result)` and `(not proven for every input)`. The last
+    is a non-validating, non-reaching check in a program that is not
+    `proven`; no program in the repo has one.
+  - No checks reads `refinement checks: none`.
+  - `--fast --certificate`'s report is unchanged: nothing was sized.
+  - The `.telc` stores the report, so artifacts changed too.
+- **Tests:** a new `size-checks` group covers simpleplus, tictactoe, and a
+  `case` on a constant that matches (discharged) and one that doesn't
+  (reaches the result).
+- **Goldens recorded under `port/`:** `P.certificate` for the three
+  programs and `over-budget-recursion`, `P.compile` and
+  `P.telc-certificate`.
+- **Corpus:** the gate compares a certificate with its checks section
+  removed against `NAME.hs-certificate`, and the whole output against
+  `NAME.port-certificate` (dev fixup).
+
+**P7.3/P7.4 under the user's decision.** These apply only when
+`Checks.proven`; otherwise the program is left as it is. In particular,
+simpleplus and tictactoe keep their checks and bottoms, so their counts
+don't drop.
+
 **P7.5 Decision point, for the user (and Sam).** What remains are runtime
 checks. In the goldens that is input validation: simpleplus's `invalid
 input` and tictactoe's input refinements. The options:
@@ -1557,7 +1639,12 @@ The alignment steps that were done:
   certification: HASH`, where haskell-final, on the inlined term, reported
   it in main (EALTests' second PINNED program). No golden or corpus
   program fails certification.
-- P7 will add its line here: the certificate's checks section.
+- `--certificate` (and the report a `.telc` stores) has a section
+  haskell-final's lacks, after the budget line: `refinement checks: N
+  discharged statically, M left to run time:` and a row per check (P7.2;
+  `port/*.certificate`, `port/*.telc-certificate`, `port/*.compile`, and
+  the corpus's `NAME.port-certificate`). The rest of the report is
+  unchanged.
 
 ## 8. Left open
 
@@ -1697,7 +1784,9 @@ empty.
   `ratarith.hs-run`, the reference evaluator's), and `NAME.port-ic-meter`
   holds the port's whole output.
 - `NAME.hs-certificate`: haskell-final `--certificate` output. There are
-  14; `ratarith` has none. The port matched all 14 byte for byte.
+  14; `ratarith` has none. The port matched all 14 byte for byte until
+  P7.2. Since then they still match with the checks section removed, and
+  `NAME.port-certificate` holds the port's whole output.
 - To compare:
   ```sh
   cd bend/dev/corpus
