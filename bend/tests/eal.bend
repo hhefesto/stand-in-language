@@ -209,7 +209,7 @@ def after(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           main.outcome(Lf.of.expr(expr))
 
 # Its verdicts before and after sizing (compileUnitTest: no cap).
@@ -226,7 +226,7 @@ def gated.after(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
       False{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           +bs = bodies(Lf.defer.lift(Lf.of.expr(expr)))
           U32.is_eq(certified(bs), U32.from_nat(Map.size(&2, Lf.Body, bs)))
 
@@ -257,7 +257,7 @@ def layouts.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           layouts.text(EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
 
 # The digest of a program's capture layouts, sized as the command sizes it.

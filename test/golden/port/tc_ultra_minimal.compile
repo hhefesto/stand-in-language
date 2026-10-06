@@ -3,4 +3,4 @@ status 0
 --- stderr
 wrote tc_ultra_minimal.telc (881 nodes, sources a2a06b3bc4b3)
 --- files
-1484a28d8ae8df120c559a5812b767119ba3825bb1947eb94594cb31ed483a66 3351 tc_ultra_minimal.telc
+19119d93628304f7bc2f0a1efd32d590ee64c50c4e7ee56477317667953faa92 3376 tc_ultra_minimal.telc

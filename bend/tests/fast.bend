@@ -63,7 +63,7 @@ def sized.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) 
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           Ss.replay(Ss.prepared(expr), Ss.Sized{}, lines)
 
 def sized.compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:

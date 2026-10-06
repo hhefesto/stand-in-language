@@ -5,13 +5,21 @@ import ../Expr.bend as E
 import ../Term.bend as T
 import ../Text.bend as Tx
 
-# Sizing: every certificate golden's counts, and haskell-final's
-# SizingTests (an unbounded input is reported as such, an exhausted budget
-# as that, and the same program sizes under the full budget). One `ok NAME`
-# line per group (FAIL NAME when it breaks). Run from the source root.
+# Sizing: every certificate golden's counts, haskell-final's SizingTests
+# (an unbounded input is reported as such, an exhausted budget as that, and
+# the same program sizes under the full budget), and what sizing proves of
+# refinement checks. One `ok NAME` line per group (FAIL NAME when it
+# breaks). Run from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
+
+def all(bs: List<&2, Bool>) -> Bool:
+  match bs:
+    case Nil{}:
+      True{}
+    case Con{b, rest}:
+      b && all(rest)
 
 def text(r: Result<&1, &1, String, String>) -> String:
   match r:
@@ -39,7 +47,7 @@ def sized(+max: U32, +t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Strin
       Sz.render(f, t, max)
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr}:
+        case Sz.Sized{cs, expr, checks}:
           counts(cs)
 
 def size.term(+max: U32, r: Result<&2, &2, String, T.C>) -> String:
@@ -55,6 +63,51 @@ def size(+max: U32, srcs: List<&2, Fr.Src>, +entry: String) -> String:
 
 def with.prelude(+name: String, t: String, +prelude: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, t}]
+
+# Checks
+# ------
+
+def keys(xs: List<&2, String>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{x, rest}:
+      match rest:
+        case Nil{}:
+          x
+        case Con{y, more}:
+          x ++ "," ++ keys(Con{y, more})
+
+def checks.text(c: Sz.Checks) -> String:
+  match c:
+    case Sz.Checks{v, r, p}:
+      "validating " ++ keys(Set.to_list(v)) ++ "; reaching " ++ keys(Set.to_list(r))
+        ++ Bool.pick(String, p, "; proven", "")
+
+def checked(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
+  match r:
+    case Fail{f}:
+      "sizing failed"
+    case Done{s}:
+      match s:
+        case Sz.Sized{cs, expr, checks}:
+          checks.text(checks)
+
+def checked.term(r: Result<&2, &2, String, T.C>) -> String:
+  match r:
+    case Fail{e}:
+      e
+    case Done{run}:
+      checked(Sz.size(65536, True{}, E.of.term3(run)))
+
+# What sizing proved of the checks, by number.
+def checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
+  checked.term(Fr.compile(srcs, entry))
+
+# A case on a constant: Prelude's abort is its one check.
+def cased(+prelude: String, +scrutinee: String) -> String:
+  checks(with.prelude("cased", "import Prelude\nmain = \\input -> (case " ++ scrutinee
+    ++ " of\n  0 -> \"zero\"\n  1 -> \"one\", 0)\n", prelude), "cased")
 
 def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String) -> IO(Unit):
   do IO<Unit>:
@@ -73,6 +126,11 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
     IO.print(verdict("size-unbounded-input", String.eq(
       size(65536, with.prelude("unbounded-input-recursion", unb, prelude), "unbounded-input-recursion"),
       "could not size recursion #0 at unbounded-input-recursion:27:34:\n  its test depends on input that nothing bounds, so no finite iteration\n  count can be proven for it. Constrain that input with a refinement\n  (`x : someValidator`) or an `assert` before recursing on it.")))
+    IO.print(verdict("size-checks", all([
+      String.eq(checks(with.prelude("simpleplus", plus, prelude), "simpleplus"), "validating 0; reaching "),
+      String.eq(checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "validating 0,1,2; reaching "),
+      String.eq(cased(prelude, "0"), "validating ; reaching ; proven"),
+      String.eq(cased(prelude, "3"), "validating ; reaching 0; proven")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:

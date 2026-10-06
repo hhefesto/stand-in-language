@@ -56,9 +56,9 @@ def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, r: Result<&2, &2, 
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{+counts, +expr}:
+        case Sz.Sized{+counts, +expr, checks}:
           +ms = mods(Fr.all(srcs))
-          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry)), 65536,
+          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks), 65536,
                      Ss.layouts(expr))}
 
 def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, T.C>) -> Maybe<&2, Tc.Telc>:
@@ -178,7 +178,7 @@ def source.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Ss.Replay:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           Ss.replay(Ss.prepared(expr), Ss.Sized{}, [])
 
 def source.run(r: Result<&2, &2, String, T.C>) -> Ss.Replay:

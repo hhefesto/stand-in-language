@@ -2,6 +2,7 @@ import Base
 import ./Loc.bend as L
 import ./Term.bend as T
 import ./Expr.bend as E
+import ./Size.bend as Sz
 import ./Levels.bend as Lv
 
 # The static report: what the compiler knows about a program's recursion
@@ -11,7 +12,8 @@ import ./Levels.bend as Lv
 # Two analyses feed it, and they answer different questions:
 #
 #   * sizing (Size.bend) says how many times each recursion can iterate.
-#     That is the number that makes the program total.
+#     That is the number that makes the program total. It also says which
+#     refinement checks it discharged, and which are left to run time.
 #   * the structural pass (Levels.bend) says how recursions nest, and which
 #     bindings are used below the level they were bound at.
 #
@@ -132,6 +134,104 @@ def sizing(+counts: List<&2, E.TS>, run: T.C, +budget: U32) -> List<&2, String>:
   List.append(&2, String,
     "recursion sites (iterations, over every input):" <> sized.rows(counts, ls, widest(places(counts, ls), 0n)),
     ["", "sizing budget in force: " ++ U32.show(budget) ++ " unrollings"])
+
+# Refinement checks
+# -----------------
+
+# A check as written: its number, and its own location.
+type Check is Data:
+  Check{+site: U32, +loc: L.Loc}
+
+def check.le(a: Check, b: Check) -> Bool:
+  match a:
+    case Check{sa, la}:
+      match b:
+        case Check{sb, lb}:
+          U32.is_le(sa, sb)
+
+# Every refinement check in the program.
+def checks(t: T.C, acc: List<&2, Check>) -> List<&2, Check>:
+  match t:
+    case T.CCheck{a, cloc, site, x, y}:
+      checks(y, checks(x, Check{site, cloc} <> acc))
+    case T.CPair{a, x, y}:
+      checks(y, checks(x, acc))
+    case T.CSetEnv{a, x}:
+      checks(x, acc)
+    case T.CDefer{a, fi, x}:
+      checks(x, acc)
+    case T.CLeft{a, x}:
+      checks(x, acc)
+    case T.CRight{a, x}:
+      checks(x, acc)
+    case _:
+      acc
+
+def has(s: Set(), +site: U32) -> Bool:
+  Pair.snd(Set(), Bool, Set.has(s, U32.show(site)))
+
+def discharged(cs: Sz.Checks, +site: U32) -> Bool:
+  match cs:
+    case Sz.Checks{validating, reaching, proven}:
+      proven && Bool.not(has(reaching, site))
+
+# What sizing proved of a check, and why it is left to run time if it is.
+def verdict(cs: Sz.Checks, +site: U32) -> String:
+  match cs:
+    case Sz.Checks{validating, reaching, proven}:
+      Bool.pick(String, has(validating, site), "at run time (validates input)",
+        Bool.pick(String, has(reaching, site), "at run time (reaches the result)",
+          Bool.pick(String, proven, "discharged", "at run time (not proven for every input)")))
+
+def check.place(+site: U32, m: Maybe<&2, String>) -> String:
+  match m:
+    case Some{s}:
+      s
+    case None{}:
+      "check " ++ U32.show(site)
+
+def check.places(ks: List<&2, Check>) -> List<&2, String>:
+  match ks:
+    case Nil{}:
+      []
+    case Con{k, rest}:
+      match k:
+        case Check{+site, loc}:
+          check.place(site, L.render_compact(loc)) <> check.places(rest)
+
+def check.rows(ks: List<&2, Check>, +cs: Sz.Checks, +w: Nat) -> List<&2, String>:
+  match ks:
+    case Nil{}:
+      []
+    case Con{k, rest}:
+      match k:
+        case Check{+site, loc}:
+          ("  " ++ pad(w, check.place(site, L.render_compact(loc))) ++ "  " ++ verdict(cs, site))
+            <> check.rows(rest, cs, w)
+
+def discharged.count(ks: List<&2, Check>, +cs: Sz.Checks) -> U32:
+  match ks:
+    case Nil{}:
+      0
+    case Con{k, rest}:
+      match k:
+        case Check{+site, loc}:
+          (Bool.pick(U32, discharged(cs, site), 1, 0) + discharged.count(rest, cs) : U32)
+
+def checking.of(+ks: List<&2, Check>, +cs: Sz.Checks) -> List<&2, String>:
+  match ks:
+    case Nil{}:
+      ["refinement checks: none"]
+    case Con{k, rest}:
+      +n = discharged.count(ks, cs)
+      ("refinement checks: " ++ U32.show(n) ++ " discharged statically, "
+         ++ U32.show((U32.from_nat(List.length(&2, Check, ks)) - n : U32)) ++ " left to run time:")
+        <> check.rows(ks, cs, widest(check.places(ks), 0n))
+
+# Every check as written, with what sizing proved of it (DESIGN §10's
+# split): discharged, or left to run time and why.
+def checking(run: T.C, +cs: Sz.Checks) -> List<&2, String>:
+  checking.of(List.sort(~Check, ~check.le, checks(run, [])), cs)
 
 # The structural pass's rows
 # --------------------------
@@ -269,11 +369,14 @@ def found(info: Result<&2, &2, String, Lv.Info>) -> Bool:
       True{}
 
 # The whole static report (renderStaticReport): the counts sizing inferred
-# for the program, then the structural reading of its source.
-def report(+counts: List<&2, E.TS>, run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>) -> String:
+# for the program and what it proved of its checks, then the structural
+# reading of its source.
+def report(+counts: List<&2, E.TS>, +run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>, +cs: Sz.Checks) -> String:
   unlines(List.concat(&2, String, [
     ["static report: what the compiler knows without running the program", ""],
     sizing(counts, run, budget),
+    [""],
+    checking(run, cs),
     [""],
     structural(info),
     closing(found(info))]))

@@ -122,7 +122,7 @@ def sized(guided: Bool, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           Ss.replay(prepared(guided, expr), Ss.Sized{}, lines)
 
 def compiled(guided: Bool, r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
@@ -236,7 +236,7 @@ def usage.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
       False{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           wired(expr)
 
 def usage.term(r: Result<&2, &2, String, T.C>) -> Bool:

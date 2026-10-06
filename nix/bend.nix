@@ -133,6 +133,7 @@ let
       "size-over-budget"
       "size-budget-exhausted"
       "size-unbounded-input"
+      "size-checks"
     ];
     lexical = [
       "reserved"

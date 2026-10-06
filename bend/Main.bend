@@ -499,8 +499,8 @@ def out.path(o: Out, +file: String) -> String:
 
 # The sized program as an artifact: haskell-final's `--ic --compile`, less
 # the IC certificate.
-def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>) -> Tc.Telc:
-  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info), budget(), Ss.layouts(expr))
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks) -> Tc.Telc:
+  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks), budget(), Ss.layouts(expr))
 
 def prefix(n: Nat, s: String) -> String:
   match n:
@@ -539,16 +539,16 @@ def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod
       match c:
         case Compiled{+run, s}:
           match s:
-            case Sz.Sized{+counts, +expr}:
+            case Sz.Sized{+counts, +expr, +checks}:
               match act:
                 case Play{}:
                   play(Ss.prepared(expr), Sized{}, False{})
                 case Meter{}:
                   play(Ss.prepared(expr), Sized{}, True{})
                 case Report{}:
-                  IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry)))
+                  IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry), checks))
                 case Compile{}:
-                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry)))
+                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks))
 
 # Unsized (--fast)
 # ----------------

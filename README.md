@@ -149,6 +149,16 @@ in these places:
   branch never ends now finishes (`ratarith` in the parity corpus gives
   what haskell-final's reference evaluator gives, where its IC ran out of
   fuel).
+- `--certificate` also says what sizing proved of each refinement check
+  (DESIGN.md §10's split, which haskell-final's report lacks): discharged,
+  or left to run time because it validates input, because its abort
+  reaches the result on some input, or because it is not proven for every
+  input. Sizing's main run assumes the refinements that bound the input
+  pass (its limits pass learned the input positions they force), so it
+  explores only input that passes them. A check that validates input is
+  therefore never discharged, and neither is anything else in a program
+  that has one. Otherwise the main run explored every input, and the split
+  is exactly as sound as that exploration.
 - Like haskell-final, the port certifies the sized program only for the
   capture layouts that guide the IC; it does not refuse to run a program
   whose sized form fails certification (DESIGN.md's `admitIC` is not in
@@ -227,6 +237,9 @@ recursion sites (iterations, over every input):
 
 sizing budget in force: 65536 unrollings
 
+refinement checks: 0 discharged statically, 1 left to run time:
+  simpleplus:14:31  at run time (validates input)
+
 recursion nesting (structural, approximate):
   triple         function             levels
   Prelude:11:17  Prelude.d2c          0, 1
@@ -245,6 +258,14 @@ which is what duplicating a value across recursion levels costs. The two lists
 index differently — a count is per instantiation, a nesting row is per `{test,
 recursion, last}` as written — so they do not line up row by row, and the
 report says so.
+
+The checks section splits the program's refinement checks as DESIGN.md §10
+asks. These are every `x : v = e`, plus Prelude's `abort`, the one check that
+`case`, UDT validators and pattern lambdas call. A check is *discharged* when
+sizing proved that no input makes its abort reach the result. Otherwise it is
+left to run time, and the report says why. simpleplus's `validInput` stays:
+it validates the input, and sizing assumed it passes in order to bound the
+recursions.
 
 `--meter` runs the program and reports what the run cost: the interactions
 the net performed over the whole session, on stderr once the session ends.
