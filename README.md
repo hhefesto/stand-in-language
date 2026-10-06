@@ -57,23 +57,23 @@ $ ./result/bin/telomare tictactoe.tel
 
 ### Speed: Haskell to Bend
 
-The Bend `telomare` does the same work as haskell-final's `telomare FILE.tel
---ic`: the same EAL certification, sizing, capture layouts and interaction
-net, reducing to the same interaction counts and printing the same output. It
-does it in a fraction of the time. Wall-clock times for a whole run, from
+The Bend `telomare` prints what haskell-final's `telomare FILE.tel --ic`
+prints, through the same stages: EAL certification, sizing, capture layouts
+and an interaction net. It does it in a fraction of the time. Wall-clock
+times for a whole run, from
 reading the program to the session's end, both printing identical output (an
 Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 
 | Program | haskell-final `--ic` | Bend | Speedup |
 |---|---:|---:|---:|
 | `tc_ultra_minimal.tel` | 0.06 s | 0.02 s | 3× |
-| `simpleplus.tel`, input `3 4` | 9.6 s | 0.9 s | 11× |
-| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 3.6 s | 21× |
-| a CaseTests program (integer cases) | 36.4 s | 1.9 s | 20× |
+| `simpleplus.tel`, input `3 4` | 9.6 s | 0.8 s | 12× |
+| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 2.4 s | 30× |
+| a CaseTests program (integer cases) | 36.4 s | 1.7 s | 21× |
 | a CaseTests program (property shapes) | 289.9 s | 5.0 s | 58× |
 | UDTTests' natural arithmetic | 16.3 s | 1.0 s | 16× |
-| NatUDTTests' `Nat` | 61.8 s | 3.0 s | 20× |
-| the Prelude's `Rational` | 31.3 s | 1.5 s | 21× |
+| NatUDTTests' `Nat` | 61.8 s | 3.0 s | 21× |
+| the Prelude's `Rational` | 31.3 s | 0.7 s | 43× |
 
 haskell-final ran the property-shapes program with its heap capped at 8 GB
 (`GHCRTS=-M8G`); uncapped, it ran this machine low on memory.
@@ -86,8 +86,9 @@ that is already data, and looking again at an apply site whose code has not
 changed. And it certifies the term that runs, where haskell-final built and
 certified a second one with every let binding inlined (3,054 bodies for
 tic-tac-toe, against 176). Every result is identical, and the capture
-layouts are byte for byte the same. The interaction net runs the
-tic-tac-toe test game's 15.2 million interactions in about 1.9 s.
+layouts are byte for byte the same. The interaction net runs only the branch
+an `if` chooses (see [Design](#design)), so it runs the tic-tac-toe test game
+in 6.0 million interactions instead of 15.2 million, in about 0.7 s.
 
 ### Design
 
@@ -104,7 +105,8 @@ the one runtime (C4); every stage hands the next a type without the previous
 stage's forms (H1, see [Compiler stages](#compiler-stages)); failures are one
 union with a case per stage (§9); a closure body is one template however
 often it occurs (§7), and a test pins that the IC's environment wiring and
-EAL's usage map agree (§7). It differs on purpose in these places:
+EAL's usage map agree on the code the IC runs (§7). It differs on purpose
+in these places:
 
 - `--meter` reports interactions only. haskell-final's IC also printed
   "logical storage" counted on its own map-of-ports net, which the port
@@ -117,16 +119,32 @@ EAL's usage map agree (§7). It differs on purpose in these places:
   inlined at each use; the port no longer builds it. Every example
   program certifies as it did, and a missing definition is reported as it
   was.
+- The IC runs only the branch an `if` chooses (DESIGN.md §11.3). The core
+  keeps one conditional, the strict gate-switch, and sizing and EAL read
+  it as before. The IC compiles each branch into a template of its own,
+  which the gate picks and runs on the parts of the environment the
+  branches use. Evaluating the other branch could change only the cost:
+  the core is total for certified programs and an abort is a value, so a
+  dead branch's value is projected away. This narrows §7's "eager
+  speculation is accepted" to everything but an `if`'s branches. It is
+  sound for the same reason the strict net is: the lazy net duplicates no
+  more than the strict one does, each captured part going once to the
+  chosen branch instead of fanning to both. Displays are unchanged;
+  interaction counts are not haskell-final's (the tic-tac-toe test game
+  takes 6.0 million instead of 15.2 million), and a program whose dead
+  branch never ends now finishes (`ratarith` in the parity corpus gives
+  what haskell-final's reference evaluator gives, where its IC ran out of
+  fuel).
 - Like haskell-final, the port certifies the sized program only for the
   capture layouts that guide the IC; it does not refuse to run a program
   whose sized form fails certification (DESIGN.md's `admitIC` is not in
   master or haskell-final).
 
-Of DESIGN.md's open questions (§11), two are resolved: the certified term
-is the executed one (§11.4, above), and `trace` (§11.7) is removed, since it
-had no runtime meaning and restoring it would need a side channel through
-the IC (C1/C4). The rest stay as haskell-final has them: abort is a core
-form, and `if` is strict.
+Of DESIGN.md's open questions (§11), three are resolved: the certified
+term is the executed one (§11.4), the IC runs only an `if`'s chosen branch
+(§11.3; both above), and `trace` (§11.7) is removed, since it had no
+runtime meaning and restoring it would need a side channel through the IC
+(C1/C4). Abort stays a core form, as in haskell-final.
 
 ## Quick Start
 
@@ -222,11 +240,13 @@ That is a measurement of one run, not a prediction about the next:
 $ printf '3 4\n' | telomare simpleplus.tel --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 1517868
+IC interactions: 782347
 ```
 
-The count is haskell-final's `--ic --meter` count, interaction for
-interaction. It is not a memory figure, deliberately. haskell-final's IC also
+The count is the port's own: its net runs only the branch an `if` chooses,
+where haskell-final's built both, so it is lower than haskell-final's
+`--ic --meter` count (1517868 for this run; see [Design](#design)). It is
+not a memory figure, deliberately. haskell-final's IC also
 printed the peaks of its net's "logical storage" (agents, port entries,
 pending pairs), but those counted its own representation of the net (a map of
 ports, stale entries included), which the port does not share, so it does

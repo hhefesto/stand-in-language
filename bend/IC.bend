@@ -21,7 +21,11 @@ import ./Lift.bend as Lf
 # A closure body as the net compiles it: the runnable core with every
 # closure taken out into its template, a reference (template, function
 # index) in its place (§7: code is a pointer). An aborted value can only be
-# a run's input or result, but the core allows it, so it compiles.
+# a run's input or result, but the core allows it, so it compiles. An `if`
+# (the gate-switch over s) keeps its branches l and r as written, which is
+# how EAL reads and hashes it, and how it runs: the gate chooses one of
+# their templates, el or er, and only that branch is built, on the parts of
+# the environment the branches use, captured as a list (DESIGN §11.3).
 type Code is Data:
   CdZero{}
   CdPair{+a: Code, +b: Code}
@@ -33,6 +37,17 @@ type Code is Data:
   CdAbort{}
   CdAborted{+m: Co.D}
   CdRef{+tid: U32, +fi: U32}
+  CdIte{+s: Code, +l: Code, +r: Code, +el: Code, +er: Code, +cap: Code}
+
+# The strict if (Co.gate.switch): both branches built, one chosen.
+def ite.strict(s: Code, l: Code, r: Code) -> Code:
+  CdSetEnv{CdPair{CdSetEnv{CdPair{CdGate{}, s}}, CdPair{l, r}}}
+
+# The if as the IC runs it (Co.ite, its environment trimmed to what the
+# branches capture): the gate chooses a branch's template, which then runs
+# on the captured parts.
+def ite.run(s: Code, el: Code, er: Code, cap: Code) -> Code:
+  CdSetEnv{CdPair{ite.strict(s, el, er), cap}}
 
 # Agent kinds
 # -----------
@@ -907,7 +922,9 @@ def usage.add(m: Map<&2, U32>, +k: String) -> Map<&2, U32>:
   usage.add.got(k, Map.get(U32, 0, m, k))
 
 # How often the body uses each environment path, not looking inside
-# closures; a projection chain over Env is one use of its path.
+# closures; a projection chain over Env is one use of its path. An if uses
+# its scrutinee's paths and its captured parts' (each once, for the branch
+# it chooses).
 def usage(x: Code, +path: String, acc: Map<&2, U32>) -> Map<&2, U32>:
   match x:
     case CdEnv{}:
@@ -920,6 +937,8 @@ def usage(x: Code, +path: String, acc: Map<&2, U32>) -> Map<&2, U32>:
       usage(b, "", usage(a, "", acc))
     case CdSetEnv{c}:
       usage(c, "", acc)
+    case CdIte{s, l, r, el, er, cap}:
+      usage(cap, "", usage(s, "", acc))
     case _:
       acc
 
@@ -1991,6 +2010,8 @@ def compile(+fuel: Nat, j: CJ) -> M(U32):
                 return (a * 4 : U32)
             case CdRef{tid, fi}:
               value(ref(), tid, fi)
+            case CdIte{s, l, r, el, er, cap}:
+              compile(f, CTerm{ite.run(s, el, er, cap)})
         case CProj{path, +k, c}:
           match path:
             case Some{p}:
@@ -2029,8 +2050,14 @@ def C.run(-A: Data, -B: Data, f: A -> C(B), r: A & Coll) -> B & Coll:
 def C.bind(-A: Data, -B: Data, m: C(A), f: A -> C(B)) -> C(B):
   c => C.run(A, B, f, m(c))
 
+def lifted.ite(s: Lf.L, l: Lf.L, r: Lf.L) -> Lf.L:
+  Lf.LSetEnv{Lc.Unknown{}, Lf.LPair{Lc.Unknown{},
+    Lf.LSetEnv{Lc.Unknown{}, Lf.LPair{Lc.Unknown{}, Lf.LGate{Lc.Unknown{}}, s}},
+    Lf.LPair{Lc.Unknown{}, l, r}}}
+
 # A collected body as EAL lifts it (Lift), each template reference its
-# code's hash. Locations do not reach the hash.
+# code's hash and each if with its branches as written. Locations do not
+# reach the hash.
 def lifted(+hs: Map<&2, String>, x: Code) -> Lf.L:
   match x:
     case CdZero{}:
@@ -2053,6 +2080,8 @@ def lifted(+hs: Map<&2, String>, x: Code) -> Lf.L:
       Lf.LAbort{Lc.Unknown{}}
     case CdAborted{m}:
       Lf.LAbort{Lc.Unknown{}}
+    case CdIte{s, l, r, el, er, cap}:
+      lifted.ite(lifted(hs, s), lifted(hs, l), lifted(hs, r))
 
 # A body's code hash (tplHash, hashLiftedBody).
 def code.of(+hs: Map<&2, String>, x: Code) -> String:
@@ -2100,6 +2129,8 @@ def key.of(c: Code, acc: String) -> String:
       "B" ++ key.data(m, acc)
     case CdRef{tid, fi}:
       "T" ++ U32.show(tid) ++ "," ++ U32.show(fi) ++ ";" ++ acc
+    case CdIte{s, l, r, el, er, cap}:
+      "I" ++ key.of(s, key.of(cap, key.of(el, key.of(er, acc))))
 
 def c.found(r: Map<&2, U32> & Maybe<&2, U32>, c: Coll, +fi: U32, +key: String, +body: Code, orig: Co.V) -> Code & Coll:
   (seen, old) = r
@@ -2126,14 +2157,119 @@ def c.add.go(+fi: U32, +body: Code, orig: Co.V, +c: Coll) -> Code & Coll:
 def c.add(+fi: U32, body: Code, orig: Co.V) -> C(Code):
   c => c.add.go(fi, body, orig, c)
 
+# What an if's branches capture
+# ------------------------------
+
+# Whether path p is below another of the paths qs.
+def below(+p: String, qs: List<&2, String>) -> Bool:
+  match qs:
+    case Nil{}:
+      False{}
+    case Con{+q, rest}:
+      (String.starts_with(p, q) && Bool.not(String.eq(p, q))) || below(p, rest)
+
+def tops.if(drop: Bool, +p: String, rest: List<&2, String>) -> List<&2, String>:
+  match drop:
+    case True{}:
+      rest
+    case False{}:
+      p <> rest
+
+def tops(ps: List<&2, String>, +all: List<&2, String>) -> List<&2, String>:
+  match ps:
+    case Nil{}:
+      []
+    case Con{+p, rest}:
+      tops.if(below(p, all), p, tops(rest, all))
+
+# The environment paths the branches use with none used above them: the
+# parts an if captures (Split's capture, on paths).
+def captured(+us: Map<&2, U32>) -> List<&2, String>:
+  +ps = Map.keys(&2, U32, us)
+  tops(ps, ps)
+
+def proj.one(left: Bool, x: Code) -> Code:
+  match left:
+    case True{}:
+      CdLeft{x}
+    case False{}:
+      CdRight{x}
+
+# x projected along a path, its first step innermost.
+def proj(path: String, x: Code) -> Code:
+  match path:
+    case SNil{}:
+      x
+    case SCon{c, rest}:
+      proj(rest, proj.one(Char.is_eq(c, 'L'), x))
+
+# The captured parts, as a list.
+def capture(ps: List<&2, String>) -> Code:
+  match ps:
+    case Nil{}:
+      CdZero{}
+    case Con{p, rest}:
+      CdPair{proj(p, CdEnv{}), capture(rest)}
+
+def after(p: String, q: String) -> String:
+  match p:
+    case SNil{}:
+      q
+    case SCon{c, pt}:
+      match q:
+        case SCon{d, qt}:
+          after(pt, qt)
+        case SNil{}:
+          ""
+
+# Where the environment path q is in the captured list: under its part's
+# place.
+def moved(ps: List<&2, String>, +q: String, +at: String) -> String:
+  match ps:
+    case Nil{}:
+      q
+    case Con{+p, rest}:
+      Bool.pick(String, String.starts_with(q, p), at ++ "L" ++ after(p, q), moved(rest, q, at ++ "R"))
+
+# A branch's code reading the captured list instead of the environment.
+# Like usage, it carries the projections over a node down to the Env they
+# start from. A nested if's branches as written stay: only its hash reads
+# them.
+def trimmed(+ps: List<&2, String>, x: Code, +path: String) -> Code:
+  match x:
+    case CdEnv{}:
+      proj(moved(ps, path, ""), CdEnv{})
+    case CdLeft{c}:
+      trimmed(ps, c, "L" ++ path)
+    case CdRight{c}:
+      trimmed(ps, c, "R" ++ path)
+    case CdPair{a, b}:
+      proj(path, CdPair{trimmed(ps, a, ""), trimmed(ps, b, "")})
+    case CdSetEnv{c}:
+      proj(path, CdSetEnv{trimmed(ps, c, "")})
+    case CdIte{s, l, r, el, er, cap}:
+      proj(path, CdIte{trimmed(ps, s, ""), l, r, el, er, trimmed(ps, cap, "")})
+    case other:
+      proj(path, other)
+
 # Every closure body becomes a template, innermost first, each Defer a
-# reference to its template.
+# reference to its template. So does each branch of an if, as Co.ite defers
+# them, reading the parts of the environment the branches capture.
 def collect(x: Co.V) -> C(Code):
   match x:
     case Co.VDefer{fi, +b}:
       do C<Code>:
         b2 : Code <- collect(b)
         c.add(fi, b2, b)
+    case Co.VSetEnv{Co.VPair{Co.VSetEnv{Co.VPair{Co.VGate{}, s}}, Co.VPair{+l, +r}}}:
+      do C<Code>:
+        s2 : Code <- collect(s)
+        +l2 : Code <- collect(l)
+        +r2 : Code <- collect(r)
+        +ps : List<&2, String> = captured(usage(l2, "", usage(r2, "", Map.new(&2, U32))))
+        el : Code <- c.add(Co.step.e.ind(), trimmed(ps, l2, ""), l)
+        er : Code <- c.add(Co.step.t.ind(), trimmed(ps, r2, ""), r)
+        return CdIte{s2, l2, r2, el, er, capture(ps)}
     case Co.VPair{a, b}:
       do C<Code>:
         a2 : Code <- collect(a)

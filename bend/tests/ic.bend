@@ -15,9 +15,10 @@ import ../Text.bend as Tx
 # laziness); whole sessions' interaction counts, guided by EAL as the
 # command runs them, against the .ic-meter goldens; and programs the
 # goldens do not cover (CaseTests, UDTTests, a pattern lambda, a qualified
-# import): their displays and, guided, haskell-final's `--ic --meter`
-# counts. One `ok NAME` line per group (FAIL NAME when it breaks). Run from
-# the source root.
+# import): their displays and, guided, their counts. The counts are the
+# port's: its IC runs only an if's chosen branch, where haskell-final's
+# built both. One `ok NAME` line per group (FAIL NAME when it breaks). Run
+# from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
@@ -189,15 +190,27 @@ def eal.uses(kvs: List<&2, Sigma<&2, &2, String, _ => EAL.Use>>) -> String:
             case EAL.Use{n, loc}:
               "[" ++ path ++ "]" ++ U32.show(n) ++ ";" ++ eal.uses(rest)
 
-def lifted.main(t: Lf.Lifted) -> Lf.L:
-  match t:
-    case Lf.Lifted{bodies, main}:
-      main
+# A body as the IC runs it: at each if, the gate choosing a branch's
+# template, run on the captured parts.
+def ran(x: IC.Code) -> IC.Code:
+  match x:
+    case IC.CdIte{s, l, r, el, er, cap}:
+      IC.ite.run(ran(s), el, er, ran(cap))
+    case IC.CdPair{a, b}:
+      IC.CdPair{ran(a), ran(b)}
+    case IC.CdSetEnv{a}:
+      IC.CdSetEnv{ran(a)}
+    case IC.CdLeft{a}:
+      IC.CdLeft{ran(a)}
+    case IC.CdRight{a}:
+      IC.CdRight{ran(a)}
+    case other:
+      other
 
-# One body: the usage the IC wires it by, and EAL's for the same code.
-def agrees(body: IC.Code, orig: Co.V) -> Bool:
+# One body: the usage the IC wires it by, and EAL's for the code it runs.
+def agrees(+body: IC.Code) -> Bool:
   String.eq(ic.uses(Map.to_list(&2, U32, IC.usage(body, "", Map.new(&2, U32)))),
-            eal.uses(Map.to_list(&2, EAL.Use, EAL.usage(lifted.main(Lf.defer.lift(Lf.of.expr(orig))), "", Map.new(&2, EAL.Use)))))
+            eal.uses(Map.to_list(&2, EAL.Use, EAL.usage(IC.lifted(Map.new(&2, String), ran(body)), "", Map.new(&2, EAL.Use)))))
 
 def all.agree(srcs: List<&2, IC.Src>) -> Bool:
   match srcs:
@@ -206,17 +219,16 @@ def all.agree(srcs: List<&2, IC.Src>) -> Bool:
     case Con{src, rest}:
       match src:
         case IC.Src{tid, fi, body, orig, code}:
-          agrees(body, orig) && all.agree(rest)
+          agrees(body) && all.agree(rest)
 
-def collected.agree(r: IC.Code & IC.Coll, whole: Co.V) -> Bool:
+def collected.agree(r: IC.Code & IC.Coll) -> Bool:
   (entry, c) = r
   match c:
     case IC.Coll{next, srcs, seen, hs}:
-      agrees(entry, whole) && all.agree(srcs)
+      agrees(entry) && all.agree(srcs)
 
-def wired(+expr: Co.V) -> Bool:
-  +whole = Co.app(expr, Co.VEnv{})
-  collected.agree(IC.collect(whole)(IC.Coll{3, IC.selectors(), Map.new(&2, U32), None{}}), whole)
+def wired(expr: Co.V) -> Bool:
+  collected.agree(IC.collect(Co.app(expr, Co.VEnv{}))(IC.Coll{3, IC.selectors(), Map.new(&2, U32), None{}}))
 
 def usage.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
   match r:
@@ -358,9 +370,14 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       gives(Co.app(Co.app(church.two(), Co.app(church.two(), succ.c())), z()), num(4n)),
       gives(Co.app(Co.app(church.two(), Co.app(church.two(), Co.app(church.two(), succ.c()))), z()), num(8n))])))
     IO.print(verdict("ic-fuel", runs.dry(Co.app(Co.app(church.two(), succ.c()), z()), 3)))
+    # ICTests' branch laziness. The IC runs only the chosen branch, so the
+    # strict shape skips a diverging dead branch too, giving what
+    # haskell-final's reference evaluator gave, where its IC ran dry. A
+    # closure over an if still reads back as written.
     IO.print(verdict("ic-laziness", all([
+      gives(d(203, Co.gate.switch(z(), left(env()), env())), d(203, Co.gate.switch(z(), left(env()), env()))),
       gives(se(p(d(200, Co.ite(p(z(), z()), left(env()), omega.applied())), p(z(), z()))), z()),
-      runs.dry(se(p(d(201, se(p(se(p(Co.VGate{}, p(z(), z()))), p(omega.applied(), left(env()))))), p(z(), z()))), 50000),
+      gives(se(p(d(201, se(p(se(p(Co.VGate{}, p(z(), z()))), p(omega.applied(), left(env()))))), p(z(), z()))), z()),
       gives(se(p(d(202, se(p(se(p(Co.VGate{}, p(z(), z()))), p(se(p(p(z(), z()), z())), left(env()))))), p(z(), z()))), z())])))
     IO.print(verdict("ic-omega", runs.dry(omega.applied(), 100000)))
     IO.print(verdict("ic-case", all([
@@ -377,19 +394,19 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, arithmetic(), "11111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 10361),
-      costs(prelude, pattern.lambda(), 24276),
-      costs(prelude, rational(), 6774269),
-      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 1252)])))
+      costs(prelude, case.nonexhaustive(), 5561),
+      costs(prelude, pattern.lambda(), 5802),
+      costs(prelude, rational(), 91147),
+      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 552)])))
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
-      524)))
+      150)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      1517868)))
+      782347)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      15168230)))
+      5949895)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),
