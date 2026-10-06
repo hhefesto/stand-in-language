@@ -20,10 +20,10 @@ def shown(xs: List<&2, String>) -> IO(Unit):
 
 def report(r: Ss.Replay) -> IO(Unit):
   match r:
-    case Ss.Replay{xs, n}:
+    case Ss.Replay{xs, c}:
       do IO<Unit>:
         u : Unit <- shown(xs)
-        IO.print("IC interactions: " ++ U32.show(n))
+        IO.print("IC interactions: " ++ U32.show(Ss.cost.spent(c)))
 
 def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> IO(Unit):
   match r:
@@ -32,7 +32,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> 
     case Done{s}:
       match s:
         case Sz.Sized{counts, expr}:
-          report(Ss.replay(Ss.prepared(expr), lines))
+          report(Ss.replay(Ss.prepared(expr), Ss.Sized{}, lines))
 
 def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> IO(Unit):
   match r:

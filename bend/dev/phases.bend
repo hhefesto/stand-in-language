@@ -18,8 +18,8 @@ def ms(+t0: Nat, +t1: Nat) -> String:
 
 def spent(r: Ss.Replay) -> U32:
   match r:
-    case Ss.Replay{xs, n}:
-      n
+    case Ss.Replay{xs, c}:
+      Ss.cost.spent(c)
 
 def verdict(m: Maybe<&2, EAL.Err>) -> String:
   match m:
@@ -36,7 +36,7 @@ def run(+expr: Co.V, lines: List<&2, String>, +t2: Nat) -> IO(Unit):
     +p : IC.Prog = IC.prepare(expr, lay)
     +t4 : Nat <- IO.now()
     IO.print("prepare " ++ ms(t3, t4))
-    +n : U32 = spent(Ss.replay(p, lines))
+    +n : U32 = spent(Ss.replay(p, Ss.Sized{}, lines))
     t5 : Nat <- IO.now()
     IO.print("session " ++ ms(t4, t5) ++ ": " ++ U32.show(n) ++ " interactions")
 
