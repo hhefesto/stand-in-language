@@ -222,9 +222,9 @@ expected to change that (section 4).
 - P2 is done: `c28a8c8`.
 - P3 is done: `d4e6b47`. `run` certified everywhere, so no stop.
 - P4 is done: `2359df8`, with capture trimming (see P4).
-- **Stopped at P4b (2026-10-06): certificate counts change.** The data
-  and the options are under P4b; the user decides. Nothing of P4b is
-  committed.
+- P4b was measured and **skipped** (the user's decision, 2026-10-06):
+  it changes certificates (data under P4b). Sizing keeps `Expr.ite`.
+- P5 is next.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -746,7 +746,7 @@ foresee, and how they were resolved:
   - ctign: `#0 <= 3, #1 <= 4, #2 <= 2, #3 Prelude:67:42 <= 116` becomes
     `#0 <= 2, #1 <= 1, #2 <= 1` (site #3 gone);
   - patlam: `Prelude:67:42 (#3) <= 1` gone.
-- **Options for the user:**
+- **The user chose to skip P4b** (option 1). The options were:
   1. Skip P4b. Sizing keeps `Expr.ite` for its unrolling step and the
      strict reading of user `if`s; P4 already settles §11.3 at runtime.
      The IC keeps using `Co.step.e.ind`/`step.t.ind` for its branch
