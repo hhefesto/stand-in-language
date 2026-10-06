@@ -114,7 +114,9 @@ EAL's usage map agree (§7). It differs on purpose in these places:
 
 DESIGN.md's open questions (§11) stay as haskell-final has them: the
 certified term is not the executed one, abort is a core form, `if` is
-strict, `trace` does nothing.
+strict. The exception is `trace` (§11.7), which is removed: it had no
+runtime meaning, and restoring it would need a side channel through the IC
+(C1/C4).
 
 ## Quick Start
 

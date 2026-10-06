@@ -483,10 +483,6 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
               do Result<&2, &2, ExpErr, EV>:
                 x2 : EV <- ex(f, ETerm{x})
                 return VT{S.SRight{loc, vt(x2)}}
-            case S.STrace{loc, x}:
-              do Result<&2, &2, ExpErr, EV>:
-                x2 : EV <- ex(f, ETerm{x})
-                return VT{S.STrace{loc, vt(x2)}}
             case S.SHash{loc, x}:
               do Result<&2, &2, ExpErr, EV>:
                 x2 : EV <- ex(f, ETerm{x})

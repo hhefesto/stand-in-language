@@ -27,7 +27,6 @@ type F is Data:
   FIte{+loc: L.Loc, +i: F, +t: F, +e: F}
   FLeft{+loc: L.Loc, +x: F}
   FRight{+loc: L.Loc, +x: F}
-  FTrace{+loc: L.Loc, +x: F}
   FChurch{+loc: L.Loc, +n: U32}
   FRec{+loc: L.Loc, +t: F, +r: F, +b: F}
   FRep{+loc: L.Loc}
@@ -124,9 +123,6 @@ def mk.left(a: L.Loc, x: F) -> F:
 def mk.right(a: L.Loc, x: F) -> F:
   FRight{a, x}
 
-def mk.trace(a: L.Loc, x: F) -> F:
-  FTrace{a, x}
-
 def open.fr(+a: L.Loc, +b: FR) -> FR:
   +o = outer(fr.frees(b))
   FR{FOpen{a, o, fr.t(b)}, o}
@@ -159,8 +155,6 @@ def frees(+fuel: Nat, t: T.Term2()) -> FR:
           fr1(~mk.left, a, frees(f, x))
         case T.TRight{a, x}:
           fr1(~mk.right, a, frees(f, x))
-        case T.TTrace{a, x}:
-          fr1(~mk.trace, a, frees(f, x))
         case T.TChurch{a, n}:
           FR{FChurch{a, n}, []}
         case T.TRec{a, x, y, z}:
@@ -350,10 +344,6 @@ def build(+fuel: Nat, +ren: Ren, t: F) -> B(T.C):
           do B<T.C>:
             x2 : T.C <- build(f, ren, x)
             return T.CRight{a, x2}
-        case FTrace{a, x}:
-          do B<T.C>:
-            x2 : T.C <- build(f, ren, x)
-            return T.C.retag(a, x2)
         case FChurch{a, n}:
           church(a, U32.to_nat(n))
         case FRec{a, x, y, z}:

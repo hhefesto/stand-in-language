@@ -25,7 +25,6 @@ type T<-V: Data> is Data:
   TIte{+loc: L.Loc, +i: T<V>, +t: T<V>, +e: T<V>}
   TLeft{+loc: L.Loc, +x: T<V>}
   TRight{+loc: L.Loc, +x: T<V>}
-  TTrace{+loc: L.Loc, +x: T<V>}
   THash{+loc: L.Loc, +x: T<V>}
   TChurch{+loc: L.Loc, +n: U32}
   TRec{+loc: L.Loc, +t: T<V>, +r: T<V>, +b: T<V>}
@@ -75,8 +74,6 @@ def T.loc(-V: Data, t: T<V>) -> L.Loc:
     case TLeft{loc, x}:
       loc
     case TRight{loc, x}:
-      loc
-    case TTrace{loc, x}:
       loc
     case THash{loc, x}:
       loc

@@ -266,8 +266,6 @@ def kids(t: S.Expanded()) -> List<&2, S.Expanded()>:
       [x]
     case S.SRight{loc, x}:
       [x]
-    case S.STrace{loc, x}:
-      [x]
     case S.SHash{loc, x}:
       [x]
     case S.SList{loc, xs}:

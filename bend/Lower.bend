@@ -252,8 +252,6 @@ def dd(+fuel: Nat, +names: Set(), n: DN) -> Set():
               dd(f, names, DT{x})
             case S.SRight{loc, x}:
               dd(f, names, DT{x})
-            case S.STrace{loc, x}:
-              dd(f, names, DT{x})
             case S.SCheck{loc, a, b}:
               union(dd(f, names, DT{a}), dd(f, names, DT{b}))
             case S.SHash{loc, x}:
@@ -484,10 +482,6 @@ def validate(+fuel: Nat, +env: Map<&2, T.Term1()>, n: VN) -> R(VV):
               do Result<&2, &2, Rs.ResErr, VV>:
                 x2 : VV <- validate(f, env, VTerm{x})
                 return VT{T.TRight{loc, vt(x2)}}
-            case S.STrace{loc, x}:
-              do Result<&2, &2, Rs.ResErr, VV>:
-                x2 : VV <- validate(f, env, VTerm{x})
-                return VT{T.TTrace{loc, vt(x2)}}
             case S.SCheck{loc, a, b}:
               do Result<&2, &2, Rs.ResErr, VV>:
                 a2 : VV <- validate(f, env, VTerm{a})
@@ -601,10 +595,6 @@ def debruijn(+fuel: Nat, +app: Bool, +ctx: List<&2, Ctx>, t: T.Term1()) -> R(T.T
           do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
             x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
             return T.TRight{a, x2}
-        case T.TTrace{a, x}:
-          do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
-            x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
-            return T.TTrace{a, x2}
         case T.THash{a, x}:
           do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
             x2 : T.T<Nat> <- debruijn(f, app, ctx, x)
@@ -647,8 +637,6 @@ def close.lams(+fuel: Nat, +naked: Bool, t: T.Term2()) -> T.Term2():
           T.TLeft{a, close.lams(f, naked, x)}
         case T.TRight{a, x}:
           T.TRight{a, close.lams(f, naked, x)}
-        case T.TTrace{a, x}:
-          T.TTrace{a, close.lams(f, naked, x)}
         case T.THash{a, x}:
           T.THash{a, close.lams(f, naked, x)}
         case other:
@@ -699,8 +687,6 @@ def show(t: T.Term2(), +paren: Bool, acc: String) -> String:
       lp(paren) ++ "Fix LeftUPF " ++ show(x, True{}, rp(paren, acc))
     case T.TRight{a, x}:
       lp(paren) ++ "Fix RightUPF " ++ show(x, True{}, rp(paren, acc))
-    case T.TTrace{a, x}:
-      lp(paren) ++ "Fix TraceUPF " ++ show(x, True{}, rp(paren, acc))
     case T.THash{a, x}:
       lp(paren) ++ "Fix HashUPF " ++ show(x, True{}, rp(paren, acc))
     case T.TChurch{a, n}:
@@ -739,8 +725,6 @@ def hashes(t: T.Term2(), +loc: L.Loc) -> T.Term2():
       T.TLeft{a, hashes(x, loc)}
     case T.TRight{a, x}:
       T.TRight{a, hashes(x, loc)}
-    case T.TTrace{a, x}:
-      T.TTrace{a, hashes(x, loc)}
     case T.TRec{a, x, y, z}:
       T.TRec{a, hashes(x, loc), hashes(y, loc), hashes(z, loc)}
     case other:
@@ -899,10 +883,6 @@ def annotate(+fuel: Nat, n: AN) -> St(AV):
               do St<AV>:
                 x2 : AV <- annotate(f, AT{x})
                 return AVT{S.SRight{loc, avt(x2)}}
-            case S.STrace{loc, x}:
-              do St<AV>:
-                x2 : AV <- annotate(f, AT{x})
-                return AVT{S.STrace{loc, avt(x2)}}
             case S.SHash{loc, x}:
               do St<AV>:
                 x2 : AV <- annotate(f, AT{x})
@@ -1085,9 +1065,6 @@ def left.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
 def right.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
   T.TRight{a, x}
 
-def trace.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
-  T.TTrace{a, x}
-
 def hash.mk(a: L.Loc, x: T.Term1()) -> T.Term1():
   T.THash{a, x}
 
@@ -1222,10 +1199,6 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
               do Result<&2, &2, Rs.ResErr, LV>:
                 x2 : LV <- lta(f, LNT{x})
                 return one(~right.mk, x2, a)
-            case S.STrace{a, x}:
-              do Result<&2, &2, Rs.ResErr, LV>:
-                x2 : LV <- lta(f, LNT{x})
-                return one(~trace.mk, x2, a)
             case S.SHash{a, x}:
               do Result<&2, &2, Rs.ResErr, LV>:
                 x2 : LV <- lta(f, LNT{x})

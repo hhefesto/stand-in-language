@@ -54,7 +54,6 @@ type Surf<-P: Data, -C: Data, -N: Data> is Data:
   SIte{+loc: L.Loc, +i: Surf<P, C, N>, +t: Surf<P, C, N>, +e: Surf<P, C, N>}
   SLeft{+loc: L.Loc, +x: Surf<P, C, N>}
   SRight{+loc: L.Loc, +x: Surf<P, C, N>}
-  STrace{+loc: L.Loc, +x: Surf<P, C, N>}
   SHash{+loc: L.Loc, +x: Surf<P, C, N>}
   SChurch{+loc: L.Loc, +n: U32}
   SRec{+loc: L.Loc, +t: Surf<P, C, N>, +r: Surf<P, C, N>, +b: Surf<P, C, N>}
@@ -151,8 +150,6 @@ def loc(-P: Data, -C: Data, -N: Data, t: Surf<P, C, N>) -> L.Loc:
     case SLeft{loc, x}:
       loc
     case SRight{loc, x}:
-      loc
-    case STrace{loc, x}:
       loc
     case SHash{loc, x}:
       loc

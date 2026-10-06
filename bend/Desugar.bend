@@ -43,9 +43,6 @@ def b.left(+l: L.Loc) -> S.Expanded():
 def b.right(+l: L.Loc) -> S.Expanded():
   S.SRight{l, S.SVar{l, "x"}}
 
-def b.trace(+l: L.Loc) -> S.Expanded():
-  S.STrace{l, S.SVar{l, "x"}}
-
 def lam2(+name: String, body: S.Expanded()) -> S.Expanded():
   S.SLam{L.Builtin{name}, L.Name{L.Builtin{name}, "x"},
     S.SLam{L.Builtin{name}, L.Name{L.Builtin{name}, "y"}, body}}
@@ -59,7 +56,6 @@ def add.builtins(t: S.Expanded()) -> S.Expanded():
     [builtin("zero", S.SInt{L.Builtin{"zero"}, 0}),
      builtin("left", lam1("left", b.left(L.Builtin{"left"}))),
      builtin("right", lam1("right", b.right(L.Builtin{"right"}))),
-     builtin("trace", lam1("trace", b.trace(L.Builtin{"trace"}))),
      builtin("pair", lam2("pair", S.SPair{L.Builtin{"pair"}, S.SVar{L.Builtin{"pair"}, "x"}, S.SVar{L.Builtin{"pair"}, "y"}})),
      builtin("app", lam2("app", S.SApp{L.Builtin{"app"}, S.SVar{L.Builtin{"app"}, "x"}, S.SVar{L.Builtin{"app"}, "y"}}))],
     t}
@@ -198,8 +194,6 @@ def optimize.one(+scope: Set(), +a: L.Loc, +name: String, +x: S.Expanded(), +t: 
       optimize.pick(has(scope, "left"), S.SLeft{S.loc(Empty, Unit, Empty, x), x}, t)
     case "right":
       optimize.pick(has(scope, "right"), S.SRight{S.loc(Empty, Unit, Empty, x), x}, t)
-    case "trace":
-      optimize.pick(has(scope, "trace"), S.STrace{a, x}, t)
     case "pair":
       optimize.pick(has(scope, "pair"), partial.pair(a, x), t)
     case "app":
@@ -285,8 +279,6 @@ def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
               VT{optimize(scope, S.SLeft{anno, vt(go(f, scope, OT{x}))})}
             case S.SRight{anno, x}:
               VT{optimize(scope, S.SRight{anno, vt(go(f, scope, OT{x}))})}
-            case S.STrace{anno, x}:
-              VT{optimize(scope, S.STrace{anno, vt(go(f, scope, OT{x}))})}
             case S.SHash{anno, x}:
               VT{optimize(scope, S.SHash{anno, vt(go(f, scope, OT{x}))})}
             case S.SRec{anno, a, b, c}:
@@ -342,7 +334,7 @@ def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
                       <> vas(go(f, scope, OAs{rest}))}
 
 def builtin.names() -> Set():
-  Set.from_list(["left", "right", "trace", "pair", "app"])
+  Set.from_list(["left", "right", "pair", "app"])
 
 def fuel() -> Nat:
   U32.to_nat(4294967295)
@@ -577,8 +569,6 @@ def lower(+fuel: Nat, n: ON) -> LV:
               DT{S.SLeft{a, dt(lower(f, OT{x}))}}
             case S.SRight{a, x}:
               DT{S.SRight{a, dt(lower(f, OT{x}))}}
-            case S.STrace{a, x}:
-              DT{S.STrace{a, dt(lower(f, OT{x}))}}
             case S.SHash{a, x}:
               DT{S.SHash{a, dt(lower(f, OT{x}))}}
             case S.SRec{a, x, y, z}:
