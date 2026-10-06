@@ -218,7 +218,8 @@ expected to change that (section 4).
 **Status (2026-10-06):**
 - P1 is done: `74c4cc5` (P1a) and `f0fb389` (P1b). Results are under P1.
 - P2 is done: `c28a8c8`.
-- P3 is next.
+- P3 is done: `d4e6b47`. `run` certified everywhere, so no stop.
+- P4 is next.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -527,6 +528,48 @@ in the dev fixup; that tool was already stale.
    bigger (tictactoe: 3,054 bodies against 194 templates), so measure its
    sizing and IC cost first.
 4. **README "Design":** "§3/§11.4: the port certifies the term it runs".
+
+**Done (2026-10-06), `d4e6b47`.**
+- **Step 1, measured** with a throwaway `certrun` (each term certified on
+  its own, verdict and time), over the three goldens' programs, testchar
+  (bare, and with the Prelude imported), `test/programs/limits/*` and the
+  15 corpus programs. `run` certified on every one that `cert` did; bare
+  testchar fails to resolve on both. Certify times, cert → run:
+  - tictactoe 1,217 → 783 ms (3,054 → 176 bodies);
+  - arith 1,366 → 756 ms; ratarith 2,163 → 1,006 ms; rat 477 → 253 ms;
+  - casea 127 → 484 ms; cases 342 → 810 ms; ctstr 220 → 567 ms;
+    ctall 199 → 411 ms; ctign/ctprop ~50 → ~200 ms.
+- **Step 2, done:**
+  - `Front.Terms` is gone; `Front.term`/`compile` give the one `T.C`.
+  - `Lower.validate` became `defined`: the same walk in the same order,
+    over a set of names, building nothing. It runs first in `process`
+    (formerly `process.let`), so testchar's golden text is unchanged.
+    `VV` and the inlining helpers are gone. `debruijn` lost its `app`
+    flag (only debruijinizeApp is left).
+  - Main certifies `run`.
+  - Gate: every output unchanged (22 goldens, corpus 13 + 14). The eal
+    test moved to the one term, with two re-pins:
+    - `eal-pinned`'s second program (EALTests' false rejection) was "gave
+      up" and is now "dependency". `bodyerrs` shows the same give-up (the
+      dispatch depth cap) in one body: on the running term the gate sits
+      under the Prelude's let lambdas, so main fails on that dependency.
+      The first pin (mismatch) is unchanged.
+    - `eal-lift-udt` → `b75730…617f`. The old digest was the lifted main
+      of main2Term3's term, which `b0917c2` checked equal to
+      haskell-final's (with all 709 bodies, and the 82 of the sized
+      term). There is no haskell-final counterpart for the running term's
+      unsized lift; the sized term's are unchanged by P3.
+- **Whole runs, P2 → P3** (median of 3, 15 s cool-downs): tictactoe test
+  game 6.43 → 3.53 s; simpleplus 0.93 → 0.84 s; casea 1.51 → 1.85 s;
+  cases 2.17 → 2.57 s; ctstr 1.78 → 2.14 s.
+- **README speed table, Bend column after P3** (median of 3): tictactoe
+  3.6 s, rat 1.5, natudt 3.0, natarith 1.0, casea 1.9, ctprop 5.0,
+  simpleplus 0.9, tc 0.02. It is in the `fixup! Certify the term that
+  runs` commit, to fold into `d4e6b47`.
+- **A lead for the case programs' 20%:** `ealtime casea` shows main's pass
+  faster on `run` (110 → 67 ms) but the standalone verdicts 4× slower
+  (94 → 375 ms) over fewer bodies (145 → 84). Find which bodies dominate
+  (a timed `bodyerrs`) before changing anything.
 
 ### P4. One conditional; the IC runs only the chosen branch (DESIGN §11.3)
 
@@ -903,7 +946,7 @@ machine needn't redo it. Read Haskell with `git show haskell-final:PATH`.
 
 **`compileFast`** (479-497):
 1. Parse and expand the modules. Errors read `"Error in module X:\n" <> err`.
-2. `main2Term3` (= the port's `cert`) → `certifyMain`; a failure renders as
+2. `main2Term3` (the port's `cert` until P3) → `certifyMain`; a failure renders as
    `renderEALError`.
 3. It **runs `main2Term3let`** (= `run`) through `term3ToFast (ownerMap
    modules)`, with no sizing, no `inferEALCompiled` and no static checks.
@@ -1316,6 +1359,12 @@ The alignment steps that were done:
 - `trace` is not a builtin (P2): a program using it fails with "missing
   definition", where haskell-final treated it as the identity. No program
   in the repo or the corpus uses it.
+- EAL certifies the running term (P3), so a program that fails
+  certification can fail differently: a failure inside a let-bound
+  function's body reads `a function body this program depends on failed
+  certification: HASH`, where haskell-final, on the inlined term, reported
+  it in main (EALTests' second PINNED program). No golden or corpus
+  program fails certification.
 - P4–P7 will add their lines here: counts, the fuel text, the
   certificate's checks section.
 
@@ -1370,7 +1419,7 @@ and run it from the repo root: modules load as `M.tel` from the cwd.
 **Compile (`--check-only` passed on 2026-10-01):**
 - `icmeter MODULE [LINE…]`: the session's displays, then
   `IC interactions: N`.
-- `ealtime MODULE`: for the `cert` and `sized` passes, `bodies N`, then
+- `ealtime MODULE`: for the `term` (certified) and `sized` passes, `bodies N`, then
   `main X ms: vars V sites S pairs P blames B -> ok|<error>` and
   `verdicts Y ms: K certify`.
 - `tplcount MODULE`: how many templates the prepared program has.
@@ -1379,10 +1428,10 @@ and run it from the repo root: modules load as `M.tel` from the cwd.
   for comparing builds.
 - `bodyerrs MODULE`: every lifted body's standalone verdict on the
   certified term and on the sized one, with the failure text.
-- `sites MODULE`: the recursion sites (location and token), and the node
-  counts of `cert` and `run` (useful for P3).
+- `sites MODULE`: the recursion sites (location and token), and the
+  term's node count.
 - `size MODULE`: sizing's counts, or its failure.
-- `lift MODULE`: the deferLift dump of `cert`.
+- `lift MODULE`: the deferLift dump of the term.
 - `lexdump`: tokens.
 - `ealonly`: certification only.
 - `sha`, `shabench`: SHA-256.
