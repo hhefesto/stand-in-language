@@ -1,5 +1,6 @@
 import Base
 import ../Front.bend as Fr
+import ../Term.bend as T
 import ../Size.bend as Sz
 import ../Expr.bend as E
 import ../Core.bend as Co
@@ -123,14 +124,12 @@ def sized(guided: Bool, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2
         case Sz.Sized{counts, expr}:
           Ss.replay(prepared(guided, expr), lines)
 
-def compiled(guided: Bool, r: Result<&2, &2, String, Fr.Terms>, lines: List<&2, String>) -> Ss.Replay:
+def compiled(guided: Bool, r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], 0}
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, run}:
-          sized(guided, Sz.size(65536, True{}, E.of.term3(run)), lines)
+    case Done{run}:
+      sized(guided, Sz.size(65536, True{}, E.of.term3(run)), lines)
 
 # A session as the command runs it: guided by EAL.
 def session(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
@@ -228,17 +227,15 @@ def usage.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
         case Sz.Sized{counts, expr}:
           wired(expr)
 
-def usage.terms(r: Result<&2, &2, String, Fr.Terms>) -> Bool:
+def usage.term(r: Result<&2, &2, String, T.C>) -> Bool:
   match r:
     case Fail{e}:
       False{}
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, run}:
-          usage.sized(Sz.size(65536, True{}, E.of.term3(run)))
+    case Done{run}:
+      usage.sized(Sz.size(65536, True{}, E.of.term3(run)))
 
 def usage.agrees(srcs: List<&2, Fr.Src>, +entry: String) -> Bool:
-  usage.terms(Fr.compile(srcs, entry))
+  usage.term(Fr.compile(srcs, entry))
 
 def unlines(xs: List<&2, String>) -> String:
   match xs:

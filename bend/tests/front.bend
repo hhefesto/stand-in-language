@@ -253,18 +253,18 @@ def sites.text(xs: List<&2, Site>) -> String:
         case Con{y, more}:
           site.text(x) ++ ", " ++ sites.text(Con{y, more})
 
-def sites(r: Result<&2, &2, String, Fr.Terms>) -> String:
+def sites(r: Result<&2, &2, String, T.C>) -> String:
   match r:
     case Fail{e}:
       e
-    case Done{Fr.Terms{cert, run}}:
+    case Done{run}:
       sites.text(sort(walk(U32.to_nat(4000000000), run, []), []))
 
-def error(r: Result<&2, &2, String, Fr.Terms>) -> String:
+def error(r: Result<&2, &2, String, T.C>) -> String:
   match r:
     case Fail{e}:
       e
-    case Done{ts}:
+    case Done{t}:
       "(compiled)"
 
 def with.prelude(+name: String, t: String, +prelude: String) -> List<&2, Fr.Src>:

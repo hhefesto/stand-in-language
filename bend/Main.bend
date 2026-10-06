@@ -279,7 +279,9 @@ def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2,
       Done{Compiled{run, s}}
 
 # certifyMain gates the program before its sizing does (Driver's
-# compileMainReporting), whatever the action. Certification runs first and
+# compileMainReporting), whatever the action. It certifies the term that is
+# sized and run, where haskell-final certified the let-inlined one (DESIGN
+# §3, §11.4). Certification runs first and
 # sizing after it, never side by side: EAL forks over the bodies, and run
 # alongside sizing the two would split the lanes and starve those forks.
 def certified(+run: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
@@ -289,18 +291,16 @@ def certified(+run: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compi
     case None{}:
       sized(run, Sz.size(budget(), True{}, E.of.term3(run)))
 
-def resolved(r: Result<&2, &2, Fr.Err, Fr.Terms>) -> Result<&2, &2, Failure, Compiled>:
+def resolved(r: Result<&2, &2, Fr.Err, T.C>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{e}:
       Fail{Refused{e}}
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, +run}:
-          certified(run, EAL.certify(Lf.defer.lift(cert)))
+    case Done{+run}:
+      certified(run, EAL.certify(Lf.defer.lift(run)))
 
 # The parsed modules compiled: resolved, certified, sized.
 def compile(m: Fr.Mods, +entry: String) -> Result<&2, &2, Failure, Compiled>:
-  resolved(Fr.terms(m, entry))
+  resolved(Fr.term(m, entry))
 
 # The action, on the compiled program. Running prepares it under the EAL
 # capture layouts of the sized term, so closures are copied as EAL

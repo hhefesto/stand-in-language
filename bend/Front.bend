@@ -13,7 +13,7 @@ import ./Text.bend as Tx
 # The front end as the command drives it (haskell-final's app/Main.hs
 # getModulesFor and Driver.compileModules, up to Term3): load the modules
 # the entry needs, parse and expand each, resolve main, desugar, and lower
-# it both ways.
+# it.
 
 # A module's name and text.
 
@@ -40,11 +40,6 @@ type Err is Data:
 
 type Mods is Data:
   Mods{+mods: List<&2, Rs.Mod>, +errs: List<&2, ModErr>}
-
-# The program's two Term3s: main2Term3's, which EAL certifies, and
-# main2Term3let's, which is sized and run.
-type Terms is Data:
-  Terms{+cert: T.C, +run: T.C}
 
 def import.names(items: List<&2, S.Item>) -> List<&2, String>:
   match items:
@@ -173,22 +168,16 @@ def main.or(r: Result<&2, &2, Rs.ResErr, S.Expanded()>) -> Result<&2, &2, Err, S
     case Done{t}:
       Done{D.desugar(t)}
 
-def lowered(+t: S.Desugared()) -> Result<&2, &2, Err, Terms>:
-  do Result<&2, &2, Err, Terms>:
-    cert : T.C <- re.or(Lw.process(t))
-    run : T.C <- re.or(Lw.process.let(t))
-    return Terms{cert, run}
-
-# From the parsed modules to the program's two Term3s (compileModules, up
-# to sizing).
-def terms(m: Mods, +entry: String) -> Result<&2, &2, Err, Terms>:
+# From the parsed modules to the program's Term3, which EAL certifies and
+# the command sizes and runs (compileModules, up to sizing).
+def term(m: Mods, +entry: String) -> Result<&2, &2, Err, T.C>:
   match m:
     case Mods{+mods, errs}:
       match errs:
         case Nil{}:
-          do Result<&2, &2, Err, Terms>:
+          do Result<&2, &2, Err, T.C>:
             t : S.Surf<Empty, Empty, Empty> <- main.or(Rs.main(mods, entry))
-            lowered(t)
+            re.or(Lw.process(t))
         case Con{e, rest}:
           Fail{Modules{e <> rest}}
 
@@ -221,14 +210,14 @@ def render(e: Err) -> String:
     case Unresolved{re}:
       "RE (" ++ Rs.render(re) ++ ")"
 
-def rendered(r: Result<&2, &2, Err, Terms>) -> Result<&2, &2, String, Terms>:
+def rendered(r: Result<&2, &2, Err, T.C>) -> Result<&2, &2, String, T.C>:
   match r:
     case Fail{e}:
       Fail{render(e)}
-    case Done{ts}:
-      Done{ts}
+    case Done{t}:
+      Done{t}
 
 # From the modules' texts to Term3, every problem as the text the command
 # prints.
-def compile(srcs: List<&2, Src>, +entry: String) -> Result<&2, &2, String, Terms>:
-  rendered(terms(all(srcs), entry))
+def compile(srcs: List<&2, Src>, +entry: String) -> Result<&2, &2, String, T.C>:
+  rendered(term(all(srcs), entry))

@@ -42,18 +42,16 @@ def sized(+max: U32, +t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Strin
         case Sz.Sized{cs, expr}:
           counts(cs)
 
-def size.terms(+max: U32, r: Result<&2, &2, String, Fr.Terms>) -> String:
+def size.term(+max: U32, r: Result<&2, &2, String, T.C>) -> String:
   match r:
     case Fail{e}:
       e
-    case Done{ts}:
-      match ts:
-        case Fr.Terms{cert, +run}:
-          sized(max, run, Sz.size(max, True{}, E.of.term3(run)))
+    case Done{+run}:
+      sized(max, run, Sz.size(max, True{}, E.of.term3(run)))
 
 # The counts, in token order, or the failure as the command reports it.
 def size(+max: U32, srcs: List<&2, Fr.Src>, +entry: String) -> String:
-  size.terms(max, Fr.compile(srcs, entry))
+  size.term(max, Fr.compile(srcs, entry))
 
 def with.prelude(+name: String, t: String, +prelude: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, t}]

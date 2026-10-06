@@ -110,16 +110,21 @@ EAL's usage map agree (§7). It differs on purpose in these places:
 - `--fast`, `.telc` artifacts (`--compile`) and `--draw-net` are not
   ported. `--fast` is a second evaluator (C4 makes that transitional), and
   sizing tictactoe takes 0.2 s here, so compiling once buys little.
+- EAL certifies the term that is sized and run (DESIGN.md §3, §11.4).
+  haskell-final certified a second term, built with every let binding
+  inlined at each use; the port no longer builds it. Every example
+  program certifies as it did, and a missing definition is reported as it
+  was.
 - Like haskell-final, the port certifies the sized program only for the
   capture layouts that guide the IC; it does not refuse to run a program
   whose sized form fails certification (DESIGN.md's `admitIC` is not in
   master or haskell-final).
 
-DESIGN.md's open questions (§11) stay as haskell-final has them: the
-certified term is not the executed one, abort is a core form, `if` is
-strict. The exception is `trace` (§11.7), which is removed: it had no
-runtime meaning, and restoring it would need a side channel through the IC
-(C1/C4).
+Of DESIGN.md's open questions (§11), two are resolved: the certified term
+is the executed one (§11.4, above), and `trace` (§11.7) is removed, since it
+had no runtime meaning and restoring it would need a side channel through
+the IC (C1/C4). The rest stay as haskell-final has them: abort is a core
+form, and `if` is strict.
 
 ## Quick Start
 
