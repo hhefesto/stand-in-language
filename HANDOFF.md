@@ -1016,8 +1016,8 @@ etc. Check against a haskell-final artifact.
   match.
 - **Tests:** `bend/tests/telc.bend` (telc-round-trip, telc-runs,
   telc-magic, telc-hash, telc-nodes at 881 and 23,866), in `nix/bend.nix`.
-- **Goldens:** `P.compile`, `P.telc`, `P.telc-certificate` for the three
-  programs, `expected/` recorded with the oracle's plain `--compile`;
+- **Goldens:** `P.compile`, `P.telc-run`, `P.telc-certificate` for the
+  three programs (not `P.telc`: `.gitignore` drops `*.telc`), `expected/` recorded with the oracle's plain `--compile`;
   `port/` for tc's and simpleplus's `.compile` (their artifacts store
   layouts; tictactoe's matches as is). `goldenPatterns` gained the three.
 - **Times:** `tictactoe.tel --compile` 1.7 s; running the `.telc` 0.9 s.
