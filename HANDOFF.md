@@ -225,7 +225,8 @@ expected to change that (section 4).
 - P4b was measured and **skipped** (the user's decision, 2026-10-06):
   it changes certificates (data under P4b). Sizing keeps `Expr.ite`.
 - P5 is done: `3fd770f` (`--fast` on the IC; see P5 for the design).
-- P6 is next.
+- P6 is done: `db9c827` (`.telc` v4; see P6).
+- P7 is next; it stops at P7.2 (the report's format) and P7.5.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -982,6 +983,45 @@ etc. Check against a haskell-final artifact.
 - The nine haskell-final `.telc` goldens stay excluded: they need its IC
   certificate.
 
+**Done (2026-10-06), `db9c827`.**
+- **`bend/Telc.bend`:** `Telc{entry, hash, cert, counts, places, budget,
+  expr, layouts}`; `encode` (writers put their bytes before a tail, as
+  `key.of` does); `decode` through a small reader monad `G` with
+  haskell-final's messages (magic, version, `not a readable telomare
+  artifact: not enough bytes`, the unknown-tag texts), skipping an IC
+  certificate (Data.Binary's big-endian Integer and Natural); `of` builds an
+  artifact from a sized program; `shapes` gives the layouts back as a map;
+  `sources.hash`; `nodes`. `Text.Bytes.write` writes the bytes.
+- **Locations:** a site's location is a variable, and haskell-final stores
+  its real span. The parser's `SVar` locations are now `L.word`: the end is
+  the start plus the name's length. Nothing printed changes.
+- **Main:** `--compile [-o|--output FILE]` (the output defaults to `.tel`
+  made `.telc`) prints `wrote P (N nodes, sources H)`. `--ic --compile` is
+  accepted as the same (recorded in section 7). `--fast --compile` dies
+  with haskell-final's text, exit 1. A `.telc` path: `--fast` prints its
+  note first, then the file is read and decoded (`path: msg`, exit 1), the
+  staleness note is printed when the entry's sources load and hash
+  otherwise, and then: `--compile` → `P.telc is already compiled`, exit 1;
+  `--certificate` → the stored text (with `--ic`, refused as before); a run
+  or `--meter` → the IC under the stored layouts. `-o` without `--compile`
+  is refused (exit 2).
+- **Compatibility, checked by hand with the oracle:** for tc_ultra_minimal,
+  simpleplus and tictactoe, the port's artifact equals haskell-final's
+  `--ic --compile` one byte for byte except the IC certificate (layouts
+  included: 989 and 7,184 bytes; tictactoe has none on either side, since
+  EAL gives up on its sized term, so its port artifact equals
+  haskell-final's plain `--compile` exactly). Each side runs the other's
+  artifacts with the same output, and the port with the same counts as
+  from source. Bad magic, wrong version, truncation and staleness texts
+  match.
+- **Tests:** `bend/tests/telc.bend` (telc-round-trip, telc-runs,
+  telc-magic, telc-hash, telc-nodes at 881 and 23,866), in `nix/bend.nix`.
+- **Goldens:** `P.compile`, `P.telc`, `P.telc-certificate` for the three
+  programs, `expected/` recorded with the oracle's plain `--compile`;
+  `port/` for tc's and simpleplus's `.compile` (their artifacts store
+  layouts; tictactoe's matches as is). `goldenPatterns` gained the three.
+- **Times:** `tictactoe.tel --compile` 1.7 s; running the `.telc` 0.9 s.
+
 ### P7. Erase aborts the sizer proves dead (DESIGN §10 direction, §11.6, C5)
 
 The facts are in section 5.3. The plan follows DESIGN §10's three parts:
@@ -1493,6 +1533,13 @@ The alignment steps that were done:
 - A program whose unchosen branch never ends now finishes (P4):
   `ratarith` gives haskell-final's reference evaluator's `1111`, where
   haskell-final `--ic` ran out of fuel.
+- `--compile` (P6) stores no IC certificate, and stores the capture
+  layouts, where haskell-final's plain `--compile` stored none
+  (`port/*.compile`); `--ic --compile` writes the same artifact and, unlike
+  haskell-final's, prints no IC certificate. A `.telc` runs on the IC with
+  or without `--ic` (haskell-final ran it on its reference evaluator
+  without), so its `--meter` is the IC's. `X.telc --ic --certificate` is
+  refused, as for a `.tel`.
 - `--fast` (P5) runs on the IC. Its fuel and meter are interactions; the
   meter has no "function applications" or "gate selections" lines; each
   unroll counts once, where haskell-final counted two per application
