@@ -109,6 +109,35 @@ def Bytes.read(path: String) -> IO(Result<&1, &1, String, List<&2, U32>>):
     r : Result<&1, &1, U32 & String, File> <- File.open(path, "r")
     Bytes.read.opened(r)
 
+def Bytes.write.done(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Result<&1, &1, String, Unit>):
+  (f, w) = r
+  match w:
+    case Fail{e}:
+      (code, msg) = e
+      do IO<Result<&1, &1, String, Unit>>:
+        File.close(f)
+        return Fail{msg}
+    case Done{u}:
+      do IO<Result<&1, &1, String, Unit>>:
+        File.close(f)
+        return Done{Unit{}}
+
+def Bytes.write.opened(bs: List<&2, U32>, r: Result<&1, &1, U32 & String, File>) -> IO(Result<&1, &1, String, Unit>):
+  match r:
+    case Fail{e}:
+      (code, msg) = e
+      IO.pure(Result<&1, &1, String, Unit>, Fail{msg})
+    case Done{f}:
+      do IO<Result<&1, &1, String, Unit>>:
+        w : File & Result<&1, &1, U32 & String, Unit> <- File.write_bytes(f, bs)
+        Bytes.write.done(w)
+
+# A file written with bytes (each 0-255).
+def Bytes.write(path: String, bs: List<&2, U32>) -> IO(Result<&1, &1, String, Unit>):
+  do IO<Result<&1, &1, String, Unit>>:
+    r : Result<&1, &1, U32 & String, File> <- File.open(path, "w")
+    Bytes.write.opened(bs, r)
+
 def decoded(r: Result<&1, &1, String, List<&2, U32>>) -> Result<&1, &1, String, String>:
   match r:
     case Fail{e}:

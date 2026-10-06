@@ -168,10 +168,14 @@ def outcome(h: How, r: IC.RB) -> Outcome:
     case IC.RBOk{+x}:
       value(aborted(x), x)
 
+# EAL's capture layouts for the sized program (ealCaptureLayouts).
+def layouts(expr: Co.V) -> Map<&2, Lf.Shape>:
+  EAL.layouts(Lf.defer.lift(Lf.of.expr(expr)))
+
 # prepareEntry: the sized program prepared for runs under EAL's capture
 # layouts for it, so closures are copied as EAL planned.
 def prepared(+expr: Co.V) -> IC.Prog:
-  IC.prepare(expr, EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
+  IC.prepare(expr, layouts(expr))
 
 # The session (evalSessionCore)
 # -----------------------------

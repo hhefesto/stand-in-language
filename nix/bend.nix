@@ -36,10 +36,11 @@ let
 
   # The golden cases the port covers: runs on IC (the plain runs too, whose
   # output is the same), compile errors, the static report (--certificate),
-  # the meter (--ic --meter; its expectation is test/golden/port's) and the
-  # unsized runs (--fast; the meter's and the fuel's are port's too). The
-  # others are haskell-final's other actions (--ic --certificate, --compile,
-  # .telc, --draw-net) and the REPL.
+  # the meter (--ic --meter; its expectation is test/golden/port's), the
+  # unsized runs (--fast; the meter's and the fuel's are port's too), and
+  # compiled programs (--compile, whose artifact is port's, and the .telc
+  # run). The others need haskell-final's IC certificate (--ic --compile,
+  # --ic --certificate, .telc with --ic), or are --draw-net and the REPL.
   goldenPatterns = [
     "*.run"
     "*.run-*"
@@ -52,6 +53,9 @@ let
     "*.test-game-ic"
     "*.fast"
     "*.fast-*"
+    "*.compile"
+    "*.telc"
+    "*.telc-certificate"
   ];
 
   # Each test under bend/tests prints one `ok NAME` line per group it checks
@@ -114,6 +118,13 @@ let
       "fast-sites"
       "fast-unsized"
       "fast-fuel"
+    ];
+    telc = [
+      "telc-round-trip"
+      "telc-runs"
+      "telc-magic"
+      "telc-hash"
+      "telc-nodes"
     ];
     size = [
       "size-tc_ultra_minimal"

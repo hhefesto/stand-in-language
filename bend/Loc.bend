@@ -3,8 +3,10 @@ import ./Show.bend as Show
 
 # Source locations (haskell-final's Telomare.IR.Loc). Every stage annotates
 # its terms with a Loc so diagnostics can say where a term came from. Only
-# the start of a span is ever rendered; the end matters to one thing, the
-# text EAL hashes a refinement check under, and there it equals the start.
+# the start of a span is ever rendered. The end matters to two things: the
+# text EAL hashes a refinement check under, where it equals the start, and
+# a compiled program's recursion sites, which are variables, whose span is
+# the word's (Telc.bend).
 
 # A position: line and column (1-based, tabs to the next multiple of 8
 # plus 1, as megaparsec counts them) and the offset in characters.
@@ -28,6 +30,13 @@ type Name is Data:
 
 def at(+file: String, +p: Pos) -> Loc:
   Src{file, p, p}
+
+# A word's span, from p to where it ends on its line.
+def word(+file: String, p: Pos, +w: String) -> Loc:
+  match p:
+    case Pos{+line, +col, +off}:
+      +n = U32.from_nat(String.length(w))
+      Src{file, Pos{line, col, off}, Pos{line, (col + n : U32), (off + n : U32)}}
 
 def Name.text(n: Name) -> String:
   match n:

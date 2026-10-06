@@ -405,8 +405,8 @@ def atom.begin(+file: String, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t
   match t:
     case Lx.Tok{k, +at, ws, nl}:
       match k:
-        case Lx.KId{name}:
-          got.term(next(toks), stack, S.SVar{L.at(file, at), name})
+        case Lx.KId{+name}:
+          got.term(next(toks), stack, S.SVar{L.word(file, at, name), name})
         case Lx.KStr{s}:
           got.term(next(toks), stack, S.SStr{L.at(file, at), s})
         case Lx.KNat{n}:

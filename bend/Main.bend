@@ -1,5 +1,6 @@
 import Base
 import ./Text.bend as Tx
+import ./Telc.bend as Tc
 import ./Expr.bend as E
 import ./Core.bend as Co
 import ./Term.bend as T
@@ -22,6 +23,8 @@ import ./Loc.bend as L
 #   telomare FILE.tel --certificate   report what is known without running it
 #   telomare FILE.tel --fast [--fuel N]   run it unsized, each iteration
 #                                     capped at N interactions (0: no cap)
+#   telomare FILE.tel --compile [-o FILE.telc]   compile it once
+#   telomare FILE.telc [--meter | --certificate]   run or report that
 #
 # The two reports are DESIGN.md's (C3, §9): the static report holds the
 # iteration counts sizing inferred and the structural nesting reading; the
@@ -30,21 +33,24 @@ import ./Loc.bend as L
 # (haskell-final's IC space certificate) is refused. `--fast` skips sizing
 # and runs on the IC too (C4), every recursion unbounded: nothing proves it
 # terminates, so fuel caps each iteration, and its meter adds each
-# recursion site's unrolls. haskell-final's other actions (--compile and
-# .telc programs, --draw-net) are not ported. The goldens in test/golden
-# check the command (`test/golden/run.sh BIN_DIR check`).
+# recursion site's unrolls. `--compile` writes haskell-final's version 4
+# artifact (Telc.bend), less its IC certificate; `--ic --compile` is the
+# same. haskell-final's --draw-net is not ported. The goldens in
+# test/golden check the command (`test/golden/run.sh BIN_DIR check`).
 
 # What to do with the program.
 type Act is Data:
   Play{}
   Meter{}
   Report{}
+  Compile{}
 
 type Arg is Data:
   AFile{+path: String}
   AIc{}
   AFast{}
   AFuel{}
+  AOut{}
   AAct{+act: Act, +flag: String}
   AOld{+flag: String}
   AUnknown{+flag: String}
@@ -55,22 +61,28 @@ type Fuel is Data:
   FuelNext{}
   FuelOf{+n: U32}
 
+# --compile's output (-o, --output): not given, the next argument, or given.
+type Out is Data:
+  NoOut{}
+  OutNext{}
+  OutTo{+path: String}
+
 # The arguments so far: the action, the flag that chose it ("" for the
 # default, a plain run), whether `--ic` and `--fast` were given, the fuel
-# cap and, once given, the program; or what is wrong.
+# cap, the output and, once given, the program; or what is wrong.
 type Cmd is Data:
-  Cmd{+act: Act, +flag: String, +ic: Bool, +fast: Bool, +fuel: Fuel, +file: Maybe<&2, String>}
+  Cmd{+act: Act, +flag: String, +ic: Bool, +fast: Bool, +fuel: Fuel, +out: Out, +file: Maybe<&2, String>}
   Bad{+msg: String}
 
 def usage() -> String:
-  "usage: telomare FILE.tel [--ic | --fast [--fuel N]] [--meter | --certificate]"
+  "usage: telomare FILE.tel [--ic | --fast [--fuel N]] [--meter | --certificate | --compile [-o FILE]]"
 
 # The command line
 # ----------------
 
 # haskell-final's options that the port leaves out.
 def old.flags() -> List<&2, String>:
-  ["--compile", "--output", "-o", "--draw-net", "--draw-limit"]
+  ["--draw-net", "--draw-limit"]
 
 def arg.old(+s: String, old: Bool) -> Arg:
   match old:
@@ -93,12 +105,26 @@ def arg.report(+s: String, report: Bool) -> Arg:
     case False{}:
       arg.meter(s, String.eq(s, "--meter"))
 
+def arg.compile(+s: String, compile: Bool) -> Arg:
+  match compile:
+    case True{}:
+      AAct{Compile{}, s}
+    case False{}:
+      arg.report(s, String.eq(s, "--certificate"))
+
+def arg.out(+s: String, out: Bool) -> Arg:
+  match out:
+    case True{}:
+      AOut{}
+    case False{}:
+      arg.compile(s, String.eq(s, "--compile"))
+
 def arg.fuel(+s: String, fuel: Bool) -> Arg:
   match fuel:
     case True{}:
       AFuel{}
     case False{}:
-      arg.report(s, String.eq(s, "--certificate"))
+      arg.out(s, String.eq(s, "-o") || String.eq(s, "--output"))
 
 def arg.fast(+s: String, fast: Bool) -> Arg:
   match fast:
@@ -126,55 +152,54 @@ def arg(+s: String) -> Arg:
 
 def with.file(c: Cmd, +path: String) -> Cmd:
   match c:
-    case Cmd{act, flag, ic, fast, fuel, file}:
+    case Cmd{act, flag, ic, fast, fuel, out, file}:
       match file:
         case None{}:
-          Cmd{act, flag, ic, fast, fuel, Some{path}}
+          Cmd{act, flag, ic, fast, fuel, out, Some{path}}
         case Some{f}:
           Bad{"telomare: one program at a time\n" ++ usage()}
     case Bad{m}:
       Bad{m}
 
-def act.set(+first: String, +a: Act, +flag: String, +ic: Bool, +fast: Bool, +fuel: Fuel, +file: Maybe<&2, String>, none: Bool) -> Cmd:
+def act.set(+first: String, +a: Act, +flag: String, +ic: Bool, +fast: Bool, +fuel: Fuel, +out: Out, +file: Maybe<&2, String>, none: Bool) -> Cmd:
   match none:
     case True{}:
-      Cmd{a, flag, ic, fast, fuel, file}
+      Cmd{a, flag, ic, fast, fuel, out, file}
     case False{}:
       Bad{"telomare: " ++ first ++ " and " ++ flag ++ " are separate actions; give one\n" ++ usage()}
 
 def with.act(c: Cmd, +a: Act, +flag: String) -> Cmd:
   match c:
-    case Cmd{act, +first, +ic, +fast, +fuel, +file}:
-      act.set(first, a, flag, ic, fast, fuel, file, String.is_empty(first))
+    case Cmd{act, +first, +ic, +fast, +fuel, +out, +file}:
+      act.set(first, a, flag, ic, fast, fuel, out, file, String.is_empty(first))
     case Bad{m}:
       Bad{m}
 
-# A compiled program (haskell-final's --compile wrote them) is refused.
-def with.path(c: Cmd, +path: String, telc: Bool) -> Cmd:
-  match telc:
-    case True{}:
-      Bad{"telomare: " ++ path ++ " is a compiled program, which only haskell-final runs; run the .tel instead"}
-    case False{}:
-      with.file(c, path)
-
 def with.ic(c: Cmd) -> Cmd:
   match c:
-    case Cmd{act, flag, ic, fast, fuel, file}:
-      Cmd{act, flag, True{}, fast, fuel, file}
+    case Cmd{act, flag, ic, fast, fuel, out, file}:
+      Cmd{act, flag, True{}, fast, fuel, out, file}
     case Bad{m}:
       Bad{m}
 
 def with.fast(c: Cmd) -> Cmd:
   match c:
-    case Cmd{act, flag, ic, fast, fuel, file}:
-      Cmd{act, flag, ic, True{}, fuel, file}
+    case Cmd{act, flag, ic, fast, fuel, out, file}:
+      Cmd{act, flag, ic, True{}, fuel, out, file}
     case Bad{m}:
       Bad{m}
 
 def with.fuel(c: Cmd, f: Fuel) -> Cmd:
   match c:
-    case Cmd{act, flag, ic, fast, fuel, file}:
-      Cmd{act, flag, ic, fast, f, file}
+    case Cmd{act, flag, ic, fast, fuel, out, file}:
+      Cmd{act, flag, ic, fast, f, out, file}
+    case Bad{m}:
+      Bad{m}
+
+def with.out(c: Cmd, o: Out) -> Cmd:
+  match c:
+    case Cmd{act, flag, ic, fast, fuel, out, file}:
+      Cmd{act, flag, ic, fast, fuel, o, file}
     case Bad{m}:
       Bad{m}
 
@@ -216,27 +241,26 @@ def fuel.arg(c: Cmd, a: Arg) -> Cmd:
     case _:
       Bad{"telomare: --fuel takes a number of interactions\n" ++ usage()}
 
-def fuel.next(c: Cmd) -> Bool:
-  match c:
-    case Cmd{act, flag, ic, fast, fuel, file}:
-      match fuel:
-        case FuelNext{}:
-          True{}
-        case _:
-          False{}
-    case Bad{m}:
-      False{}
+# The argument after -o is the file --compile writes.
+def out.arg(c: Cmd, a: Arg) -> Cmd:
+  match a:
+    case AFile{s}:
+      with.out(c, OutTo{s})
+    case _:
+      Bad{"telomare: -o takes the name of the file to write\n" ++ usage()}
 
 def with.arg.at(c: Cmd, a: Arg) -> Cmd:
   match a:
     case AFile{+path}:
-      with.path(c, path, String.ends_with(path, ".telc"))
+      with.file(c, path)
     case AIc{}:
       with.ic(c)
     case AFast{}:
       with.fast(c)
     case AFuel{}:
       with.fuel(c, FuelNext{})
+    case AOut{}:
+      with.out(c, OutNext{})
     case AAct{act, flag}:
       with.act(c, act, flag)
     case AOld{flag}:
@@ -244,15 +268,41 @@ def with.arg.at(c: Cmd, a: Arg) -> Cmd:
     case AUnknown{flag}:
       Bad{"telomare: unknown option " ++ flag ++ "\n" ++ usage()}
 
-def with.arg.if(next: Bool, c: Cmd, a: Arg) -> Cmd:
-  match next:
-    case True{}:
-      fuel.arg(c, a)
-    case False{}:
+# What the next argument is for: anything, --fuel's cap, or -o's file.
+type Next is Data:
+  Free{}
+  ForFuel{}
+  ForOut{}
+
+def next.out(o: Out) -> Next:
+  match o:
+    case OutNext{}:
+      ForOut{}
+    case _:
+      Free{}
+
+def next.of(c: Cmd) -> Next:
+  match c:
+    case Cmd{act, flag, ic, fast, fuel, out, file}:
+      match fuel:
+        case FuelNext{}:
+          ForFuel{}
+        case _:
+          next.out(out)
+    case Bad{m}:
+      Free{}
+
+def with.arg.for(n: Next, c: Cmd, a: Arg) -> Cmd:
+  match n:
+    case Free{}:
       with.arg.at(c, a)
+    case ForFuel{}:
+      fuel.arg(c, a)
+    case ForOut{}:
+      out.arg(c, a)
 
 def with.arg(+c: Cmd, a: Arg) -> Cmd:
-  with.arg.if(fuel.next(c), c, a)
+  with.arg.for(next.of(c), c, a)
 
 def args.go(xs: List<String>, c: Cmd) -> Cmd:
   match xs:
@@ -435,19 +485,61 @@ def resolved(r: Result<&2, &2, Fr.Err, T.C>) -> Result<&2, &2, Failure, Compiled
 def compile(m: Fr.Mods, +entry: String) -> Result<&2, &2, Failure, Compiled>:
   resolved(Fr.term(m, entry))
 
+# Compiling (--compile)
+# ---------------------
+
+# Where --compile writes: -o's file, or the program's, .tel made .telc
+# (replaceExtension).
+def out.path(o: Out, +file: String) -> String:
+  match o:
+    case OutTo{path}:
+      path
+    case _:
+      Bool.pick(String, String.ends_with(file, ".tel"), file ++ "c", file ++ ".telc")
+
+# The sized program as an artifact: haskell-final's `--ic --compile`, less
+# the IC certificate.
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>) -> Tc.Telc:
+  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info), budget(), Ss.layouts(expr))
+
+def prefix(n: Nat, s: String) -> String:
+  match n:
+    case 0n:
+      ""
+    case 1n+k:
+      match s:
+        case SNil{}:
+          ""
+        case SCon{c, rest}:
+          SCon{c, prefix(k, rest)}
+
+def wrote(+path: String, +n: U32, +hash: String, r: Result<&1, &1, String, Unit>) -> IO(Unit):
+  match r:
+    case Fail{e}:
+      IO.die(Unit, 1, "telomare: " ++ path ++ ": " ++ e)
+    case Done{u}:
+      IO.print_err("wrote " ++ path ++ " (" ++ U32.show(n) ++ " nodes, sources " ++ prefix(12n, hash) ++ ")")
+
+def written(+path: String, t: Tc.Telc) -> IO(Unit):
+  match t:
+    case Tc.Telc{entry, +hash, cert, counts, places, budget, +expr, layouts}:
+      do IO<Unit>:
+        r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts}))
+        wrote(path, Tc.nodes(expr), hash, r)
+
 # The action, on the compiled program. Running prepares it under the EAL
 # capture layouts of the sized term, so closures are copied as EAL
 # planned; the static report needs neither, and reads the modules as
-# written.
-def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod>, +entry: String) -> IO(Unit):
+# written. Compiling writes the artifact to path.
+def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod>, +entry: String, srcs: List<&2, Fr.Src>, +path: String) -> IO(Unit):
   match r:
     case Fail{f}:
       IO.die(Unit, 1, failed(f))
     case Done{c}:
       match c:
-        case Compiled{run, s}:
+        case Compiled{+run, s}:
           match s:
-            case Sz.Sized{counts, expr}:
+            case Sz.Sized{+counts, +expr}:
               match act:
                 case Play{}:
                   play(Ss.prepared(expr), Sized{}, False{})
@@ -455,6 +547,8 @@ def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod
                   play(Ss.prepared(expr), Sized{}, True{})
                 case Report{}:
                   IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry)))
+                case Compile{}:
+                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry)))
 
 # Unsized (--fast)
 # ----------------
@@ -544,85 +638,209 @@ def fast.parsed(act: Act, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
       fast.ran(False{}, fuel, entry, m)
     case Meter{}:
       fast.ran(True{}, fuel, entry, m)
+    case Compile{}:
+      IO.die(Unit, 1, "--compile sizes the program, so it cannot be combined with --fast")
+
+# Compiled programs (.telc)
+# -------------------------
+
+def noted(fast: Bool) -> IO(Unit):
+  match fast:
+    case True{}:
+      IO.print_err("note: --fast does not apply to an already-compiled program")
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def stale.if(stale: Bool) -> IO(Unit):
+  match stale:
+    case True{}:
+      IO.print_err("note: the sources have changed since this program was compiled; recompile it to pick the changes up")
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def stale.of(+hash: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
+  match r:
+    case Fail{e}:
+      IO.pure(Unit, Unit{})
+    case Done{srcs}:
+      stale.if(Bool.not(String.eq(Tc.sources.hash(srcs), hash)))
+
+# An artifact outlives the sources it came from: when they are here and
+# hash otherwise now, that is worth saying, never refusing over
+# (warnIfStale).
+def stale(+entry: String, +hash: String) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
+    stale.of(hash, r)
+
+# A compiled program run, under the capture layouts it stores.
+def telc.play(t: Tc.Telc, meter: Bool) -> IO(Unit):
+  match t:
+    case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts}:
+      play(IC.prepare(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape))), Sized{}, meter)
+
+def telc.cert(t: Tc.Telc) -> IO(Unit):
+  match t:
+    case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts}:
+      IO.write(cert)
+
+def telc.acted(act: Act, +path: String, t: Tc.Telc) -> IO(Unit):
+  match act:
+    case Compile{}:
+      IO.die(Unit, 1, path ++ " is already compiled")
+    case Report{}:
+      telc.cert(t)
+    case Play{}:
+      telc.play(t, False{})
+    case Meter{}:
+      telc.play(t, True{})
+
+def telc.decoded(act: Act, +path: String, r: Result<&2, &2, String, Tc.Telc>) -> IO(Unit):
+  match r:
+    case Fail{msg}:
+      IO.die(Unit, 1, path ++ ": " ++ msg)
+    case Done{t}:
+      match t:
+        case Tc.Telc{+entry, +hash, cert, counts, places, budget, expr, layouts}:
+          do IO<Unit>:
+            stale(entry, hash)
+            telc.acted(act, path, Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts})
+
+def telc.read(act: Act, +path: String, r: Result<&1, &1, String, List<&2, U32>>) -> IO(Unit):
+  match r:
+    case Fail{e}:
+      IO.die(Unit, 1, "telomare: " ++ path ++ ": " ++ e)
+    case Done{bs}:
+      telc.decoded(act, path, Tc.decode(bs))
+
+# A compiled program: nothing to parse, certify or size (runArtifact).
+def telc.run(act: Act, fast: Bool, +path: String) -> IO(Unit):
+  do IO<Unit>:
+    noted(fast)
+    r : Result<&1, &1, String, List<&2, U32>> <- Tx.Bytes.read(path)
+    telc.read(act, path, r)
+
+# The source
+# ----------
 
 # The modules parsed and expanded once, for both the compiler and the
 # static report.
-def parsed(act: Act, h: Ss.How, +entry: String, m: Fr.Mods) -> IO(Unit):
+def parsed(act: Act, h: Ss.How, +entry: String, +path: String, srcs: List<&2, Fr.Src>, m: Fr.Mods) -> IO(Unit):
   match h:
     case Ss.Sized{}:
       match m:
         case Fr.Mods{+mods, errs}:
-          acted(compile(Fr.Mods{mods, errs}, entry), act, mods, entry)
+          acted(compile(Fr.Mods{mods, errs}, entry), act, mods, entry, srcs, path)
     case Ss.Fast{fuel}:
       fast.parsed(act, fuel, entry, m)
 
-def loaded(act: Act, h: Ss.How, +entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
+def loaded(act: Act, h: Ss.How, +entry: String, +path: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.die(Unit, 1, failed(Unread{e}))
-    case Done{srcs}:
-      parsed(act, h, entry, Fr.all(srcs))
+    case Done{+srcs}:
+      parsed(act, h, entry, path, srcs, Fr.all(srcs))
 
-def run.file(act: Act, h: Ss.How, file: Maybe<&2, String>) -> IO(Unit):
+def source.run(act: Act, h: Ss.How, o: Out, +f: String) -> IO(Unit):
+  +entry = base.name(f)
+  do IO<Unit>:
+    r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
+    loaded(act, h, entry, out.path(o, f), r)
+
+def unsized(h: Ss.How) -> Bool:
+  match h:
+    case Ss.Sized{}:
+      False{}
+    case Ss.Fast{n}:
+      True{}
+
+# A .telc is an artifact, whatever else the command line says.
+def file.run(telc: Bool, act: Act, h: Ss.How, o: Out, +f: String) -> IO(Unit):
+  match telc:
+    case True{}:
+      telc.run(act, unsized(h), f)
+    case False{}:
+      source.run(act, h, o, f)
+
+def run.file(act: Act, h: Ss.How, o: Out, file: Maybe<&2, String>) -> IO(Unit):
   match file:
-    case Some{f}:
-      +entry = base.name(f)
-      do IO<Unit>:
-        r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
-        loaded(act, h, entry, r)
+    case Some{+f}:
+      file.run(String.ends_with(f, ".telc"), act, h, o, f)
     case None{}:
       IO.die(Unit, 2, usage())
 
 # haskell-final's `--ic --certificate` was another report, the IC space
 # certificate, which the port does not have: refuse it rather than answer
 # with the static report.
-def run.cmd(act: Act, ic: Bool, h: Ss.How, file: Maybe<&2, String>) -> IO(Unit):
+def run.cmd(act: Act, ic: Bool, h: Ss.How, o: Out, file: Maybe<&2, String>) -> IO(Unit):
   match act:
     case Report{}:
       match ic:
         case True{}:
           IO.die(Unit, 2, "telomare: --ic --certificate (the IC space certificate) is not in the Bend port; haskell-final has it. --certificate alone gives the static report")
         case False{}:
-          run.file(Report{}, h, file)
+          run.file(Report{}, h, o, file)
     case other:
-      run.file(other, h, file)
+      run.file(other, h, o, file)
 
-def fast.checked(act: Act, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
+def fast.checked(act: Act, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
   match f:
     case FuelNext{}:
       IO.die(Unit, 2, "telomare: --fuel takes a number of interactions\n" ++ usage())
     case FuelOf{n}:
-      run.cmd(act, False{}, Ss.Fast{n}, file)
+      run.cmd(act, False{}, Ss.Fast{n}, o, file)
     case NoFuel{}:
-      run.cmd(act, False{}, Ss.Fast{fast.fuel()}, file)
+      run.cmd(act, False{}, Ss.Fast{fast.fuel()}, o, file)
 
-def sized.checked(act: Act, ic: Bool, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
+def sized.checked(act: Act, ic: Bool, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
   match f:
     case NoFuel{}:
-      run.cmd(act, ic, Ss.Sized{}, file)
+      run.cmd(act, ic, Ss.Sized{}, o, file)
     case _:
       IO.die(Unit, 2, "telomare: --fuel caps an unsized run; give it with --fast\n" ++ usage())
 
-# --fast and --ic name two runtimes in haskell-final, and --fuel caps only
-# an unsized run.
-def fast.ic(ic: Bool, act: Act, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
+def fast.ic(ic: Bool, act: Act, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
   match ic:
     case True{}:
       IO.die(Unit, 2, "telomare: --fast and --ic are separate runtimes; give one\n" ++ usage())
     case False{}:
-      fast.checked(act, file, f)
+      fast.checked(act, o, file, f)
 
-def checked(act: Act, ic: Bool, unsized: Bool, f: Fuel, file: Maybe<&2, String>) -> IO(Unit):
+# --fast and --ic name two runtimes in haskell-final, --fuel caps only an
+# unsized run, and -o names only --compile's output.
+def checked(act: Act, ic: Bool, unsized: Bool, f: Fuel, o: Out, file: Maybe<&2, String>) -> IO(Unit):
   match unsized:
     case True{}:
-      fast.ic(ic, act, file, f)
+      fast.ic(ic, act, o, file, f)
     case False{}:
-      sized.checked(act, ic, file, f)
+      sized.checked(act, ic, o, file, f)
+
+def out.bad(act: Act, o: Out) -> Maybe<&2, String>:
+  match act:
+    case Compile{}:
+      match o:
+        case OutNext{}:
+          Some{"telomare: -o takes the name of the file to write\n" ++ usage()}
+        case _:
+          None{}
+    case _:
+      match o:
+        case NoOut{}:
+          None{}
+        case _:
+          Some{"telomare: -o names the file --compile writes; give it with --compile\n" ++ usage()}
+
+def command.out(bad: Maybe<&2, String>, act: Act, ic: Bool, fast: Bool, f: Fuel, o: Out, file: Maybe<&2, String>) -> IO(Unit):
+  match bad:
+    case Some{msg}:
+      IO.die(Unit, 2, msg)
+    case None{}:
+      checked(act, ic, fast, f, o, file)
 
 def command(c: Cmd) -> IO(Unit):
   match c:
-    case Cmd{act, flag, ic, fast, fuel, file}:
-      checked(act, ic, fast, fuel, file)
+    case Cmd{+act, flag, ic, fast, fuel, +out, file}:
+      command.out(out.bad(act, out), act, ic, fast, fuel, out, file)
     case Bad{msg}:
       IO.die(Unit, 2, msg)
 
@@ -630,9 +848,9 @@ def command(c: Cmd) -> IO(Unit):
 def args(xs: List<String>) -> IO(Unit):
   match xs:
     case self <> rest:
-      command(args.go(rest, Cmd{Play{}, "", False{}, False{}, NoFuel{}, None{}}))
+      command(args.go(rest, Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}}))
     case _:
-      command(Cmd{Play{}, "", False{}, False{}, NoFuel{}, None{}})
+      command(Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}})
 
 def main() -> IO(Unit):
   do IO<Unit>:

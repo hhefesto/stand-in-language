@@ -43,7 +43,7 @@ copying. Both reports of [Resource reporting](#resource-reporting) are
 ported: the static report (`--certificate`) as haskell-final prints it, and
 `--meter` with the interaction count only (see that section). haskell-final's
 other actions are not ported: `--ic --certificate` (the IC space
-certificate), `--compile` and `.telc` programs, and `--draw-net`.
+certificate) and `--draw-net`.
 The sections that describe them say so. `test/golden/` records exactly what
 haskell-final printed for each example program and mode, and `nix flake
 check` runs the command on every case it covers (`test/golden/run.sh BIN_DIR
@@ -113,8 +113,12 @@ in these places:
 - `--meter` reports interactions only. haskell-final's IC also printed
   "logical storage" counted on its own map-of-ports net, which the port
   does not share and so cannot report honestly.
-- `.telc` artifacts (`--compile`) and `--draw-net` are not ported; sizing
-  tictactoe takes 0.2 s here, so compiling once buys little.
+- `--draw-net` is not ported.
+- `--compile` writes haskell-final's version 4 artifact with no IC
+  certificate (the port has none to store), and `--ic --compile` writes the
+  same. For the example programs it is byte for byte the artifact
+  haskell-final's `--ic --compile` writes, but for that certificate, and
+  artifacts load either way.
 - `--fast` runs on the IC (C4: one runtime), not on a second evaluator.
   Sizing is skipped, and every recursion site becomes a closure that
   rebuilds itself when applied, so each application unrolls one layer;
@@ -269,19 +273,21 @@ two failures it is — a budget that was too small, or an input that nothing
 bounds. Only the first is fixable by raising the budget. See
 `test/programs/limits/` for a worked example of each.
 
-## Compiling once (haskell-final)
+## Compiling once
 
-Sizing is the slow part — about 70 seconds for `tictactoe.tel` — and it gives
-the same answer every time, because it runs the program over a *symbolic*
-input. So it need only happen once:
+Certifying and sizing are the slow part (about 70 seconds for `tictactoe.tel`
+in haskell-final, 1.7 s here), and they give the same answer every time,
+because sizing runs the program over a *symbolic* input. So they need only
+happen once:
 
 ```sh
-$ telomare tictactoe.tel --compile      # ~70s, writes tictactoe.telc
-$ telomare tictactoe.telc               # starts immediately
+$ telomare tictactoe.tel --compile      # writes tictactoe.telc
+$ telomare tictactoe.telc               # starts at once
 ```
 
-A `.telc` file holds the sized program together with its counts and its
-certificate, so running it skips parsing, typechecking, resolving and sizing,
+A `.telc` file holds the sized program together with its counts, its
+certificate and the capture layouts it runs under, so running it skips
+parsing, certifying, resolving and sizing,
 and `--certificate` on it prints instantly. If the sources are still around and
 have changed since it was built, running it says so and carries on — an
 artifact is expected to outlive the checkout it came from.
@@ -534,7 +540,7 @@ goldens in `test/golden/`.
 | Drive | `Telomare.Driver`, the `telomare` command | ported for running programs, `--meter` and `--fast`: `bend/{Session,Meter,Main}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
-| Artifacts | `Telomare.Artifact` | not ported |
+| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 4, written with no IC certificate) |
 | REPL and LSP | `app/Repl.hs`, `app/LSP.hs` | not ported |
 
 Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and the
