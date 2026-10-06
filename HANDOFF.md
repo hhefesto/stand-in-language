@@ -155,11 +155,13 @@ Pushed: `origin/bend-port` (hhefesto/stand-in-language) was force-pushed at
 - The corpus (section 10) matches haskell-final on `--ic --meter` (13
   programs) and `--certificate` (14 programs).
 
-**Interaction counts that tests pin** (guided, as in haskell-final):
-- tc_ultra_minimal: 524
-- simpleplus `3 4`: 1,517,868
-- tictactoe `1 4 2 5 3` (the `.ic-meter` golden's game): 15,168,230. The
-  test game (`1 9 2 8 3`) spends 15,208,930; no test pins it.
+**Interaction counts that tests pin** (guided). Until P4 they were
+haskell-final's; from P4 (`2359df8`) they are the port's own:
+- tc_ultra_minimal: 524 → 150
+- simpleplus `3 4`: 1,517,868 → 782,347
+- tictactoe `1 4 2 5 3` (the `.ic-meter` golden's game): 15,168,230 →
+  5,949,895. The test game (`1 9 2 8 3`) spends 15,208,930 → 5,967,451;
+  no test pins it.
 
 **Templates after `7103aa53`** (one per exactly-equal body):
 - tc 34 → 17
@@ -219,7 +221,8 @@ expected to change that (section 4).
 - P1 is done: `74c4cc5` (P1a) and `f0fb389` (P1b). Results are under P1.
 - P2 is done: `c28a8c8`.
 - P3 is done: `d4e6b47`. `run` certified everywhere, so no stop.
-- P4 is next.
+- P4 is done: `2359df8`, with capture trimming (see P4).
+- P4b is next; it stops if any certificate count changes.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -664,6 +667,54 @@ in the dev fixup; that tool was already stale.
   (`telomare ratarith.tel` without `--ic`) and record it in section 7.
 - Section 7 gets a line: interaction counts differ from haskell-final
   `--ic` by design, from P4 on.
+
+**Done (2026-10-06), `2359df8`.** Two things the plan above did not
+foresee, and how they were resolved:
+- **Hashes.** Collecting the lazy shape changes the collected code of
+  every body that contains an `if`, so its hash (`code.of`) no longer
+  matches EAL's and its capture layout is not found. So `IC.Code` got a
+  node, `CdIte{s, l, r, el, er, cap}`: the branches as written (`l`, `r`;
+  `lifted` and so the hash read the strict if) and how it runs (`el`, `er`
+  the branch templates' references, `cap` the captured parts; `compile`,
+  `usage` and `key.of` read `ite.run`).
+- **The whole env.** Handing the chosen branch the whole env (the plan's
+  `CdEnv`) made counts mixed: tc 524 → 221, simpleplus 1,517,868 →
+  1,305,239, but tictactoe 15,168,230 → 19,651,473, and `cases`/`ctall`
+  ran out of fuel (the env, used whole beside the scrutinee's paths, is
+  duplicated whole at every `if`). As the plan said to, the branches now
+  capture only what they use: `captured` takes the paths `l` and `r` use
+  with no used path above them, `capture` builds them as a list, and
+  `trimmed` rewrites each branch to read the list (`moved` maps a path to
+  its place). With that, every count fell (below).
+- **Counts, haskell-final → port** (all displays identical):
+  - goldens: tc 524 → 150; simpleplus 1,517,868 → 782,347; tictactoe
+    15,168,230 → 5,949,895;
+  - corpus: casea 1,597,098 → 625,575; cases 3,131,170 → 2,449,599; ctall
+    2,201,993 → 1,719,551; ctign 247,873 → 2,297; ctprop 247,873 →
+    105,363; ctstr 2,641,796 → 2,102,322; natarith 109,150 → 48,979;
+    natudt 2,996,437 → 2,596,341; nonex 10,361 → 5,561; patlam 24,276 →
+    5,802; qual 1,252 → 552; rat 6,774,269 → 91,147;
+  - `ratarith` finishes: `1111` in 291,766, which is what haskell-final's
+    reference evaluator prints (`telomare ratarith.tel`, kept as
+    `bend/dev/corpus/ratarith.hs-run`); its `--ic` ran out of fuel.
+- **Whole runs, P3 → P4** (median of 3): tictactoe test game 3.58 → 2.49 s
+  (its session 0.72 s); rat 1.50 → 0.75 s; simpleplus 0.85 → 0.79 s; casea
+  1.86 → 1.74 s; cases 2.60 → 2.52 s. The README table was re-measured.
+- **Tests:**
+  - `ic-laziness` pin 2 gives 0, citing the reference evaluator; a new
+    case checks that a closure over an `if` reads back as written
+    (templates keep their `orig`).
+  - `ic-usage-agrees` now compares each template's wiring with
+    `EAL.usage` of the code the IC runs (`ran`: each `CdIte` as
+    `ite.run`), through `IC.lifted`. A branch template reads the captured
+    list, so its body can no longer be compared with its `orig`. It covers
+    the branch templates.
+  - `ic-meter-*` and `ic-meter-case-udt` are re-pinned; the three
+    `port/*.ic-meter` goldens re-recorded.
+- **Corpus:** each program's meter is checked two ways: the displays
+  against haskell-final's (`NAME.hs-ic-meter`, or `NAME.hs-run` where its
+  IC ran dry), and the whole output against `NAME.port-ic-meter`, the
+  port's record (dev fixup `6bc1d54`).
 
 **P4b, measured follow-up: retire sizing's lazy `ite`.**
 - Let sizing select on the gate-switch when the scrutinee is known, and
@@ -1356,6 +1407,13 @@ The alignment steps that were done:
 - `--ic --certificate` (haskell-final's IC space certificate) is refused,
   exit 2. `--certificate` alone gives the static report.
 - `--draw-net`, the REPL and the LSP are not ported.
+- Interaction counts are the port's own from P4 on: its IC runs only an
+  `if`'s chosen branch, on the parts of the environment the branches use,
+  where haskell-final's built both (`test/golden/port/*.ic-meter`). The
+  displays are unchanged.
+- A program whose unchosen branch never ends now finishes (P4):
+  `ratarith` gives haskell-final's reference evaluator's `1111`, where
+  haskell-final `--ic` ran out of fuel.
 - `trace` is not a builtin (P2): a program using it fails with "missing
   definition", where haskell-final treated it as the identity. No program
   in the repo or the corpus uses it.
@@ -1365,8 +1423,8 @@ The alignment steps that were done:
   certification: HASH`, where haskell-final, on the inlined term, reported
   it in main (EALTests' second PINNED program). No golden or corpus
   program fails certification.
-- P4–P7 will add their lines here: counts, the fuel text, the
-  certificate's checks section.
+- P5–P7 will add their lines here: the fuel text, the certificate's
+  checks section.
 
 ## 8. Left open
 
@@ -1501,14 +1559,20 @@ empty.
   - `rat`, `ratarith`: Rational.
 - `NAME.hs-ic-meter`: haskell-final `--ic --meter` output (displays, then
   `IC interactions: N`). There are 13; `arith` and `casei` have none.
-  `ratarith`'s is the fuel death at 10,000,000. The port matched all 13.
+  `ratarith`'s is the fuel death at 10,000,000. The port matched all 13
+  until P4; from P4 its displays still do (`ratarith`'s match
+  `ratarith.hs-run`, the reference evaluator's), and `NAME.port-ic-meter`
+  holds the port's whole output.
 - `NAME.hs-certificate`: haskell-final `--certificate` output. There are
   14; `ratarith` has none. The port matched all 14 byte for byte.
 - To compare:
   ```sh
   cd bend/dev/corpus
-  /tmp/bin/telomare casea.tel --meter 2>&1 | diff - casea.hs-ic-meter
-  /tmp/bin/telomare casea.tel --certificate | diff - casea.hs-certificate
+  /tmp/bin/telomare casea.tel --meter 2>&1 | diff - casea.port-ic-meter
+  diff <(/tmp/bin/telomare casea.tel --meter 2>&1 | grep -v '^IC inter') \
+       <(grep -v '^IC inter' casea.hs-ic-meter)
+  { /tmp/bin/telomare casea.tel --certificate; echo "status $?"; } \
+    | diff - casea.hs-certificate
   ```
   The port's `--meter` puts `IC interactions: N` on stderr after the
   displays, which matches haskell-final's first meter line.
