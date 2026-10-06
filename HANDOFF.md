@@ -222,7 +222,9 @@ expected to change that (section 4).
 - P2 is done: `c28a8c8`.
 - P3 is done: `d4e6b47`. `run` certified everywhere, so no stop.
 - P4 is done: `2359df8`, with capture trimming (see P4).
-- P4b is next; it stops if any certificate count changes.
+- **Stopped at P4b (2026-10-06): certificate counts change.** The data
+  and the options are under P4b; the user decides. Nothing of P4b is
+  committed.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -724,6 +726,36 @@ foresee, and how they were resolved:
 - **Stop if any certificate count changes.** Sizing today evaluates dead
   strict branches of user `if`s and may size recursion sites reachable only
   there. If anything changes, report to the user instead of re-recording.
+
+**Measured (2026-10-06), stopped.** Tried in a scratch copy only:
+- Sizing's `eval` read the strict shape as it reads `E.ite`: evaluate
+  `fill(Gate, s)`, apply that selector to `(Defer -4 l, Defer -5 r)` by
+  `JStep`, then apply the chosen one to the env by `JStep`. (Rewriting the
+  shape into `E.ite` and evaluating that loops: `E.ite` contains the
+  strict shape over the two Defers.)
+- **Everywhere:** simpleplus and tictactoe no longer size (`could not
+  size recursion #3 at simpleplus:12:28: its test depends on input that
+  nothing bounds`). The validators (`assert`, `and`) are `if`s inside
+  refinement checks; read lazily there, the check's value is not the
+  strict shape `extract` recognises, so the input restriction is lost.
+  ctign and patlam changed too.
+- **Except inside checks** (`MCheck` keeps the strict reading): every
+  golden certificate and 12 of the 14 corpus certificates are unchanged.
+  Two change, both a `case` over a constant whose dead branches sized
+  Prelude recursions:
+  - ctign: `#0 <= 3, #1 <= 4, #2 <= 2, #3 Prelude:67:42 <= 116` becomes
+    `#0 <= 2, #1 <= 1, #2 <= 1` (site #3 gone);
+  - patlam: `Prelude:67:42 (#3) <= 1` gone.
+- **Options for the user:**
+  1. Skip P4b. Sizing keeps `Expr.ite` for its unrolling step and the
+     strict reading of user `if`s; P4 already settles §11.3 at runtime.
+     The IC keeps using `Co.step.e.ind`/`step.t.ind` for its branch
+     templates. (Recommended: (2) needs a mode-dependent reading, which
+     adds about as much as it removes.)
+  2. Do P4b with the check exception, and record ctign's and patlam's
+     certificates as differences by design (no golden changes; the
+     corpus is dev-only). The IC then needs its own indices for branch
+     templates.
 
 ### P5. `--fast` on the IC (needs P4)
 
