@@ -23,7 +23,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           count(Ss.prepared(expr))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> String:

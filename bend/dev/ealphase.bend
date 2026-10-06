@@ -56,7 +56,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           run(Lf.defer.lift(Lf.of.expr(expr)))
 
 def body.run(+bodies: Map<&2, Lf.Body>, b: Lf.Body) -> IO(Unit):

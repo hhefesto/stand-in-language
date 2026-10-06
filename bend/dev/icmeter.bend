@@ -31,7 +31,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> 
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           report(Ss.replay(Ss.prepared(expr), Ss.Sized{}, lines))
 
 def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> IO(Unit):

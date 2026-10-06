@@ -34,7 +34,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           lines(Map.to_list(&2, Lf.Shape, EAL.layouts(Lf.defer.lift(Lf.of.expr(expr)))))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):

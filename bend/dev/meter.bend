@@ -107,7 +107,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> 
       Ss.Replay{["sizing failed"], 0}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           Ss.replay(Ss.prepared(expr), lines)
 
 def compiled(r: Result<&2, &2, String, Fr.Terms>, lines: List<&2, String>) -> Ss.Replay:

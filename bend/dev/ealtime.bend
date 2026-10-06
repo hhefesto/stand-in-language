@@ -72,7 +72,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           run("sized", Lf.defer.lift(Lf.of.expr(expr)))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):

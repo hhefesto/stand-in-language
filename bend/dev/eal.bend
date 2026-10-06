@@ -81,7 +81,7 @@ def sized.main(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           layouts(main.shapes.only(Lf.defer.lift(Lf.of.expr(expr))))
 
 def l.size(l: Lf.L) -> U32:
@@ -144,7 +144,7 @@ def sized.sizes(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           sized.sizes.go(Lf.defer.lift(Lf.of.expr(expr)))
 
 def sized.verdicts(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
@@ -153,7 +153,7 @@ def sized.verdicts(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           "certified: " ++ U32.show(trues(Map.values(&2, Bool, EAL.verdicts(bodies.of(Lf.defer.lift(Lf.of.expr(expr)))))))
 
 def sized.times(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
@@ -162,7 +162,7 @@ def sized.times(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           times(Lf.defer.lift(Lf.of.expr(expr)))
 
 def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
@@ -171,7 +171,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr}:
+        case Sz.Sized{counts, expr, checks}:
           layouts(EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
 
 def compiled(r: Result<&2, &2, String, Fr.Terms>, +what: String) -> IO(Unit):
