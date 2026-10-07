@@ -17,8 +17,9 @@ import ../Text.bend as Tx
 # goldens do not cover (CaseTests, UDTTests, a pattern lambda, a qualified
 # import): their displays and, guided, their counts. The counts are the
 # port's: its IC runs only an if's chosen branch, where haskell-final's
-# built both. One `ok NAME` line per group (FAIL NAME when it breaks). Run
-# from the source root.
+# built both, and a program sizing proved for every input runs without the
+# checks and chain bottoms sizing discharged. One `ok NAME` line per group
+# (FAIL NAME when it breaks). Run from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
@@ -394,13 +395,13 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, arithmetic(), "11111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 5561),
-      costs(prelude, pattern.lambda(), 5802),
-      costs(prelude, rational(), 91147),
-      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 552)])))
+      costs(prelude, case.nonexhaustive(), 5469),
+      costs(prelude, pattern.lambda(), 5776),
+      costs(prelude, rational(), 90345),
+      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 548)])))
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
-      150)))
+      146)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
       782347)))

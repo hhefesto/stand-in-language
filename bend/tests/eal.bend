@@ -13,8 +13,12 @@ import ../Text.bend as Tx
 # as this port computes EAL (verdicts, per-body verdicts, env usage and
 # capture layouts; not the bangs, levels and speculation only the
 # certificate report shows); a UDT program's lifted hash (its `#`
-# constants) and two programs' capture layouts against haskell-final's. One `ok NAME` line per group (FAIL NAME when it
-# breaks). Run from the source root.
+# constants); and two programs' capture layouts: simpleplus's against
+# haskell-final's, and tc_ultra_minimal's as the port's own, since sizing
+# proved it for every input and its chain's bottom is inert (P7.3), so
+# the layouts hold 0 where haskell-final's held the bottom's closure. One
+# `ok NAME` line per group (FAIL NAME when it breaks). Run from the source
+# root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
@@ -376,7 +380,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       "b75730207db05b27efcf8ab700f980be65a044216046b2f1082d4b5bebcc617f")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
-      "d621d23901b8b564a6e8c985ebb78a2c555d4237d77b2494b0c329dd7c4fd923")))
+      "627da040c4dc4096affc8f8f3db1077d99218f4a09dfca65b05dc35eb3842b97")))
     IO.print(verdict("eal-layouts-simpleplus", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus")),
       "fd1fa24db14b3e8c40035ade3aed6fd40ec170b215d26634fb293c13fd171b71")))

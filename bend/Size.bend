@@ -1044,21 +1044,22 @@ def count.of(counts: List<&2, E.TS>, +tok: U32) -> U32:
           count.pick(U32.is_eq(t, tok), (n + 1 : U32), count.of(rest, tok))
 
 # Each recursion site becomes a chain of its count plus one steps
-# (setSizes); one never reached gets one.
-def set.sizes(+counts: List<&2, E.TS>, x: E.X) -> E.X:
+# (setSizes); one never reached gets one. inert: the chains' bottoms are
+# proven dead.
+def set.sizes(+counts: List<&2, E.TS>, +inert: Bool, x: E.X) -> E.X:
   match x:
     case E.XStub{+tok, y}:
-      E.sized.chain(tok, count.of(counts, tok))
+      E.sized.chain(tok, count.of(counts, tok), inert)
     case E.XPair{a, b}:
-      E.XPair{set.sizes(counts, a), set.sizes(counts, b)}
+      E.XPair{set.sizes(counts, inert, a), set.sizes(counts, inert, b)}
     case E.XSetEnv{a}:
-      E.XSetEnv{set.sizes(counts, a)}
+      E.XSetEnv{set.sizes(counts, inert, a)}
     case E.XDefer{fi, a}:
-      E.XDefer{fi, set.sizes(counts, a)}
+      E.XDefer{fi, set.sizes(counts, inert, a)}
     case E.XLeft{a}:
-      E.XLeft{set.sizes(counts, a)}
+      E.XLeft{set.sizes(counts, inert, a)}
     case E.XRight{a}:
-      E.XRight{set.sizes(counts, a)}
+      E.XRight{set.sizes(counts, inert, a)}
     case other:
       other
 
@@ -1099,20 +1100,74 @@ def cored(+counts: List<&2, E.TS>, cs: Checks, r: Result<&2, &2, String, Co.V>) 
     case Fail{form}:
       Fail{Leftover{form}}
 
-def tidy(m: Maybe<&2, SizeFail>, +run: R, +cm: E.X, +lim: Set(), cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+# The sized program, from cm (main applied to the input): each recursion
+# its chain, and the checks left to run time (left; None for every check)
+# resolved.
+def program(+counts: List<&2, E.TS>, +left: Maybe<&2, Set()>, +inert: Bool, +cm: E.X, cap: Bool) -> E.X:
+  match cap:
+    case True{}:
+      uncap(set.sizes(counts, inert, E.resolve.checks(left, cm)))
+    case False{}:
+      set.sizes(counts, inert, E.resolve.checks(left, cm))
+
+def overrun(at: E.Site) -> Maybe<&2, SizeFail>:
+  match at:
+    case E.AtRecursion{tok}:
+      Some{Internal{"recursion #" ++ U32.show(tok) ++ " can run past the count sizing gave it (a bug in sizing)"}}
+    case _:
+      None{}
+
+# What the sized program's result says against its counts: a chain's
+# bottom reached (a count too small for some input), or an error sizing
+# would have thrown.
+def recheck(v: E.X) -> Maybe<&2, SizeFail>:
+  match v:
+    case E.XAborted{at, m}:
+      overrun(at)
+    case E.XError{msg}:
+      Some{Internal{msg}}
+    case E.XPair{a, b}:
+      fail.or(recheck(a), recheck(b))
+    case E.XEither{n, a, b}:
+      fail.or(recheck(a), recheck(b))
+    case _:
+      None{}
+
+def bottoms.dead(m: Maybe<&2, SizeFail>, +counts: List<&2, E.TS>, cs: Checks, +left: Maybe<&2, Set()>, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match m:
     case Some{fail}:
       Fail{fail}
     case None{}:
-      match cap:
-        case True{}:
-          cored(r.s(run), checks(lim, r.v(run)), E.core(uncap(set.sizes(r.s(run), cm))))
-        case False{}:
-          cored(r.s(run), checks(lim, r.v(run)), E.core(set.sizes(r.s(run), cm)))
+      cored(counts, cs, E.core(program(counts, left, True{}, cm, cap)))
 
-def main.run.from(+max: U32, +cm: E.X, zeros: Set(), +lim: Set(), mx: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
-  +run = eval(fuel(), Cfg{MSize{}, zeros, max}, JEval{E.remove.checks(mx), E.XZero{}})
-  tidy(fold.aborted(r.v(run)), run, cm, lim, cap)
+# What sizing proved, made true of the program (DESIGN §10's split). When
+# the main run explored every input, a discharged check becomes its value,
+# and the sized program, with them gone, runs once more over the same
+# input: no chain's bottom may reach its result, and then none is reached
+# on any input, so each becomes inert. Otherwise the program keeps every
+# check and every bottom.
+def discharged(+cs: Checks, +counts: List<&2, E.TS>, +cfg: Cfg, +mx: E.X, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  match cs:
+    case Checks{v, +reaching, proven}:
+      match proven:
+        case False{}:
+          cored(counts, cs, E.core(program(counts, None{}, False{}, cm, cap)))
+        case True{}:
+          +left = {Some{reaching} : Maybe<&2, Set()>}
+          bottoms.dead(recheck(r.v(eval(fuel(), cfg, JEval{set.sizes(counts, False{}, E.resolve.checks(left, mx)), E.XZero{}}))),
+                       counts, cs, left, cm, cap)
+
+def tidy(m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +mx: E.X, +cm: E.X, +lim: Set(), cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  match m:
+    case Some{fail}:
+      Fail{fail}
+    case None{}:
+      discharged(checks(lim, r.v(run)), r.s(run), cfg, mx, cm, cap)
+
+def main.run.from(+max: U32, +cm: E.X, +zeros: Set(), +lim: Set(), +mx: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  +cfg = {Cfg{MSize{}, zeros, max} : Cfg}
+  +run = eval(fuel(), cfg, JEval{E.remove.checks(mx), E.XZero{}})
+  tidy(fold.aborted(r.v(run)), run, cfg, mx, cm, lim, cap)
 
 def main.run(+max: U32, +cm: E.X, +lim: R, +x: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match cap:
@@ -1133,7 +1188,7 @@ def capped(+x: E.X, cap: Bool) -> E.X:
 # unrollings per site.
 def size(+max: U32, +cap: Bool, +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
   +cm = capped(x, cap)
-  main.run(max, E.remove.checks(cm),
+  main.run(max, cm,
            eval(fuel(), Cfg{MLimits{}, Set.new(), max}, JEval{convert.is(cm), E.XZero{}}),
            x, cap)
 

@@ -19,8 +19,9 @@ import ../Sha256.bend as Sha
 # (RunModeTests "compiled artifacts"): a round trip keeps every field, a
 # decoded program runs as its source does, garbage is refused by its magic
 # number, the sources' hash follows their content and not their order, and
-# the node counts are haskell-final's. One `ok NAME` line per group (FAIL
-# NAME when it breaks). Run from the source root.
+# the node counts: simpleplus's is haskell-final's, and tc_ultra_minimal's
+# the port's, 13 fewer, since its chain's bottom is inert (P7.3). One `ok
+# NAME` line per group (FAIL NAME when it breaks). Run from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
@@ -230,7 +231,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       String.eq(Tc.sources.hash([Fr.Src{"simpleplus", plus}, Fr.Src{"Prelude", prelude}]),
                 Tc.sources.hash(with.prelude(prelude, "simpleplus", plus)))])))
     IO.print(verdict("telc-nodes", all([
-      U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 881),
+      U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 868),
       U32.is_eq(nodes(sp), 23866)])))
 
 def main() -> IO(Unit):

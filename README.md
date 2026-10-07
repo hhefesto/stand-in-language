@@ -159,6 +159,18 @@ in these places:
   therefore never discharged, and neither is anything else in a program
   that has one. Otherwise the main run explored every input, and the split
   is exactly as sound as that exploration.
+- A program the main run explored on every input, whose result is data,
+  runs without what sizing discharged (DESIGN.md §10 and C5). Each
+  discharged check becomes the value it checked. Then the sized program
+  runs once more, symbolically, over every input; if no chain's bottom
+  reaches its result, every bottom becomes 0 instead of an abort. If one
+  does, sizing has a bug, and the program does not compile. A program
+  whose checks are all discharged has no Abort left in the code that runs.
+  Displays are unchanged, and interaction counts drop a little: 150 to 146
+  for `tc_ultra_minimal`, and 91,147 to 90,345 for the Rational example.
+  The extra pass costs about 0.02 s on the parity corpus. A program that
+  validates its input keeps every check and every bottom, since what
+  sizing proved there holds only for input that passes the validation.
 - Like haskell-final, the port certifies the sized program only for the
   capture layouts that guide the IC; it does not refuse to run a program
   whose sized form fails certification (DESIGN.md's `admitIC` is not in
@@ -168,7 +180,9 @@ Of DESIGN.md's open questions (§11), three are resolved: the certified
 term is the executed one (§11.4), the IC runs only an `if`'s chosen branch
 (§11.3; both above), and `trace` (§11.7) is removed, since it had no
 runtime meaning and restoring it would need a side channel through the IC
-(C1/C4). Abort stays a core form, as in haskell-final.
+(C1/C4). Abort (§10, §11.6) is erased where sizing proves it dead, and stays
+a core form for the checks left to run time; whether those should move to
+the session boundary is still open.
 
 ## Quick Start
 

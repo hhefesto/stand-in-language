@@ -174,18 +174,28 @@ def step.body(+tok: U32, +n: U32) -> X:
 def approx.body() -> X:
   gate.switch(app(var(4n), var(0n)), app(app(var(3n), var(1n)), var(0n)), app(var(2n), var(0n)))
 
-def chain(n: Nat, +tok: U32) -> X:
-  match n:
-    case 0n:
+# A chain's bottom: a closure that aborts with (0, token) when applied; or,
+# where sizing proved no input reaches it, 0, so the program holds no Abort
+# for it (DESIGN §10).
+def bottom(+tok: U32, inert: Bool) -> X:
+  match inert:
+    case True{}:
+      XZero{}
+    case False{}:
       XPair{XDefer{Co.step.w(), fill(fill(XAbort{AtRecursion{tok}}, XRight{XEnv{}}), XLeft{XEnv{}})},
             XPair{XZero{}, int.u32(tok)}}
-    case 1n+k:
-      XPair{XDefer{Co.step.rfb(), approx.body()}, XPair{chain(k, tok), XLeft{XEnv{}}}}
 
-# A recursion sized to n iterations: n links over a base that aborts with
-# (0, token) (sizedRecursionChain).
-def sized.chain(+tok: U32, n: U32) -> X:
-  chain(U32.to_nat(n), tok)
+def chain(n: Nat, +tok: U32, +inert: Bool) -> X:
+  match n:
+    case 0n:
+      bottom(tok, inert)
+    case 1n+k:
+      XPair{XDefer{Co.step.rfb(), approx.body()}, XPair{chain(k, tok, inert), XLeft{XEnv{}}}}
+
+# A recursion sized to n iterations: n links over its bottom
+# (sizedRecursionChain).
+def sized.chain(+tok: U32, n: U32, +inert: Bool) -> X:
+  chain(U32.to_nat(n), tok, inert)
 
 # Unbounded recursion (--fast)
 # ----------------------------
@@ -223,27 +233,48 @@ def unbounded(x: X) -> X:
     case other:
       other
 
-# A refinement check becomes: apply the check, abort with its answer if
-# that is not 0, else the value (removeRefinementWrappers).
-def remove.checks(t: X) -> X:
+# Whether check site is left to run time: every check, or those in a set.
+def check.left(left: Maybe<&2, Set()>, +site: U32) -> Bool:
+  match left:
+    case None{}:
+      True{}
+    case Some{s}:
+      Pair.snd(Set(), Bool, Set.has(s, U32.show(site)))
+
+def check.of(here: Bool, +site: U32, tc: X, c: X) -> X:
+  match here:
+    case True{}:
+      fill(XDefer{Co.refinement.tc(), fill(fill(XAbort{AtCheck{site}}, app(XLeft{XEnv{}}, XRight{XEnv{}})), XRight{XEnv{}})},
+           XPair{tc, c})
+    case False{}:
+      c
+
+# A refinement check left to run time becomes: apply the check, abort with
+# its answer if that is not 0, else the value (removeRefinementWrappers). A
+# check sizing discharged becomes its value (DESIGN §10). left: the checks
+# left to run time, or None for every check.
+def resolve.checks(+left: Maybe<&2, Set()>, t: X) -> X:
   match t:
     case XCheck{+site, tc, c}:
-      fill(XDefer{Co.refinement.tc(), fill(fill(XAbort{AtCheck{site}}, app(XLeft{XEnv{}}, XRight{XEnv{}})), XRight{XEnv{}})},
-           XPair{remove.checks(tc), remove.checks(c)})
+      check.of(check.left(left, site), site, resolve.checks(left, tc), resolve.checks(left, c))
     case XPair{a, b}:
-      XPair{remove.checks(a), remove.checks(b)}
+      XPair{resolve.checks(left, a), resolve.checks(left, b)}
     case XSetEnv{x}:
-      XSetEnv{remove.checks(x)}
+      XSetEnv{resolve.checks(left, x)}
     case XDefer{fi, x}:
-      XDefer{fi, remove.checks(x)}
+      XDefer{fi, resolve.checks(left, x)}
     case XLeft{x}:
-      XLeft{remove.checks(x)}
+      XLeft{resolve.checks(left, x)}
     case XRight{x}:
-      XRight{remove.checks(x)}
+      XRight{resolve.checks(left, x)}
     case XStub{tok, x}:
-      XStub{tok, remove.checks(x)}
+      XStub{tok, resolve.checks(left, x)}
     case other:
       other
+
+# Every check left to run time.
+def remove.checks(t: X) -> X:
+  resolve.checks(None{}, t)
 
 def to.int.succ(m: Maybe<&2, U32>) -> Maybe<&2, U32>:
   match m:

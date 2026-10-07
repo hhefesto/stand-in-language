@@ -3,6 +3,7 @@ import ../Front.bend as Fr
 import ../Size.bend as Sz
 import ../Expr.bend as E
 import ../Term.bend as T
+import ../Core.bend as Co
 import ../Text.bend as Tx
 
 # Sizing: every certificate golden's counts, haskell-final's SizingTests
@@ -104,10 +105,51 @@ def checked.term(r: Result<&2, &2, String, T.C>) -> String:
 def checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
   checked.term(Fr.compile(srcs, entry))
 
+# Whether an Abort is left in the code that runs.
+def has.abort(x: Co.V) -> Bool:
+  match x:
+    case Co.VAbort{}:
+      True{}
+    case Co.VPair{a, b}:
+      has.abort(a) || has.abort(b)
+    case Co.VDefer{fi, b}:
+      has.abort(b)
+    case Co.VSetEnv{a}:
+      has.abort(a)
+    case Co.VLeft{a}:
+      has.abort(a)
+    case Co.VRight{a}:
+      has.abort(a)
+    case _:
+      False{}
+
+def aborts.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
+  match r:
+    case Fail{f}:
+      "sizing failed"
+    case Done{s}:
+      match s:
+        case Sz.Sized{cs, expr, checks}:
+          Bool.pick(String, has.abort(expr), "Abort", "none")
+
+def aborts.term(r: Result<&2, &2, String, T.C>) -> String:
+  match r:
+    case Fail{e}:
+      e
+    case Done{run}:
+      aborts.of(Sz.size(65536, True{}, E.of.term3(run)))
+
+# Whether the sized program holds an Abort.
+def aborts(srcs: List<&2, Fr.Src>, +entry: String) -> String:
+  aborts.term(Fr.compile(srcs, entry))
+
+def case.of(+prelude: String, +scrutinee: String) -> List<&2, Fr.Src>:
+  with.prelude("cased", "import Prelude\nmain = \\input -> (case " ++ scrutinee
+    ++ " of\n  0 -> \"zero\"\n  1 -> \"one\", 0)\n", prelude)
+
 # A case on a constant: Prelude's abort is its one check.
 def cased(+prelude: String, +scrutinee: String) -> String:
-  checks(with.prelude("cased", "import Prelude\nmain = \\input -> (case " ++ scrutinee
-    ++ " of\n  0 -> \"zero\"\n  1 -> \"one\", 0)\n", prelude), "cased")
+  checks(case.of(prelude, scrutinee), "cased")
 
 def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String) -> IO(Unit):
   do IO<Unit>:
@@ -131,6 +173,11 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       String.eq(checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "validating 0,1,2; reaching "),
       String.eq(cased(prelude, "0"), "validating ; reaching ; proven"),
       String.eq(cased(prelude, "3"), "validating ; reaching 0; proven")])))
+    IO.print(verdict("size-erased", all([
+      String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
+      String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),
+      String.eq(aborts(case.of(prelude, "3"), "cased"), "Abort"),
+      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "Abort")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:
