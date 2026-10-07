@@ -231,7 +231,8 @@ expected to change that (section 4).
   decided (2026-10-06): the report lists **every check** with its verdict, and
   P7.3/P7.4 erase **only where sound**: in programs with no
   input-validating check.
-- P7.3 and P7.4 are done: `7c49323` (see P7).
+- P7.3 and P7.4 are done: `7c49323` (see P7). `nix flake check` passed
+  there, as it did on P6.
 - P7.5 is the user's and Sam's call; the work stops there.
 
 The order below runs from output-preserving work to work that changes
@@ -1749,7 +1750,7 @@ The alignment steps that were done:
 Build a tool with `bend bend/dev/X.bend -o /tmp/X` (inside `nix develop`),
 and run it from the repo root: modules load as `M.tel` from the cwd.
 
-**Compile (`--check-only` passed on 2026-10-01):**
+**Compile (all built on 2026-10-06, at `7c49323`):**
 - `icmeter MODULE [LINE…]`: the session's displays, then
   `IC interactions: N`.
 - `ealtime MODULE`: for the `term` (certified) and `sized` passes, `bodies N`, then
@@ -1795,10 +1796,10 @@ fix them when needed):
 
 | Tool | First error |
 |---|---|
-| `eal`, `ic1`, `meter` | "expected: a defined name"; `eal`'s `main.only` calls `EAL.main.of`, which no longer exists |
-| `ealphase` | expects `Result<…, EAL.St>` |
+| `eal`, `ealphase` | unknown constructor `../Front.Terms` (gone since P3); before that, `eal`'s `main.only` called `EAL.main.of`, which no longer exists |
+| `ic1`, `meter` | `../IC.Run` has 4 fields since P5 (`unrolls`) |
 | `expr` | "write `../Syntax.Surf<..>`" |
-| `parsedump` | stage types |
+| `parsedump` | `../Syntax.SLamPat`'s fields |
 | `paths` | unknown constructor `../Term.TIdx` |
 
 **`bend/dev/upstream/`:** draft issues for bendlang/bend (`NOTES.md`), not
