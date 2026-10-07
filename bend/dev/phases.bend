@@ -11,7 +11,8 @@ import ../Session.bend as Ss
 
 # `phases MODULE [LINE...]`: the command's stages one after another, each
 # timed: the front end, certification, sizing, the capture layouts, the
-# net's preparation and the session on those lines.
+# net's preparation and the session on those lines. It times main alone,
+# sized with no guard: no session boundary, every check in main.
 
 def ms(+t0: Nat, +t1: Nat) -> String:
   U32.show(U32.from_nat((t1 - t0 : Nat))) ++ " ms"
@@ -36,7 +37,7 @@ def run(+expr: Co.V, lines: List<&2, String>, +t2: Nat) -> IO(Unit):
     +p : IC.Prog = IC.prepare(expr, lay)
     +t4 : Nat <- IO.now()
     IO.print("prepare " ++ ms(t3, t4))
-    +n : U32 = spent(Ss.replay(p, Ss.Sized{}, lines))
+    +n : U32 = spent(Ss.replay(Ss.alone(p), Ss.Sized{}, lines))
     t5 : Nat <- IO.now()
     IO.print("session " ++ ms(t4, t5) ++ ": " ++ U32.show(n) ++ " interactions")
 
