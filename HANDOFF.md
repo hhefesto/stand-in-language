@@ -157,7 +157,7 @@ Pushed: `origin/bend-port` (hhefesto/stand-in-language) was force-pushed at
 
 **Interaction counts that tests pin** (guided). Until P4 they were
 haskell-final's; from P4 (`2359df8`) they are the port's own:
-- tc_ultra_minimal: 524 → 150
+- tc_ultra_minimal: 524 → 150 (P4) → 146 (P7.4: it is proven)
 - simpleplus `3 4`: 1,517,868 → 782,347
 - tictactoe `1 4 2 5 3` (the `.ic-meter` golden's game): 15,168,230 →
   5,949,895. The test game (`1 9 2 8 3`) spends 15,208,930 → 5,967,451;
@@ -227,11 +227,12 @@ expected to change that (section 4).
 - P5 is done: `3fd770f` (`--fast` on the IC; see P5 for the design).
 - P6 is done: `db9c827` (`.telc` v4; see P6).
 - P7.1 is done: `f44a2bc` (check numbers; aborts keep their site).
-- P7.2 is done (see P7). It stopped as planned and the user decided
-  (2026-10-06): the report lists **every check** with its verdict, and
+- P7.2 is done: `f86ff41` (see P7). It stopped as planned and the user
+  decided (2026-10-06): the report lists **every check** with its verdict, and
   P7.3/P7.4 erase **only where sound**: in programs with no
   input-validating check.
-- P7.3 is next, then P7.4; P7 stops at P7.5.
+- P7.3 and P7.4 are done: `7c49323` (see P7).
+- P7.5 is the user's and Sam's call; the work stops there.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -1084,7 +1085,8 @@ The facts are in section 5.3. The plan follows DESIGN §10's three parts:
     superposition keeps every site.
 - No output changed.
 
-**Done: P7.2 (2026-10-06).** The finding that shaped the user's decisions:
+**Done: P7.2 (2026-10-06), `f86ff41`.** The finding that shaped the user's
+decisions:
 - **The premise above was wrong.** Sizing's main run does not explore
   every input. The limits pass learns, from each check, which input
   positions must be 0 or pairs, and the main run runs on that restricted
@@ -1142,10 +1144,60 @@ The facts are in section 5.3. The plan follows DESIGN §10's three parts:
   removed against `NAME.hs-certificate`, and the whole output against
   `NAME.port-certificate` (dev fixup).
 
-**P7.3/P7.4 under the user's decision.** These apply only when
-`Checks.proven`; otherwise the program is left as it is. In particular,
-simpleplus and tictactoe keep their checks and bottoms, so their counts
-don't drop.
+**Done: P7.3 and P7.4 (2026-10-06), `7c49323`.** Both apply only when
+`Checks.proven` holds (the user's decision); otherwise the program keeps
+every check and bottom. In particular, simpleplus and tictactoe are
+untouched.
+- **Checks (P7.4):** `E.resolve.checks(left, x)` replaces
+  `remove.checks`, which is now `resolve.checks(None, x)`, every check.
+  - `left` is `Some{reaching}` when proven: a check in the set becomes
+    the abort closure, as before, and any other becomes its value `c`.
+  - The sized program is now built from the capped term with its checks
+    (`Sz.program`), not from the one the main run evaluated.
+- **Bottoms (P7.3):** `E.bottom(tok, inert)`: the abort closure, or
+  `XZero` when inert. `set.sizes` and `sized.chain` take `inert`.
+- **The re-check:** `Sz.discharged` evaluates `set.sizes(counts, False,
+  resolve.checks(left, mx))` with the main run's `Cfg`, so bottoms still
+  abort and discharged checks are gone.
+  - `recheck` folds its result. A bottom's abort (`AtRecursion`) or an
+    `XError` in it fails sizing with `Internal` ("recursion #N can run
+    past the count sizing gave it (a bug in sizing)"). No program in the
+    repo or the corpus hits it.
+  - Otherwise the program is built with inert bottoms.
+  - The re-check runs the strict chains, and costs about 0.02-0.03 s
+    (`--certificate` ctprop 0.23 → 0.24 s, rat 0.18 → 0.20 s, medians of
+    3; no memory change).
+- **Zero as the bottom** is safe because P4's IC never runs an unchosen
+  branch. EAL still certifies, and its layouts change only where they
+  described the bottom: tc's slot that held its closure (`CapPair
+  (CapPair CapCode CapOther) …`) now holds 0 (`CapOther`), the bodies
+  holding the chain hash differently, and the bottom's own entry (13 → 12)
+  is gone.
+- **Counts** (the displays are unchanged everywhere):
+  - tc 150 → 146
+  - casea 625,575 → 625,437
+  - cases 2,449,599 → 2,449,365
+  - ctall 1,719,551 → 1,719,327
+  - ctign 2,297 → 2,271
+  - ctprop 105,363 → 105,271
+  - ctstr 2,102,322 → 2,102,088
+  - natarith 48,979 → 48,535
+  - natudt 2,596,341 → 2,596,247
+  - nonex 5,561 → 5,469 (its abort stays: it reaches the result)
+  - patlam 5,802 → 5,776
+  - qual 552 → 548
+  - ratarith 291,766 → 288,000
+  - rat 91,147 → 90,345
+- **Tests:**
+  - `size-erased`: no Abort in the core of a proven `case` that matches,
+    nor in tc; an Abort in the non-matching one, and in simpleplus.
+  - Re-pinned: `ic-meter-case-udt`, `ic-meter-tc_ultra_minimal`,
+    `eal-layouts-tc_ultra_minimal` (now the port's digest `627da040…`;
+    simpleplus's still pins haskell-final's) and `telc-nodes` (tc 881 →
+    868).
+  - `ic-case` still shows `Non-exhaustive patterns in case`.
+- **Goldens:** `port/tc_ultra_minimal.ic-meter` and `.compile`
+  re-recorded. The corpus's `NAME.port-ic-meter` re-recorded (dev fixup).
 
 **P7.5 Decision point, for the user (and Sam).** What remains are runtime
 checks. In the goldens that is input validation: simpleplus's `invalid
@@ -1611,7 +1663,10 @@ The alignment steps that were done:
 - Interaction counts are the port's own from P4 on: its IC runs only an
   `if`'s chosen branch, on the parts of the environment the branches use,
   where haskell-final's built both (`test/golden/port/*.ic-meter`). The
-  displays are unchanged.
+  displays are unchanged. From P7.4, a program sizing proved for every
+  input also runs without the checks and chain bottoms it discharged
+  (`port/tc_ultra_minimal.ic-meter`, `.compile`; the corpus's
+  `NAME.port-ic-meter`).
 - A program whose unchosen branch never ends now finishes (P4):
   `ratarith` gives haskell-final's reference evaluator's `1111`, where
   haskell-final `--ic` ran out of fuel.
