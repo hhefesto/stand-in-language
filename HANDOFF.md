@@ -233,7 +233,10 @@ expected to change that (section 4).
   input-validating check.
 - P7.3 and P7.4 are done: `7c49323` (see P7). `nix flake check` passed
   there, as it did on P6.
-- P7.5 is the user's and Sam's call; the work stops there.
+- P7.1–P7.4 were pushed (`16dbe49`, 2026-10-06).
+- P7.5: the user chose (b), and of its forms "the session runs main's
+  input refinements" (2026-10-06). Done; see P7. Not pushed. Sam was asked
+  "How happy are we with Abort?"; no answer is recorded here yet.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -1163,7 +1166,9 @@ untouched.
   - `recheck` folds its result. A bottom's abort (`AtRecursion`) or an
     `XError` in it fails sizing with `Internal` ("recursion #N can run
     past the count sizing gave it (a bug in sizing)"). No program in the
-    repo or the corpus hits it.
+    repo or the corpus hits it. **Superseded in P7.5:** `bottomed` now
+    just keeps the bottoms, since tictactoe, once proven, showed the
+    re-run follows paths sizing set aside.
   - Otherwise the program is built with inert bottoms.
   - The re-check runs the strict chains, and costs about 0.02-0.03 s
     (`--certificate` ctprop 0.23 → 0.24 s, rat 0.18 → 0.20 s, medians of
@@ -1199,6 +1204,85 @@ untouched.
   - `ic-case` still shows `Non-exhaustive patterns in case`.
 - **Goldens:** `port/tc_ultra_minimal.ic-meter` and `.compile`
   re-recorded. The corpus's `NAME.port-ic-meter` re-recorded (dev fixup).
+
+**Done: P7.5 (b), the session boundary (2026-10-06), `8103636`.** DESIGN §11.10's
+convention, made a rule.
+- **The rule:** main's input refinements are the refined bindings of the
+  let that `main = \input -> let ... in body` opens with. The session runs
+  them on each line it reads, eagerly, before main; a failing one ends the
+  session with its abort, as main would have. The opening call, main on 0,
+  is not checked.
+  - Why not 0: simpleplus's `validInput (left 0)` fails, but main never
+    demands it on 0.
+  - Behavior change: a refinement now fires on a line even where main
+    would not have used its value (`ic-guard` pins one).
+- **The guard** (`Fr.guard.of`): the desugared program (lets around main:
+  Resolve's globals, Desugar's builtins and aliases), with main's body
+  replaced by the tuple of the refined values. It is lowered, split,
+  certified (EAL) and sized like main, keeps its checks (the residual
+  run-time checks), and runs on the IC under its own layouts.
+  `Fr.Program{run, guard, boundary}` carries it; `boundary` is main's
+  checks the guard runs, matched by rendered location.
+- **Sizing** (`Sz.size.at(max, cap, boundary, x)`; `size` = no
+  boundary):
+  - `Checks{validating, boundary, reaching, opening, proven}`.
+  - Main is also run on 0 (the opening call) when there is a boundary:
+    `opening` is the checks reaching its result.
+  - `proven` = validating ⊆ boundary, every validating check's
+    restriction exact (`R.e`, from `exact`: every shape understood, and at
+    each gate at most one branch that passes under restrictions of its
+    own), and both results data with no failure.
+  - When proven, main keeps `(reaching \ boundary) ∪ opening`; the rest
+    become their values.
+- **The extra run (P7.3) changed:** a bottom reaching the result no
+  longer fails sizing; the bottoms just stay. tictactoe showed why:
+  - The sized program, re-run strictly over the main run's input, reaches
+    recursion #0's and #13's bottoms on superposition paths that sizing's
+    own run set aside: `test.pick` drops a test outcome on unbounded
+    input, and `step.next` and `stub.expand` give up on recursion values
+    they cannot follow.
+  - Marking the re-run's tests as sizing does (`XTest`) did not help, nor
+    did lazy links.
+  - Lazy links (`E.ite`) are also slower (1.3–1.6 s against 1.1 s for
+    tictactoe's `--certificate`) and lose simpleplus's proof, so the
+    re-run stays strict.
+  - The re-run costs about 0.3 s on tictactoe, which it cannot prove;
+    `--certificate` goes 0.70 → 1.07 s, and a whole run 2.45 → 3.02 s
+    (README table).
+- **Results** (displays unchanged everywhere):
+  - simpleplus is proven, its bottoms dead, with no Abort in main:
+    `3 4` 782,347 → 42,943.
+    - With the guard but main keeping its check: 788,886. With the check
+      erased but the bottoms kept: 43,023.
+    - So ~740k was the check running inside main. EAL guidance does not
+      explain it (both certify, 86 vs 75 layouts); unexplained.
+  - tictactoe is proven but keeps its bottoms: 5,949,895 → 5,938,558.
+    The invalid line `10`: 7,642,943 → 1,011,148.
+  - `simpleplus.fast-meter` 728,870 → 735,924: the guard's interactions.
+    `--fast` doesn't size, so main keeps its checks there. The guard's
+    unrolls are not counted (its tokens are its own).
+- **Artifacts:** with a guard, `.telc` version 5 = version 4's bytes, then
+  the guard's program and layouts (`Tc.Guard`). The reader takes 4 and 5;
+  haskell-final refuses 5 by its version. Its refusal text, "reads
+  versions 4 and 5", is port-only.
+- **Report:** a boundary check reads `at the session boundary`.
+- **Tests:**
+  - `size-boundary` and `size-erased` (guarded simpleplus has no Abort;
+    guarded tictactoe keeps them).
+  - `ic-guard`.
+  - `telc-guard` (version 5 and 4), and `telc-runs` on a guarded
+    artifact (`3 4`, `9 a`).
+  - Re-pinned: `ic-meter-simpleplus` 42,943, `ic-meter-tictactoe`
+    5,938,558, `telc-nodes` simpleplus 23,768.
+  - The tests' sessions run the guard, as the command does
+    (`Ss.session`, `Ss.Prog{main, guard}`).
+- **Goldens recorded under `port/`:** `*.certificate`, simpleplus and
+  tictactoe `ic-meter`, `compile`, `telc-certificate`, and
+  `simpleplus.fast-meter`. The corpus is unchanged: no corpus program
+  refines its input in main.
+- **Dev:** `guarded MODULE` gives EAL's verdict and layout counts for main
+  guarded, main alone and the guard. `icmeter` runs the guard; `phases`
+  times main alone.
 
 **P7.5 Decision point, for the user (and Sam).** What remains are runtime
 checks. In the goldens that is input validation: simpleplus's `invalid
@@ -1695,6 +1779,12 @@ The alignment steps that were done:
   certification: HASH`, where haskell-final, on the inlined term, reported
   it in main (EALTests' second PINNED program). No golden or corpus
   program fails certification.
+- Main's input refinements run at the session boundary (P7.5): eagerly, on
+  every line, before main (not on the opening 0). A refinement fires even
+  where main would not have used its value; an invalid line costs only the
+  guard. A guarded program's `.telc` is version 5, which haskell-final
+  refuses. Counts: `port/simpleplus.ic-meter`, `port/tictactoe.ic-meter`,
+  `port/simpleplus.fast-meter`.
 - `--certificate` (and the report a `.telc` stores) has a section
   haskell-final's lacks, after the budget line: `refinement checks: N
   discharged statically, M left to run time:` and a row per check (P7.2;
@@ -1771,7 +1861,10 @@ and run it from the repo root: modules load as `M.tel` from the cwd.
 - `sha`, `shabench`: SHA-256.
 
 - `phases MODULE [LINE…]`: per-phase times (front, certify, size, layouts,
-  prepare, session). Fixed in the dev fixup after `74c4cc5`.
+  prepare, session), for main alone (no guard). Fixed in the dev fixup
+  after `74c4cc5`.
+- `guarded MODULE`: EAL's verdict and the number of capture layouts for
+  main sized with its session guard, main alone, and the guard (P7.5).
 
 **Profiling** (how P1 was measured):
 1. `bend bend/dev/ealtime.bend -o X.c` emits the C.
