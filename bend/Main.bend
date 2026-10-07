@@ -382,7 +382,7 @@ def metered(meter: Bool, r: Run, c: Ss.Cost) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
-def got(+p: IC.Prog, +h: Ss.How, net: IC.Net, i: Tx.In, st: Co.D, c: Ss.Cost, g: Tx.Got) -> IO(SS):
+def got(+p: Ss.Prog, +h: Ss.How, net: IC.Net, i: Tx.In, st: Co.D, c: Ss.Cost, g: Tx.Got) -> IO(SS):
   match g:
     case Tx.GLine{text}:
       IO.pure(SS, STurn{i, Ss.answer(p, h, net, text, st, c)})
@@ -391,7 +391,7 @@ def got(+p: IC.Prog, +h: Ss.How, net: IC.Net, i: Tx.In, st: Co.D, c: Ss.Cost, g:
     case Tx.GErr{msg}:
       IO.die(SS, 1, "telomare: <stdin>: hGetLine: " ++ msg)
 
-def session(fuel: Nat, +p: IC.Prog, +r: Run, +meter: Bool, s: SS) -> IO(Unit):
+def session(fuel: Nat, +p: Ss.Prog, +r: Run, +meter: Bool, s: SS) -> IO(Unit):
   match fuel:
     case 0n:
       IO.die(Unit, 1, "telomare: too many iterations")
@@ -417,7 +417,7 @@ def session(fuel: Nat, +p: IC.Prog, +r: Run, +meter: Bool, s: SS) -> IO(Unit):
                 next : SS <- got(p, how(r), net, i, st, c, g)
                 session(k, p, r, meter, next)
 
-def play(+p: IC.Prog, +r: Run, meter: Bool) -> IO(Unit):
+def play(+p: Ss.Prog, +r: Run, meter: Bool) -> IO(Unit):
   session(U32.to_nat(4294967295), p, r, meter, STurn{Tx.Closed{}, Ss.start(p, how(r))})
 
 # The pipeline (compileModules, then the action)
@@ -449,17 +449,40 @@ def failed(f: Failure) -> String:
     case Unrunnable{form}:
       "telomare: --fast left " ++ form ++ " in the program (a bug)"
 
-# The program compiled: Term3 as run (for locating its recursion sites)
-# and the sized program.
+# The program compiled: main's Term3 as run (for locating its recursion
+# sites), main sized, and the session's guard sized, if main has input
+# refinements.
 type Compiled is Data:
-  Compiled{+run: T.C, +sized: Sz.Sized}
+  Compiled{+run: T.C, +sized: Sz.Sized, +guard: Maybe<&2, Sz.Sized>}
 
-def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Compiled>:
+def guard.sized(+run: T.C, +s: Sz.Sized, +g: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Compiled>:
+  match r:
+    case Fail{f}:
+      Fail{Unsizable{f, g}}
+    case Done{gs}:
+      Done{Compiled{run, s, Some{gs}}}
+
+# The guard is certified and sized as main is: it runs on the IC too.
+def guard.certified(+run: T.C, +s: Sz.Sized, +g: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
+  match c:
+    case Some{e}:
+      Fail{Uncertified{e}}
+    case None{}:
+      guard.sized(run, s, g, Sz.size(budget(), True{}, E.of.term3(g)))
+
+def guarded(+run: T.C, +s: Sz.Sized, g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Compiled>:
+  match g:
+    case None{}:
+      Done{Compiled{run, s, None{}}}
+    case Some{+t}:
+      guard.certified(run, s, t, EAL.certify(Lf.defer.lift(t)))
+
+def sized(+run: T.C, g: Maybe<&2, T.C>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{f}:
       Fail{Unsizable{f, run}}
     case Done{s}:
-      Done{Compiled{run, s}}
+      guarded(run, s, g)
 
 # certifyMain gates the program before its sizing does (Driver's
 # compileMainReporting), whatever the action. It certifies the term that is
@@ -467,23 +490,25 @@ def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2,
 # §3, §11.4). Certification runs first and
 # sizing after it, never side by side: EAL forks over the bodies, and run
 # alongside sizing the two would split the lanes and starve those forks.
-def certified(+run: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
+def certified(+run: T.C, g: Maybe<&2, T.C>, +boundary: Set(), c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
     case None{}:
-      sized(run, Sz.size(budget(), True{}, E.of.term3(run)))
+      sized(run, g, Sz.size.at(budget(), True{}, boundary, E.of.term3(run)))
 
-def resolved(r: Result<&2, &2, Fr.Err, T.C>) -> Result<&2, &2, Failure, Compiled>:
+def resolved(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{e}:
       Fail{Refused{e}}
-    case Done{+run}:
-      certified(run, EAL.certify(Lf.defer.lift(run)))
+    case Done{p}:
+      match p:
+        case Fr.Program{+run, g, +boundary}:
+          certified(run, g, boundary, EAL.certify(Lf.defer.lift(run)))
 
 # The parsed modules compiled: resolved, certified, sized.
 def compile(m: Fr.Mods, +entry: String) -> Result<&2, &2, Failure, Compiled>:
-  resolved(Fr.term(m, entry))
+  resolved(Fr.program(m, entry))
 
 # Compiling (--compile)
 # ---------------------
@@ -497,10 +522,20 @@ def out.path(o: Out, +file: String) -> String:
     case _:
       Bool.pick(String, String.ends_with(file, ".tel"), file ++ "c", file ++ ".telc")
 
+def guard.stored(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Tc.Guard>:
+  match g:
+    case None{}:
+      None{}
+    case Some{s}:
+      match s:
+        case Sz.Sized{counts, +expr, checks}:
+          Some{Tc.guard.of(expr, Ss.layouts(expr))}
+
 # The sized program as an artifact: haskell-final's `--ic --compile`, less
-# the IC certificate.
-def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks) -> Tc.Telc:
-  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks), budget(), Ss.layouts(expr))
+# the IC certificate, and with the session's guard (version 5) if main has
+# input refinements.
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, g: Maybe<&2, Sz.Sized>) -> Tc.Telc:
+  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks), budget(), Ss.layouts(expr), guard.stored(g))
 
 def prefix(n: Nat, s: String) -> String:
   match n:
@@ -522,33 +557,46 @@ def wrote(+path: String, +n: U32, +hash: String, r: Result<&1, &1, String, Unit>
 
 def written(+path: String, t: Tc.Telc) -> IO(Unit):
   match t:
-    case Tc.Telc{entry, +hash, cert, counts, places, budget, +expr, layouts}:
+    case Tc.Telc{entry, +hash, cert, counts, places, budget, +expr, layouts, guard}:
       do IO<Unit>:
-        r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts}))
+        r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard}))
         wrote(path, Tc.nodes(expr), hash, r)
 
-# The action, on the compiled program. Running prepares it under the EAL
-# capture layouts of the sized term, so closures are copied as EAL
-# planned; the static report needs neither, and reads the modules as
-# written. Compiling writes the artifact to path.
+def guard.expr(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Co.V>:
+  match g:
+    case None{}:
+      None{}
+    case Some{s}:
+      match s:
+        case Sz.Sized{counts, expr, checks}:
+          Some{expr}
+
+# What the session runs: main, and its guard if it has one, each prepared.
+def session.of(+expr: Co.V, g: Maybe<&2, Sz.Sized>) -> Ss.Prog:
+  Ss.session(expr, guard.expr(g))
+
+# The action, on the compiled program. Running prepares it (and its guard)
+# under the EAL capture layouts of the sized term, so closures are copied
+# as EAL planned; the static report needs neither, and reads the modules
+# as written. Compiling writes the artifact to path.
 def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod>, +entry: String, srcs: List<&2, Fr.Src>, +path: String) -> IO(Unit):
   match r:
     case Fail{f}:
       IO.die(Unit, 1, failed(f))
     case Done{c}:
       match c:
-        case Compiled{+run, s}:
+        case Compiled{+run, s, +g}:
           match s:
             case Sz.Sized{+counts, +expr, +checks}:
               match act:
                 case Play{}:
-                  play(Ss.prepared(expr), Sized{}, False{})
+                  play(session.of(expr, g), Sized{}, False{})
                 case Meter{}:
-                  play(Ss.prepared(expr), Sized{}, True{})
+                  play(session.of(expr, g), Sized{}, True{})
                 case Report{}:
                   IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry), checks))
                 case Compile{}:
-                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks))
+                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks, g))
 
 # Unsized (--fast)
 # ----------------
@@ -574,24 +622,48 @@ def unbounded(+run: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Co.V>
     case None{}:
       unrunnable(E.fast(run))
 
-# The program compiled unsized: Term3 as run (for locating its recursion
-# sites) and the core to run.
+# The program compiled unsized: main's Term3 as run (for locating its
+# recursion sites), the core to run, and the guard's, if main has input
+# refinements.
 type Unbounded is Data:
-  Unbounded{+run: T.C, +expr: Co.V}
+  Unbounded{+run: T.C, +expr: Co.V, +guard: Maybe<&2, Co.V>}
 
-def with.run(+run: T.C, r: Result<&2, &2, Failure, Co.V>) -> Result<&2, &2, Failure, Unbounded>:
+def fast.guarded(+run: T.C, +v: Co.V, r: Result<&2, &2, Failure, Co.V>) -> Result<&2, &2, Failure, Unbounded>:
+  match r:
+    case Fail{f}:
+      Fail{f}
+    case Done{gv}:
+      Done{Unbounded{run, v, Some{gv}}}
+
+def fast.guard(+run: T.C, +v: Co.V, g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Unbounded>:
+  match g:
+    case None{}:
+      Done{Unbounded{run, v, None{}}}
+    case Some{+t}:
+      fast.guarded(run, v, unbounded(t, EAL.certify(Lf.defer.lift(t))))
+
+def with.run(+run: T.C, g: Maybe<&2, T.C>, r: Result<&2, &2, Failure, Co.V>) -> Result<&2, &2, Failure, Unbounded>:
   match r:
     case Fail{f}:
       Fail{f}
     case Done{v}:
-      Done{Unbounded{run, v}}
+      fast.guard(run, v, g)
 
-def fast.resolved(r: Result<&2, &2, Fr.Err, T.C>) -> Result<&2, &2, Failure, Unbounded>:
+def fast.resolved(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Result<&2, &2, Failure, Unbounded>:
   match r:
     case Fail{e}:
       Fail{Refused{e}}
-    case Done{+run}:
-      with.run(run, unbounded(run, EAL.certify(Lf.defer.lift(run))))
+    case Done{p}:
+      match p:
+        case Fr.Program{+run, g, boundary}:
+          with.run(run, g, unbounded(run, EAL.certify(Lf.defer.lift(run))))
+
+def unguided(m: Maybe<&2, Co.V>) -> Maybe<&2, IC.Prog>:
+  match m:
+    case None{}:
+      None{}
+    case Some{v}:
+      Some{IC.prepare(v, Map.new(&2, Lf.Shape))}
 
 # The unsized program run, unguided: EAL's capture layouts are the sized
 # term's, and there is none.
@@ -601,8 +673,8 @@ def fast.acted(r: Result<&2, &2, Failure, Unbounded>, +meter: Bool, +fuel: U32, 
       IO.die(Unit, 1, failed(f))
     case Done{u}:
       match u:
-        case Unbounded{run, v}:
-          play(IC.prepare(v, Map.new(&2, Lf.Shape)), Unsized{fuel, Ct.locs(run, Map.new(&2, L.Loc)), mods}, meter)
+        case Unbounded{run, v, g}:
+          play(Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), unguided(g)}, Unsized{fuel, Ct.locs(run, Map.new(&2, L.Loc)), mods}, meter)
 
 def modules.ok(errs: List<&2, Fr.ModErr>) -> Bool:
   match errs:
@@ -628,7 +700,7 @@ def fast.reported(+entry: String, m: Fr.Mods) -> IO(Unit):
 def fast.ran(+meter: Bool, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
   match m:
     case Fr.Mods{+mods, errs}:
-      fast.acted(fast.resolved(Fr.term(Fr.Mods{mods, errs}, entry)), meter, fuel, mods)
+      fast.acted(fast.resolved(Fr.program(Fr.Mods{mods, errs}, entry)), meter, fuel, mods)
 
 def fast.parsed(act: Act, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
   match act:
@@ -673,15 +745,28 @@ def stale(+entry: String, +hash: String) -> IO(Unit):
     r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
     stale.of(hash, r)
 
-# A compiled program run, under the capture layouts it stores.
+def stored(+expr: Co.V, ls: List<&2, Tc.Layout>) -> IC.Prog:
+  IC.prepare(expr, Tc.shapes(ls, Map.new(&2, Lf.Shape)))
+
+def stored.guard(g: Maybe<&2, Tc.Guard>) -> Maybe<&2, IC.Prog>:
+  match g:
+    case None{}:
+      None{}
+    case Some{x}:
+      match x:
+        case Tc.Guard{+expr, layouts}:
+          Some{stored(expr, layouts)}
+
+# A compiled program run, and its guard, under the capture layouts it
+# stores.
 def telc.play(t: Tc.Telc, meter: Bool) -> IO(Unit):
   match t:
-    case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts}:
-      play(IC.prepare(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape))), Sized{}, meter)
+    case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, guard}:
+      play(Ss.Prog{stored(expr, layouts), stored.guard(guard)}, Sized{}, meter)
 
 def telc.cert(t: Tc.Telc) -> IO(Unit):
   match t:
-    case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts}:
+    case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard}:
       IO.write(cert)
 
 def telc.acted(act: Act, +path: String, t: Tc.Telc) -> IO(Unit):
@@ -701,10 +786,10 @@ def telc.decoded(act: Act, +path: String, r: Result<&2, &2, String, Tc.Telc>) ->
       IO.die(Unit, 1, path ++ ": " ++ msg)
     case Done{t}:
       match t:
-        case Tc.Telc{+entry, +hash, cert, counts, places, budget, expr, layouts}:
+        case Tc.Telc{+entry, +hash, cert, counts, places, budget, expr, layouts, guard}:
           do IO<Unit>:
             stale(entry, hash)
-            telc.acted(act, path, Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts})
+            telc.acted(act, path, Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard})
 
 def telc.read(act: Act, +path: String, r: Result<&1, &1, String, List<&2, U32>>) -> IO(Unit):
   match r:

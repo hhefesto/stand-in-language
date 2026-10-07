@@ -15,11 +15,13 @@ import ../Text.bend as Tx
 # laziness); whole sessions' interaction counts, guided by EAL as the
 # command runs them, against the .ic-meter goldens; and programs the
 # goldens do not cover (CaseTests, UDTTests, a pattern lambda, a qualified
-# import): their displays and, guided, their counts. The counts are the
-# port's: its IC runs only an if's chosen branch, where haskell-final's
-# built both, and a program sizing proved for every input runs without the
-# checks and chain bottoms sizing discharged. One `ok NAME` line per group
-# (FAIL NAME when it breaks). Run from the source root.
+# import): their displays and, guided, their counts; and the session's
+# guard, which runs main's input refinements on each line before main. The
+# counts are the port's: its IC runs only an if's chosen branch, where
+# haskell-final's built both, and a program sizing proved for every input
+# main is called on runs without the checks and chain bottoms sizing
+# discharged. One `ok NAME` line per group (FAIL NAME when it breaks). Run
+# from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
@@ -117,29 +119,48 @@ def prepared(guided: Bool, +expr: Co.V) -> IC.Prog:
     case False{}:
       IC.prepare(expr, Map.new(&2, Lf.Shape))
 
-def sized(guided: Bool, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def guard.sized(guided: Bool, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, IC.Prog>:
+  match r:
+    case Fail{f}:
+      None{}
+    case Done{s}:
+      match s:
+        case Sz.Sized{counts, +expr, checks}:
+          Some{prepared(guided, expr)}
+
+def guard.of(guided: Bool, m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
+  match m:
+    case None{}:
+      None{}
+    case Some{t}:
+      guard.sized(guided, Sz.size(65536, True{}, E.of.term3(t)))
+
+def sized(guided: Bool, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
         case Sz.Sized{counts, expr, checks}:
-          Ss.replay(prepared(guided, expr), Ss.Sized{}, lines)
+          Ss.replay(Ss.Prog{prepared(guided, expr), g}, Ss.Sized{}, lines)
 
-def compiled(guided: Bool, r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
+def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], Ss.cost.none()}
-    case Done{run}:
-      sized(guided, Sz.size(65536, True{}, E.of.term3(run)), lines)
+    case Done{p}:
+      match p:
+        case Fr.Program{run, g, +boundary}:
+          sized(guided, guard.of(guided, g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)), lines)
 
-# A session as the command runs it: guided by EAL.
+# A session as the command runs it: main's input refinements run first, by
+# the guard, and both are guided by EAL.
 def session(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
-  compiled(True{}, Fr.compile(srcs, entry), lines)
+  compiled(True{}, Fr.compile.program(srcs, entry), lines)
 
 # The same session unguided: the same displays, sooner (no EAL).
 def plain(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
-  compiled(False{}, Fr.compile(srcs, entry), lines)
+  compiled(False{}, Fr.compile.program(srcs, entry), lines)
 
 def spent(r: Ss.Replay) -> U32:
   match r:
@@ -332,6 +353,27 @@ def qualified() -> String:
 def with.prelude(+prelude: String, +name: String, text: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, text}]
 
+# A refinement of main's input whose value main never uses: the session
+# runs it on every line, before main, so an empty line ends the session
+# with its abort; the opening call, on 0, is not checked.
+def unused.refinement() -> String:
+  unlines(["import Prelude",
+           "main = \\input -> let x : (\\v -> if v then 0 else (1, \"empty\")) = left input",
+           "                 in if input then (\"got a line\", 0) else (\"start\", 1)"])
+
+def joined(xs: List<&2, String>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{x, rest}:
+      x ++ "|" ++ joined(rest)
+
+# Every display, newest first.
+def displays(r: Ss.Replay) -> String:
+  match r:
+    case Ss.Replay{shown, c}:
+      joined(shown)
+
 def shows(+prelude: String, text: String, +out: String) -> Bool:
   String.eq(last(plain(with.prelude(prelude, "M", text), "M", [])), out)
 
@@ -399,15 +441,19 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       costs(prelude, pattern.lambda(), 5776),
       costs(prelude, rational(), 90345),
       U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 548)])))
+    IO.print(verdict("ic-guard", all([
+      String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", [""])),
+        "runtime error:\nAborted, user abort: empty|start|"),
+      String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", ["a"])), "got a line|start|")])))
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
       146)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      782347)))
+      42943)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      5949895)))
+      5938558)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

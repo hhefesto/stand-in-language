@@ -9,7 +9,9 @@ import ./Meter.bend as Mt
 # Driver.funWrapWith and evalSessionCore, with IC.icRuntimeResult and
 # IR.Base.convertAbortMessage). A program is run on 0 first, then on
 # (line, state) for each line read, while it answers (display, state) and
-# the state is not 0.
+# the state is not 0. Before main sees a line, the session runs main's
+# input refinements on it, if main has any (Front's guard): one that fails
+# ends the session as main would have, with its abort.
 
 # Print the display and go on with the state; print it and end; or fail
 # as the Haskell did with `error`.
@@ -160,6 +162,23 @@ def failed.how(h: How, f: IC.Fault) -> Outcome:
     case Fast{n}:
       failed.fast(f)
 
+def guard.aborted(m: Maybe<&2, Co.D>) -> Maybe<&2, Outcome>:
+  match m:
+    case Some{msg}:
+      Some{Stop{"runtime error:\nAborted, " ++ abort.message(msg)}}
+    case None{}:
+      None{}
+
+# What the guard's run says: nothing when main's input refinements pass,
+# else how the session ends: with the leftmost one's abort, as main
+# would have ended it, or the runtime's failure.
+def guard.verdict(h: How, r: IC.RB) -> Maybe<&2, Outcome>:
+  match r:
+    case IC.RBErr{f}:
+      Some{failed.how(h, f)}
+    case IC.RBOk{x}:
+      guard.aborted(aborted(x))
+
 # What an iteration's result means for the session.
 def outcome(h: How, r: IC.RB) -> Outcome:
   match r:
@@ -176,6 +195,27 @@ def layouts(expr: Co.V) -> Map<&2, Lf.Shape>:
 # layouts for it, so closures are copied as EAL planned.
 def prepared(+expr: Co.V) -> IC.Prog:
   IC.prepare(expr, layouts(expr))
+
+# What the session runs: main, and the guard it runs on each line before
+# main, if main has input refinements.
+type Prog is Data:
+  Prog{+main: IC.Prog, +guard: Maybe<&2, IC.Prog>}
+
+# A program no guard comes before.
+def alone(p: IC.Prog) -> Prog:
+  Prog{p, None{}}
+
+def guard.prepared(g: Maybe<&2, Co.V>) -> Maybe<&2, IC.Prog>:
+  match g:
+    case None{}:
+      None{}
+    case Some{+x}:
+      Some{prepared(x)}
+
+# What the session runs, from main's sized program and the guard's, each
+# prepared under its capture layouts.
+def session(+main: Co.V, g: Maybe<&2, Co.V>) -> Prog:
+  Prog{prepared(main), guard.prepared(g)}
 
 # The session (evalSessionCore)
 # -----------------------------
@@ -234,13 +274,40 @@ def turn(h: How, r: IC.Run, before: Cost) -> Turn:
     case IC.Run{net, out, +spent, unrolls}:
       turn.of(net, outcome(h, out), cost.plus(before, spent, unrolls))
 
-# The first iteration runs on 0.
-def start(+p: IC.Prog, +h: How) -> Turn:
-  turn(h, IC.run(p, IC.net.new(p), Co.DZero{}, fuel(h)), cost.none())
+# The first iteration runs on 0, unguarded.
+def start(p: Prog, +h: How) -> Turn:
+  match p:
+    case Prog{+m, g}:
+      turn(h, IC.run(m, IC.net.new(m), Co.DZero{}, fuel(h)), cost.none())
 
-# The next iteration runs on the line read and the state the last one left.
-def answer(+p: IC.Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> Turn:
-  turn(h, IC.run(p, net, Co.DPair{Co.of.string(line), st}, fuel(h)), cost)
+def checked(v: Maybe<&2, Outcome>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> Turn:
+  match v:
+    case None{}:
+      turn(h, IC.run(m, net, input, fuel(h)), cost)
+    case Some{o}:
+      turn.of(net, o, cost)
+
+# Main on input, once the guard's run r passes it. The guard's
+# interactions count; its unrolls do not, since its recursion sites are
+# its own and the meter's table locates main's.
+def guarded(r: IC.Run, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+  match r:
+    case IC.Run{gnet, out, +spent, unrolls}:
+      checked(guard.verdict(h, out), h, m, net, input, cost.plus(cost, spent, []))
+
+def answered(g: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+  match g:
+    case None{}:
+      turn(h, IC.run(m, net, input, fuel(h)), cost)
+    case Some{+gp}:
+      guarded(IC.run(gp, IC.net.new(gp), input, fuel(h)), h, m, net, input, cost)
+
+# The next iteration runs on the line read and the state the last one left,
+# once the guard passes them.
+def answer(p: Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> Turn:
+  match p:
+    case Prog{+m, g}:
+      answered(g, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
 
 # A session on given lines, for the tests: the displays, newest first, and
 # what it spent. It ends where the session would, or where the lines run
@@ -259,7 +326,7 @@ def replay.end(t: Turn, +shown: List<&2, String>) -> Replay:
     case Fails{msg, cost}:
       Replay{msg <> shown, cost}
 
-def replay.go(lines: List<&2, String>, +p: IC.Prog, +h: How, t: Turn, +shown: List<&2, String>) -> Replay:
+def replay.go(lines: List<&2, String>, +p: Prog, +h: How, t: Turn, +shown: List<&2, String>) -> Replay:
   match lines:
     case Nil{}:
       replay.end(t, shown)
@@ -270,5 +337,5 @@ def replay.go(lines: List<&2, String>, +p: IC.Prog, +h: How, t: Turn, +shown: Li
         case other:
           replay.end(other, shown)
 
-def replay(+p: IC.Prog, +h: How, lines: List<&2, String>) -> Replay:
+def replay(+p: Prog, +h: How, lines: List<&2, String>) -> Replay:
   replay.go(lines, p, h, start(p, h), [])

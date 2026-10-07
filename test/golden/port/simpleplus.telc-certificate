@@ -11,7 +11,7 @@ recursion sites (iterations, over every input):
 sizing budget in force: 65536 unrollings
 
 refinement checks: 0 discharged statically, 1 left to run time:
-  simpleplus:14:31  at run time (validates input)
+  simpleplus:14:31  at the session boundary
 
 recursion nesting (structural, approximate):
   triple         function             levels

@@ -39,43 +39,78 @@ def with.prelude(+prelude: String, +name: String, text: String) -> List<&2, Fr.S
 # Sessions
 # --------
 
-def fast.of(r: Result<&2, &2, String, Co.V>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
+def unguided(r: Result<&2, &2, String, Co.V>) -> Maybe<&2, IC.Prog>:
+  match r:
+    case Fail{form}:
+      None{}
+    case Done{v}:
+      Some{IC.prepare(v, Map.new(&2, Lf.Shape))}
+
+def fast.guard(m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
+  match m:
+    case None{}:
+      None{}
+    case Some{t}:
+      unguided(E.fast(t))
+
+def fast.of(r: Result<&2, &2, String, Co.V>, g: Maybe<&2, IC.Prog>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{form}:
       Ss.Replay{["left " ++ form], Ss.cost.none()}
     case Done{v}:
-      Ss.replay(IC.prepare(v, Map.new(&2, Lf.Shape)), h, lines)
+      Ss.replay(Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), g}, h, lines)
 
-def fast.compiled(r: Result<&2, &2, String, T.C>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
+def fast.compiled(r: Result<&2, &2, String, Fr.Program>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], Ss.cost.none()}
-    case Done{run}:
-      fast.of(E.fast(run), h, lines)
+    case Done{p}:
+      match p:
+        case Fr.Program{run, g, boundary}:
+          fast.of(E.fast(run), fast.guard(g), h, lines)
 
-# A session run unsized, each iteration capped at fuel (0: no cap).
+# A session run unsized, each iteration capped at fuel (0: no cap), main's
+# input refinements run first, as the command runs it.
 def fast(srcs: List<&2, Fr.Src>, +entry: String, +fuel: U32, lines: List<&2, String>) -> Ss.Replay:
-  fast.compiled(Fr.compile(srcs, entry), Ss.Fast{fuel}, lines)
+  fast.compiled(Fr.compile.program(srcs, entry), Ss.Fast{fuel}, lines)
 
-def sized.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def sized.expr(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Co.V>:
+  match r:
+    case Fail{f}:
+      None{}
+    case Done{s}:
+      match s:
+        case Sz.Sized{counts, expr, checks}:
+          Some{expr}
+
+def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
+  match m:
+    case None{}:
+      None{}
+    case Some{t}:
+      sized.expr(Sz.size(65536, True{}, E.of.term3(t)))
+
+def sized.of(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
-          Ss.replay(Ss.prepared(expr), Ss.Sized{}, lines)
+        case Sz.Sized{counts, +expr, checks}:
+          Ss.replay(Ss.session(expr, g), Ss.Sized{}, lines)
 
-def sized.compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
+def sized.compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], Ss.cost.none()}
-    case Done{run}:
-      sized.of(Sz.size(65536, True{}, E.of.term3(run)), lines)
+    case Done{p}:
+      match p:
+        case Fr.Program{run, g, +boundary}:
+          sized.of(guard.expr(g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)), lines)
 
 # The same session sized, as the command runs it.
 def sized(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
-  sized.compiled(Fr.compile(srcs, entry), lines)
+  sized.compiled(Fr.compile.program(srcs, entry), lines)
 
 def joined(xs: List<&2, String>) -> String:
   match xs:

@@ -172,16 +172,19 @@ def has(s: Set(), +site: U32) -> Bool:
 
 def discharged(cs: Sz.Checks, +site: U32) -> Bool:
   match cs:
-    case Sz.Checks{validating, reaching, proven}:
-      proven && Bool.not(has(reaching, site))
+    case Sz.Checks{validating, boundary, reaching, opening, proven}:
+      proven && Bool.not(has(boundary, site) || has(reaching, site) || has(opening, site))
 
-# What sizing proved of a check, and why it is left to run time if it is.
+# What sizing proved of a check, and why it is left to run time if it is:
+# the session runs it before main (one of main's input refinements), or it
+# validates input otherwise, or its abort reaches the result.
 def verdict(cs: Sz.Checks, +site: U32) -> String:
   match cs:
-    case Sz.Checks{validating, reaching, proven}:
-      Bool.pick(String, has(validating, site), "at run time (validates input)",
-        Bool.pick(String, has(reaching, site), "at run time (reaches the result)",
-          Bool.pick(String, proven, "discharged", "at run time (not proven for every input)")))
+    case Sz.Checks{validating, boundary, reaching, opening, proven}:
+      Bool.pick(String, has(boundary, site), "at the session boundary",
+        Bool.pick(String, has(validating, site), "at run time (validates input)",
+          Bool.pick(String, has(reaching, site) || has(opening, site), "at run time (reaches the result)",
+            Bool.pick(String, proven, "discharged", "at run time (not proven for every input)"))))
 
 def check.place(+site: U32, m: Maybe<&2, String>) -> String:
   match m:

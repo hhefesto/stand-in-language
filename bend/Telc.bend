@@ -18,7 +18,10 @@ import ./Certificate.bend as Ct
 # skips one it reads), and the capture layouts the program runs under.
 # Integers are int64 little-endian; a string is its UTF-8 length, then its
 # UTF-8; a Maybe is byte 0, or 1 and the value; a map is its length, then
-# its entries in ascending key order.
+# its entries in ascending key order. A program whose session is guarded
+# (Front's guard) is a port extension, version 5: version 4's bytes, then
+# the guard's program and layouts as main's are written. haskell-final
+# refuses it by its version, rather than run main unguarded.
 
 # A site's count (None: not sized) and a site's location, by token.
 type Count is Data:
@@ -31,12 +34,20 @@ type Place is Data:
 type Layout is Data:
   Layout{+digest: String, +shape: Lf.Shape}
 
+# The session's guard: its sized program and its capture layouts.
+type Guard is Data:
+  Guard{+expr: Co.V, +layouts: List<&2, Layout>}
+
 type Telc is Data:
   Telc{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
-       +budget: U32, +expr: Co.V, +layouts: List<&2, Layout>}
+       +budget: U32, +expr: Co.V, +layouts: List<&2, Layout>, +guard: Maybe<&2, Guard>}
 
+# haskell-final's version, and the port's for a guarded session.
 def version() -> U32:
   4
+
+def version.guarded() -> U32:
+  5
 
 # The sources' hash (sourcesHash): SHA-256 of every module's name and text
 # with their lengths, the modules sorted by name, in lowercase hex.
@@ -128,8 +139,12 @@ def layouts.of(m: Map<&2, Lf.Shape>) -> List<&2, Layout>:
 # A sized program as an artifact: its entry, the sources' hash, the static
 # report as rendered, each site's count and location, the budget, the
 # program and its capture layouts.
-def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, ls: Map<&2, Lf.Shape>) -> Telc:
-  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, expr, layouts.of(ls)}
+def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, ls: Map<&2, Lf.Shape>, guard: Maybe<&2, Guard>) -> Telc:
+  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, expr, layouts.of(ls), guard}
+
+# A guard's sized program and its layouts, as stored.
+def guard.of(expr: Co.V, ls: Map<&2, Lf.Shape>) -> Guard:
+  Guard{expr, layouts.of(ls)}
 
 # The layouts as the IC looks them up.
 def shapes(ls: List<&2, Layout>, acc: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
@@ -266,15 +281,31 @@ def put.report(+cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, rest: L
   put.int(count(Count, cs), put.counts(cs, put.int(count(Place, ps), put.places(ps, put.int(budget, rest)))))
 
 # The program, no IC certificate, and the layouts.
-def put.program(expr: Co.V, +ls: List<&2, Layout>) -> List<&2, U32>:
-  put.expr(expr, 0 <> put.int(count(Layout, ls), put.layouts(ls, [])))
+def put.program(expr: Co.V, +ls: List<&2, Layout>, rest: List<&2, U32>) -> List<&2, U32>:
+  put.expr(expr, 0 <> put.int(count(Layout, ls), put.layouts(ls, rest)))
+
+def put.guard(g: Maybe<&2, Guard>) -> List<&2, U32>:
+  match g:
+    case None{}:
+      []
+    case Some{x}:
+      match x:
+        case Guard{expr, layouts}:
+          put.program(expr, layouts, [])
+
+def version.of(g: Maybe<&2, Guard>) -> U32:
+  match g:
+    case None{}:
+      version()
+    case Some{x}:
+      version.guarded()
 
 def encode(t: Telc) -> List<&2, U32>:
   match t:
-    case Telc{entry, hash, cert, counts, places, budget, expr, layouts}:
-      84 <> 69 <> 76 <> 67 <> put.int(version(),
+    case Telc{entry, hash, cert, counts, places, budget, expr, layouts, +guard}:
+      84 <> 69 <> 76 <> 67 <> put.int(version.of(guard),
         put.string(entry, put.string(hash, put.string(cert,
-          put.report(counts, places, budget, put.program(expr, layouts))))))
+          put.report(counts, places, budget, put.program(expr, layouts, put.guard(guard)))))))
 
 # Reading
 # -------
@@ -598,7 +629,23 @@ def ic.cert(+m: U32) -> G(Unit):
         b1 : Unit <- bound()
         bound()
 
-def fields(+entry: String) -> G(Telc):
+def program() -> G(Guard):
+  do G<Guard>:
+    x : Co.V <- expr(fuel())
+    m : U32 <- byte()
+    c : Unit <- ic.cert(m)
+    nl : U32 <- int()
+    ls : List<&2, Layout> <- layouts(U32.to_nat(nl))
+    return Guard{x, ls}
+
+def guard.read(guarded: Bool) -> G(Maybe<&2, Guard>):
+  match guarded:
+    case True{}:
+      G.bind(Guard, Maybe<&2, Guard>, program(), g => G.pure(Maybe<&2, Guard>, Some{g}))
+    case False{}:
+      G.pure(Maybe<&2, Guard>, None{})
+
+def fields(+entry: String, +v: U32) -> G(Telc):
   do G<Telc>:
     hash : String <- string()
     cert : String <- string()
@@ -612,7 +659,8 @@ def fields(+entry: String) -> G(Telc):
     c : Unit <- ic.cert(m)
     nl : U32 <- int()
     ls : List<&2, Layout> <- layouts(U32.to_nat(nl))
-    return Telc{entry, hash, cert, cs, ps, budget, x, ls}
+    g : Maybe<&2, Guard> <- guard.read(U32.is_eq(v, version.guarded()))
+    return Telc{entry, hash, cert, cs, ps, budget, x, ls, g}
 
 # What a file holds: an artifact, or why it is none (the magic or the
 # version, said as is; anything else is unreadable).
@@ -623,13 +671,13 @@ type Read is Data:
 def versioned.if(ok: Bool, +v: U32) -> G(Read):
   match ok:
     case True{}:
-      G.bind(String, Read, string(), entry => G.bind(Telc, Read, fields(entry), t => G.pure(Read, Read{t})))
+      G.bind(String, Read, string(), entry => G.bind(Telc, Read, fields(entry, v), t => G.pure(Read, Read{t})))
     case False{}:
-      G.pure(Read, Refused{"this artifact is version " ++ U32.show(v) ++ ", but this telomare reads version "
-        ++ U32.show(version()) ++ "; recompile it from source"})
+      G.pure(Read, Refused{"this artifact is version " ++ U32.show(v) ++ ", but this telomare reads versions "
+        ++ U32.show(version()) ++ " and " ++ U32.show(version.guarded()) ++ "; recompile it from source"})
 
 def versioned(+v: U32) -> G(Read):
-  versioned.if(U32.is_eq(v, version()), v)
+  versioned.if(U32.is_eq(v, version()) || U32.is_eq(v, version.guarded()), v)
 
 def magic(bs: List<&2, U32>) -> Bool:
   match bs:

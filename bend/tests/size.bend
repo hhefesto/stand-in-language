@@ -81,9 +81,9 @@ def keys(xs: List<&2, String>) -> String:
 
 def checks.text(c: Sz.Checks) -> String:
   match c:
-    case Sz.Checks{v, r, p}:
-      "validating " ++ keys(Set.to_list(v)) ++ "; reaching " ++ keys(Set.to_list(r))
-        ++ Bool.pick(String, p, "; proven", "")
+    case Sz.Checks{v, b, r, o, p}:
+      "validating " ++ keys(Set.to_list(v)) ++ "; boundary " ++ keys(Set.to_list(b)) ++ "; reaching " ++ keys(Set.to_list(r))
+        ++ "; opening " ++ keys(Set.to_list(o)) ++ Bool.pick(String, p, "; proven", "")
 
 def checked(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
   match r:
@@ -101,9 +101,26 @@ def checked.term(r: Result<&2, &2, String, T.C>) -> String:
     case Done{run}:
       checked(Sz.size(65536, True{}, E.of.term3(run)))
 
-# What sizing proved of the checks, by number.
+# What sizing proved of the checks, by number, with no guard.
 def checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
   checked.term(Fr.compile(srcs, entry))
+
+def guarded.program(r: Result<&2, &2, String, Fr.Program>) -> Result<&2, &2, Sz.SizeFail, Sz.Sized>:
+  match r:
+    case Fail{e}:
+      Fail{Sz.Internal{e}}
+    case Done{p}:
+      match p:
+        case Fr.Program{run, g, +boundary}:
+          Sz.size.at(65536, True{}, boundary, E.of.term3(run))
+
+def guarded.sized(srcs: List<&2, Fr.Src>, +entry: String) -> Result<&2, &2, Sz.SizeFail, Sz.Sized>:
+  guarded.program(Fr.compile.program(srcs, entry))
+
+# What sizing proved of the checks, by number, as the command sizes main:
+# its input refinements run by the session's guard.
+def guarded.checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
+  checked(guarded.sized(srcs, entry))
 
 # Whether an Abort is left in the code that runs.
 def has.abort(x: Co.V) -> Bool:
@@ -143,6 +160,10 @@ def aborts.term(r: Result<&2, &2, String, T.C>) -> String:
 def aborts(srcs: List<&2, Fr.Src>, +entry: String) -> String:
   aborts.term(Fr.compile(srcs, entry))
 
+# Whether main, sized as the command sizes it, holds an Abort.
+def guarded.aborts(srcs: List<&2, Fr.Src>, +entry: String) -> String:
+  aborts.of(guarded.sized(srcs, entry))
+
 def case.of(+prelude: String, +scrutinee: String) -> List<&2, Fr.Src>:
   with.prelude("cased", "import Prelude\nmain = \\input -> (case " ++ scrutinee
     ++ " of\n  0 -> \"zero\"\n  1 -> \"one\", 0)\n", prelude)
@@ -169,15 +190,22 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       size(65536, with.prelude("unbounded-input-recursion", unb, prelude), "unbounded-input-recursion"),
       "could not size recursion #0 at unbounded-input-recursion:27:34:\n  its test depends on input that nothing bounds, so no finite iteration\n  count can be proven for it. Constrain that input with a refinement\n  (`x : someValidator`) or an `assert` before recursing on it.")))
     IO.print(verdict("size-checks", all([
-      String.eq(checks(with.prelude("simpleplus", plus, prelude), "simpleplus"), "validating 0; reaching "),
-      String.eq(checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "validating 0,1,2; reaching "),
-      String.eq(cased(prelude, "0"), "validating ; reaching ; proven"),
-      String.eq(cased(prelude, "3"), "validating ; reaching 0; proven")])))
+      String.eq(checks(with.prelude("simpleplus", plus, prelude), "simpleplus"), "validating 0; boundary ; reaching ; opening "),
+      String.eq(checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "validating 0,1,2; boundary ; reaching ; opening "),
+      String.eq(cased(prelude, "0"), "validating ; boundary ; reaching ; opening ; proven"),
+      String.eq(cased(prelude, "3"), "validating ; boundary ; reaching 0; opening ; proven")])))
+    IO.print(verdict("size-boundary", all([
+      String.eq(guarded.checks(with.prelude("simpleplus", plus, prelude), "simpleplus"),
+        "validating 0; boundary 0; reaching ; opening ; proven"),
+      String.eq(guarded.checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"),
+        "validating 0,1,2; boundary 0,1,2; reaching ; opening ; proven")])))
     IO.print(verdict("size-erased", all([
       String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
       String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),
       String.eq(aborts(case.of(prelude, "3"), "cased"), "Abort"),
-      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "Abort")])))
+      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "Abort"),
+      String.eq(guarded.aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "none"),
+      String.eq(guarded.aborts(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "Abort")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:

@@ -3,7 +3,7 @@ status 0
 enter two digits separated by a space
 3 plus 4 is 7
 --- stderr
-IC interactions: 728870
+IC interactions: 735924
 recursion unrolls (measured):     55 across 4 sites
 
   site   source            function          unrolls

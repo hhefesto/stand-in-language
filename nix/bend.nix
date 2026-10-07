@@ -91,6 +91,7 @@ let
       "ic-case"
       "ic-udt"
       "ic-meter-case-udt"
+      "ic-guard"
       "ic-meter-tc_ultra_minimal"
       "ic-meter-simpleplus"
       "ic-meter-tictactoe"
@@ -122,6 +123,7 @@ let
     telc = [
       "telc-round-trip"
       "telc-runs"
+      "telc-guard"
       "telc-magic"
       "telc-hash"
       "telc-nodes"
@@ -134,6 +136,7 @@ let
       "size-budget-exhausted"
       "size-unbounded-input"
       "size-checks"
+      "size-boundary"
       "size-erased"
     ];
     lexical = [

@@ -70,7 +70,7 @@ Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 |---|---:|---:|---:|
 | `tc_ultra_minimal.tel` | 0.06 s | 0.02 s | 3× |
 | `simpleplus.tel`, input `3 4` | 9.6 s | 0.8 s | 12× |
-| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 2.4 s | 30× |
+| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 3.0 s | 25× |
 | a CaseTests program (integer cases) | 36.4 s | 1.7 s | 21× |
 | a CaseTests program (property shapes) | 289.9 s | 5.0 s | 58× |
 | UDTTests' natural arithmetic | 16.3 s | 1.0 s | 16× |
@@ -78,7 +78,11 @@ Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 | the Prelude's `Rational` | 31.3 s | 0.7 s | 43× |
 
 haskell-final ran the property-shapes program with its heap capped at 8 GB
-(`GHCRTS=-M8G`); uncapped, it ran this machine low on memory.
+(`GHCRTS=-M8G`); uncapped, it ran this machine low on memory. tic-tac-toe
+took 2.4 s until its input refinements moved to the session boundary (see
+[Design](#design)): sizing now also runs the sized program once more, about
+0.3 s, to find whether its chains' bottoms are dead (for tic-tac-toe they
+cannot be shown to be).
 
 Most of the difference is in EAL. The Bend analysis keeps its state in flat
 arrays of words, as the runtime keeps its net, instead of maps in a state
@@ -116,9 +120,10 @@ in these places:
 - `--draw-net` is not ported.
 - `--compile` writes haskell-final's version 4 artifact with no IC
   certificate (the port has none to store), and `--ic --compile` writes the
-  same. For the example programs it is byte for byte the artifact
-  haskell-final's `--ic --compile` writes, but for that certificate, and
-  artifacts load either way.
+  same. Its stored report has the checks section below, and a program whose
+  session has a guard (below) is written as version 5: version 4 and then
+  the guard, which haskell-final refuses by its version rather than run main
+  unguarded. haskell-final's artifacts load in the port.
 - `--fast` runs on the IC (C4: one runtime), not on a second evaluator.
   Sizing is skipped, and every recursion site becomes a closure that
   rebuilds itself when applied, so each application unrolls one layer;
@@ -149,28 +154,44 @@ in these places:
   branch never ends now finishes (`ratarith` in the parity corpus gives
   what haskell-final's reference evaluator gives, where its IC ran out of
   fuel).
+- Main's input refinements are checked at the session boundary (DESIGN.md
+  §11.10's convention, made a rule). These are the refined bindings of the
+  `let` that `main = \input -> let ... in body` opens with. On each line it
+  reads, the session runs them first, as a program of their own (the
+  guard: main with its body replaced by the refined values), and calls main
+  only when they pass. A failing one ends the session with its abort, as
+  main would have. The opening call, main on 0, is not checked, since 0 is
+  no input. Two things differ from haskell-final, where a refinement fired
+  only when main used its value: one now fires on every line, even where
+  main would not have used it, and an invalid line costs only the guard
+  (tic-tac-toe's `10`: 1.0 million interactions instead of 7.6 million).
+  `--fast` runs the guard too. Displays of the example programs are
+  unchanged.
 - `--certificate` also says what sizing proved of each refinement check
   (DESIGN.md §10's split, which haskell-final's report lacks): discharged,
-  or left to run time because it validates input, because its abort
-  reaches the result on some input, or because it is not proven for every
-  input. Sizing's main run assumes the refinements that bound the input
-  pass (its limits pass learned the input positions they force), so it
-  explores only input that passes them. A check that validates input is
-  therefore never discharged, and neither is anything else in a program
-  that has one. Otherwise the main run explored every input, and the split
-  is exactly as sound as that exploration.
-- A program the main run explored on every input, whose result is data,
-  runs without what sizing discharged (DESIGN.md §10 and C5). Each
-  discharged check becomes the value it checked. Then the sized program
-  runs once more, symbolically, over every input; if no chain's bottom
-  reaches its result, every bottom becomes 0 instead of an abort. If one
-  does, sizing has a bug, and the program does not compile. A program
-  whose checks are all discharged has no Abort left in the code that runs.
-  Displays are unchanged, and interaction counts drop a little: 150 to 146
-  for `tc_ultra_minimal`, and 91,147 to 90,345 for the Rational example.
-  The extra pass costs about 0.02 s on the parity corpus. A program that
-  validates its input keeps every check and every bottom, since what
-  sizing proved there holds only for input that passes the validation.
+  or left to run time because the session runs it at its boundary, because
+  it validates input otherwise, because its abort reaches the result on
+  some input, or because it is not proven for every input. Sizing's main
+  run assumes the refinements that bound the input pass (its limits pass
+  learned the input positions they force), so it explores only input that
+  passes them. With the boundary that is every input main is called on,
+  once sizing also runs the opening call, and provided each restriction is
+  exactly what its check needs (sizing checks that). A program whose input
+  is validated anywhere else is proven for nothing. Otherwise the split is
+  exactly as sound as sizing's exploration.
+- A program proven so runs without what sizing discharged (DESIGN.md §10
+  and C5). Main's boundary checks and its discharged checks become the
+  values they checked. Then the sized program runs once more, symbolically,
+  over the same input. If no chain's bottom reaches its result, every
+  bottom becomes 0 instead of an abort. That run follows paths sizing set
+  aside (a test outcome on input nothing bounds), so a bottom it reaches
+  proves no count wrong; the bottoms then stay. A program whose checks are
+  all discharged or at the boundary, and whose bottoms are dead, has no
+  Abort left in main. simpleplus is one: `3 4` takes 42,943 interactions
+  instead of 782,347, nearly all of the difference being the check no
+  longer run inside main. tic-tac-toe keeps its bottoms: the extra run
+  reaches one. Elsewhere counts drop a little: 150 to 146 for
+  `tc_ultra_minimal`, and 91,147 to 90,345 for the Rational example.
 - Like haskell-final, the port certifies the sized program only for the
   capture layouts that guide the IC; it does not refuse to run a program
   whose sized form fails certification (DESIGN.md's `admitIC` is not in
@@ -180,9 +201,10 @@ Of DESIGN.md's open questions (§11), three are resolved: the certified
 term is the executed one (§11.4), the IC runs only an `if`'s chosen branch
 (§11.3; both above), and `trace` (§11.7) is removed, since it had no
 runtime meaning and restoring it would need a side channel through the IC
-(C1/C4). Abort (§10, §11.6) is erased where sizing proves it dead, and stays
-a core form for the checks left to run time; whether those should move to
-the session boundary is still open.
+(C1/C4). Abort (§10, §11.6) is erased where sizing proves it dead. main's
+input refinements run at the session boundary (§11.10), in a guard that
+keeps them as checks. Abort stays a core form there, in the guard, in the
+checks left to run time, and in bottoms not proven dead.
 
 ## Quick Start
 
@@ -252,7 +274,7 @@ recursion sites (iterations, over every input):
 sizing budget in force: 65536 unrollings
 
 refinement checks: 0 discharged statically, 1 left to run time:
-  simpleplus:14:31  at run time (validates input)
+  simpleplus:14:31  at the session boundary
 
 recursion nesting (structural, approximate):
   triple         function             levels
@@ -277,9 +299,9 @@ The checks section splits the program's refinement checks as DESIGN.md §10
 asks. These are every `x : v = e`, plus Prelude's `abort`, the one check that
 `case`, UDT validators and pattern lambdas call. A check is *discharged* when
 sizing proved that no input makes its abort reach the result. Otherwise it is
-left to run time, and the report says why. simpleplus's `validInput` stays:
-it validates the input, and sizing assumed it passes in order to bound the
-recursions.
+left to run time, and the report says why. simpleplus's `validInput` is a
+refinement of main's input, so the session runs it before main on each line
+it reads, and main runs without it.
 
 `--meter` runs the program and reports what the run cost: the interactions
 the net performed over the whole session, on stderr once the session ends.
@@ -289,12 +311,13 @@ That is a measurement of one run, not a prediction about the next:
 $ printf '3 4\n' | telomare simpleplus.tel --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 782347
+IC interactions: 42943
 ```
 
 The count is the port's own: its net runs only the branch an `if` chooses,
-where haskell-final's built both, so it is lower than haskell-final's
-`--ic --meter` count (1517868 for this run; see [Design](#design)). It is
+where haskell-final's built both, and main runs without the input check the
+session ran before it, so it is far lower than haskell-final's `--ic
+--meter` count (1517868 for this run; see [Design](#design)). It is
 not a memory figure, deliberately. haskell-final's IC also
 printed the peaks of its net's "logical storage" (agents, port entries,
 pending pairs), but those counted its own representation of the net (a map of
@@ -338,7 +361,7 @@ will even run programs the sizing pass rejects:
 $ printf '3 4\n' | telomare simpleplus.tel --fast --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 728870
+IC interactions: 735924
 recursion unrolls (measured):     55 across 4 sites
 
   site   source            function          unrolls
@@ -575,7 +598,7 @@ goldens in `test/golden/`.
 | Drive | `Telomare.Driver`, the `telomare` command | ported for running programs, `--meter` and `--fast`: `bend/{Session,Meter,Main}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
-| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 4, written with no IC certificate) |
+| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 4, written with no IC certificate; version 5 with a session guard) |
 | REPL and LSP | `app/Repl.hs`, `app/LSP.hs` | not ported |
 
 Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and the
