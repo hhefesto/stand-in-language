@@ -1331,10 +1331,14 @@ Asked of Sam (2026-10-08):
   opening` and every bottom is inert, with no re-run. `at.recursion`,
   `bottomed`, `everything`, `as.ran` and `opening.bottomed` are gone;
   `discharged` and `tidy` no longer take the main run's `Cfg` or `mx`.
-- The risk accepted (Sam's call): a path sizing set aside that a real
-  input does take would now give 0 where the bottom aborted with
-  `recursion overflow`. No program in the repo or the corpus shows one:
-  every display is unchanged.
+- The risk accepted: if a real input takes a path sizing set aside and
+  runs a recursion past its count, the session now ends with the IC's
+  stuck error, `Generic Runtime Error: IC runtime: ICStuck "applied value
+  is ICZero, not a function: 0"`, where it ended with `Aborted, recursion
+  overflow (should be caught by other means) for rt: Just N`: still an
+  error, but one that no longer names the recursion. A probe showed both
+  (simpleplus sized to one iteration per site, `3 4`). No program in the
+  repo or the corpus shows one: every display is unchanged.
 - **Results:**
   - tictactoe loses its bottoms. `ic-meter-tictactoe` (`1 4 2 5 3`)
     5,938,558 → 5,927,480; the test game (`1 9 2 8 3`) 5,956,146 →
