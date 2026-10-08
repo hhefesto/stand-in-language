@@ -185,17 +185,19 @@ def bottom(+tok: U32, inert: Bool) -> X:
       XPair{XDefer{Co.step.w(), fill(fill(XAbort{AtRecursion{tok}}, XRight{XEnv{}}), XLeft{XEnv{}})},
             XPair{XZero{}, int.u32(tok)}}
 
-def chain(n: Nat, +tok: U32, +inert: Bool) -> X:
+# n links over a bottom: each runs one approximant step, recurring into the
+# next.
+def chain.over(n: Nat, bot: X) -> X:
   match n:
     case 0n:
-      bottom(tok, inert)
+      bot
     case 1n+k:
-      XPair{XDefer{Co.step.rfb(), approx.body()}, XPair{chain(k, tok, inert), XLeft{XEnv{}}}}
+      XPair{XDefer{Co.step.rfb(), approx.body()}, XPair{chain.over(k, bot), XLeft{XEnv{}}}}
 
 # A recursion sized to n iterations: n links over its bottom
 # (sizedRecursionChain).
 def sized.chain(+tok: U32, n: U32, +inert: Bool) -> X:
-  chain(U32.to_nat(n), tok, inert)
+  chain.over(U32.to_nat(n), bottom(tok, inert))
 
 # Unbounded recursion (--fast)
 # ----------------------------

@@ -128,6 +128,11 @@ let
       "telc-hash"
       "telc-nodes"
     ];
+    sem = [
+      "sem-tc_ultra_minimal"
+      "sem-simpleplus"
+      "sem-tictactoe"
+    ];
     size = [
       "size-tc_ultra_minimal"
       "size-simpleplus"
