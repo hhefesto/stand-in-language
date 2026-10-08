@@ -32,6 +32,7 @@ Line numbers are as of `e3480b1`. Search for the definition named when
 they drift.
 
 Contents:
+0. Status
 1. Working rules
 2. The goal, stated exactly
 3. Where things stand
@@ -49,6 +50,59 @@ Contents:
 15. Nix gotchas
 
 ---
+
+## 0. Status (2026-10-08)
+
+The user asked to run the plan, stopping at decisions. bend-port is the
+Bend version that keeps up with master's behaviour, so D2 was settled
+that way. S1 and S3's executable half are committed on `sizing-proof`:
+- `cb5b7e5`: Sem, the checker, `chain.over`, and the parity test;
+- `0968c2a`: the laws, and the proof of `fuel_more`.
+
+Both passed the gate and `nix flake check`. Nothing is pushed.
+
+**Done:**
+- **S0.1:** the filter fix landed on bend-port as `822f0c5` (plus a
+  handoff fixup, `c66e7e0`), and sizing-proof was rebased onto it. Not
+  pushed.
+- **S0.2:** `bend/dev/fastdiff.sh`, run on 100 generated sessions each
+  of tictactoe and simpleplus: no sized/`--fast` difference.
+- **S1:**
+  - `bend/Sem.bend`, the meaning. It is strict like the IC, not lazy as
+    first planned; §2 says why.
+  - `bend/tests/sem.bend`: Sem and the IC show the same displays on tc,
+    three simpleplus sessions (one aborting at the guard) and three
+    tictactoe games, in about 3 s.
+  - `bend/LAWS.bend`: six laws, a draft waiting on D1.
+- **S1 spike:** `fuel_more` is proven in `bend/PROOF.bend`, about 200
+  lines, in a few rounds against the checker. A planted error is caught.
+  It also passes `--verdict`, BendTT's Lean-proven kernel (built as §8
+  says). So does `Sem.bend` with its imports.
+- **S3, executable half:** `bend/Check.bend`, with `bend/dev/check.bend
+  MODULE [RUNS]` to run it. Every erasure is proven, without counting the
+  checker's own soundness, which is S4:
+  - tc_ultra_minimal: 7 runs;
+  - simpleplus: 14,163 runs, 3.6 s;
+  - all 15 corpus programs: 1 run each, since they ignore their input.
+
+  The checker is not yet wired into `Sz.discharged`, which would change
+  outputs.
+
+**In progress:**
+- **S0.3, tictactoe.** 50,000 runs found no input that fires a site, but
+  that budget is not enough for a verdict. A 5,000,000-run check was
+  started (`check tictactoe 5000000`, log
+  `/tmp/claude-1000/-home-hhefesto-src-telomare/4e3d9564-c256-4dc9-b9fb-90e07fbbce07/scratchpad/logs/check-ttt-long.log`, which is gone on another machine). The estimate is 2–4 million leaves at
+  6.6 ms each. It ends with "proven", "fires … on input …" (a real
+  counterexample: see D4), or "unknown".
+
+**Next:**
+- **D1:** the user (and Sam) approve or amend `bend/LAWS.bend`.
+- **S2:** prove `what_runs`, `erasure` and `counts_suffice`. Each is a
+  simulation between two runs of `sem`, built on `fuel_more`.
+- **S4:** prove the two certificate laws for `Check.bend`.
+- **S3, the rest:** wire the checker into sizing. This decides what
+  happens to tictactoe's outputs (D3).
 
 ## 1. Working rules
 
@@ -91,62 +145,97 @@ Once S1 starts, add `bend bend/PROOF.bend` (§5).
 
 ## 2. The goal, stated exactly
 
-**The objects. All of them exist in the code today:**
-- `x`: main as sizing receives it. This is `Sz.size.at`'s `x`
-  (Size.bend:1268), an `E.X` with an `XStub` per recursion site and an
-  `XCheck` per refinement check. `cm = Sz.capped(x, True{})`.
+**The objects, as built:**
+- `x`: main as sizing receives it (`E.of.term3(run)`), with an `XStub`
+  per recursion site and an `XCheck` per refinement check.
 - `counts`: sizing's counts.
-- **marked**: `Sz.program(counts, None{}, False{}, cm, True{})`
-  (Size.bend:1188). Every check is kept, and every chain's bottom is an
-  abort. Each such abort carries its site in `E.Site`: `AtCheck{n}`, or
-  `AtRecursion{tok}` (Expr.bend `check.of` 244, `bottom` 180).
-- **erased**: `Sz.program(counts, Some{left}, True{}, cm, True{})`. This is
-  what bend-port runs when sizing says `proven` (`Sz.discharged`, 1210).
-  The checks not in `left` and every bottom are erased.
-- **unbounded**: marked with each chain replaced by the self-rebuilding
-  step, i.e. `E.unbounded` (Expr.bend:219) where `program` calls
-  `set.sizes`. This is `--fast`'s meaning, with the checks kept.
-- **admitted inputs**: 0, the session's opening call, and every datum the
-  session's guard passes. P7.5(b) runs main's boundary refinements as a
-  guard before every later call.
+- **The witness**, `Ck.witness(counts, x)` (Check.bend):
+  - each `XStub` becomes its chain of `count + 1` links
+    (`E.chain.over`, Expr.bend) over the `XStub` itself, which stands for
+    the rest of the recursion;
+  - the `XCheck`s stay.
+- **A policy**, `Sm.Pol{mode, checks}`, says what the erasable sites
+  mean. The erasable sites are the checks sizing erases
+  (`Ck.erasable(x, left)`, i.e. every check not left to run time) and
+  every chain's bottom. The modes:
+  - Watch: a mark (below);
+  - Erase: the check's value, and 0;
+  - Limit: the check's value, and the recursion unbounded.
+- **What runs** is `Sz.program(counts, Some{left}, True{}, x, False{})`:
+  the program the compiler hands the runtime when sizing proves main.
+- **Admitted inputs:** 0, the opening call, and every datum the session's
+  guard passes.
 
-**The meaning, `Sem`.** A lazy (call-by-name) big-step evaluator over the
-core fragment of `E.X`:
-- It follows DESIGN §2's table.
-- Aborts and stuck values are values (DESIGN §5 "Applying data is
-  tolerated", §6 "aborts are discardable values").
-- It is indexed by fuel, because Bend demands termination.
-- It records which erasable aborts fire (§4 explains why: firings, not
-  where an aborted value ends up).
-- The observation is the result read back in full: a data tree whose leaves
-  may be an abort (site and message) or a stuck value.
+**The meaning, `Sem`** (bend/Sem.bend):
+- It evaluates in the IC's order. Every value is computed once, except the
+  strict `if`'s branches: only the chosen one runs, as the IC has done
+  since P4.
+- Aborted and stuck values are values.
+- It is indexed by fuel (the depth of evaluation), because Bend demands
+  termination.
+- An `XVar` is an input position not yet known. A run that needs its shape
+  stops with `Needs`.
+- Watched, a bottom, and an erasable check whose test does not give 0,
+  become a **mark**. A mark travels as an aborted value does, and ends the
+  run with `Fired` if it reaches the result.
+- It is shaped for proof. Each step is a value, `sem` on a job a pure
+  helper picks, or a pure function of `sem`'s results. That is what kept
+  `fuel_more` to about ten cases.
 
-**The theorem, as three laws:**
-1. **Erasure.** If the marked program fires no erased site on input `d` at
-   fuel `f`, the erased program gives the same observation on `d` at `f`.
-2. **Chains suffice.** If the marked program fires no bottom on `d`, the
-   unbounded program gives the same observation on `d`, at some fuel.
-3. **Certificate.** If the checker accepts the program, then for every
-   admitted `d` and every fuel, the marked program fires no erased site.
+**Why strict, not lazy as first planned:**
+- The call-by-name draft re-evaluated shared work without bound. It never
+  finished tc_ultra_minimal.
+- Strict evaluation is what the IC, the one runtime, does, and it computes
+  each value once.
+- The cost: under strict evaluation `--fast` can loop in dead code that the
+  sized program finishes. The IC has the same limitation.
 
-Together these say: for every program, whatever the compiler erases is
-erased soundly, and the compiled program computes what the unbounded
-program computes.
+**Why marks travel instead of firing when used.** Under strict evaluation
+dead code uses values. A let's argument, for instance, is computed whether
+or not it is used. In simpleplus the opening call computes `left inString`
+from a failed check and then discards it. So a mark matters only if what
+is computed from it reaches the result. That is sizing's own rule: an
+abort counts only if it reaches the result. A mark inside an abort's
+message makes the whole aborted value a mark, so `trunc` cannot swallow
+it.
+
+**The laws** (bend/LAWS.bend, a draft for D1):
+1. `fuel_more`: more fuel never changes an answer. **Proven.**
+2. `what_runs`: what runs answers as the witness does under Erase, given
+   enough fuel.
+3. `erasure`: if the watched witness answers (so no mark reaches the
+   result) and the erased one answers too, they give the same answer.
+4. `counts_suffice`: the same for Limit, i.e. the recursions unbounded
+   past their chains.
+5. `certificate_opening` and `certificate_guarded`: if the checker proves
+   main, the watched witness fires on no admitted input, at any fuel.
+
+Together they say: on every input the session can give main, what the
+compiler erased could not have mattered, and the recursions had all the
+links they needed.
+
+Laws 3 and 4 compare answers where both runs give one. Under strict
+evaluation, the erased run may compute dead values the watched run never
+does. That every run of a certified program ends is EAL's promise (C2),
+not these laws'.
+
+Law 4 is about the witness under Limit, not `E.unbounded(x)` itself. A
+chain link and `limit.code` are different closures. A program that takes a
+recursion value apart instead of applying it could tell them apart, so
+equating the two needs a representation lemma, which is not attempted.
 
 "Every program" means every program the compiler builds. A program the
-checker can't verify keeps its bottoms and checks: that is P7.5's
-behaviour, and DESIGN §10's part 2. The theorem then holds for it
-trivially.
+checker cannot verify keeps its bottoms and checks. That is P7.5's
+behaviour, DESIGN §10's part 2, and the laws then hold trivially.
 
 **Not covered: the trusted base.**
-- `Sem` is the meaning. It is checked against the IC by tests (S1), not by
-  proof. Proving the IC sound (optimal reduction of EAL-typable nets, §7)
-  is a separate, larger project.
-- Termination is EAL's promise (C2 through §5), not this branch's. The laws
-  are indexed by fuel, so they need no termination.
-- The front end (parse to Term3) and the session loop.
-- Bend's own checker. `bend … --verdict` re-checks with BendTT's kernel,
-  which has a proof in Lean.
+- `Sem` is the meaning. It is checked against the IC by tests
+  (`tests/sem.bend`), not by proof. Proving the IC sound (optimal
+  reduction of EAL-typable nets, §7) is a separate, larger project.
+- Termination is EAL's promise (C2 through §5).
+- The front end (parse to Term3), and the session loop.
+- Bend's checker. `--verdict` re-checks with BendTT's kernel, which has a
+  proof in Lean.
 
 ## 3. Where things stand
 
@@ -225,52 +314,40 @@ way. The reasons:
   program.
 - The certificate stays the counts. Sizing emits nothing new.
 
-**One lemma does most of the work: demand.** In a lazy semantics, a subterm
-the run never needed was never evaluated. So if no erasable site fires
-during a run, replacing what those sites hold changes nothing, at the same
-fuel.
+**One lemma does most of the work: what never reaches the result never
+mattered.** A watched run carries a mark wherever an erasable site would
+make a difference, and the mark travels with everything computed from it.
+If no mark reaches the result, then putting the check's value or 0 there,
+or the unbounded recursion, gives the same answer wherever that run gives
+one. The lemma is a simulation between two runs of `sem`, in which a mark
+on one side stands for any value on the other. It is used three times:
+1. **Erasure** (law 3): the marks at erased checks and bottoms.
+2. **The counts suffice** (law 4): the marks at bottoms, with Limit.
+3. **The checker** (laws 5): input holes. Suppose a run on a partial input
+   never needed a hole's shape. Then it gives the same answer on every
+   input that fills the hole.
 
-`Sem` records firings rather than checking where aborted values end up, for
-two reasons:
-- An abort's message is truncated to data (`trunc`, Size.bend:479, after
-  haskell-final's `truncF`). That can swallow an aborted value that was
-  demanded, so "no marker in the result" is weaker than "no marker fired".
-- A kept check also does work its erased version skips: it evaluates its
-  test. So law 1 needs fuel monotonicity besides demand.
-
-The lemma is used three times:
-1. **Erasure** (law 1). The sites are the erased bottoms and checks. Each
-   is replaced by 0, or by the check's value.
-2. **Chains suffice** (law 2). Each bottom is replaced by the rest of the
-   unbounded recursion. This also needs an unrolling lemma: n chain links
-   over `limit` behave as `limit` does. The encodings differ: a chain link
-   carries the next link as data (Expr.bend `chain` 188), while
-   `limit.code` (208) rebuilds itself.
-3. **The checker** (law 3). Input positions are sites too. Suppose a run on
-   a partial input (data with holes) never inspects a hole and fires no
-   erased site. Then the run is the same on every input that fills the
-   holes.
-
-**Checker v1: forking symbolic execution on `Sem` itself.**
-- Run the marked program with `Sem` on a partial input.
-- A projection of a hole is a hole. The left of input position `p` is
-  position `pL`, as with sizing's `XVar`, and this holds because
-  `Left 0 = 0`.
-- When a gate, an abort or an application inspects a hole, stop. Then run
-  twice: once with the hole as 0, and once with it as a pair of two new
-  holes.
-- Run the guard on the same partial input first, and prune the branches it
-  rejects. That handles the boundary exactly, with none of the limits
+**Checker v1, built: forking symbolic execution on `Sem` itself**
+(Check.bend).
+- It runs the watched witness on a partial input, starting from `XVar ""`.
+- A projection of a hole is a hole: the left of input position `p` is
+  `pL`, as with sizing's `XVar`. This holds because `Left 0 = 0`.
+- When a run needs a hole's shape (`Needs p`), it splits the hole on the
+  way to `p` into 0 and a pair, and runs each side again.
+- The guard runs first on the same partial input and prunes what it
+  refuses. That handles the boundary exactly, with none of the limits
   pass's `extract`/`exact` (§7).
-- Accept when no leaf fires an erased site. Reject when any budget (fuel,
-  number of leaves) runs out.
-- Proof: the demand lemma, plus "the leaves cover every input" (induction
-  on the split tree). This is small.
-- Cost: exponential in the input positions inspected. That's fine for tc,
-  simpleplus and most of the corpus. tictactoe will likely blow the budget,
-  because the board, the player and a line of input are all inspected. It
-  then keeps its bottoms, which cost it 11,078 of 5.9 million interactions
-  on the test game (0.2%).
+- It accepts when no leaf's run lets a mark reach the result. A leaf where
+  one does names a concrete input. A budget that runs out (runs, or depth)
+  gives "unknown".
+- Proof: the lemma, plus "the leaves cover every input" (induction on the
+  split tree).
+- Cost: exponential in the input positions inspected.
+  - Characters are unary numbers, so the guard's digit test splits once
+    per level, and strict evaluation looks at every character before the
+    guard decides.
+  - simpleplus takes 14,163 runs.
+  - tictactoe (board, player and line) is in the millions.
 
 **Checker v2, only if tictactoe-class programs must be erased:
 decision-tree values.**
@@ -299,96 +376,113 @@ Each step is one or a few gated commits. Stop at the decisions in §6.
 
 ### S0. Ground truth, no proofs (small; first)
 
-**S0.1. Fix the filter inversion.**
-- In Size.bend:376, drop the `Bool.not`, so that the left alternative is
-  kept where the superposition is at or below `n`.
-- Pin the seven cases of §3 as a `size-filter` group in
-  `bend/tests/size.bend`, and list it in `nix/bend.nix` `tests.size`.
-- Gate it. Expect no output to change. If a golden or corpus count does
-  change, that's a sizing change: compare with haskell-final and record it.
-- Where the fix lands is D2.
+**S0.1. Fix the filter inversion. Done:** bend-port `822f0c5`.
+- The `Bool.not` was replaced by a `filter.left` that mirrors
+  `filter.right`.
+- The `size-filter` group pins the seven cases of §3.
+- No golden or corpus output changed. The full gate and `nix flake check`
+  passed.
 
-**S0.2. Differential test, sized vs unbounded.**
-- Run tictactoe and the corpus with and without `--fast` on many generated
-  input sequences: digits 1–9, other digits, letters, `q`, and empty and
-  long lines. Diff the displays.
-- A difference means an over-run (the erased bottom's stuck error) or a
-  wrongly discharged check.
-- Put the script in `bend/dev/`.
-- This reaches only the states a session reaches. The laws cover every
-  state the guard admits.
+**S0.2. Differential test, sized vs unbounded. Done:**
+`bend/dev/fastdiff.sh BIN [SESSIONS [SEED]]`.
+- 100 generated sessions each of tictactoe and simpleplus (seed 7): no
+  difference.
+- A difference would mean an over-run (the erased bottom's stuck error) or
+  a wrongly discharged check.
+- It reaches only the states a session reaches. The laws cover every state
+  the guard admits.
 
-**S0.3. Explain tictactoe's #0 and #13.**
-- Rebuild the old re-run as `bend/dev/rerun.bend`, from `e64b80a^`'s
-  `bottomed` and `as.ran`.
-- Have it print the superposition path (the `XEither` names) on which each
-  bottom fires.
-- Then decide which it is:
-  - a real input: a sizing bug, so fix sizing and see D4;
-  - a combination no input produces: then checker v1 rejects tictactoe,
-    and v2 must not.
+**S0.3. tictactoe's #0 and #13. In progress, by checker v1 rather than by
+the old re-run.** The checker answers the question directly. A leaf where a
+mark reaches the result is a concrete input that over-runs, and "proven"
+rules every such input out. 50,000 runs found nothing. The 5,000,000-run
+check is in §0. If it fires, that input is a sizing bug: fix sizing, and
+see D4.
 
-### S1. The specification (medium; ends at D1)
+### S1. The specification (medium; ends at D1). Done but D1
 
-**`bend/Sem.bend`.**
-- The lazy evaluator over the core fragment of `E.X`: Zero, Pair, Env,
-  SetEnv, Defer, Gate, Left, Right, `Abort{site}` and `Aborted{site, m}`.
-  Every other form is stuck.
-- Fuel-indexed and call-by-name: a thunk is a term and its environment.
-- It records the sites that fire, and reads the result back as an
-  observation tree.
-- Keep it short and plainly DESIGN §2's table: it is the one definition
-  everything else is trusted against.
-- It is not a second runtime (C4). Nothing runs user programs on it. It is
-  the meaning, and later the checker's engine.
+- **`bend/Sem.bend`:** the meaning (§2). It joins `Everything.bend`, as
+  `Check.bend` does.
+- **`bend/LAWS.bend` and `bend/PROOF.bend`:**
+  - `bend bend/PROOF.bend` prints SOME PROOFS FAIL with "5 TODOs" until the
+    other laws are proven.
+  - Keep both out of `Everything.bend` while laws are open. Its check and
+    the pre-commit hook expect ALL PROOFS CHECK.
+  - The law statements use `Sm.answered(r)` (Unit for an answer, Empty for
+    Spent) instead of `r != Spent`. Bend uses a function at most once, but
+    a Data witness can be reused.
+- **`bend/tests/sem.bend`:** sem-tc_ultra_minimal, sem-simpleplus and
+  sem-tictactoe (listed in `nix/bend.nix`, run by `gate.sh`). It compares
+  against the IC unguided, which shows the same displays.
+- **The spike:**
+  - `fuel_more` is proven, and passes `--verdict`.
+  - Lessons:
+    - Shape definitions for proof: no deep or default patterns in what a
+      proof must unfold.
+    - Hypotheses that are used twice must be Data.
+    - A curried application must stay on one line.
+    - "fin"-style helpers match computed results, as Bend's
+      insertion-sort demo does.
 
-**`bend/LAWS.bend` and `bend/PROOF.bend`.**
-- `LAWS.bend` holds the three laws of §2 in Bend, as open claims. The human
-  owns them, so don't edit them once they are approved.
-- `PROOF.bend` fills them, with `?TODO` until each is done.
-- Bend's convention (GUIDE, "Laws and Proofs"): `bend PROOF.bend` prints
-  SOME PROOFS FAIL while a law is open, and ALL PROOFS CHECK once all hold.
-  `--verdict` re-checks with the kernel.
-- `Sem.bend` joins `Everything.bend` like any module. Keep `LAWS.bend` and
-  `PROOF.bend` out of it while laws are open: its check and the pre-commit
-  hook expect ALL PROOFS CHECK.
+### S2. Semantic lemmas, proven (medium). Next, after D1
 
-**`bend/tests/sem.bend`.**
-- `Sem` against the IC on the sized terms of the goldens and the corpus:
-  the same displays and the same aborts.
-- This is the evidence that `Sem` means what the IC does.
-- Call-by-name may be too slow for tictactoe. Measure it, and fall back to
-  the small programs if so.
+- `what_runs`: a syntactic correspondence. `Sem` under Erase reads an
+  erasable `XCheck` as its value and an `XStub` as 0, exactly what
+  `E.resolve.checks` and an inert `E.bottom` write. It needs `fuel_more`
+  for the extra dispatch steps.
+- `erasure` and `counts_suffice`: the mark simulation (§4).
+- After S2, P7.6's erasure is proven correct on every input where the
+  watched witness answers. What remains is knowing that for all inputs
+  statically: S4.
 
-**Spike first, before writing the laws for real:**
-- Prove one small law about `Sem`: more fuel never changes a finished
-  result.
-- Run `bend --verdict` on a file that imports Expr.bend and Size.bend.
+**Sketch of the mark simulation** (for `erasure`; `counts_suffice` is the
+same with Limit).
 
-This measures how proofs feel in Bend. It also finds kernel limits (U32,
-String, `Map`/`Set`) before they matter.
+`vw ~ ve` ("the watched value stands for the erased one") holds when:
+- `vw` is a mark: then any `ve`;
+- or both are the same leaf (`WZero`, `WGate`, `WAbort{at}`, `WStuck`,
+  `WHole{p}`, `WAborted{at, m}`, `WCode{fi, body}`, with the same body);
+- or both are pairs, related part by part.
 
-### S2. Semantic lemmas, proven (medium)
+Without marks, `~` is equality, and that is how the conclusion's readbacks
+come out equal. A mark in the result fires, so the watched answer has none.
 
-- Fuel monotonicity. Determinism is free, since `Sem` is a function.
-- The demand lemma, for sites and for input holes.
-- Law 1, erasure.
-- The unrolling lemma, and law 2, chains suffice.
+Jobs are related the same way: the same constructor over related
+environments and results. There are three extra pairs, for the places
+`step` reads the policy:
+- `JWatch{site, tc, c, envw} ~ JE{c, enve}`;
+- `JDone{Val{WMark…}} ~` any job (the bottom, and a failed check);
+- `JE{E.check.of(…), envw} ~ JE{E.check.of(…), enve}` for kept checks.
 
-After S2, P7.6's erasure is proven correct on every input on which the
-marked program fires no bottom. What remains is knowing that statically.
+The lemma: if `sem(f, Watch, Jw)` and `sem(f', Erase, Je)` both answer (not
+Spent and not Needs), their results are related. The induction is on `f`,
+case by case on the job, as in `fuel_more`. The cases that do the work:
+- **Eliminating a mark:** `left.of`, `set.of`, `branch.of` and `abort.of`
+  of a mark give a mark, which is related to whatever Erase computes.
+- **A strict `if` on a mark:** Watch gives the mark. Erase runs a branch,
+  and since the erased run answered, that branch gave a value.
+- **`checked`:** the test gave 0, so the value is `c`'s on both sides;
+  otherwise the result is a mark.
+- **`abort.of` on a pair holding a mark:** a mark (`marked.or`).
 
-### S3. Checker v1, executable (medium)
+Answers do not depend on fuel once given (`fuel_more`, extended by
+induction to any larger fuel), so the two runs can be compared at the
+larger of the two fuels.
 
-**`bend/Check.bend`.**
-- `Sem` over partial inputs, with guard pruning and budgets (§4).
-- Wire it into `Sz.discharged` (Size.bend:1210): erase only when sizing
-  says `proven` and the checker accepts. Otherwise keep every bottom and
-  every check, as P7.5 did for tictactoe.
+### S3. Checker v1, executable (medium). Built; wiring left
+
+**`bend/Check.bend`** is built (§4), and so is its dev tool. Wiring is
+left:
+- Call it from `Sz.discharged` (Size.bend:1210), or from Main after
+  sizing, with the guard's sized program.
+- Erase only when sizing says `proven` and the checker says proven.
+  Otherwise keep every bottom and every check, as P7.5 did for tictactoe.
+- Budget: simpleplus needs about 15,000 runs. Pick one that keeps compile
+  time sane.
 
 **Gate.**
-- Outputs are unchanged for the programs it accepts.
-- Re-pin where it rejects. If tictactoe is rejected:
+- Outputs are unchanged for the programs it proves.
+- Re-pin where it does not. If tictactoe is unknown:
   - `ic-meter-tictactoe` and `port/tictactoe.ic-meter` go back to
     5,938,558;
   - `size-erased`'s tictactoe line goes back to "Abort";
@@ -419,27 +513,28 @@ marked program fires no bottom. What remains is knowing that statically.
 
 ## 6. Decisions for the user (and Sam)
 
-**D1 (end of S1): the laws' wording.**
-- The meaning is lazy call-by-name.
+**D1 (open): the laws' wording,** `bend/LAWS.bend`.
+- The meaning is the IC's evaluation order (§2), not a lazy one.
 - The inputs are 0 plus whatever the guard admits, not only the states a
   session reaches. Sizing claims every input, and DESIGN §6 keeps the
   session out of totality ("each turn is a total function call").
-- The observation is the full readback, with abort sites and messages.
+- The observation is the full readback, with abort sites and messages. A
+  closure shows only as its function index.
+- Erasure and the counts are stated where both runs answer, leaving
+  termination to EAL.
 - These pin down what a Telomare program means, so Sam should see them.
   Approve LAWS.bend before S2.
 
-**D2 (now): where S0.1's fix lands.**
-- Recommended: on bend-port, before the pending push of
-  `8103636..e3480b1`. bend-port is the branch headed for master, and P7.6
-  trusts sizing.
-- Then rebase sizing-proof onto it.
+**D2: decided** (2026-10-08). The fix landed on bend-port, which keeps up
+with master's behaviour.
 
 **D3 (after S3): residual aborts.** Is it acceptable that programs the
-checker can't verify keep their bottoms, as a residual runtime abort
-(DESIGN §10's part 2)? If tictactoe must lose its aborts, S5 is needed.
+checker cannot verify keep their bottoms, as a residual runtime abort
+(DESIGN §10's part 2)? If tictactoe stays unknown and must lose its
+aborts, S5 is needed.
 
-**D4 (S0, only if a real input over-runs): revert P7.6.** Revert it on
-bend-port and go back to P7.5's confirming re-run until the checker lands.
+**D4 (only if the tictactoe check fires): revert P7.6** on bend-port, and
+go back to P7.5's confirming re-run until the checker is wired in.
 
 ## 7. Reference: sizing, read as a prover must
 
@@ -530,6 +625,23 @@ The source is the flake input: `nix flake archive --json` →
   Lean proof that no accepted def has type `Empty` and that live code
   halts. The paper is `paper/BendTT.pdf`.
 
+**The kernel, for `--verdict`.**
+- `bend --verdict` re-checks with BendTT's kernel, a Lean program bend
+  builds on first use. That build needs Lean v4.34.0 on PATH or under
+  elan.
+- nixos-unstable's Lean 4.34.1 builds it in about a minute:
+  ```sh
+  nix build github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8#lean4 --out-link $ROOTS/lean4
+  mkdir K && cp $BEND/bend2/bendtt.lean K/ && cd K
+  $ROOTS/lean4/bin/lean -c bendtt.c bendtt.lean
+  $ROOTS/lean4/bin/leanc -O3 -DNDEBUG bendtt.c -o bendtt
+  BENDTT=$PWD/bendtt bend bend/PROOF.bend --verdict
+  ```
+  `$BEND` is the flake input's path (§14). Lean is used only to build this
+  tool; the proofs are Bend.
+- `--verdict` refuses a file with open laws. To kernel-check a finished law
+  early, copy it and its proof into a scratch file.
+
 **Examples to imitate:**
 - `demos/proof_typed_eval/`: an evaluator and an optimizer, with the law
   "the optimizer keeps the meaning of every program". Its `PROOF.bend` is
@@ -549,9 +661,8 @@ Telomare's core.
 - **Kernel coverage.** `--verdict` must accept everything the proof imports
   (Expr.bend, Size.bend, Base's `Map`/`Set`, U32). Check this in the spike.
   If something is refused, keep the checker and `Sem` free of it.
-- **Call-by-name cost.** It affects both `Sem`'s parity test and checker
-  v1's leaves. If it is too slow, give `Sem` a call-by-need twin and prove
-  the two equal, or keep v1 to small programs.
+- **Call-by-name cost.** This one happened: the lazy draft never finished
+  tc. It was resolved by making `Sem` strict, as the IC is (§2).
 - **`Sem` vs the IC.** They can differ in stuck messages, or in which abort
   is reported when several are in a result. The parity test and the
   observation's design must decide which differences count as
@@ -636,6 +747,14 @@ User-space profiling works (`perf_event_paranoid` = 2).
   inside `nix develop`.
 
 ## 12. Dev tools and the parity corpus (`bend/dev/`)
+
+**This branch's tools** (built from the repo root like the others):
+- `check MODULE [RUNS]`: the erasure checker (`Check.bend`) on MODULE's
+  main, guarded as the command guards it. It prints the erasable checks,
+  the verdict, and the runs taken (4096 by default). The corpus runs from
+  `bend/dev/corpus`.
+- `fastdiff.sh BIN [SESSIONS [SEED]]`: S0.2's sized vs `--fast` sessions.
+- `gate.sh`: the gate (§11).
 
 Build a tool with `bend bend/dev/X.bend -o /tmp/X` (inside `nix develop`),
 and run it from the repo root: modules load as `M.tel` from the cwd.
@@ -759,8 +878,9 @@ empty.
 - `IC`, `Session`, `Main`.
 - `Levels` and `Certificate`: the static report.
 - `Text`, `Show`, `Loc`.
-- Planned on this branch (§5): `Sem` (the meaning), `Check` (the checker),
-  and `LAWS`/`PROOF` (the claims and their proofs).
+- This branch's: `Sem` (the meaning) and `Check` (the erasure checker),
+  both in `Everything.bend`; `LAWS` and `PROOF` (the claims and their
+  proofs), kept out of it while laws are open.
 
 **IC:**
 - The net is an `Array<U32>`, 8 words per agent. Active pairs are LIFO.
