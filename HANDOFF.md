@@ -237,8 +237,10 @@ expected to change that (section 4).
 - P7.5: the user chose (b), and of its forms "the session runs main's
   input refinements" (2026-10-06). Done; see P7. Not pushed.
 - Sam was asked "How happy are we with Abort?" and pointed to DESIGN §10
-  (2026-10-08), the section P7 was planned from. Two follow-ups are
-  pending with Sam; see "After P7.5" under P7.
+  (2026-10-08), the section P7 was planned from. Two follow-ups were put
+  to him; see "After P7.5" under P7. The first was answered yes
+  (2026-10-08) and is done: P7.6, `e64b80a`. Not pushed. The second is
+  pending.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -1170,7 +1172,8 @@ untouched.
     past the count sizing gave it (a bug in sizing)"). No program in the
     repo or the corpus hits it. **Superseded in P7.5:** `bottomed` now
     just keeps the bottoms, since tictactoe, once proven, showed the
-    re-run follows paths sizing set aside.
+    re-run follows paths sizing set aside. **Superseded in P7.6:** no
+    re-run; proven means inert bottoms.
   - Otherwise the program is built with inert bottoms.
   - The re-check runs the strict chains, and costs about 0.02-0.03 s
     (`--certificate` ctprop 0.23 → 0.24 s, rat 0.18 → 0.20 s, medians of
@@ -1237,7 +1240,8 @@ convention, made a rule.
   - When proven, main keeps `(reaching \ boundary) ∪ opening`; the rest
     become their values.
 - **The extra run (P7.3) changed:** a bottom reaching the result no
-  longer fails sizing; the bottoms just stay. tictactoe showed why:
+  longer fails sizing; the bottoms just stay. (**Superseded in P7.6:** the
+  re-run is gone.) tictactoe showed why:
   - The sized program, re-run strictly over the main run's input, reaches
     recursion #0's and #13's bottoms on superposition paths that sizing's
     own run set aside: `test.pick` drops a test outcome on unbounded
@@ -1259,7 +1263,7 @@ convention, made a rule.
     - So ~740k was the check running inside main. EAL guidance does not
       explain it (both certify, 86 vs 75 layouts); unexplained.
   - tictactoe is proven but keeps its bottoms: 5,949,895 → 5,938,558.
-    The invalid line `10`: 7,642,943 → 1,011,148.
+    The invalid line `10`: 7,642,943 → 1,011,148. (P7.6 erases them.)
   - `simpleplus.fast-meter` 728,870 → 735,924: the guard's interactions.
     `--fast` doesn't size, so main keeps its checks there. The guard's
     unrolls are not counted (its tokens are its own).
@@ -1299,30 +1303,52 @@ input` and tictactoe's input refinements. The options:
 - "Abort is one of the core machine forms": unchanged (`VAbort`,
   `VAborted`; the IC's abort, aborted and scrut.abort agents).
 - "The sized approximant chain relies on a runtime abort": the bottoms
-  become 0 only when the program is `proven` *and* the re-run reaches no
-  bottom (`Sz.discharged`). tictactoe is proven but keeps them; the re-run
-  reaches #0 and #13 on paths sizing set aside (`test.pick`,
+  became 0 only when the program was `proven` *and* the re-run reached no
+  bottom (`Sz.discharged`). tictactoe was proven but kept them; the re-run
+  reached #0 and #13 on paths sizing set aside (`test.pick`,
   `step.next`/`stub.expand`). §10 says the bottom "is provably dead if
-  the certificate is right".
+  the certificate is right". Since P7.6, every proven program's bottoms
+  are 0.
 - "The IC implements abort and abort-message readback": unchanged; the
   residual checks need it (the guard's refinements, reaching checks such
   as `nonex`'s `case`, unproven bottoms). The guard is the candidate for
   §10's "principled argument for a residual runtime abort", but it keeps
   Abort: its checks are ordinary checks.
 
-Asked of Sam (2026-10-08), pending:
+Asked of Sam (2026-10-08):
 1. Trust the certificate and erase the bottoms whenever sizing succeeds?
-   If yes: in `Sz.discharged`, inert whenever `proven`, and drop the
-   re-run (`as.ran`, `opening.bottomed`, `bottomed`). tictactoe re-pins
-   (`ic-meter-tictactoe`, `port/tictactoe.ic-meter`, `size-erased`), and
-   the README speed table moves back toward 2.4 s.
-2. Is the goal Abort gone from the core and the IC entirely? If yes, a
-   step of its own (P8), planned once Sam confirms, since it changes the
-   language:
+   **Yes** (2026-10-08): P7.6 below.
+2. Pending. Is the goal Abort gone from the core and the IC entirely? If
+   yes, a step of its own (P8), planned once Sam confirms, since it
+   changes the language:
    - the guard returns validator verdicts as data, and the session renders
      `user abort:` from them;
    - a check that can reach main's result becomes a compile error;
    - Abort leaves Core, the IC and EAL.
+
+**Done: P7.6, trust the certificate (2026-10-08), `e64b80a`.**
+- `Sz.discharged`: when `proven`, main keeps `(reaching \ boundary) ∪
+  opening` and every bottom is inert, with no re-run. `at.recursion`,
+  `bottomed`, `everything`, `as.ran` and `opening.bottomed` are gone;
+  `discharged` and `tidy` no longer take the main run's `Cfg` or `mx`.
+- The risk accepted (Sam's call): a path sizing set aside that a real
+  input does take would now give 0 where the bottom aborted with
+  `recursion overflow`. No program in the repo or the corpus shows one:
+  every display is unchanged.
+- **Results:**
+  - tictactoe loses its bottoms. `ic-meter-tictactoe` (`1 4 2 5 3`)
+    5,938,558 → 5,927,480; the test game (`1 9 2 8 3`) 5,956,146 →
+    5,945,068; `10` 1,011,148 → 1,009,350.
+  - `port/tictactoe.compile`: 98,500 → 98,136 nodes.
+  - Every other count is unchanged, the corpus included: the re-run had
+    confirmed every other proven program.
+  - Time (medians of 7 interleaved runs): tictactoe's whole run 3.10 →
+    2.80 s, and `--certificate` about 0.45 s less on a loaded machine.
+    README row 3.0 → 2.8 s (26×). Other rows unchanged (the re-run cost
+    them 0.02–0.03 s).
+- **Tests:** `size-erased` (guarded tictactoe: no Abort),
+  `ic-meter-tictactoe` re-pinned; `port/tictactoe.ic-meter` and
+  `.compile` re-recorded.
 
 **Soundness:** classification is exactly as sound as sizing's path
 exploration. That is the evaluation that already makes the program total,
