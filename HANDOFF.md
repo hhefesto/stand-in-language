@@ -241,6 +241,19 @@ expected to change that (section 4).
   to him; see "After P7.5" under P7. The first was answered yes
   (2026-10-08) and is done: P7.6, `e64b80a`. Not pushed. The second is
   pending.
+- The user set the branches' roles (2026-10-08). bend-port is the Bend
+  version that keeps up with master's behaviour. The proof that sizing's
+  erasures are sound is on branch `sizing-proof`, which has its own
+  handoff (`HANDOFF-sizing-proof.md`) and merges back here.
+- Found while planning that proof, and fixed: `822f0c5`. Sizing's
+  left-branch superposition filter (`Size.filter.at`) was inverted against
+  haskell-final's `filterLeft`.
+  - In a left branch it kept only the left side of superpositions at
+    unrelated positions, which drops a path some input takes.
+  - It also kept both sides of the superpositions that branch decides.
+
+  The `size-filter` test pins the seven cases. No golden or corpus output
+  changed, and the full gate and `nix flake check` passed. Not pushed.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
