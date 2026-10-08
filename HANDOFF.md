@@ -235,8 +235,10 @@ expected to change that (section 4).
   there, as it did on P6.
 - P7.1–P7.4 were pushed (`16dbe49`, 2026-10-06).
 - P7.5: the user chose (b), and of its forms "the session runs main's
-  input refinements" (2026-10-06). Done; see P7. Not pushed. Sam was asked
-  "How happy are we with Abort?"; no answer is recorded here yet.
+  input refinements" (2026-10-06). Done; see P7. Not pushed.
+- Sam was asked "How happy are we with Abort?" and pointed to DESIGN §10
+  (2026-10-08), the section P7 was planned from. Two follow-ups are
+  pending with Sam; see "After P7.5" under P7.
 
 The order below runs from output-preserving work to work that changes
 outputs. P5 needs P4. The user wants the work to stop only at these
@@ -1292,6 +1294,35 @@ input` and tictactoe's input refinements. The options:
 - (b) Move input refinements to the session boundary (§11.10: validate
   before calling main). Then `Abort` leaves the core, but this needs a
   language-level boundary discipline.
+
+**After P7.5: §10's three "[open]" conflicts as they stand (2026-10-08).**
+- "Abort is one of the core machine forms": unchanged (`VAbort`,
+  `VAborted`; the IC's abort, aborted and scrut.abort agents).
+- "The sized approximant chain relies on a runtime abort": the bottoms
+  become 0 only when the program is `proven` *and* the re-run reaches no
+  bottom (`Sz.discharged`). tictactoe is proven but keeps them; the re-run
+  reaches #0 and #13 on paths sizing set aside (`test.pick`,
+  `step.next`/`stub.expand`). §10 says the bottom "is provably dead if
+  the certificate is right".
+- "The IC implements abort and abort-message readback": unchanged; the
+  residual checks need it (the guard's refinements, reaching checks such
+  as `nonex`'s `case`, unproven bottoms). The guard is the candidate for
+  §10's "principled argument for a residual runtime abort", but it keeps
+  Abort: its checks are ordinary checks.
+
+Asked of Sam (2026-10-08), pending:
+1. Trust the certificate and erase the bottoms whenever sizing succeeds?
+   If yes: in `Sz.discharged`, inert whenever `proven`, and drop the
+   re-run (`as.ran`, `opening.bottomed`, `bottomed`). tictactoe re-pins
+   (`ic-meter-tictactoe`, `port/tictactoe.ic-meter`, `size-erased`), and
+   the README speed table moves back toward 2.4 s.
+2. Is the goal Abort gone from the core and the IC entirely? If yes, a
+   step of its own (P8), planned once Sam confirms, since it changes the
+   language:
+   - the guard returns validator verdicts as data, and the session renders
+     `user abort:` from them;
+   - a check that can reach main's result becomes a compile error;
+   - Abort leaves Core, the IC and EAL.
 
 **Soundness:** classification is exactly as sound as sizing's path
 exploration. That is the evaluation that already makes the program total,
