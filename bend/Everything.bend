@@ -15,6 +15,8 @@ import ./Split.bend as Split
 import ./Expr.bend as Expr
 import ./Core.bend as Core
 import ./Size.bend as Size
+import ./Sem.bend as Sem
+import ./Check.bend as Check
 import ./Front.bend as Front
 import ./Sha256.bend as Sha256
 import ./Lift.bend as Lift
