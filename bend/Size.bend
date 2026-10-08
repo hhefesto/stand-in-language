@@ -361,6 +361,13 @@ def fold.gate(n: Maybe<&2, String>, g: GR) -> E.X:
     case GR{l, r, o}:
       fold.pick(o, fold.branch(n, l, r))
 
+def filter.left(yes: Bool, q: String, a: E.X, b: E.X) -> E.X:
+  match yes:
+    case True{}:
+      a
+    case False{}:
+      E.XEither{Some{q}, a, b}
+
 def filter.right(yes: Bool, q: String, a: E.X, b: E.X) -> E.X:
   match yes:
     case True{}:
@@ -373,7 +380,7 @@ def filter.at(nt: Maybe<&2, String>, left: Bool, +n: String, +a: E.X, +b: E.X) -
     case Some{+q}:
       match left:
         case True{}:
-          merge.pick(Bool.not(below(q, n)), Some{q}, a, b)
+          filter.left(below(q, n), q, a, b)
         case False{}:
           filter.right(below(n, q), q, a, b)
     case None{}:

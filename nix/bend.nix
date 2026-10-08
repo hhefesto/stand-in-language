@@ -137,6 +137,7 @@ let
       "size-unbounded-input"
       "size-checks"
       "size-boundary"
+      "size-filter"
       "size-erased"
     ];
     lexical = [

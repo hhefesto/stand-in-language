@@ -172,6 +172,23 @@ def case.of(+prelude: String, +scrutinee: String) -> List<&2, Fr.Src>:
 def cased(+prelude: String, +scrutinee: String) -> String:
   checks(case.of(prelude, scrutinee), "cased")
 
+# Which alternatives filter.at keeps of a superposition at q (left 0, right
+# a pair), in the branch a choice at n took: haskell-final's filterLeft and
+# filterRight.
+def kept(x: E.X) -> String:
+  match x:
+    case E.XZero{}:
+      "a"
+    case E.XPair{l, r}:
+      "b"
+    case E.XEither{k, l, r}:
+      "both"
+    case _:
+      "other"
+
+def filtered(+q: String, left: Bool, +n: String) -> String:
+  kept(Sz.filter.at(Some{q}, left, n, E.XZero{}, E.XPair{E.XZero{}, E.XZero{}}))
+
 def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("size-tc_ultra_minimal", String.eq(
@@ -199,6 +216,14 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
         "validating 0; boundary 0; reaching ; opening ; proven"),
       String.eq(guarded.checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"),
         "validating 0,1,2; boundary 0,1,2; reaching ; opening ; proven")])))
+    IO.print(verdict("size-filter", all([
+      String.eq(filtered("R", True{}, "L"), "both"),
+      String.eq(filtered("L", True{}, "L"), "a"),
+      String.eq(filtered("LL", True{}, "L"), "a"),
+      String.eq(filtered("L", True{}, "LL"), "both"),
+      String.eq(filtered("L", False{}, "L"), "b"),
+      String.eq(filtered("L", False{}, "LL"), "b"),
+      String.eq(filtered("R", False{}, "L"), "both")])))
     IO.print(verdict("size-erased", all([
       String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
       String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),
