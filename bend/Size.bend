@@ -1192,43 +1192,6 @@ def program(+counts: List<&2, E.TS>, +left: Maybe<&2, Set()>, +inert: Bool, +cm:
     case False{}:
       set.sizes(counts, inert, E.resolve.checks(left, cm))
 
-def at.recursion(at: E.Site) -> Bool:
-  match at:
-    case E.AtRecursion{tok}:
-      True{}
-    case _:
-      False{}
-
-# Whether a chain's bottom reaches the result, or sizing could not follow
-# the run (an error it would have thrown).
-def bottomed(v: E.X) -> Bool:
-  match v:
-    case E.XAborted{at, m}:
-      at.recursion(at)
-    case E.XError{msg}:
-      True{}
-    case E.XPair{a, b}:
-      bottomed(a) || bottomed(b)
-    case E.XEither{n, a, b}:
-      bottomed(a) || bottomed(b)
-    case _:
-      False{}
-
-# Every check and every bottom kept.
-def everything(+counts: List<&2, E.TS>, cs: Checks, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
-  cored(counts, cs, E.core(program(counts, None{}, False{}, cm, cap)))
-
-# The sized program with the checks the main run had (ran), to run again.
-def as.ran(+counts: List<&2, E.TS>, +ran: Maybe<&2, Set()>, x: E.X) -> E.X:
-  set.sizes(counts, False{}, E.resolve.checks(ran, x))
-
-def opening.bottomed(+cfg: Cfg, +counts: List<&2, E.TS>, +ran: Maybe<&2, Set()>, m0: Maybe<&2, E.X>) -> Bool:
-  match m0:
-    case None{}:
-      False{}
-    case Some{x0}:
-      bottomed(r.v(eval(fuel(), cfg, JEval{as.ran(counts, ran, x0), E.XZero{}})))
-
 def minus(xs: List<&2, String>, +t: Set(), +acc: Set()) -> Set():
   match xs:
     case Nil{}:
@@ -1240,24 +1203,18 @@ def minus(xs: List<&2, String>, +t: Set(), +acc: Set()) -> Set():
 # the main run explored every input main is called on, main keeps only the
 # checks whose abort reaches its result (a boundary check only if it does
 # on the opening call: on any other input the session ran it first), and
-# the rest become their values. Then the sized program, with the checks the
-# main run had, runs once more over the same input (and on 0, if the
-# session opens with it). If no chain's bottom reaches its result, none is
-# reached on any input, and each becomes inert. That run follows every path
-# sizing's did and more (sizing set some aside: a test outcome on input
-# nothing bounds, a recursion value it could not follow), so a bottom it
-# reaches proves no count wrong, and the bottoms stay. Otherwise the
-# program keeps every check and every bottom.
-def discharged(+cs: Checks, +counts: List<&2, E.TS>, +cfg: Cfg, +mx: E.X, +m0: Maybe<&2, E.X>, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+# the rest become their values. The chains' bottoms then become inert: the
+# counts are sizing's certificate that no input reaches one (§10: "provably
+# dead if the certificate is right"). Otherwise the program keeps every
+# check and every bottom.
+def discharged(+cs: Checks, +counts: List<&2, E.TS>, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match cs:
     case Checks{v, +boundary, +reaching, +opening, proven}:
       match proven:
         case False{}:
-          everything(counts, cs, cm, cap)
+          cored(counts, cs, E.core(program(counts, None{}, False{}, cm, cap)))
         case True{}:
-          +ran = {Some{union(union(reaching, boundary), opening)} : Maybe<&2, Set()>}
-          +dead = Bool.not(bottomed(r.v(eval(fuel(), cfg, JEval{as.ran(counts, ran, mx), E.XZero{}}))) || opening.bottomed(cfg, counts, ran, m0))
-          cored(counts, cs, E.core(program(counts, Some{minus(Set.to_list(reaching), boundary, opening)}, dead, cm, cap)))
+          cored(counts, cs, E.core(program(counts, Some{minus(Set.to_list(reaching), boundary, opening)}, True{}, cm, cap)))
 
 # The opening call, run as the main run runs.
 def opening.run(+cfg: Cfg, m0: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
@@ -1267,17 +1224,17 @@ def opening.run(+cfg: Cfg, m0: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
     case Some{x0}:
       Some{r.v(eval(fuel(), cfg, JEval{E.remove.checks(x0), E.XZero{}}))}
 
-def tidy(m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +mx: E.X, +m0: Maybe<&2, E.X>, +cm: E.X, +lim: R, +boundary: Set(), cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def tidy(m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +m0: Maybe<&2, E.X>, +cm: E.X, +lim: R, +boundary: Set(), cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match m:
     case Some{fail}:
       Fail{fail}
     case None{}:
-      discharged(checks(r.c(lim), r.e(lim), boundary, r.v(run), opening.run(cfg, m0)), r.s(run), cfg, mx, m0, cm, cap)
+      discharged(checks(r.c(lim), r.e(lim), boundary, r.v(run), opening.run(cfg, m0)), r.s(run), cm, cap)
 
 def main.run.from(+max: U32, +cm: E.X, +boundary: Set(), +lim: R, +mx: E.X, +m0: Maybe<&2, E.X>, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   +cfg = {Cfg{MSize{}, r.z(lim), max} : Cfg}
   +run = eval(fuel(), cfg, JEval{E.remove.checks(mx), E.XZero{}})
-  tidy(fold.aborted(r.v(run)), run, cfg, mx, m0, cm, lim, boundary, cap)
+  tidy(fold.aborted(r.v(run)), run, cfg, m0, cm, lim, boundary, cap)
 
 # The session's opening call, main on 0, which sizing runs only when the
 # session also guards main: otherwise main is proven only if the main run

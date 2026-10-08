@@ -453,7 +453,7 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       42943)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      5938558)))
+      5927480)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

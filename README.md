@@ -70,7 +70,7 @@ Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 |---|---:|---:|---:|
 | `tc_ultra_minimal.tel` | 0.06 s | 0.02 s | 3× |
 | `simpleplus.tel`, input `3 4` | 9.6 s | 0.8 s | 12× |
-| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 3.0 s | 25× |
+| `tictactoe.tel`, the test game (`1 9 2 8 3`) | 73.7 s | 2.8 s | 26× |
 | a CaseTests program (integer cases) | 36.4 s | 1.7 s | 21× |
 | a CaseTests program (property shapes) | 289.9 s | 5.0 s | 58× |
 | UDTTests' natural arithmetic | 16.3 s | 1.0 s | 16× |
@@ -79,10 +79,9 @@ Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 
 haskell-final ran the property-shapes program with its heap capped at 8 GB
 (`GHCRTS=-M8G`); uncapped, it ran this machine low on memory. tic-tac-toe
-took 2.4 s until its input refinements moved to the session boundary (see
-[Design](#design)): sizing now also runs the sized program once more, about
-0.3 s, to find whether its chains' bottoms are dead (for tic-tac-toe they
-cannot be shown to be).
+took 2.4 s before its input refinements moved to the session boundary (see
+[Design](#design)), which adds a second program, the guard, to certify, size
+and run.
 
 Most of the difference is in EAL. The Bend analysis keeps its state in flat
 arrays of words, as the runtime keeps its net, instead of maps in a state
@@ -94,7 +93,7 @@ certified a second one with every let binding inlined (3,054 bodies for
 tic-tac-toe, against 176). Every result is identical, and the capture
 layouts are byte for byte the same. The interaction net runs only the branch
 an `if` chooses (see [Design](#design)), so it runs the tic-tac-toe test game
-in 6.0 million interactions instead of 15.2 million, in about 0.7 s.
+in 5.9 million interactions instead of 15.2 million, in about 0.7 s.
 
 ### Design
 
@@ -150,7 +149,7 @@ in these places:
   more than the strict one does, each captured part going once to the
   chosen branch instead of fanning to both. Displays are unchanged;
   interaction counts are not haskell-final's (the tic-tac-toe test game
-  takes 6.0 million instead of 15.2 million), and a program whose dead
+  takes 5.9 million instead of 15.2 million), and a program whose dead
   branch never ends now finishes (`ratarith` in the parity corpus gives
   what haskell-final's reference evaluator gives, where its IC ran out of
   fuel).
@@ -181,17 +180,15 @@ in these places:
   exactly as sound as sizing's exploration.
 - A program proven so runs without what sizing discharged (DESIGN.md §10
   and C5). Main's boundary checks and its discharged checks become the
-  values they checked. Then the sized program runs once more, symbolically,
-  over the same input. If no chain's bottom reaches its result, every
-  bottom becomes 0 instead of an abort. That run follows paths sizing set
-  aside (a test outcome on input nothing bounds), so a bottom it reaches
-  proves no count wrong; the bottoms then stay. A program whose checks are
-  all discharged or at the boundary, and whose bottoms are dead, has no
-  Abort left in main. simpleplus is one: `3 4` takes 42,943 interactions
-  instead of 782,347, nearly all of the difference being the check no
-  longer run inside main. tic-tac-toe keeps its bottoms: the extra run
-  reaches one. Elsewhere counts drop a little: 150 to 146 for
-  `tc_ultra_minimal`, and 91,147 to 90,345 for the Rational example.
+  values they checked, and every chain's bottom becomes 0 instead of an
+  abort: the counts are sizing's certificate that no input main is called
+  on reaches one (§10: the bottom "is provably dead if the certificate is
+  right"). A program whose checks are all discharged or at the boundary
+  has no Abort left in main. simpleplus is one: `3 4` takes 42,943
+  interactions instead of 782,347, nearly all of the difference being the
+  check no longer run inside main. tic-tac-toe is another. Elsewhere
+  counts drop a little: 150 to 146 for `tc_ultra_minimal`, and 91,147 to
+  90,345 for the Rational example.
 - Like haskell-final, the port certifies the sized program only for the
   capture layouts that guide the IC; it does not refuse to run a program
   whose sized form fails certification (DESIGN.md's `admitIC` is not in
@@ -204,7 +201,7 @@ runtime meaning and restoring it would need a side channel through the IC
 (C1/C4). Abort (§10, §11.6) is erased where sizing proves it dead. main's
 input refinements run at the session boundary (§11.10), in a guard that
 keeps them as checks. Abort stays a core form there, in the guard, in the
-checks left to run time, and in bottoms not proven dead.
+checks left to run time, and in programs sizing does not prove.
 
 ## Quick Start
 

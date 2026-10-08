@@ -205,7 +205,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       String.eq(aborts(case.of(prelude, "3"), "cased"), "Abort"),
       String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "Abort"),
       String.eq(guarded.aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "none"),
-      String.eq(guarded.aborts(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "Abort")])))
+      String.eq(guarded.aborts(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "none")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:
