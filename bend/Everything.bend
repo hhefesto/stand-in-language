@@ -28,7 +28,9 @@ import ./Certificate.bend as Certificate
 import ./Meter.bend as Meter
 import ./Telc.bend as Telc
 import ./Main.bend as Main
+import ./PROOF.bend as Proof
 
-# Every module of the port, so that `bend bend/Everything.bend` checks them all
-# (types, termination, laws) and prints "ALL PROOFS CHECK". No main: checking
-# is the whole job. Add each new module here.
+# Every module of the port, and the proofs of LAWS.bend, so that
+# `bend bend/Everything.bend` checks them all (types, termination, laws) and
+# prints "ALL PROOFS CHECK". No main: checking is the whole job. Add each new
+# module here.
