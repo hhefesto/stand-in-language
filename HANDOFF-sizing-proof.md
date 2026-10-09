@@ -61,7 +61,10 @@ that way. Committed on `sizing-proof`:
 - "State sizing's soundness laws, …": the laws, and the proof of
   `fuel_more`;
 - "Prove sizing's semantic laws": the proofs of `what_runs`, `erasure`
-  and `counts_suffice`.
+  and `counts_suffice`;
+- "Prove the certificate laws": the proofs of `certificate_opening` and
+  `certificate_guarded`. With them every law in `bend/LAWS.bend` is
+  proven, and `PROOF.bend` joins `Everything.bend`.
 
 Each passed the gate and `nix flake check`. Nothing is pushed.
 
@@ -98,8 +101,16 @@ amendment is folded into the laws commit.
   `bend/PROOF.bend` and rechecked with `--verdict`. One simulation lemma,
   `sim`, covers laws 3 and 4. A second, `runs`, with `prog_witness`,
   covers law 2 (§5). `bend/dev/gate.sh proofs` checks the proofs, and
-  the kernel too when `BENDTT` is set. Only the two certificate laws are
-  open.
+  the kernel too when `BENDTT` is set.
+- **S4:** `certificate_opening` and `certificate_guarded` are proven for
+  checker v1, and rechecked with `--verdict` (§5). All seven laws hold:
+  `bend bend/PROOF.bend --verdict` prints ALL PROOFS CHECK. PROOF.bend is
+  about 7,700 lines.
+- **S0.3, tictactoe:** the 5,000,000-run check (`check tictactoe
+  5000000`) hit its 10-hour limit without a verdict (exit 124). Earlier,
+  50,000 runs had found no input that fires a site. So no counterexample
+  is known (D4 does not arise), but checker v1 cannot prove tictactoe
+  within any budget a compile could afford. That is D3.
 - **S3, executable half:** `bend/Check.bend`, with `bend/dev/check.bend
   MODULE [RUNS]` to run it. Every erasure is proven, without counting the
   checker's own soundness, which is S4:
@@ -110,18 +121,17 @@ amendment is folded into the laws commit.
   The checker is not yet wired into `Sz.discharged`, which would change
   outputs.
 
-**In progress:**
-- **S0.3, tictactoe.** 50,000 runs found no input that fires a site, but
-  that budget is not enough for a verdict. A 5,000,000-run check was
-  started (`check tictactoe 5000000`, log
-  `/tmp/claude-1000/-home-hhefesto-src-telomare/4e3d9564-c256-4dc9-b9fb-90e07fbbce07/scratchpad/logs/check-ttt-long.log`, which is gone on another machine). The estimate is 2–4 million leaves at
-  6.6 ms each. It ends with "proven", "fires … on input …" (a real
-  counterexample: see D4), or "unknown".
-
-**Next:**
-- **S4:** prove the two certificate laws for `Check.bend`.
-- **S3, the rest:** wire the checker into sizing. This decides what
-  happens to tictactoe's outputs (D3).
+**Next** (each waits on the user):
+- **S3, the rest:** wire the checker into sizing. Then the compiler
+  erases only what the checker proves, and the theorem covers what runs.
+  tictactoe would keep its bottoms (D3), which changes its outputs back
+  to P7.5's.
+- **A `--verdict` check in `nix flake check`.** It needs BendTT's kernel,
+  which needs Lean 4.34 (§8), so a new nixpkgs input. Until then
+  `gate.sh proofs` runs it by hand, and `bend-check` checks the proofs
+  without the kernel.
+- **The README's "Design" note** on the theorem and its trusted base,
+  once the checker is wired in.
 
 ## 1. Working rules
 
@@ -232,6 +242,7 @@ it.
    past their chains. **Proven.**
 5. `certificate_opening` and `certificate_guarded`: if the checker proves
    main, the watched witness fires on no admitted input, at any fuel.
+   **Proven.**
 
 Together they say: on every input the session can give main, what the
 compiler erased could not have mattered, and the recursions had all the
@@ -429,8 +440,9 @@ see D4.
 - **`bend/LAWS.bend` and `bend/PROOF.bend`:**
   - `bend bend/PROOF.bend` prints SOME PROOFS FAIL with "5 TODOs" until the
     other laws are proven.
-  - Keep both out of `Everything.bend` while laws are open. Its check and
-    the pre-commit hook expect ALL PROOFS CHECK.
+  - Both were kept out of `Everything.bend` while laws were open, since
+    its check and the pre-commit hook expect ALL PROOFS CHECK. Since S4,
+    PROOF.bend is in it.
   - The law statements use `Sm.answered(r)` (Unit for an answer, Empty for
     Spent) instead of `r != Spent`. Bend uses a function at most once, but
     a Data witness can be reused.
@@ -557,11 +569,30 @@ left:
 - Whether `--certificate` should say which erasures are proven is an output
   change. Ask the user.
 
-### S4. Checker v1, proven (small to medium, given S2)
+### S4. Checker v1, proven (small to medium, given S2). Done but the flake check
 
-- Prove law 3 for v1.
-- Add a `bend-proof` check to `nix flake check`:
-  `bend bend/PROOF.bend --verdict` must print ALL PROOFS CHECK.
+As built (PROOF.bend, "Laws 5: the certificate"):
+- `certificate_opening`: the checker's opening run read back an answer
+  (`opened_v`, `opening_obs`). Two runs that both answer agree
+  (`fuel_agree`), so no run on any fuel fires.
+- `certificate_guarded` rests on a second simulation, `hs`: the run on a
+  partial input against the run on any data under it (`refines`). A hole
+  stands for data or a hole, and an aborted value for one with any
+  message (`hf`). Both runs use the same policy, so it is lockstep.
+  - The input itself is evaluated in different numbers of steps, so the
+    runs are joined job by job through `E.app` (`app_rel` … `app7`,
+    `in_rel`). The data's run gets the extra fuel.
+  - A reading on the partial input means the data's run never fires
+    (`no_fire_rel`). That needs `no_fired`, beside `no_obs`: `sem` never
+    answers `Fired`.
+  - A guard that refuses the partial input refuses the data
+    (`guard_leaf`, `bad_rel`, `wbad`).
+  - `tree` follows `Ck.explore`. Every input under a node lies under one
+    side of its split (`split_cover`), and `good` says what each job
+    promises.
+- Still open: a `bend-proof` check in `nix flake check`, so that
+  `bend bend/PROOF.bend --verdict` must print ALL PROOFS CHECK. It needs
+  the kernel built in Nix (§0).
 - The README's "Design" section records the theorem and its trusted base.
   DESIGN §10's second conflict ("the chain relies on a runtime abort as its
   safety net") is then resolved by proof, for every program the checker
@@ -944,7 +975,7 @@ empty.
 - `Text`, `Show`, `Loc`.
 - This branch's: `Sem` (the meaning) and `Check` (the erasure checker),
   both in `Everything.bend`; `LAWS` and `PROOF` (the claims and their
-  proofs), kept out of it while laws are open.
+  proofs), in it through PROOF.bend's import of LAWS.bend.
 
 **IC:**
 - The net is an `Array<U32>`, 8 words per agent. Active pairs are LIFO.
