@@ -4175,3 +4175,3559 @@ def what_runs_at(fuel, counts, x, left, input, o, got):
 
 def Laws.what_runs(fuel, counts, x, left, input, o, got):
   what_runs_at(fuel, counts, x, left, input, o, got)
+
+
+# Laws 5: the certificate
+# =======================
+#
+# The checker (Check.bend) proves main by running it on partial inputs,
+# whose holes (XVar) stand for data. The opening call is one such run, on
+# 0. For later calls, hs relates the run on a partial input to the run on
+# any data under it: a hole stands for data or a hole, and an aborted
+# value for one with any message. A reading on the partial input then
+# means no firing on the data (no_fire_rel), and a guard's refusal there
+# means one here (bad_rel). tree follows the checker's exploration, whose
+# leaves cover every input (split_cover).
+
+# Fuel
+# ----
+
+law add_zero_r:
+  for a: Nat
+  {Nat.add(a, 0n) == a : Nat}
+
+def add_zero_r(a):
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_zero_r(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}
+      {==}
+
+law add_comm:
+  for +a: Nat
+  for +b: Nat
+  {Nat.add(a, b) == Nat.add(b, a) : Nat}
+
+def add_comm(a, b):
+  match a:
+    case 0n:
+      Equal.sym(Nat, Nat.add(b, 0n), b, add_zero_r(b))
+    case 1n+p:
+      %Equal.sym(Nat, Nat.add(b, 1n+p), 1n+Nat.add(b, p), add_succ(b, p)) : {1n+Nat.add(p, b) == _ : Nat}
+      %add_comm(p, b) : {1n+Nat.add(p, b) == 1n+_ : Nat}
+      {==}
+
+# Two runs of a job that both answered give the same answer.
+law fuel_agree:
+  for +a: Nat
+  for +b: Nat
+  for +pol: Sm.Pol
+  for +j: Sm.Job
+  Sm.answered(Sm.sem(a, pol, j)) -> Sm.answered(Sm.sem(b, pol, j)) -> {Sm.sem(a, pol, j) == Sm.sem(b, pol, j) : Sm.R}
+
+def fuel_agree(a, b, pol, j):
+  ha => hb =>
+    Equal.trans(Sm.R, Sm.sem(a, pol, j), Sm.sem(Nat.add(b, a), pol, j), Sm.sem(b, pol, j), fuel_plus(b, a, pol, j)(ha),
+      (%add_comm(a, b) : {Sm.sem(_, pol, j) == Sm.sem(b, pol, j) : Sm.R};
+       Equal.sym(Sm.R, Sm.sem(b, pol, j), Sm.sem(Nat.add(a, b), pol, j), fuel_plus(a, b, pol, j)(hb))))
+
+# The opening call
+# ----------------
+
+def provenv(v: Ck.Verdict) -> Data:
+  match v:
+    case Ck.Proven{}:
+      Unit
+    case _:
+      Empty
+
+def seenp(s: Ck.Seen) -> Data:
+  match s:
+    case Ck.Seen{v, l}:
+      provenv(v)
+
+law seen_proven:
+  for s: Ck.Seen
+  for left: Nat
+  {s == Ck.Seen{Ck.Proven{}, left} : Ck.Seen} -> seenp(s)
+
+def seen_proven(s, left):
+  h => (%Equal.sym(Ck.Seen, s, Ck.Seen{Ck.Proven{}, left}, h) : seenp(_); Unit{})
+
+law opened_v:
+  for v: Ck.Verdict
+  for s: Ck.Seen
+  seenp(Ck.opened(v, s)) -> provenv(v)
+
+def opened_v(v, s):
+  match v:
+    case Ck.Proven{}:
+      h => Unit{}
+    case Ck.Fires{i, at}:
+      match s:
+        case Ck.Seen{w, l}:
+          h => h
+    case Ck.Unknown{why}:
+      match s:
+        case Ck.Seen{w, l}:
+          h => h
+
+law opened_s:
+  for v: Ck.Verdict
+  for s: Ck.Seen
+  seenp(Ck.opened(v, s)) -> seenp(s)
+
+def opened_s(v, s):
+  match v:
+    case Ck.Proven{}:
+      match s:
+        case Ck.Seen{w, l}:
+          h => h
+    case Ck.Fires{i, at}:
+      match s:
+        case Ck.Seen{w, l}:
+          h => Empty.absurd(provenv(w), h)
+    case Ck.Unknown{why}:
+      match s:
+        case Ck.Seen{w, l}:
+          h => Empty.absurd(provenv(w), h)
+
+# The opening run read back an answer.
+law opening_obs:
+  for r: Sm.R
+  provenv(Ck.step.verdict(Ck.main.step(E.XZero{}, r))) -> isobs(r)
+
+def opening_obs(r):
+  match r:
+    case Sm.Obs{o}:
+      h => Unit{}
+    case Sm.Val{w}:
+      h => h
+    case Sm.Fired{at}:
+      h => h
+    case Sm.Needs{p}:
+      h => h
+    case Sm.Spent{}:
+      h => h
+
+law fired_obs:
+  for r: Sm.R
+  for site: E.Site
+  isobs(r) -> {r == Sm.Fired{site} : Sm.R} -> Empty
+
+def fired_obs(r, site):
+  ho => h => (%h : isobs(_); ho)
+
+law fired_ans:
+  for r: Sm.R
+  for site: E.Site
+  {Sm.read.r(r) == Sm.Fired{site} : Sm.R} -> Sm.answered(r)
+
+def fired_ans(r, site):
+  match r:
+    case Sm.Spent{}:
+      h => (%Equal.sym(Sm.R, Sm.Spent{}, Sm.Fired{site}, h) : Sm.answered(_); Unit{})
+    case Sm.Val{w}:
+      h => Unit{}
+    case Sm.Obs{o}:
+      h => Unit{}
+    case Sm.Fired{at}:
+      h => Unit{}
+    case Sm.Needs{p}:
+      h => Unit{}
+
+law read_ans:
+  for r: Sm.R
+  isobs(Sm.read.r(r)) -> Sm.answered(r)
+
+def read_ans(r):
+  match r:
+    case Sm.Spent{}:
+      h => h
+    case Sm.Val{w}:
+      h => Unit{}
+    case Sm.Obs{o}:
+      h => Unit{}
+    case Sm.Fired{at}:
+      h => Unit{}
+    case Sm.Needs{p}:
+      h => Unit{}
+
+# Where a run reads back an answer, no run of it, on any fuel, fires.
+law obs_never_fires:
+  for +fuel: Nat
+  for +any: Nat
+  for +pol: Sm.Pol
+  for +j: Sm.Job
+  for +site: E.Site
+  isobs(Sm.read.r(Sm.sem(fuel, pol, j))) -> {Sm.read.r(Sm.sem(any, pol, j)) == Sm.Fired{site} : Sm.R} -> Empty
+
+def obs_never_fires(fuel, any, pol, j, site):
+  +ho => +hf =>
+    fired_obs(Sm.read.r(Sm.sem(fuel, pol, j)), site)(ho)(%fuel_agree(any, fuel, pol, j)(fired_ans(Sm.sem(any, pol, j), site)(hf))(read_ans(Sm.sem(fuel, pol, j))(ho)) : {Sm.read.r(_) == Sm.Fired{site} : Sm.R}; hf)
+
+# Law 5, the opening call, with each of its words shared.
+law opening_at:
+  for +depth: Nat
+  for +fuel: Nat
+  for +checks: List<&2, U32>
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +leaves: Nat
+  for +left: Nat
+  for +proven: {Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves) == Ck.Seen{Ck.Proven{}, left} : Ck.Seen}
+  for +any: Nat
+  for +site: E.Site
+  {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}) != Sm.Fired{site} : Sm.R}
+
+def opening_at(depth, fuel, checks, main, g, leaves, left, proven, any, site):
+  hf => obs_never_fires(fuel, any, Sm.Pol{Sm.Watch{}, checks}, Sm.JE{E.app(main, E.XZero{}), Sm.WZero{}}, site)(opening_obs(Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))(opened_v(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven))))(hf)
+
+def Laws.certificate_opening(depth, fuel, checks, main, g, leaves, left, proven, any, site):
+  opening_at(depth, fuel, checks, main, g, leaves, left, proven, any, site)
+
+
+# Holes
+# -----
+#
+# The checker runs main on a partial input, whose holes (XVar) stand for
+# data no run has looked at. hf(w, v) is w with each hole replaced by what
+# stands at its place in v, if that is data or a hole, and each aborted
+# value's message by v's: w stands for v when hf(w, v) is v.
+
+def doh(w: Sm.W) -> Bool:
+  match w:
+    case Sm.WZero{}:
+      True{}
+    case Sm.WPair{a, b}:
+      Bool.and(doh(a), doh(b))
+    case Sm.WHole{p}:
+      True{}
+    case _:
+      False{}
+
+def hole.or(b: Bool, v: Sm.W, +p: String) -> Sm.W:
+  match b:
+    case True{}:
+      v
+    case False{}:
+      Sm.WHole{p}
+
+def hf(w: Sm.W, +v: Sm.W) -> Sm.W:
+  match w:
+    case Sm.WHole{+p}:
+      hole.or(doh(v), v, p)
+    case Sm.WPair{a, b}:
+      match v:
+        case Sm.WPair{c, d}:
+          Sm.WPair{hf(a, c), hf(b, d)}
+        case _:
+          Sm.WPair{a, b}
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WAborted{at2, m2}:
+          Sm.WAborted{at, m2}
+        case _:
+          Sm.WAborted{at, m}
+    case other:
+      other
+
+def rhf(rp: Sm.R, rd: Sm.R) -> Sm.R:
+  match rp:
+    case Sm.Val{w}:
+      match rd:
+        case Sm.Val{v}:
+          Sm.Val{hf(w, v)}
+        case other:
+          other
+    case _:
+      rd
+
+# The job the data's run runs where the partial input's run runs j.
+def hj(j: Sm.Job, ee: Sm.W, re: Sm.R) -> Sm.Job:
+  match j:
+    case Sm.JE{x, env}:
+      Sm.JE{x, hf(env, ee)}
+    case Sm.JPair{a, b, env}:
+      Sm.JPair{a, b, hf(env, ee)}
+    case Sm.JSetE{y, env}:
+      Sm.JSetE{y, hf(env, ee)}
+    case Sm.JSet{r}:
+      Sm.JSet{rhf(r, re)}
+    case Sm.JIfE{s, l, rt, env}:
+      Sm.JIfE{s, l, rt, hf(env, ee)}
+    case Sm.JIf{r, l, rt, env}:
+      Sm.JIf{rhf(r, re), l, rt, hf(env, ee)}
+    case Sm.JLeft{y, env}:
+      Sm.JLeft{y, hf(env, ee)}
+    case Sm.JRight{y, env}:
+      Sm.JRight{y, hf(env, ee)}
+    case Sm.JWatch{site, tc, c, env}:
+      Sm.JWatch{site, tc, c, hf(env, ee)}
+    case Sm.JDone{r}:
+      Sm.JDone{rhf(r, re)}
+
+law true_false:
+  for h: {True{} == False{} : Bool}
+  Empty
+
+def true_false(h):
+  false_true(Equal.sym(Bool, True{}, False{}, h))
+
+# A hole stands for data or a hole.
+law hole_doh:
+  for b: Bool
+  for +v: Sm.W
+  for +p: String
+  {b == doh(v) : Bool} -> {hf(Sm.WHole{p}, hole.or(b, v, p)) == hole.or(b, v, p) : Sm.W}
+
+def hole_doh(b, v, p):
+  match b:
+    case True{}:
+      h => (%h : {hole.or(_, v, p) == v : Sm.W}; {==})
+    case False{}:
+      h => {==}
+
+law hf_refl:
+  for w: Sm.W
+  {hf(w, w) == w : Sm.W}
+
+def hf_refl(w):
+  match w:
+    case Sm.WHole{+p}:
+      {==}
+    case Sm.WPair{+a, +b}:
+      %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+      %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+      {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at}:
+      {==}
+    case Sm.WAborted{at, m}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WMark{at}:
+      {==}
+
+law hf_idem:
+  for w: Sm.W
+  for +v: Sm.W
+  {hf(w, hf(w, v)) == hf(w, v) : Sm.W}
+
+def hf_idem(w, v):
+  match w:
+    case Sm.WHole{+p}:
+      hole_doh(doh(v), v, p)({==})
+    case Sm.WPair{+a, +b}:
+      match v:
+        case Sm.WPair{+c, +d}:
+          %hf_idem(a, c) : {Sm.WPair{hf(a, hf(a, c)), hf(b, hf(b, d))} == Sm.WPair{_, hf(b, d)} : Sm.W}
+          %hf_idem(b, d) : {Sm.WPair{hf(a, hf(a, c)), hf(b, hf(b, d))} == Sm.WPair{hf(a, hf(a, c)), _} : Sm.W}
+          {==}
+        case Sm.WZero{}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+        case Sm.WCode{fi2, y2}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+        case Sm.WGate{}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+        case Sm.WAbort{at2}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+        case Sm.WAborted{at2, m2}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+        case Sm.WStuck{}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+        case Sm.WHole{q}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+        case Sm.WMark{at2}:
+          %hf_refl(a) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{_, b} : Sm.W}
+          %hf_refl(b) : {Sm.WPair{hf(a, a), hf(b, b)} == Sm.WPair{hf(a, a), _} : Sm.W}
+          {==}
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, d}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WMark{at}:
+      {==}
+
+law rhf_refl:
+  for r: Sm.R
+  {rhf(r, r) == r : Sm.R}
+
+def rhf_refl(r):
+  match r:
+    case Sm.Val{+w}:
+      %hf_refl(w) : {Sm.Val{hf(w, w)} == Sm.Val{_} : Sm.R}
+      {==}
+    case Sm.Obs{o}:
+      {==}
+    case Sm.Fired{at}:
+      {==}
+    case Sm.Needs{p}:
+      {==}
+    case Sm.Spent{}:
+      {==}
+
+law rhf_idem:
+  for rp: Sm.R
+  for rd: Sm.R
+  {rhf(rp, rhf(rp, rd)) == rhf(rp, rd) : Sm.R}
+
+def rhf_idem(rp, rd):
+  match rp:
+    case Sm.Val{+w}:
+      match rd:
+        case Sm.Val{+v}:
+          %hf_idem(w, v) : {Sm.Val{hf(w, hf(w, v))} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.Obs{o}:
+          {==}
+        case Sm.Fired{at}:
+          {==}
+        case Sm.Needs{p}:
+          {==}
+        case Sm.Spent{}:
+          {==}
+    case Sm.Obs{o}:
+      {==}
+    case Sm.Fired{at}:
+      {==}
+    case Sm.Needs{p}:
+      {==}
+    case Sm.Spent{}:
+      {==}
+
+# A data value, or a hole, has no mark, reads back, and is no function.
+law doh_left:
+  for v: Sm.W
+  for +q: String
+  {True{} == doh(v) : Bool} -> {rhf(Sm.Val{Sm.WHole{q}}, Sm.left.of(v)) == Sm.left.of(v) : Sm.R}
+
+def doh_left(v, q):
+  match v:
+    case Sm.WZero{}:
+      h => {==}
+    case Sm.WPair{+a, +b}:
+      h => (%Equal.sym(Bool, doh(a), True{}, and_l(doh(a), doh(b))(Equal.sym(Bool, True{}, Bool.and(doh(a), doh(b)), h))) : {Sm.Val{hole.or(_, a, q)} == Sm.Val{a} : Sm.R}; {==})
+    case Sm.WHole{p}:
+      h => {==}
+    case Sm.WCode{fi, y}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.left.of(Sm.WCode{fi, y})) == Sm.left.of(Sm.WCode{fi, y}) : Sm.R}, true_false(h))
+    case Sm.WGate{}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.left.of(Sm.WGate{})) == Sm.left.of(Sm.WGate{}) : Sm.R}, true_false(h))
+    case Sm.WAbort{at}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.left.of(Sm.WAbort{at})) == Sm.left.of(Sm.WAbort{at}) : Sm.R}, true_false(h))
+    case Sm.WAborted{at, m}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.left.of(Sm.WAborted{at, m})) == Sm.left.of(Sm.WAborted{at, m}) : Sm.R}, true_false(h))
+    case Sm.WStuck{}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.left.of(Sm.WStuck{})) == Sm.left.of(Sm.WStuck{}) : Sm.R}, true_false(h))
+    case Sm.WMark{at}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.left.of(Sm.WMark{at})) == Sm.left.of(Sm.WMark{at}) : Sm.R}, true_false(h))
+
+law doh_right:
+  for v: Sm.W
+  for +q: String
+  {True{} == doh(v) : Bool} -> {rhf(Sm.Val{Sm.WHole{q}}, Sm.right.of(v)) == Sm.right.of(v) : Sm.R}
+
+def doh_right(v, q):
+  match v:
+    case Sm.WZero{}:
+      h => {==}
+    case Sm.WPair{+a, +b}:
+      h => (%Equal.sym(Bool, doh(b), True{}, and_r(doh(a), doh(b))(Equal.sym(Bool, True{}, Bool.and(doh(a), doh(b)), h))) : {Sm.Val{hole.or(_, b, q)} == Sm.Val{b} : Sm.R}; {==})
+    case Sm.WHole{p}:
+      h => {==}
+    case Sm.WCode{fi, y}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.right.of(Sm.WCode{fi, y})) == Sm.right.of(Sm.WCode{fi, y}) : Sm.R}, true_false(h))
+    case Sm.WGate{}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.right.of(Sm.WGate{})) == Sm.right.of(Sm.WGate{}) : Sm.R}, true_false(h))
+    case Sm.WAbort{at}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.right.of(Sm.WAbort{at})) == Sm.right.of(Sm.WAbort{at}) : Sm.R}, true_false(h))
+    case Sm.WAborted{at, m}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.right.of(Sm.WAborted{at, m})) == Sm.right.of(Sm.WAborted{at, m}) : Sm.R}, true_false(h))
+    case Sm.WStuck{}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.right.of(Sm.WStuck{})) == Sm.right.of(Sm.WStuck{}) : Sm.R}, true_false(h))
+    case Sm.WMark{at}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{q}}, Sm.right.of(Sm.WMark{at})) == Sm.right.of(Sm.WMark{at}) : Sm.R}, true_false(h))
+
+law hole_left:
+  for b: Bool
+  for +v: Sm.W
+  for +p: String
+  {b == doh(v) : Bool} -> {rhf(Sm.Val{Sm.WHole{p ++ "L"}}, Sm.left.of(hole.or(b, v, p))) == Sm.left.of(hole.or(b, v, p)) : Sm.R}
+
+def hole_left(b, v, p):
+  match b:
+    case True{}:
+      h => doh_left(v, p ++ "L")(h)
+    case False{}:
+      h => {==}
+
+law left_h:
+  for w: Sm.W
+  for +v: Sm.W
+  {rhf(Sm.left.of(w), Sm.left.of(hf(w, v))) == Sm.left.of(hf(w, v)) : Sm.R}
+
+def left_h(w, v):
+  match w:
+    case Sm.WHole{+p}:
+      hole_left(doh(v), v, p)({==})
+    case Sm.WPair{+a, +b}:
+      match v:
+        case Sm.WPair{+c, +d}:
+          %hf_idem(a, c) : {Sm.Val{hf(a, hf(a, c))} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WZero{}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WCode{fi2, y2}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WGate{}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WAbort{at2}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WAborted{at2, m2}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WStuck{}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WHole{q}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WMark{at2}:
+          %hf_refl(a) : {Sm.Val{hf(a, a)} == Sm.Val{_} : Sm.R}
+          {==}
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, d}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WMark{at}:
+      {==}
+
+law hole_right:
+  for b: Bool
+  for +v: Sm.W
+  for +p: String
+  {b == doh(v) : Bool} -> {rhf(Sm.Val{Sm.WHole{p ++ "R"}}, Sm.right.of(hole.or(b, v, p))) == Sm.right.of(hole.or(b, v, p)) : Sm.R}
+
+def hole_right(b, v, p):
+  match b:
+    case True{}:
+      h => doh_right(v, p ++ "R")(h)
+    case False{}:
+      h => {==}
+
+law right_h:
+  for w: Sm.W
+  for +v: Sm.W
+  {rhf(Sm.right.of(w), Sm.right.of(hf(w, v))) == Sm.right.of(hf(w, v)) : Sm.R}
+
+def right_h(w, v):
+  match w:
+    case Sm.WHole{+p}:
+      hole_right(doh(v), v, p)({==})
+    case Sm.WPair{+a, +b}:
+      match v:
+        case Sm.WPair{+c, +d}:
+          %hf_idem(b, d) : {Sm.Val{hf(b, hf(b, d))} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WZero{}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WCode{fi2, y2}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WGate{}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WAbort{at2}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WAborted{at2, m2}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WStuck{}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WHole{q}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+        case Sm.WMark{at2}:
+          %hf_refl(b) : {Sm.Val{hf(b, b)} == Sm.Val{_} : Sm.R}
+          {==}
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, d}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WMark{at}:
+      {==}
+
+law gate_h:
+  for w: Sm.W
+  for +v: Sm.W
+  {rhf(Sm.gate.of(w), Sm.gate.of(hf(w, v))) == Sm.gate.of(hf(w, v)) : Sm.R}
+
+def gate_h(w, v):
+  match w:
+    case Sm.WPair{a, b}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, d}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, d}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{p}:
+      {==}
+    case Sm.WMark{at}:
+      {==}
+
+# A data value, or a hole, has no mark.
+law doh_mark:
+  for v: Sm.W
+  {True{} == doh(v) : Bool} -> {None{} == Sm.mark.in(v) : Maybe<&2, E.Site>}
+
+def doh_mark(v):
+  match v:
+    case Sm.WPair{+a, +b}:
+      +h =>
+        (%doh_mark(a)(Equal.sym(Bool, doh(a), True{}, and_l(doh(a), doh(b))(Equal.sym(Bool, True{}, Bool.and(doh(a), doh(b)), h)))) : {None{} == Maybe.or(&2, E.Site, _, Sm.mark.in(b)) : Maybe<&2, E.Site>};
+         doh_mark(b)(Equal.sym(Bool, doh(b), True{}, and_r(doh(a), doh(b))(Equal.sym(Bool, True{}, Bool.and(doh(a), doh(b)), h)))))
+    case Sm.WZero{}:
+      h => {==}
+    case Sm.WHole{p}:
+      h => {==}
+    case Sm.WCode{fi, y}:
+      h => Empty.absurd({None{} == Sm.mark.in(Sm.WCode{fi, y}) : Maybe<&2, E.Site>}, true_false(h))
+    case Sm.WGate{}:
+      h => Empty.absurd({None{} == Sm.mark.in(Sm.WGate{}) : Maybe<&2, E.Site>}, true_false(h))
+    case Sm.WAbort{at}:
+      h => Empty.absurd({None{} == Sm.mark.in(Sm.WAbort{at}) : Maybe<&2, E.Site>}, true_false(h))
+    case Sm.WAborted{at, m}:
+      h => Empty.absurd({None{} == Sm.mark.in(Sm.WAborted{at, m}) : Maybe<&2, E.Site>}, true_false(h))
+    case Sm.WStuck{}:
+      h => Empty.absurd({None{} == Sm.mark.in(Sm.WStuck{}) : Maybe<&2, E.Site>}, true_false(h))
+    case Sm.WMark{at}:
+      h => Empty.absurd({None{} == Sm.mark.in(Sm.WMark{at}) : Maybe<&2, E.Site>}, true_false(h))
+
+law hole_mark:
+  for b: Bool
+  for +v: Sm.W
+  for +p: String
+  {b == doh(v) : Bool} -> {Sm.mark.in(hole.or(b, v, p)) == None{} : Maybe<&2, E.Site>}
+
+def hole_mark(b, v, p):
+  match b:
+    case True{}:
+      h => Equal.sym(Maybe<&2, E.Site>, None{}, Sm.mark.in(v), doh_mark(v)(h))
+    case False{}:
+      h => {==}
+
+# Filling holes adds no mark.
+law mark_hf:
+  for w: Sm.W
+  for +v: Sm.W
+  {Sm.mark.in(hf(w, v)) == Sm.mark.in(w) : Maybe<&2, E.Site>}
+
+def mark_hf(w, v):
+  match w:
+    case Sm.WHole{+p}:
+      hole_mark(doh(v), v, p)({==})
+    case Sm.WPair{+a, +b}:
+      match v:
+        case Sm.WPair{+c, +d}:
+          %mark_hf(a, c) : {Maybe.or(&2, E.Site, Sm.mark.in(hf(a, c)), Sm.mark.in(hf(b, d))) == Maybe.or(&2, E.Site, _, Sm.mark.in(b)) : Maybe<&2, E.Site>}
+          %mark_hf(b, d) : {Maybe.or(&2, E.Site, Sm.mark.in(hf(a, c)), Sm.mark.in(hf(b, d))) == Maybe.or(&2, E.Site, Sm.mark.in(hf(a, c)), _) : Maybe<&2, E.Site>}
+          {==}
+        case Sm.WZero{}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, d}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WMark{at}:
+      {==}
+
+law pair_isobs:
+  for ra: Sm.R
+  for rb: Sm.R
+  isobs(ra) -> isobs(rb) -> isobs(Sm.read.pair(ra, rb))
+
+def pair_isobs(ra, rb):
+  match ra:
+    case Sm.Obs{x}:
+      match rb:
+        case Sm.Obs{y}:
+          ha => hb => Unit{}
+        case Sm.Val{w}:
+          ha => hb => hb
+        case Sm.Fired{at}:
+          ha => hb => hb
+        case Sm.Needs{p}:
+          ha => hb => hb
+        case Sm.Spent{}:
+          ha => hb => hb
+    case Sm.Val{w}:
+      ha => hb => ha
+    case Sm.Fired{at}:
+      ha => hb => ha
+    case Sm.Needs{p}:
+      ha => hb => ha
+    case Sm.Spent{}:
+      ha => hb => ha
+
+# A value with no mark reads back.
+law nomark_obs:
+  for +d: Bool
+  for w: Sm.W
+  {None{} == Sm.mark.in(w) : Maybe<&2, E.Site>} -> isobs(Sm.read(d, w))
+
+def nomark_obs(d, w):
+  match w:
+    case Sm.WPair{+a, +b}:
+      +h => pair_isobs(Sm.read(d, a), Sm.read(d, b))(nomark_obs(d, a)(or_none_l(Sm.mark.in(a), Sm.mark.in(b))(h)))(nomark_obs(d, b)(or_none_r(Sm.mark.in(a), Sm.mark.in(b))(h)))
+    case Sm.WMark{at}:
+      h => Empty.absurd(isobs(Sm.Fired{at}), none_some(at, h))
+    case Sm.WZero{}:
+      h => Unit{}
+    case Sm.WCode{fi, y}:
+      h => Unit{}
+    case Sm.WGate{}:
+      h => Unit{}
+    case Sm.WAbort{at}:
+      h => Unit{}
+    case Sm.WAborted{at, m}:
+      h => Unit{}
+    case Sm.WStuck{}:
+      h => Unit{}
+    case Sm.WHole{p}:
+      h => Unit{}
+
+law aborted_h:
+  for +at: E.Site
+  for r1: Sm.R
+  for r2: Sm.R
+  isobs(r1) -> isobs(r2) -> {rhf(Sm.aborted.of(at, r1), Sm.aborted.of(at, r2)) == Sm.aborted.of(at, r2) : Sm.R}
+
+def aborted_h(at, r1, r2):
+  match r1:
+    case Sm.Obs{m1}:
+      match r2:
+        case Sm.Obs{m2}:
+          h1 => h2 => {==}
+        case Sm.Val{w}:
+          h1 => h2 => Empty.absurd({rhf(Sm.Val{Sm.WAborted{at, m1}}, Sm.aborted.of(at, Sm.Val{w})) == Sm.aborted.of(at, Sm.Val{w}) : Sm.R}, h2)
+        case Sm.Fired{a2}:
+          h1 => h2 => Empty.absurd({rhf(Sm.Val{Sm.WAborted{at, m1}}, Sm.aborted.of(at, Sm.Fired{a2})) == Sm.aborted.of(at, Sm.Fired{a2}) : Sm.R}, h2)
+        case Sm.Needs{p}:
+          h1 => h2 => Empty.absurd({rhf(Sm.Val{Sm.WAborted{at, m1}}, Sm.aborted.of(at, Sm.Needs{p})) == Sm.aborted.of(at, Sm.Needs{p}) : Sm.R}, h2)
+        case Sm.Spent{}:
+          h1 => h2 => Empty.absurd({rhf(Sm.Val{Sm.WAborted{at, m1}}, Sm.aborted.of(at, Sm.Spent{})) == Sm.aborted.of(at, Sm.Spent{}) : Sm.R}, h2)
+    case Sm.Val{w}:
+      h1 => h2 => Empty.absurd({rhf(Sm.aborted.of(at, Sm.Val{w}), Sm.aborted.of(at, r2)) == Sm.aborted.of(at, r2) : Sm.R}, h1)
+    case Sm.Fired{a2}:
+      h1 => h2 => Empty.absurd({rhf(Sm.aborted.of(at, Sm.Fired{a2}), Sm.aborted.of(at, r2)) == Sm.aborted.of(at, r2) : Sm.R}, h1)
+    case Sm.Needs{p}:
+      h1 => h2 => Empty.absurd({rhf(Sm.aborted.of(at, Sm.Needs{p}), Sm.aborted.of(at, r2)) == Sm.aborted.of(at, r2) : Sm.R}, h1)
+    case Sm.Spent{}:
+      h1 => h2 => Empty.absurd({rhf(Sm.aborted.of(at, Sm.Spent{}), Sm.aborted.of(at, r2)) == Sm.aborted.of(at, r2) : Sm.R}, h1)
+
+# An abort on a pair: the same mark on both sides, or both aborted.
+law abort_ph:
+  for +at: E.Site
+  for +a: Sm.W
+  for +b: Sm.W
+  for +c: Sm.W
+  for +d: Sm.W
+  for m: Maybe<&2, E.Site>
+  {m == Sm.mark.in(Sm.WPair{a, b}) : Maybe<&2, E.Site>} -> {rhf(Sm.marked.or(Sm.mark.in(Sm.WPair{a, b}), Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b}))), Sm.marked.or(Sm.mark.in(Sm.WPair{hf(a, c), hf(b, d)}), Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)})))) == Sm.marked.or(Sm.mark.in(Sm.WPair{hf(a, c), hf(b, d)}), Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)}))) : Sm.R}
+
+def abort_ph(at, a, b, c, d, m):
+  match m:
+    case Some{s}:
+      +h =>
+        (%Equal.sym(Maybe<&2, E.Site>, Sm.mark.in(hf(Sm.WPair{a, b}, Sm.WPair{c, d})), Sm.mark.in(Sm.WPair{a, b}), mark_hf(Sm.WPair{a, b}, Sm.WPair{c, d})) : {rhf(Sm.marked.or(Sm.mark.in(Sm.WPair{a, b}), Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b}))), Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)})))) == Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)}))) : Sm.R};
+         %h : {rhf(Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b}))), Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)})))) == Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)}))) : Sm.R};
+         {==})
+    case None{}:
+      +h =>
+        (%Equal.sym(Maybe<&2, E.Site>, Sm.mark.in(hf(Sm.WPair{a, b}, Sm.WPair{c, d})), Sm.mark.in(Sm.WPair{a, b}), mark_hf(Sm.WPair{a, b}, Sm.WPair{c, d})) : {rhf(Sm.marked.or(Sm.mark.in(Sm.WPair{a, b}), Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b}))), Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)})))) == Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)}))) : Sm.R};
+         %h : {rhf(Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b}))), Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)})))) == Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)}))) : Sm.R};
+         aborted_h(at, Sm.read(True{}, Sm.WPair{a, b}), Sm.read(True{}, Sm.WPair{hf(a, c), hf(b, d)}))(nomark_obs(True{}, Sm.WPair{a, b})(h))(nomark_obs(True{}, Sm.WPair{hf(a, c), hf(b, d)})(Equal.trans(Maybe<&2, E.Site>, None{}, Sm.mark.in(Sm.WPair{a, b}), Sm.mark.in(hf(Sm.WPair{a, b}, Sm.WPair{c, d})), h, Equal.sym(Maybe<&2, E.Site>, Sm.mark.in(hf(Sm.WPair{a, b}, Sm.WPair{c, d})), Sm.mark.in(Sm.WPair{a, b}), mark_hf(Sm.WPair{a, b}, Sm.WPair{c, d}))))))
+
+law abort_h:
+  for +at: E.Site
+  for w: Sm.W
+  for +v: Sm.W
+  {rhf(Sm.abort.of(at, w), Sm.abort.of(at, hf(w, v))) == Sm.abort.of(at, hf(w, v)) : Sm.R}
+
+def abort_h(at, w, v):
+  match w:
+    case Sm.WPair{+a, +b}:
+      match v:
+        case Sm.WPair{+c, +d}:
+          abort_ph(at, a, b, c, d, Sm.mark.in(Sm.WPair{a, b}))({==})
+        case Sm.WZero{}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+        case Sm.WCode{fi2, y2}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+        case Sm.WGate{}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+        case Sm.WAbort{at2}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+        case Sm.WAborted{at2, m2}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+        case Sm.WStuck{}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+        case Sm.WHole{q}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+        case Sm.WMark{at2}:
+          rhf_refl(Sm.abort.of(at, Sm.WPair{a, b}))
+    case Sm.WAborted{+a2, m}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, d}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{a2}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{p}:
+      {==}
+    case Sm.WMark{a2}:
+      {==}
+
+law to_nv_h:
+  for rx: Sm.R
+  for rn: Sm.R
+  nval(rn) -> {rhf(rx, rn) == rn : Sm.R}
+
+def to_nv_h(rx, rn):
+  match rx:
+    case Sm.Val{w}:
+      match rn:
+        case Sm.Val{v}:
+          nv => Empty.absurd({Sm.Val{hf(w, v)} == Sm.Val{v} : Sm.R}, nv)
+        case Sm.Obs{o}:
+          nv => {==}
+        case Sm.Fired{at}:
+          nv => {==}
+        case Sm.Needs{p}:
+          nv => {==}
+        case Sm.Spent{}:
+          nv => {==}
+    case Sm.Obs{o}:
+      nv => {==}
+    case Sm.Fired{at}:
+      nv => {==}
+    case Sm.Needs{p}:
+      nv => {==}
+    case Sm.Spent{}:
+      nv => {==}
+
+law done_nv_h:
+  for f: Nat
+  for -pol: Sm.Pol
+  for rw: Sm.R
+  for -rm: Sm.R
+  nval(rw) -> {rhf(Sm.sem(f, pol, Sm.JDone{rw}), rm) == rm : Sm.R}
+
+def done_nv_h(f, pol, rw, rm):
+  match f:
+    case 0n:
+      nv => {==}
+    case 1n+g:
+      match rw:
+        case Sm.Val{w}:
+          nv => Empty.absurd({rhf(Sm.Val{w}, rm) == rm : Sm.R}, nv)
+        case Sm.Obs{o}:
+          nv => {==}
+        case Sm.Fired{at}:
+          nv => {==}
+        case Sm.Needs{p}:
+          nv => {==}
+        case Sm.Spent{}:
+          nv => {==}
+
+law m_done_nv_h:
+  for rx: Sm.R
+  for f: Nat
+  for -pol: Sm.Pol
+  for +rn: Sm.R
+  nval(rn) -> {rhf(rx, Sm.sem(f, pol, Sm.JDone{rn})) == Sm.sem(f, pol, Sm.JDone{rn}) : Sm.R}
+
+def m_done_nv_h(rx, f, pol, rn):
+  match f:
+    case 0n:
+      nv => to_nv_h(rx, Sm.Spent{})(Unit{})
+    case 1n+g:
+      nv => to_nv_h(rx, rn)(nv)
+
+law done_rel_h:
+  for f: Nat
+  for -k: Nat
+  for -pa: Sm.Pol
+  for -pb: Sm.Pol
+  for -rw: Sm.R
+  for -rm: Sm.R
+  {rhf(rw, rm) == rm : Sm.R} -> {rhf(Sm.sem(f, pa, Sm.JDone{rw}), Sm.sem(Nat.add(f, k), pb, Sm.JDone{rm})) == Sm.sem(Nat.add(f, k), pb, Sm.JDone{rm}) : Sm.R}
+
+def done_rel_h(f, k, pa, pb, rw, rm):
+  match f:
+    case 0n:
+      h => {==}
+    case 1n+g:
+      h => h
+
+law done_same_h:
+  for f: Nat
+  for k: Nat
+  for pa: Sm.Pol
+  for pb: Sm.Pol
+  for +r: Sm.R
+  {rhf(Sm.sem(f, pa, Sm.JDone{r}), Sm.sem(Nat.add(f, k), pb, Sm.JDone{r})) == Sm.sem(Nat.add(f, k), pb, Sm.JDone{r}) : Sm.R}
+
+def done_same_h(f, k, pa, pb, r):
+  done_rel_h(f, k, pa, pb, r, r)(rhf_refl(r))
+
+law pair_h:
+  for rwa: Sm.R
+  for rma: Sm.R
+  for rwb: Sm.R
+  for rmb: Sm.R
+  {rhf(rwa, rma) == rma : Sm.R} -> {rhf(rwb, rmb) == rmb : Sm.R} -> {rhf(Sm.pair.of(rwa, rwb), Sm.pair.of(rma, rmb)) == Sm.pair.of(rma, rmb) : Sm.R}
+
+def pair_h(rwa, rma, rwb, rmb):
+  match rwa:
+    case Sm.Val{+x}:
+      match rma:
+        case Sm.Val{+y}:
+          match rwb:
+            case Sm.Val{+z}:
+              match rmb:
+                case Sm.Val{+u}:
+                  ha => hb =>
+                    (%val_inj(hf(x, y), y, ha) : {Sm.Val{Sm.WPair{hf(x, y), hf(z, u)}} == Sm.Val{Sm.WPair{_, u}} : Sm.R};
+                     %val_inj(hf(z, u), u, hb) : {Sm.Val{Sm.WPair{hf(x, y), hf(z, u)}} == Sm.Val{Sm.WPair{hf(x, y), _}} : Sm.R};
+                     {==})
+                case Sm.Obs{o}:
+                  ha => hb => {==}
+                case Sm.Fired{at}:
+                  ha => hb => {==}
+                case Sm.Needs{p}:
+                  ha => hb => {==}
+                case Sm.Spent{}:
+                  ha => hb => {==}
+            case Sm.Obs{o}:
+              ha => hb => {==}
+            case Sm.Fired{at}:
+              ha => hb => {==}
+            case Sm.Needs{p}:
+              ha => hb => {==}
+            case Sm.Spent{}:
+              ha => hb => {==}
+        case Sm.Obs{o}:
+          ha => hb => to_nv_h(Sm.pair.of(Sm.Val{x}, rwb), Sm.Obs{o})(Unit{})
+        case Sm.Fired{at}:
+          ha => hb => to_nv_h(Sm.pair.of(Sm.Val{x}, rwb), Sm.Fired{at})(Unit{})
+        case Sm.Needs{p}:
+          ha => hb => to_nv_h(Sm.pair.of(Sm.Val{x}, rwb), Sm.Needs{p})(Unit{})
+        case Sm.Spent{}:
+          ha => hb => to_nv_h(Sm.pair.of(Sm.Val{x}, rwb), Sm.Spent{})(Unit{})
+    case Sm.Obs{o}:
+      ha => hb => {==}
+    case Sm.Fired{at}:
+      ha => hb => {==}
+    case Sm.Needs{p}:
+      ha => hb => {==}
+    case Sm.Spent{}:
+      ha => hb => {==}
+
+law left_r_h:
+  for rw: Sm.R
+  for rm: Sm.R
+  {rhf(rw, rm) == rm : Sm.R} -> {rhf(Sm.left.r(rw), Sm.left.r(rm)) == Sm.left.r(rm) : Sm.R}
+
+def left_r_h(rw, rm):
+  match rw:
+    case Sm.Val{+w}:
+      match rm:
+        case Sm.Val{+v}:
+          h => (%val_inj(hf(w, v), v, h) : {rhf(Sm.left.of(w), Sm.left.of(_)) == Sm.left.of(_) : Sm.R}; left_h(w, v))
+        case Sm.Obs{o}:
+          h => to_nv_h(Sm.left.of(w), Sm.Obs{o})(Unit{})
+        case Sm.Fired{at}:
+          h => to_nv_h(Sm.left.of(w), Sm.Fired{at})(Unit{})
+        case Sm.Needs{p}:
+          h => to_nv_h(Sm.left.of(w), Sm.Needs{p})(Unit{})
+        case Sm.Spent{}:
+          h => to_nv_h(Sm.left.of(w), Sm.Spent{})(Unit{})
+    case Sm.Obs{o}:
+      h => {==}
+    case Sm.Fired{at}:
+      h => {==}
+    case Sm.Needs{p}:
+      h => {==}
+    case Sm.Spent{}:
+      h => {==}
+
+law right_r_h:
+  for rw: Sm.R
+  for rm: Sm.R
+  {rhf(rw, rm) == rm : Sm.R} -> {rhf(Sm.right.r(rw), Sm.right.r(rm)) == Sm.right.r(rm) : Sm.R}
+
+def right_r_h(rw, rm):
+  match rw:
+    case Sm.Val{+w}:
+      match rm:
+        case Sm.Val{+v}:
+          h => (%val_inj(hf(w, v), v, h) : {rhf(Sm.right.of(w), Sm.right.of(_)) == Sm.right.of(_) : Sm.R}; right_h(w, v))
+        case Sm.Obs{o}:
+          h => to_nv_h(Sm.right.of(w), Sm.Obs{o})(Unit{})
+        case Sm.Fired{at}:
+          h => to_nv_h(Sm.right.of(w), Sm.Fired{at})(Unit{})
+        case Sm.Needs{p}:
+          h => to_nv_h(Sm.right.of(w), Sm.Needs{p})(Unit{})
+        case Sm.Spent{}:
+          h => to_nv_h(Sm.right.of(w), Sm.Spent{})(Unit{})
+    case Sm.Obs{o}:
+      h => {==}
+    case Sm.Fired{at}:
+      h => {==}
+    case Sm.Needs{p}:
+      h => {==}
+    case Sm.Spent{}:
+      h => {==}
+
+law checked_ph:
+  for +site: U32
+  for +a: Sm.W
+  for +b: Sm.W
+  for v: Sm.W
+  for +cd: Sm.R
+  {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{hf(Sm.WPair{a, b}, v)}, cd)) == Sm.checked(site, Sm.Val{hf(Sm.WPair{a, b}, v)}, cd) : Sm.R}
+
+def checked_ph(site, a, b, v, cd):
+  match v:
+    case Sm.WZero{}:
+      {==}
+    case Sm.WPair{c, d}:
+      {==}
+    case Sm.WCode{fi2, y2}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at2}:
+      {==}
+    case Sm.WAborted{at2, m2}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{q}:
+      {==}
+    case Sm.WMark{at2}:
+      {==}
+
+law checked_abh:
+  for +site: U32
+  for +at: E.Site
+  for +m: Sm.O
+  for v: Sm.W
+  for +cd: Sm.R
+  {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{hf(Sm.WAborted{at, m}, v)}, cd)) == Sm.checked(site, Sm.Val{hf(Sm.WAborted{at, m}, v)}, cd) : Sm.R}
+
+def checked_abh(site, at, m, v, cd):
+  match v:
+    case Sm.WZero{}:
+      {==}
+    case Sm.WPair{c, d}:
+      {==}
+    case Sm.WCode{fi2, y2}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at2}:
+      {==}
+    case Sm.WAborted{at2, m2}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{q}:
+      {==}
+    case Sm.WMark{at2}:
+      {==}
+
+# A check's value, where its test and value stand for the data's.
+law checked_h:
+  for +site: U32
+  for td: Sm.R
+  for tp: Sm.R
+  for +cd: Sm.R
+  for +cp: Sm.R
+  {rhf(tp, td) == td : Sm.R} -> {rhf(cp, cd) == cd : Sm.R} -> {rhf(Sm.checked(site, tp, cp), Sm.checked(site, td, cd)) == Sm.checked(site, td, cd) : Sm.R}
+
+def checked_h(site, td, tp, cd, cp):
+  match td:
+    case Sm.Val{+v}:
+      match tp:
+        case Sm.Val{w}:
+          match w:
+            case Sm.WZero{}:
+              h1 => h2 => (%val_inj(Sm.WZero{}, v, h1) : {rhf(cp, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; h2)
+            case Sm.WHole{p}:
+              h1 => h2 => {==}
+            case Sm.WMark{+at}:
+              h1 => h2 => (%val_inj(Sm.WMark{at}, v, h1) : {rhf(Sm.Val{Sm.WMark{at}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; {==})
+            case Sm.WPair{+a, +b}:
+              h1 => h2 => (%val_inj(hf(Sm.WPair{a, b}, v), v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; checked_ph(site, a, b, v, cd))
+            case Sm.WAborted{+at, +m}:
+              h1 => h2 => (%val_inj(hf(Sm.WAborted{at, m}, v), v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; checked_abh(site, at, m, v, cd))
+            case Sm.WCode{+fi, +y}:
+              h1 => h2 => (%val_inj(Sm.WCode{fi, y}, v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; {==})
+            case Sm.WGate{}:
+              h1 => h2 => (%val_inj(Sm.WGate{}, v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; {==})
+            case Sm.WAbort{+at}:
+              h1 => h2 => (%val_inj(Sm.WAbort{at}, v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; {==})
+            case Sm.WStuck{}:
+              h1 => h2 => (%val_inj(Sm.WStuck{}, v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; {==})
+        case Sm.Obs{o}:
+          h1 => h2 => {==}
+        case Sm.Fired{at}:
+          h1 => h2 => {==}
+        case Sm.Needs{p}:
+          h1 => h2 => {==}
+        case Sm.Spent{}:
+          h1 => h2 => {==}
+    case Sm.Obs{o}:
+      h1 => h2 => to_nv_h(Sm.checked(site, tp, cp), Sm.Obs{o})(Unit{})
+    case Sm.Fired{at}:
+      h1 => h2 => to_nv_h(Sm.checked(site, tp, cp), Sm.Fired{at})(Unit{})
+    case Sm.Needs{p}:
+      h1 => h2 => to_nv_h(Sm.checked(site, tp, cp), Sm.Needs{p})(Unit{})
+    case Sm.Spent{}:
+      h1 => h2 => to_nv_h(Sm.checked(site, tp, cp), Sm.Spent{})(Unit{})
+
+law hpair_split:
+  for +c: Sm.W
+  for +e: Sm.W
+  for v: Sm.W
+  {Sm.WPair{hf(c, pc(c, v)), hf(e, pe(e, v))} == hf(Sm.WPair{c, e}, v) : Sm.W}
+
+def hpair_split(c, e, v):
+  match v:
+    case Sm.WPair{x, y}:
+      {==}
+    case Sm.WZero{}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+    case Sm.WCode{fz, yz}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+    case Sm.WGate{}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+    case Sm.WAbort{az}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+    case Sm.WAborted{az, mz}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+    case Sm.WStuck{}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+    case Sm.WHole{qz}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+    case Sm.WMark{az}:
+      %hf_refl(c) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{_, e} : Sm.W}
+      %hf_refl(e) : {Sm.WPair{hf(c, c), hf(e, e)} == Sm.WPair{hf(c, c), _} : Sm.W}
+      {==}
+
+# Data, or a hole, is no function and no pair of one.
+law doh_apply:
+  for z: Sm.W
+  for x: Sm.W
+  {True{} == doh(z) : Bool} -> {Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(z, x) : Sm.Job}
+
+def doh_apply(z, x):
+  match z:
+    case Sm.WZero{}:
+      h => {==}
+    case Sm.WPair{z1, z2}:
+      h => {==}
+    case Sm.WHole{qz}:
+      h => {==}
+    case Sm.WCode{fz, yz}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(Sm.WCode{fz, yz}, x) : Sm.Job}, true_false(h))
+    case Sm.WGate{}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(Sm.WGate{}, x) : Sm.Job}, true_false(h))
+    case Sm.WAbort{az}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(Sm.WAbort{az}, x) : Sm.Job}, true_false(h))
+    case Sm.WAborted{az, mz}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(Sm.WAborted{az, mz}, x) : Sm.Job}, true_false(h))
+    case Sm.WStuck{}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(Sm.WStuck{}, x) : Sm.Job}, true_false(h))
+    case Sm.WMark{az}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(Sm.WMark{az}, x) : Sm.Job}, true_false(h))
+
+law hole_apply:
+  for b: Bool
+  for +z: Sm.W
+  for +p: String
+  for x: Sm.W
+  {b == doh(z) : Bool} -> {Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(hole.or(b, z, p), x) : Sm.Job}
+
+def hole_apply(b, z, p, x):
+  match b:
+    case True{}:
+      h => doh_apply(z, x)(h)
+    case False{}:
+      h => {==}
+
+law doh_set:
+  for z: Sm.W
+  {True{} == doh(z) : Bool} -> {Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(z) : Sm.Job}
+
+def doh_set(z):
+  match z:
+    case Sm.WZero{}:
+      h => {==}
+    case Sm.WPair{+z1, +z2}:
+      h => doh_apply(z1, z2)(Equal.sym(Bool, doh(z1), True{}, and_l(doh(z1), doh(z2))(Equal.sym(Bool, True{}, Bool.and(doh(z1), doh(z2)), h))))
+    case Sm.WHole{qz}:
+      h => {==}
+    case Sm.WCode{fz, yz}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(Sm.WCode{fz, yz}) : Sm.Job}, true_false(h))
+    case Sm.WGate{}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(Sm.WGate{}) : Sm.Job}, true_false(h))
+    case Sm.WAbort{az}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(Sm.WAbort{az}) : Sm.Job}, true_false(h))
+    case Sm.WAborted{az, mz}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(Sm.WAborted{az, mz}) : Sm.Job}, true_false(h))
+    case Sm.WStuck{}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(Sm.WStuck{}) : Sm.Job}, true_false(h))
+    case Sm.WMark{az}:
+      h => Empty.absurd({Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(Sm.WMark{az}) : Sm.Job}, true_false(h))
+
+law hole_set:
+  for b: Bool
+  for +z: Sm.W
+  for +p: String
+  {b == doh(z) : Bool} -> {Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.set.of(hole.or(b, z, p)) : Sm.Job}
+
+def hole_set(b, z, p):
+  match b:
+    case True{}:
+      h => doh_set(z)(h)
+    case False{}:
+      h => {==}
+
+law apply_hpairs:
+  for p: Sm.W
+  for q: Sm.W
+  for z: Sm.W
+  for x: Sm.W
+  {Sm.JDone{Sm.Val{Sm.WStuck{}}} == Sm.apply.of(hf(Sm.WPair{p, q}, z), x) : Sm.Job}
+
+def apply_hpairs(p, q, z, x):
+  match z:
+    case Sm.WZero{}:
+      {==}
+    case Sm.WPair{z1, z2}:
+      {==}
+    case Sm.WCode{fz, yz}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{az}:
+      {==}
+    case Sm.WAborted{az, mz}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{qz}:
+      {==}
+    case Sm.WMark{az}:
+      {==}
+
+# An aborted value, as the data's run has it: aborted, with its message.
+law apply_habt:
+  for +at: E.Site
+  for +m: Sm.O
+  for z: Sm.W
+  for x: Sm.W
+  {Sm.JDone{Sm.Val{hf(Sm.WAborted{at, m}, z)}} == Sm.apply.of(hf(Sm.WAborted{at, m}, z), x) : Sm.Job}
+
+def apply_habt(at, m, z, x):
+  match z:
+    case Sm.WZero{}:
+      {==}
+    case Sm.WPair{z1, z2}:
+      {==}
+    case Sm.WCode{fz, yz}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{az}:
+      {==}
+    case Sm.WAborted{az, mz}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{qz}:
+      {==}
+    case Sm.WMark{az}:
+      {==}
+
+law set_habt:
+  for +at: E.Site
+  for +m: Sm.O
+  for z: Sm.W
+  {Sm.JDone{Sm.Val{hf(Sm.WAborted{at, m}, z)}} == Sm.set.of(hf(Sm.WAborted{at, m}, z)) : Sm.Job}
+
+def set_habt(at, m, z):
+  match z:
+    case Sm.WZero{}:
+      {==}
+    case Sm.WPair{z1, z2}:
+      {==}
+    case Sm.WCode{fz, yz}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{az}:
+      {==}
+    case Sm.WAborted{az, mz}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{qz}:
+      {==}
+    case Sm.WMark{az}:
+      {==}
+
+law branch_habt:
+  for +at: E.Site
+  for +m: Sm.O
+  for z: Sm.W
+  for l: E.X
+  for rt: E.X
+  for env: Sm.W
+  {Sm.JDone{Sm.Val{hf(Sm.WAborted{at, m}, z)}} == Sm.branch.of(hf(Sm.WAborted{at, m}, z), l, rt, env) : Sm.Job}
+
+def branch_habt(at, m, z, l, rt, env):
+  match z:
+    case Sm.WZero{}:
+      {==}
+    case Sm.WPair{z1, z2}:
+      {==}
+    case Sm.WCode{fz, yz}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{az}:
+      {==}
+    case Sm.WAborted{az, mz}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WHole{qz}:
+      {==}
+    case Sm.WMark{az}:
+      {==}
+
+law val_habt:
+  for +at: E.Site
+  for +m: Sm.O
+  for +z: Sm.W
+  {rhf(Sm.Val{Sm.WAborted{at, m}}, Sm.Val{hf(Sm.WAborted{at, m}, z)}) == Sm.Val{hf(Sm.WAborted{at, m}, z)} : Sm.R}
+
+def val_habt(at, m, z):
+  %hf_idem(Sm.WAborted{at, m}, z) : {Sm.Val{hf(Sm.WAborted{at, m}, hf(Sm.WAborted{at, m}, z))} == Sm.Val{_} : Sm.R}
+  {==}
+
+law rhf_nv:
+  for rw: Sm.R
+  for rn: Sm.R
+  nval(rn) -> {rn == rhf(rw, rn) : Sm.R}
+
+def rhf_nv(rw, rn):
+  match rw:
+    case Sm.Val{w}:
+      match rn:
+        case Sm.Val{v}:
+          nv => Empty.absurd({Sm.Val{v} == Sm.Val{hf(w, v)} : Sm.R}, nv)
+        case Sm.Obs{o}:
+          nv => {==}
+        case Sm.Fired{at}:
+          nv => {==}
+        case Sm.Needs{p}:
+          nv => {==}
+        case Sm.Spent{}:
+          nv => {==}
+    case Sm.Obs{o}:
+      nv => {==}
+    case Sm.Fired{at}:
+      nv => {==}
+    case Sm.Needs{p}:
+      nv => {==}
+    case Sm.Spent{}:
+      nv => {==}
+
+# A set, and the strict if, once their parts are known, on the partial
+# input's run and the data's.
+law set_hstep:
+  for +g: Nat
+  for +pol: Sm.Pol
+  for +k: Nat
+  for re: Sm.R
+  for +rw: Sm.R
+  for ih: @j: Sm.Job -> @e2: Sm.W -> @r2: Sm.R -> {rhf(Sm.sem(g, pol, j), Sm.sem(Nat.add(g, k), pol, hj(j, e2, r2))) == Sm.sem(Nat.add(g, k), pol, hj(j, e2, r2)) : Sm.R}
+  {rhf(Sm.sem(g, pol, Sm.set.job(rw)), Sm.sem(Nat.add(g, k), pol, Sm.set.job(rhf(rw, re)))) == Sm.sem(Nat.add(g, k), pol, Sm.set.job(rhf(rw, re))) : Sm.R}
+
+def set_hstep(g, pol, k, re, rw, ih):
+  match re:
+    case Sm.Val{+v}:
+      match rw:
+        case Sm.Val{w}:
+          match w:
+            case Sm.WPair{c, +e}:
+              match c:
+                case Sm.WCode{+fi, +bd}:
+                  %hpair_split(Sm.WCode{fi, bd}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WCode{fi, bd}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  ih(Sm.JE{bd, e}, pe(e, v), Sm.Spent{})
+                case Sm.WGate{}:
+                  %hpair_split(Sm.WGate{}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WGate{}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  done_rel_h(g, k, pol, pol, Sm.gate.of(e), Sm.gate.of(hf(e, pe(e, v))))(gate_h(e, pe(e, v)))
+                case Sm.WAbort{+at}:
+                  %hpair_split(Sm.WAbort{at}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WAbort{at}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  done_rel_h(g, k, pol, pol, Sm.abort.of(at, e), Sm.abort.of(at, hf(e, pe(e, v))))(abort_h(at, e, pe(e, v)))
+                case Sm.WAborted{+at, +m}:
+                  %hpair_split(Sm.WAborted{at, m}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WAborted{at, m}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  %apply_habt(at, m, pc(Sm.WAborted{at, m}, v), hf(e, pe(e, v))) : {rhf(Sm.sem(g, pol, Sm.JDone{Sm.Val{Sm.WAborted{at, m}}}), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+                  done_rel_h(g, k, pol, pol, Sm.Val{Sm.WAborted{at, m}}, Sm.Val{hf(Sm.WAborted{at, m}, pc(Sm.WAborted{at, m}, v))})(val_habt(at, m, pc(Sm.WAborted{at, m}, v)))
+                case Sm.WMark{+at}:
+                  %hpair_split(Sm.WMark{at}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WMark{at}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  done_same_h(g, k, pol, pol, Sm.Val{Sm.WMark{at}})
+                case Sm.WHole{+p}:
+                  %hpair_split(Sm.WHole{p}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WHole{p}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  %hole_apply(doh(pc(Sm.WHole{p}, v)), pc(Sm.WHole{p}, v), p, hf(e, pe(e, v)))({==}) : {rhf(Sm.sem(g, pol, Sm.JDone{Sm.Val{Sm.WStuck{}}}), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+                  done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+                case Sm.WPair{+p, +q}:
+                  %hpair_split(Sm.WPair{p, q}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WPair{p, q}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  %apply_hpairs(p, q, pc(Sm.WPair{p, q}, v), hf(e, pe(e, v))) : {rhf(Sm.sem(g, pol, Sm.JDone{Sm.Val{Sm.WStuck{}}}), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+                  done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+                case Sm.WZero{}:
+                  %hpair_split(Sm.WZero{}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WZero{}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+                case Sm.WStuck{}:
+                  %hpair_split(Sm.WStuck{}, e, v) : {rhf(Sm.sem(g, pol, Sm.set.of(Sm.WPair{Sm.WStuck{}, e})), Sm.sem(Nat.add(g, k), pol, Sm.set.of(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.of(_)) : Sm.R}
+                  done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WHole{+p}:
+              %hole_set(doh(v), v, p)({==}) : {rhf(Sm.sem(g, pol, Sm.JDone{Sm.Val{Sm.WStuck{}}}), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WAborted{+at, +m}:
+              %set_habt(at, m, v) : {rhf(Sm.sem(g, pol, Sm.JDone{Sm.Val{Sm.WAborted{at, m}}}), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+              done_rel_h(g, k, pol, pol, Sm.Val{Sm.WAborted{at, m}}, Sm.Val{hf(Sm.WAborted{at, m}, v)})(val_habt(at, m, v))
+            case Sm.WMark{+at}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WMark{at}})
+            case Sm.WZero{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WCode{fi, y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WGate{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WAbort{at}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WStuck{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+        case Sm.Obs{o}:
+          done_nv_h(g, pol, Sm.Obs{o}, Sm.sem(Nat.add(g, k), pol, Sm.set.job(rhf(Sm.Obs{o}, Sm.Val{v}))))(Unit{})
+        case Sm.Fired{at}:
+          done_nv_h(g, pol, Sm.Fired{at}, Sm.sem(Nat.add(g, k), pol, Sm.set.job(rhf(Sm.Fired{at}, Sm.Val{v}))))(Unit{})
+        case Sm.Needs{p}:
+          done_nv_h(g, pol, Sm.Needs{p}, Sm.sem(Nat.add(g, k), pol, Sm.set.job(rhf(Sm.Needs{p}, Sm.Val{v}))))(Unit{})
+        case Sm.Spent{}:
+          done_nv_h(g, pol, Sm.Spent{}, Sm.sem(Nat.add(g, k), pol, Sm.set.job(rhf(Sm.Spent{}, Sm.Val{v}))))(Unit{})
+    case Sm.Obs{o}:
+      %rhf_nv(rw, Sm.Obs{o})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.set.job(rw)), Sm.sem(Nat.add(g, k), pol, Sm.set.job(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.job(_)) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.set.job(rw)), Nat.add(g, k), pol, Sm.Obs{o})(Unit{})
+    case Sm.Fired{at}:
+      %rhf_nv(rw, Sm.Fired{at})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.set.job(rw)), Sm.sem(Nat.add(g, k), pol, Sm.set.job(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.job(_)) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.set.job(rw)), Nat.add(g, k), pol, Sm.Fired{at})(Unit{})
+    case Sm.Needs{p}:
+      %rhf_nv(rw, Sm.Needs{p})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.set.job(rw)), Sm.sem(Nat.add(g, k), pol, Sm.set.job(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.job(_)) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.set.job(rw)), Nat.add(g, k), pol, Sm.Needs{p})(Unit{})
+    case Sm.Spent{}:
+      %rhf_nv(rw, Sm.Spent{})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.set.job(rw)), Sm.sem(Nat.add(g, k), pol, Sm.set.job(_))) == Sm.sem(Nat.add(g, k), pol, Sm.set.job(_)) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.set.job(rw)), Nat.add(g, k), pol, Sm.Spent{})(Unit{})
+
+law if_hstep:
+  for +g: Nat
+  for +pol: Sm.Pol
+  for +k: Nat
+  for re: Sm.R
+  for +rw: Sm.R
+  for +l: E.X
+  for +rt: E.X
+  for +ew: Sm.W
+  for +ee: Sm.W
+  for ih: @j: Sm.Job -> @e2: Sm.W -> @r2: Sm.R -> {rhf(Sm.sem(g, pol, j), Sm.sem(Nat.add(g, k), pol, hj(j, e2, r2))) == Sm.sem(Nat.add(g, k), pol, hj(j, e2, r2)) : Sm.R}
+  {rhf(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Sm.sem(Nat.add(g, k), pol, Sm.if.job(rhf(rw, re), l, rt, hf(ew, ee)))) == Sm.sem(Nat.add(g, k), pol, Sm.if.job(rhf(rw, re), l, rt, hf(ew, ee))) : Sm.R}
+
+def if_hstep(g, pol, k, re, rw, l, rt, ew, ee, ih):
+  match re:
+    case Sm.Val{+v}:
+      match rw:
+        case Sm.Val{w}:
+          match w:
+            case Sm.WZero{}:
+              ih(Sm.JE{l, ew}, ee, Sm.Spent{})
+            case Sm.WPair{+a, +b}:
+              %hpair_split(a, b, v) : {rhf(Sm.sem(g, pol, Sm.branch.of(Sm.WPair{a, b}, l, rt, ew)), Sm.sem(Nat.add(g, k), pol, Sm.branch.of(_, l, rt, hf(ew, ee)))) == Sm.sem(Nat.add(g, k), pol, Sm.branch.of(_, l, rt, hf(ew, ee))) : Sm.R}
+              ih(Sm.JE{rt, ew}, ee, Sm.Spent{})
+            case Sm.WAborted{+at, +m}:
+              %branch_habt(at, m, v, l, rt, hf(ew, ee)) : {rhf(Sm.sem(g, pol, Sm.JDone{Sm.Val{Sm.WAborted{at, m}}}), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+              done_rel_h(g, k, pol, pol, Sm.Val{Sm.WAborted{at, m}}, Sm.Val{hf(Sm.WAborted{at, m}, v)})(val_habt(at, m, v))
+            case Sm.WHole{+p}:
+              done_nv_h(g, pol, Sm.Needs{p}, Sm.sem(Nat.add(g, k), pol, Sm.branch.of(hf(Sm.WHole{p}, v), l, rt, hf(ew, ee))))(Unit{})
+            case Sm.WMark{+at}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WMark{at}})
+            case Sm.WCode{fi, y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WGate{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WAbort{at}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case Sm.WStuck{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+        case Sm.Obs{o}:
+          done_nv_h(g, pol, Sm.Obs{o}, Sm.sem(Nat.add(g, k), pol, Sm.if.job(rhf(Sm.Obs{o}, Sm.Val{v}), l, rt, hf(ew, ee))))(Unit{})
+        case Sm.Fired{at}:
+          done_nv_h(g, pol, Sm.Fired{at}, Sm.sem(Nat.add(g, k), pol, Sm.if.job(rhf(Sm.Fired{at}, Sm.Val{v}), l, rt, hf(ew, ee))))(Unit{})
+        case Sm.Needs{p}:
+          done_nv_h(g, pol, Sm.Needs{p}, Sm.sem(Nat.add(g, k), pol, Sm.if.job(rhf(Sm.Needs{p}, Sm.Val{v}), l, rt, hf(ew, ee))))(Unit{})
+        case Sm.Spent{}:
+          done_nv_h(g, pol, Sm.Spent{}, Sm.sem(Nat.add(g, k), pol, Sm.if.job(rhf(Sm.Spent{}, Sm.Val{v}), l, rt, hf(ew, ee))))(Unit{})
+    case Sm.Obs{o}:
+      %rhf_nv(rw, Sm.Obs{o})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee)))) == Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee))) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Nat.add(g, k), pol, Sm.Obs{o})(Unit{})
+    case Sm.Fired{at}:
+      %rhf_nv(rw, Sm.Fired{at})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee)))) == Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee))) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Nat.add(g, k), pol, Sm.Fired{at})(Unit{})
+    case Sm.Needs{p}:
+      %rhf_nv(rw, Sm.Needs{p})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee)))) == Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee))) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Nat.add(g, k), pol, Sm.Needs{p})(Unit{})
+    case Sm.Spent{}:
+      %rhf_nv(rw, Sm.Spent{})(Unit{}) : {rhf(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee)))) == Sm.sem(Nat.add(g, k), pol, Sm.if.job(_, l, rt, hf(ew, ee))) : Sm.R}
+      m_done_nv_h(Sm.sem(g, pol, Sm.if.job(rw, l, rt, ew)), Nat.add(g, k), pol, Sm.Spent{})(Unit{})
+
+law setenv_hj:
+  for m: Maybe<&2, Sm.If>
+  for y: E.X
+  for ew: Sm.W
+  for ee: Sm.W
+  for re: Sm.R
+  {hj(Sm.setenv.of(m, y, ew), ee, re) == Sm.setenv.of(m, y, hf(ew, ee)) : Sm.Job}
+
+def setenv_hj(m, y, ew, ee, re):
+  match m:
+    case Some{i}:
+      match i:
+        case Sm.If{s, l, rt}:
+          {==}
+    case None{}:
+      {==}
+
+law check_hj:
+  for h: Sm.How
+  for site: U32
+  for tc: E.X
+  for c: E.X
+  for ew: Sm.W
+  for ee: Sm.W
+  for re: Sm.R
+  {hj(Sm.check.of(h, site, tc, c, ew), ee, re) == Sm.check.of(h, site, tc, c, hf(ew, ee)) : Sm.Job}
+
+def check_hj(h, site, tc, c, ew, ee, re):
+  match h:
+    case Sm.Kept{}:
+      {==}
+    case Sm.Gone{}:
+      {==}
+    case Sm.Watched{}:
+      {==}
+
+law stub_h:
+  for +g: Nat
+  for +pol: Sm.Pol
+  for +k: Nat
+  for m: Sm.Mode
+  for +tok: U32
+  for +ew: Sm.W
+  for +ee: Sm.W
+  for ih: @j: Sm.Job -> @e2: Sm.W -> @r2: Sm.R -> {rhf(Sm.sem(g, pol, j), Sm.sem(Nat.add(g, k), pol, hj(j, e2, r2))) == Sm.sem(Nat.add(g, k), pol, hj(j, e2, r2)) : Sm.R}
+  {rhf(Sm.sem(g, pol, Sm.stub.of(m, tok, ew)), Sm.sem(Nat.add(g, k), pol, Sm.stub.of(m, tok, hf(ew, ee)))) == Sm.sem(Nat.add(g, k), pol, Sm.stub.of(m, tok, hf(ew, ee))) : Sm.R}
+
+def stub_h(g, pol, k, m, tok, ew, ee, ih):
+  match m:
+    case Sm.Watch{}:
+      done_same_h(g, k, pol, pol, Sm.Val{Sm.WMark{E.AtRecursion{tok}}})
+    case Sm.Erase{}:
+      done_same_h(g, k, pol, pol, Sm.Val{Sm.WZero{}})
+    case Sm.Limit{}:
+      ih(Sm.JE{E.limit(tok), ew}, ee, Sm.Spent{})
+
+# The partial input's run against the data's, on the same policy: where
+# the partial one gives a value, the data's gives one it stands for.
+law hs:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for jp: Sm.Job
+  for +ee: Sm.W
+  for +re: Sm.R
+  for +k: Nat
+  {rhf(Sm.sem(f, pol, jp), Sm.sem(Nat.add(f, k), pol, hj(jp, ee, re))) == Sm.sem(Nat.add(f, k), pol, hj(jp, ee, re)) : Sm.R}
+
+def hs(f, pol, jp, ee, re, k):
+  match f:
+    case 0n:
+      {==}
+    case 1n+g:
+      match jp:
+        case Sm.JE{x, +ew}:
+          match x:
+            case E.XZero{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WZero{}})
+            case E.XPair{a, b}:
+              hs(g, pol, Sm.JPair{a, b, ew}, ee, re, k)
+            case E.XEnv{}:
+              hs(g, pol, Sm.JDone{Sm.Val{ew}}, ee, Sm.Val{ee}, k)
+            case E.XSetEnv{+y}:
+              %setenv_hj(Sm.if.of(y), y, ew, ee, re) : {rhf(Sm.sem(g, pol, Sm.setenv.of(Sm.if.of(y), y, ew)), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+              hs(g, pol, Sm.setenv.of(Sm.if.of(y), y, ew), ee, re, k)
+            case E.XDefer{fi, b}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WCode{fi, b}})
+            case E.XGate{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WGate{}})
+            case E.XLeft{y}:
+              hs(g, pol, Sm.JLeft{y, ew}, ee, re, k)
+            case E.XRight{y}:
+              hs(g, pol, Sm.JRight{y, ew}, ee, re, k)
+            case E.XAbort{at}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WAbort{at}})
+            case E.XAborted{at, m}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WAborted{at, Sm.odata(m)}})
+            case E.XEither{n, a, b}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XTest{tok, y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XStub{+tok, y}:
+              stub_h(g, pol, k, Sm.pol.mode(pol), tok, ew, ee, j => e2 => r2 => hs(g, pol, j, e2, r2, k))
+            case E.XStage{sr, y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XCheck{+site, +tc, +c}:
+              %check_hj(Sm.check.how(pol, site), site, tc, c, ew, ee, re) : {rhf(Sm.sem(g, pol, Sm.check.of(Sm.check.how(pol, site), site, tc, c, ew)), Sm.sem(Nat.add(g, k), pol, _)) == Sm.sem(Nat.add(g, k), pol, _) : Sm.R}
+              hs(g, pol, Sm.check.of(Sm.check.how(pol, site), site, tc, c, ew), ee, re, k)
+            case E.XStep{tok, n, y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XVar{p}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WHole{p}})
+            case E.XAny{}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XBarrier{y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XLefts{n, y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XRights{n, y}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+            case E.XError{msg}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
+        case Sm.JPair{+a, +b, +ew}:
+          pair_h(Sm.sem(g, pol, Sm.JE{a, ew}), Sm.sem(Nat.add(g, k), pol, Sm.JE{a, hf(ew, ee)}), Sm.sem(g, pol, Sm.JE{b, ew}), Sm.sem(Nat.add(g, k), pol, Sm.JE{b, hf(ew, ee)}))(hs(g, pol, Sm.JE{a, ew}, ee, re, k))(hs(g, pol, Sm.JE{b, ew}, ee, re, k))
+        case Sm.JSetE{+y, +ew}:
+          %hs(g, pol, Sm.JE{y, ew}, ee, re, k) : {rhf(Sm.sem(g, pol, Sm.JSet{Sm.sem(g, pol, Sm.JE{y, ew})}), Sm.sem(Nat.add(g, k), pol, Sm.JSet{_})) == Sm.sem(Nat.add(g, k), pol, Sm.JSet{_}) : Sm.R}
+          hs(g, pol, Sm.JSet{Sm.sem(g, pol, Sm.JE{y, ew})}, ee, Sm.sem(Nat.add(g, k), pol, Sm.JE{y, hf(ew, ee)}), k)
+        case Sm.JSet{rw}:
+          set_hstep(g, pol, k, re, rw, j => e2 => r2 => hs(g, pol, j, e2, r2, k))
+        case Sm.JIfE{+s, +l, +rt, +ew}:
+          %hs(g, pol, Sm.JE{s, ew}, ee, re, k) : {rhf(Sm.sem(g, pol, Sm.JIf{Sm.sem(g, pol, Sm.JE{s, ew}), l, rt, ew}), Sm.sem(Nat.add(g, k), pol, Sm.JIf{_, l, rt, hf(ew, ee)})) == Sm.sem(Nat.add(g, k), pol, Sm.JIf{_, l, rt, hf(ew, ee)}) : Sm.R}
+          hs(g, pol, Sm.JIf{Sm.sem(g, pol, Sm.JE{s, ew}), l, rt, ew}, ee, Sm.sem(Nat.add(g, k), pol, Sm.JE{s, hf(ew, ee)}), k)
+        case Sm.JIf{rw, +l, +rt, +ew}:
+          if_hstep(g, pol, k, re, rw, l, rt, ew, ee, j => e2 => r2 => hs(g, pol, j, e2, r2, k))
+        case Sm.JLeft{+y, +ew}:
+          left_r_h(Sm.sem(g, pol, Sm.JE{y, ew}), Sm.sem(Nat.add(g, k), pol, Sm.JE{y, hf(ew, ee)}))(hs(g, pol, Sm.JE{y, ew}, ee, re, k))
+        case Sm.JRight{+y, +ew}:
+          right_r_h(Sm.sem(g, pol, Sm.JE{y, ew}), Sm.sem(Nat.add(g, k), pol, Sm.JE{y, hf(ew, ee)}))(hs(g, pol, Sm.JE{y, ew}, ee, re, k))
+        case Sm.JWatch{+site, +tc, +c, +ew}:
+          checked_h(site, Sm.sem(Nat.add(g, k), pol, Sm.JE{E.app(tc, c), hf(ew, ee)}), Sm.sem(g, pol, Sm.JE{E.app(tc, c), ew}), Sm.sem(Nat.add(g, k), pol, Sm.JE{c, hf(ew, ee)}), Sm.sem(g, pol, Sm.JE{c, ew}))(hs(g, pol, Sm.JE{E.app(tc, c), ew}, ee, re, k))(hs(g, pol, Sm.JE{c, ew}, ee, re, k))
+        case Sm.JDone{+rw}:
+          rhf_idem(rw, re)
+
+
+# A run gives no firing
+# ---------------------
+#
+# Only readback fires: sem never answers Fired.
+
+def nofi(r: Sm.R) -> Data:
+  match r:
+    case Sm.Fired{at}:
+      Empty
+    case _:
+      Unit
+
+def cleanf(j: Sm.Job) -> Data:
+  match j:
+    case Sm.JSet{r}:
+      nofi(r)
+    case Sm.JIf{r, l, rt, env}:
+      nofi(r)
+    case Sm.JDone{r}:
+      nofi(r)
+    case _:
+      Unit
+
+law pair_nofi:
+  for a: Sm.R
+  for b: Sm.R
+  nofi(a) -> nofi(b) -> nofi(Sm.pair.of(a, b))
+
+def pair_nofi(a, b):
+  match a:
+    case Sm.Val{x}:
+      match b:
+        case Sm.Val{y}:
+          ha => hb => Unit{}
+        case Sm.Obs{o}:
+          ha => hb => hb
+        case Sm.Fired{at}:
+          ha => hb => hb
+        case Sm.Needs{p}:
+          ha => hb => hb
+        case Sm.Spent{}:
+          ha => hb => hb
+    case Sm.Obs{o}:
+      ha => hb => ha
+    case Sm.Fired{at}:
+      ha => hb => ha
+    case Sm.Needs{p}:
+      ha => hb => ha
+    case Sm.Spent{}:
+      ha => hb => ha
+
+law left_nofi:
+  for w: Sm.W
+  nofi(Sm.left.of(w))
+
+def left_nofi(w):
+  match w:
+    case Sm.WZero{}:
+      Unit{}
+    case Sm.WPair{a, b}:
+      Unit{}
+    case Sm.WCode{fi, y}:
+      Unit{}
+    case Sm.WGate{}:
+      Unit{}
+    case Sm.WAbort{at}:
+      Unit{}
+    case Sm.WAborted{at, m}:
+      Unit{}
+    case Sm.WStuck{}:
+      Unit{}
+    case Sm.WHole{p}:
+      Unit{}
+    case Sm.WMark{at}:
+      Unit{}
+
+law right_nofi:
+  for w: Sm.W
+  nofi(Sm.right.of(w))
+
+def right_nofi(w):
+  match w:
+    case Sm.WZero{}:
+      Unit{}
+    case Sm.WPair{a, b}:
+      Unit{}
+    case Sm.WCode{fi, y}:
+      Unit{}
+    case Sm.WGate{}:
+      Unit{}
+    case Sm.WAbort{at}:
+      Unit{}
+    case Sm.WAborted{at, m}:
+      Unit{}
+    case Sm.WStuck{}:
+      Unit{}
+    case Sm.WHole{p}:
+      Unit{}
+    case Sm.WMark{at}:
+      Unit{}
+
+law leftr_nofi:
+  for r: Sm.R
+  nofi(r) -> nofi(Sm.left.r(r))
+
+def leftr_nofi(r):
+  match r:
+    case Sm.Val{w}:
+      h => left_nofi(w)
+    case Sm.Obs{o}:
+      h => h
+    case Sm.Fired{at}:
+      h => h
+    case Sm.Needs{p}:
+      h => h
+    case Sm.Spent{}:
+      h => h
+
+law rightr_nofi:
+  for r: Sm.R
+  nofi(r) -> nofi(Sm.right.r(r))
+
+def rightr_nofi(r):
+  match r:
+    case Sm.Val{w}:
+      h => right_nofi(w)
+    case Sm.Obs{o}:
+      h => h
+    case Sm.Fired{at}:
+      h => h
+    case Sm.Needs{p}:
+      h => h
+    case Sm.Spent{}:
+      h => h
+
+law checked_nofi:
+  for site: U32
+  for t: Sm.R
+  for c: Sm.R
+  nofi(t) -> nofi(c) -> nofi(Sm.checked(site, t, c))
+
+def checked_nofi(site, t, c):
+  match t:
+    case Sm.Val{w}:
+      match w:
+        case Sm.WZero{}:
+          ht => hc => hc
+        case Sm.WPair{a, b}:
+          ht => hc => Unit{}
+        case Sm.WCode{fi, y}:
+          ht => hc => Unit{}
+        case Sm.WGate{}:
+          ht => hc => Unit{}
+        case Sm.WAbort{at}:
+          ht => hc => Unit{}
+        case Sm.WAborted{at, m}:
+          ht => hc => Unit{}
+        case Sm.WStuck{}:
+          ht => hc => Unit{}
+        case Sm.WHole{p}:
+          ht => hc => Unit{}
+        case Sm.WMark{at}:
+          ht => hc => Unit{}
+    case Sm.Obs{o}:
+      ht => hc => ht
+    case Sm.Fired{at}:
+      ht => hc => ht
+    case Sm.Needs{p}:
+      ht => hc => ht
+    case Sm.Spent{}:
+      ht => hc => ht
+
+law gate_nofi:
+  for e: Sm.W
+  nofi(Sm.gate.of(e))
+
+def gate_nofi(e):
+  match e:
+    case Sm.WZero{}:
+      Unit{}
+    case Sm.WPair{a, b}:
+      Unit{}
+    case Sm.WCode{fi, y}:
+      Unit{}
+    case Sm.WGate{}:
+      Unit{}
+    case Sm.WAbort{at}:
+      Unit{}
+    case Sm.WAborted{at, m}:
+      Unit{}
+    case Sm.WStuck{}:
+      Unit{}
+    case Sm.WHole{p}:
+      Unit{}
+    case Sm.WMark{at}:
+      Unit{}
+
+law aborted_nofi:
+  for at: E.Site
+  for r: Sm.R
+  isobs(r) -> nofi(Sm.aborted.of(at, r))
+
+def aborted_nofi(at, r):
+  match r:
+    case Sm.Obs{o}:
+      h => Unit{}
+    case Sm.Val{w}:
+      h => Empty.absurd(nofi(Sm.Val{w}), h)
+    case Sm.Fired{a2}:
+      h => Empty.absurd(nofi(Sm.Fired{a2}), h)
+    case Sm.Needs{p}:
+      h => Unit{}
+    case Sm.Spent{}:
+      h => Unit{}
+
+law marked_nofi:
+  for m: Maybe<&2, E.Site>
+  for r: Sm.R
+  nofi(r) -> nofi(Sm.marked.or(m, r))
+
+def marked_nofi(m, r):
+  match m:
+    case Some{s}:
+      h => Unit{}
+    case None{}:
+      h => h
+
+law abort_pair_nofi:
+  for +at: E.Site
+  for +a: Sm.W
+  for +b: Sm.W
+  for m: Maybe<&2, E.Site>
+  {m == Sm.mark.in(Sm.WPair{a, b}) : Maybe<&2, E.Site>} -> nofi(Sm.marked.or(Sm.mark.in(Sm.WPair{a, b}), Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b}))))
+
+def abort_pair_nofi(at, a, b, m):
+  match m:
+    case Some{s}:
+      h => (%h : nofi(Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b})))); Unit{})
+    case None{}:
+      +h => (%h : nofi(Sm.marked.or(_, Sm.aborted.of(at, Sm.read(True{}, Sm.WPair{a, b})))); aborted_nofi(at, Sm.read(True{}, Sm.WPair{a, b}))(nomark_obs(True{}, Sm.WPair{a, b})(h)))
+
+law abort_nofi:
+  for +at: E.Site
+  for e: Sm.W
+  nofi(Sm.abort.of(at, e))
+
+def abort_nofi(at, e):
+  match e:
+    case Sm.WPair{+a, +b}:
+      abort_pair_nofi(at, a, b, Sm.mark.in(Sm.WPair{a, b}))({==})
+    case Sm.WZero{}:
+      Unit{}
+    case Sm.WCode{fi, y}:
+      Unit{}
+    case Sm.WGate{}:
+      Unit{}
+    case Sm.WAbort{at}:
+      Unit{}
+    case Sm.WAborted{at, m}:
+      Unit{}
+    case Sm.WStuck{}:
+      Unit{}
+    case Sm.WHole{p}:
+      Unit{}
+    case Sm.WMark{at}:
+      Unit{}
+
+law cleanf_apply:
+  for c: Sm.W
+  for e: Sm.W
+  cleanf(Sm.apply.of(c, e))
+
+def cleanf_apply(c, e):
+  match c:
+    case Sm.WGate{}:
+      gate_nofi(e)
+    case Sm.WAbort{at}:
+      abort_nofi(at, e)
+    case Sm.WZero{}:
+      Unit{}
+    case Sm.WPair{a, b}:
+      Unit{}
+    case Sm.WCode{fi, y}:
+      Unit{}
+    case Sm.WAborted{at, m}:
+      Unit{}
+    case Sm.WStuck{}:
+      Unit{}
+    case Sm.WHole{p}:
+      Unit{}
+    case Sm.WMark{at}:
+      Unit{}
+
+law cleanf_setof:
+  for w: Sm.W
+  cleanf(Sm.set.of(w))
+
+def cleanf_setof(w):
+  match w:
+    case Sm.WPair{c, e}:
+      cleanf_apply(c, e)
+    case Sm.WZero{}:
+      Unit{}
+    case Sm.WCode{fi, y}:
+      Unit{}
+    case Sm.WGate{}:
+      Unit{}
+    case Sm.WAbort{at}:
+      Unit{}
+    case Sm.WAborted{at, m}:
+      Unit{}
+    case Sm.WStuck{}:
+      Unit{}
+    case Sm.WHole{p}:
+      Unit{}
+    case Sm.WMark{at}:
+      Unit{}
+
+law cleanf_set:
+  for r: Sm.R
+  nofi(r) -> cleanf(Sm.set.job(r))
+
+def cleanf_set(r):
+  match r:
+    case Sm.Val{w}:
+      h => cleanf_setof(w)
+    case Sm.Obs{o}:
+      h => h
+    case Sm.Fired{at}:
+      h => h
+    case Sm.Needs{p}:
+      h => h
+    case Sm.Spent{}:
+      h => h
+
+law cleanf_branch:
+  for w: Sm.W
+  for l: E.X
+  for rt: E.X
+  for env: Sm.W
+  cleanf(Sm.branch.of(w, l, rt, env))
+
+def cleanf_branch(w, l, rt, env):
+  match w:
+    case Sm.WZero{}:
+      Unit{}
+    case Sm.WPair{a, b}:
+      Unit{}
+    case Sm.WCode{fi, y}:
+      Unit{}
+    case Sm.WGate{}:
+      Unit{}
+    case Sm.WAbort{at}:
+      Unit{}
+    case Sm.WAborted{at, m}:
+      Unit{}
+    case Sm.WStuck{}:
+      Unit{}
+    case Sm.WHole{p}:
+      Unit{}
+    case Sm.WMark{at}:
+      Unit{}
+
+law cleanf_if:
+  for r: Sm.R
+  for l: E.X
+  for rt: E.X
+  for env: Sm.W
+  nofi(r) -> cleanf(Sm.if.job(r, l, rt, env))
+
+def cleanf_if(r, l, rt, env):
+  match r:
+    case Sm.Val{w}:
+      h => cleanf_branch(w, l, rt, env)
+    case Sm.Obs{o}:
+      h => h
+    case Sm.Fired{at}:
+      h => h
+    case Sm.Needs{p}:
+      h => h
+    case Sm.Spent{}:
+      h => h
+
+law cleanf_setenv:
+  for m: Maybe<&2, Sm.If>
+  for y: E.X
+  for env: Sm.W
+  cleanf(Sm.setenv.of(m, y, env))
+
+def cleanf_setenv(m, y, env):
+  match m:
+    case Some{i}:
+      match i:
+        case Sm.If{s, l, rt}:
+          Unit{}
+    case None{}:
+      Unit{}
+
+law cleanf_checkof:
+  for h: Sm.How
+  for site: U32
+  for tc: E.X
+  for c: E.X
+  for env: Sm.W
+  cleanf(Sm.check.of(h, site, tc, c, env))
+
+def cleanf_checkof(h, site, tc, c, env):
+  match h:
+    case Sm.Kept{}:
+      Unit{}
+    case Sm.Gone{}:
+      Unit{}
+    case Sm.Watched{}:
+      Unit{}
+
+law cleanf_stub:
+  for m: Sm.Mode
+  for tok: U32
+  for env: Sm.W
+  cleanf(Sm.stub.of(m, tok, env))
+
+def cleanf_stub(m, tok, env):
+  match m:
+    case Sm.Watch{}:
+      Unit{}
+    case Sm.Erase{}:
+      Unit{}
+    case Sm.Limit{}:
+      Unit{}
+
+law cleanf_step:
+  for +pol: Sm.Pol
+  for x: E.X
+  for +env: Sm.W
+  cleanf(Sm.step(pol, x, env))
+
+def cleanf_step(pol, x, env):
+  match x:
+    case E.XSetEnv{+y}:
+      cleanf_setenv(Sm.if.of(y), y, env)
+    case E.XCheck{+site, tc, c}:
+      cleanf_checkof(Sm.check.how(pol, site), site, tc, c, env)
+    case E.XStub{+tok, y}:
+      cleanf_stub(Sm.pol.mode(pol), tok, env)
+    case E.XZero{}:
+      Unit{}
+    case E.XPair{a, b}:
+      Unit{}
+    case E.XEnv{}:
+      Unit{}
+    case E.XDefer{fi, b}:
+      Unit{}
+    case E.XGate{}:
+      Unit{}
+    case E.XLeft{y}:
+      Unit{}
+    case E.XRight{y}:
+      Unit{}
+    case E.XAbort{at}:
+      Unit{}
+    case E.XAborted{at, m}:
+      Unit{}
+    case E.XEither{n, a, b}:
+      Unit{}
+    case E.XTest{tok, y}:
+      Unit{}
+    case E.XStage{sr, y}:
+      Unit{}
+    case E.XStep{tok, n, y}:
+      Unit{}
+    case E.XVar{p}:
+      Unit{}
+    case E.XAny{}:
+      Unit{}
+    case E.XBarrier{y}:
+      Unit{}
+    case E.XLefts{n, y}:
+      Unit{}
+    case E.XRights{n, y}:
+      Unit{}
+    case E.XError{msg}:
+      Unit{}
+
+law no_fired:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for job: Sm.Job
+  cleanf(job) -> nofi(Sm.sem(fuel, pol, job))
+
+def no_fired(fuel, pol, job):
+  match fuel:
+    case 0n:
+      c => Unit{}
+    case 1n+f:
+      match job:
+        case Sm.JE{+x, +env}:
+          c => no_fired(f, pol, Sm.step(pol, x, env))(cleanf_step(pol, x, env))
+        case Sm.JPair{+a, +b, +env}:
+          c => pair_nofi(Sm.sem(f, pol, Sm.JE{a, env}), Sm.sem(f, pol, Sm.JE{b, env}))(no_fired(f, pol, Sm.JE{a, env})(Unit{}))(no_fired(f, pol, Sm.JE{b, env})(Unit{}))
+        case Sm.JSetE{+y, +env}:
+          c => no_fired(f, pol, Sm.JSet{Sm.sem(f, pol, Sm.JE{y, env})})(no_fired(f, pol, Sm.JE{y, env})(Unit{}))
+        case Sm.JSet{+r}:
+          c => no_fired(f, pol, Sm.set.job(r))(cleanf_set(r)(c))
+        case Sm.JIfE{+s, +l, +rt, +env}:
+          c => no_fired(f, pol, Sm.JIf{Sm.sem(f, pol, Sm.JE{s, env}), l, rt, env})(no_fired(f, pol, Sm.JE{s, env})(Unit{}))
+        case Sm.JIf{+r, +l, +rt, +env}:
+          c => no_fired(f, pol, Sm.if.job(r, l, rt, env))(cleanf_if(r, l, rt, env)(c))
+        case Sm.JLeft{+y, +env}:
+          c => leftr_nofi(Sm.sem(f, pol, Sm.JE{y, env}))(no_fired(f, pol, Sm.JE{y, env})(Unit{}))
+        case Sm.JRight{+y, +env}:
+          c => rightr_nofi(Sm.sem(f, pol, Sm.JE{y, env}))(no_fired(f, pol, Sm.JE{y, env})(Unit{}))
+        case Sm.JWatch{+site, +tc, +c2, +env}:
+          c => checked_nofi(site, Sm.sem(f, pol, Sm.JE{E.app(tc, c2), env}), Sm.sem(f, pol, Sm.JE{c2, env}))(no_fired(f, pol, Sm.JE{E.app(tc, c2), env})(Unit{}))(no_fired(f, pol, Sm.JE{c2, env})(Unit{}))
+        case Sm.JDone{r}:
+          c => c
+
+# The input
+# ---------
+
+# refines(i, d): d is one of the inputs the partial input i stands for.
+def refines(i: E.X, d: Co.D) -> Bool:
+  match i:
+    case E.XVar{p}:
+      True{}
+    case E.XZero{}:
+      match d:
+        case Co.DZero{}:
+          True{}
+        case Co.DPair{a, b}:
+          False{}
+    case E.XPair{a, b}:
+      match d:
+        case Co.DPair{x, y}:
+          Bool.and(refines(a, x), refines(b, y))
+        case Co.DZero{}:
+          False{}
+    case _:
+      False{}
+
+def istrue(b: Bool) -> Data:
+  match b:
+    case True{}:
+      Unit
+    case False{}:
+      Empty
+
+law istrue_eq:
+  for b: Bool
+  istrue(b) -> {True{} == b : Bool}
+
+def istrue_eq(b):
+  match b:
+    case True{}:
+      h => {==}
+    case False{}:
+      h => Empty.absurd({True{} == False{} : Bool}, h)
+
+# What data evaluates to: data, or no value yet.
+def datar(r: Sm.R) -> Data:
+  match r:
+    case Sm.Val{v}:
+      istrue(doh(v))
+    case Sm.Spent{}:
+      Unit
+    case _:
+      Empty
+
+law pair_datar:
+  for ra: Sm.R
+  for rb: Sm.R
+  datar(ra) -> datar(rb) -> datar(Sm.pair.of(ra, rb))
+
+def pair_datar(ra, rb):
+  match ra:
+    case Sm.Val{+x}:
+      match rb:
+        case Sm.Val{+y}:
+          ha => hb =>
+            (%istrue_eq(doh(x))(ha) : istrue(Bool.and(_, doh(y)));
+             %istrue_eq(doh(y))(hb) : istrue(Bool.and(True{}, _));
+             Unit{})
+        case Sm.Spent{}:
+          ha => hb => Unit{}
+        case Sm.Obs{o}:
+          ha => hb => hb
+        case Sm.Fired{at}:
+          ha => hb => hb
+        case Sm.Needs{p}:
+          ha => hb => hb
+    case Sm.Spent{}:
+      ha => hb => Unit{}
+    case Sm.Obs{o}:
+      ha => hb => ha
+    case Sm.Fired{at}:
+      ha => hb => ha
+    case Sm.Needs{p}:
+      ha => hb => ha
+
+law data_eval:
+  for d: Co.D
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +env: Sm.W
+  datar(Sm.sem(f, pol, Sm.JE{Sm.of.data(d), env}))
+
+def data_eval(d, f, pol, env):
+  match d:
+    case Co.DZero{}:
+      match f:
+        case 0n:
+          Unit{}
+        case 1n+g:
+          match g:
+            case 0n:
+              Unit{}
+            case 1n+h:
+              Unit{}
+    case Co.DPair{+a, +b}:
+      match f:
+        case 0n:
+          Unit{}
+        case 1n+g:
+          match g:
+            case 0n:
+              Unit{}
+            case 1n+h:
+              pair_datar(Sm.sem(h, pol, Sm.JE{Sm.of.data(a), env}), Sm.sem(h, pol, Sm.JE{Sm.of.data(b), env}))(data_eval(a, h, pol, env))(data_eval(b, h, pol, env))
+
+law hole_datar:
+  for +p: String
+  for r: Sm.R
+  datar(r) -> {rhf(Sm.Val{Sm.WHole{p}}, r) == r : Sm.R}
+
+def hole_datar(p, r):
+  match r:
+    case Sm.Val{+v}:
+      h => (%istrue_eq(doh(v))(h) : {Sm.Val{hole.or(_, v, p)} == Sm.Val{v} : Sm.R}; {==})
+    case Sm.Spent{}:
+      h => {==}
+    case Sm.Obs{o}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{p}}, Sm.Obs{o}) == Sm.Obs{o} : Sm.R}, h)
+    case Sm.Fired{at}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{p}}, Sm.Fired{at}) == Sm.Fired{at} : Sm.R}, h)
+    case Sm.Needs{p}:
+      h => Empty.absurd({rhf(Sm.Val{Sm.WHole{p}}, Sm.Needs{p}) == Sm.Needs{p} : Sm.R}, h)
+
+# The partial input and the data it stands for, evaluated.
+law in_rel:
+  for i: E.X
+  for +d: Co.D
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +env: Sm.W
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JE{i, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}
+
+def in_rel(i, d, f, pol, env, k):
+  match i:
+    case E.XVar{+p}:
+      match f:
+        case 0n:
+          hr => {==}
+        case 1n+g:
+          match g:
+            case 0n:
+              hr => {==}
+            case 1n+h:
+              hr => hole_datar(p, Sm.sem(Nat.add(1n+1n+h, k), pol, Sm.JE{Sm.of.data(d), env}))(data_eval(d, Nat.add(1n+1n+h, k), pol, env))
+    case E.XZero{}:
+      match d:
+        case Co.DZero{}:
+          match f:
+            case 0n:
+              hr => {==}
+            case 1n+g:
+              hr => done_same_h(g, k, pol, pol, Sm.Val{Sm.WZero{}})
+        case Co.DPair{x, y}:
+          hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XZero{}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(Co.DPair{x, y}), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(Co.DPair{x, y}), env}) : Sm.R}, false_true(hr))
+    case E.XPair{+a, +b}:
+      match d:
+        case Co.DPair{+x, +y}:
+          match f:
+            case 0n:
+              hr => {==}
+            case 1n+g:
+              match g:
+                case 0n:
+                  hr => {==}
+                case 1n+h:
+                  +hr => pair_h(Sm.sem(h, pol, Sm.JE{a, env}), Sm.sem(Nat.add(h, k), pol, Sm.JE{Sm.of.data(x), env}), Sm.sem(h, pol, Sm.JE{b, env}), Sm.sem(Nat.add(h, k), pol, Sm.JE{Sm.of.data(y), env}))(in_rel(a, x, h, pol, env, k)(and_l(refines(a, x), refines(b, y))(hr)))(in_rel(b, y, h, pol, env, k)(and_r(refines(a, x), refines(b, y))(hr)))
+        case Co.DZero{}:
+          hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XPair{a, b}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XZero{}, env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XZero{}, env}) : Sm.R}, false_true(hr))
+    case E.XEnv{}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XEnv{}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XSetEnv{y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XSetEnv{y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XDefer{fi, b}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XDefer{fi, b}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XGate{}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XGate{}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XLeft{y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XLeft{y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XRight{y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XRight{y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XAbort{at}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XAbort{at}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XAborted{at, m}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XAborted{at, m}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XEither{n, a, b}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XEither{n, a, b}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XTest{tok, y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XTest{tok, y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XStub{tok, y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XStub{tok, y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XStage{sr, y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XStage{sr, y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XCheck{site, tc, c}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XCheck{site, tc, c}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XStep{tok, n, y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XStep{tok, n, y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XAny{}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XAny{}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XBarrier{y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XBarrier{y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XLefts{n, y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XLefts{n, y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XRights{n, y}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XRights{n, y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XError{msg}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XError{msg}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+
+# main applied to the partial input, and to the data, job by job.
+law app7:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JPair{i, x, Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JPair{Sm.of.data(d), x, Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JPair{Sm.of.data(d), x, Sm.WZero{}}) : Sm.R}
+
+def app7(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr => pair_h(Sm.sem(g, pol, Sm.JE{i, Sm.WZero{}}), Sm.sem(Nat.add(g, k), pol, Sm.JE{Sm.of.data(d), Sm.WZero{}}), Sm.sem(g, pol, Sm.JE{x, Sm.WZero{}}), Sm.sem(Nat.add(g, k), pol, Sm.JE{x, Sm.WZero{}}))(in_rel(i, d, g, pol, Sm.WZero{}, k)(hr))(hs(g, pol, Sm.JE{x, Sm.WZero{}}, Sm.WZero{}, Sm.Spent{}, k))
+
+law app6:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JE{E.XPair{i, x}, Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XPair{Sm.of.data(d), x}, Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XPair{Sm.of.data(d), x}, Sm.WZero{}}) : Sm.R}
+
+def app6(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr => app7(g, pol, x, i, d, k)(hr)
+
+law app5:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JPair{E.twiddle(), E.XPair{i, x}, Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JPair{E.twiddle(), E.XPair{Sm.of.data(d), x}, Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JPair{E.twiddle(), E.XPair{Sm.of.data(d), x}, Sm.WZero{}}) : Sm.R}
+
+def app5(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr => pair_h(Sm.sem(g, pol, Sm.JE{E.twiddle(), Sm.WZero{}}), Sm.sem(Nat.add(g, k), pol, Sm.JE{E.twiddle(), Sm.WZero{}}), Sm.sem(g, pol, Sm.JE{E.XPair{i, x}, Sm.WZero{}}), Sm.sem(Nat.add(g, k), pol, Sm.JE{E.XPair{Sm.of.data(d), x}, Sm.WZero{}}))(hs(g, pol, Sm.JE{E.twiddle(), Sm.WZero{}}, Sm.WZero{}, Sm.Spent{}, k))(app6(g, pol, x, i, d, k)(hr))
+
+law app4:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JE{E.XPair{E.twiddle(), E.XPair{i, x}}, Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}, Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}, Sm.WZero{}}) : Sm.R}
+
+def app4(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr => app5(g, pol, x, i, d, k)(hr)
+
+law app3:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JSetE{E.XPair{E.twiddle(), E.XPair{i, x}}, Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JSetE{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}, Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JSetE{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}, Sm.WZero{}}) : Sm.R}
+
+def app3(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr =>
+        (%app4(g, pol, x, i, d, k)(hr) : {rhf(Sm.sem(g, pol, Sm.JSet{Sm.sem(g, pol, Sm.JE{E.XPair{E.twiddle(), E.XPair{i, x}}, Sm.WZero{}})}), Sm.sem(Nat.add(g, k), pol, Sm.JSet{_})) == Sm.sem(Nat.add(g, k), pol, Sm.JSet{_}) : Sm.R};
+         hs(g, pol, Sm.JSet{Sm.sem(g, pol, Sm.JE{E.XPair{E.twiddle(), E.XPair{i, x}}, Sm.WZero{}})}, Sm.WZero{}, Sm.sem(Nat.add(g, k), pol, Sm.JE{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}, Sm.WZero{}}), k))
+
+law app2:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{i, x}}}, Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}}, Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}}, Sm.WZero{}}) : Sm.R}
+
+def app2(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr => app3(g, pol, x, i, d, k)(hr)
+
+law app1:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JSetE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{i, x}}}, Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JSetE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}}, Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JSetE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}}, Sm.WZero{}}) : Sm.R}
+
+def app1(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr =>
+        (%app2(g, pol, x, i, d, k)(hr) : {rhf(Sm.sem(g, pol, Sm.JSet{Sm.sem(g, pol, Sm.JE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{i, x}}}, Sm.WZero{}})}), Sm.sem(Nat.add(g, k), pol, Sm.JSet{_})) == Sm.sem(Nat.add(g, k), pol, Sm.JSet{_}) : Sm.R};
+         hs(g, pol, Sm.JSet{Sm.sem(g, pol, Sm.JE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{i, x}}}, Sm.WZero{}})}, Sm.WZero{}, Sm.sem(Nat.add(g, k), pol, Sm.JE{E.XSetEnv{E.XPair{E.twiddle(), E.XPair{Sm.of.data(d), x}}}, Sm.WZero{}}), k))
+
+law app_rel:
+  for +f: Nat
+  for +pol: Sm.Pol
+  for +x: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +k: Nat
+  {refines(i, d) == True{} : Bool} -> {rhf(Sm.sem(f, pol, Sm.JE{E.app(x, i), Sm.WZero{}}), Sm.sem(Nat.add(f, k), pol, Sm.JE{E.app(x, Sm.of.data(d)), Sm.WZero{}})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{E.app(x, Sm.of.data(d)), Sm.WZero{}}) : Sm.R}
+
+def app_rel(f, pol, x, i, d, k):
+  match f:
+    case 0n:
+      hr => {==}
+    case 1n+g:
+      hr => app1(g, pol, x, i, d, k)(hr)
+
+
+# Readings
+# --------
+
+law hole_obs:
+  for b: Bool
+  for +v: Sm.W
+  for +p: String
+  for +d: Bool
+  {b == doh(v) : Bool} -> isobs(Sm.read(d, hole.or(b, v, p)))
+
+def hole_obs(b, v, p, d):
+  match b:
+    case True{}:
+      h => nomark_obs(d, v)(doh_mark(v)(h))
+    case False{}:
+      h => Unit{}
+
+# Filling holes keeps a reading a reading.
+law obs_hfr:
+  for +d: Bool
+  for w: Sm.W
+  for +v: Sm.W
+  isobs(Sm.read(d, w)) -> isobs(Sm.read(d, hf(w, v)))
+
+def obs_hfr(d, w, v):
+  match w:
+    case Sm.WHole{+p}:
+      h => hole_obs(doh(v), v, p, d)({==})
+    case Sm.WPair{+a, +b}:
+      match v:
+        case Sm.WPair{+c, +e}:
+          +h => pair_isobs(Sm.read(d, hf(a, c)), Sm.read(d, hf(b, e)))(obs_hfr(d, a, c)(read_pair_l(Sm.read(d, a), Sm.read(d, b))(h)))(obs_hfr(d, b, e)(read_pair_r(Sm.read(d, a), Sm.read(d, b))(h)))
+        case Sm.WZero{}:
+          h => h
+        case Sm.WCode{fi2, y2}:
+          h => h
+        case Sm.WGate{}:
+          h => h
+        case Sm.WAbort{at2}:
+          h => h
+        case Sm.WAborted{at2, m2}:
+          h => h
+        case Sm.WStuck{}:
+          h => h
+        case Sm.WHole{q}:
+          h => h
+        case Sm.WMark{at2}:
+          h => h
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WZero{}:
+          h => Unit{}
+        case Sm.WPair{c, e}:
+          h => Unit{}
+        case Sm.WCode{fi2, y2}:
+          h => Unit{}
+        case Sm.WGate{}:
+          h => Unit{}
+        case Sm.WAbort{at2}:
+          h => Unit{}
+        case Sm.WAborted{at2, m2}:
+          h => Unit{}
+        case Sm.WStuck{}:
+          h => Unit{}
+        case Sm.WHole{q}:
+          h => Unit{}
+        case Sm.WMark{at2}:
+          h => Unit{}
+    case Sm.WMark{at}:
+      h => Empty.absurd(isobs(Sm.read(d, Sm.WMark{at})), h)
+    case Sm.WZero{}:
+      h => h
+    case Sm.WCode{fi, y}:
+      h => h
+    case Sm.WGate{}:
+      h => h
+    case Sm.WAbort{at}:
+      h => h
+    case Sm.WStuck{}:
+      h => h
+
+def isfired(r: Sm.R) -> Data:
+  match r:
+    case Sm.Fired{at}:
+      Unit
+    case _:
+      Empty
+
+law fired_only:
+  for r: Sm.R
+  for site: E.Site
+  {r == Sm.Fired{site} : Sm.R} -> isfired(r)
+
+def fired_only(r, site):
+  h => (%Equal.sym(Sm.R, r, Sm.Fired{site}, h) : isfired(_); Unit{})
+
+# Where the partial input's run reads back, the data's never fires.
+law no_fire_rel:
+  for rp: Sm.R
+  for rd: Sm.R
+  for +site: E.Site
+  {rhf(rp, rd) == rd : Sm.R} -> nobs(rp) -> nofi(rd) -> isobs(Sm.read.r(rp)) -> {Sm.read.r(rd) == Sm.Fired{site} : Sm.R} -> Empty
+
+def no_fire_rel(rp, rd, site):
+  match rp:
+    case Sm.Val{+w}:
+      match rd:
+        case Sm.Val{+v}:
+          h => np => nf => ho => hf2 => fired_obs(Sm.read(False{}, v), site)(%val_inj(hf(w, v), v, h) : isobs(Sm.read(False{}, _)); obs_hfr(False{}, w, v)(ho))(hf2)
+        case Sm.Obs{o}:
+          h => np => nf => ho => hf2 => fired_obs(Sm.Obs{o}, site)(Unit{})(hf2)
+        case Sm.Fired{at}:
+          h => np => nf => ho => hf2 => nf
+        case Sm.Needs{p}:
+          h => np => nf => ho => hf2 => fired_only(Sm.Needs{p}, site)(hf2)
+        case Sm.Spent{}:
+          h => np => nf => ho => hf2 => fired_only(Sm.Spent{}, site)(hf2)
+    case Sm.Obs{o}:
+      h => np => nf => ho => hf2 => np
+    case Sm.Fired{at}:
+      h => np => nf => ho => hf2 => ho
+    case Sm.Needs{p}:
+      h => np => nf => ho => hf2 => ho
+    case Sm.Spent{}:
+      h => np => nf => ho => hf2 => ho
+
+# What reads back as aborted or stuck.
+def wbad(w: Sm.W) -> Bool:
+  match w:
+    case Sm.WPair{a, b}:
+      Bool.or(wbad(a), wbad(b))
+    case Sm.WAborted{at, m}:
+      True{}
+    case Sm.WStuck{}:
+      True{}
+    case _:
+      False{}
+
+law obs_eta:
+  for r: Sm.R
+  isobs(r) -> {Sm.Obs{unobs(r)} == r : Sm.R}
+
+def obs_eta(r):
+  match r:
+    case Sm.Obs{o}:
+      h => {==}
+    case Sm.Val{w}:
+      h => Empty.absurd({Sm.Obs{unobs(Sm.Val{w})} == Sm.Val{w} : Sm.R}, h)
+    case Sm.Fired{at}:
+      h => Empty.absurd({Sm.Obs{unobs(Sm.Fired{at})} == Sm.Fired{at} : Sm.R}, h)
+    case Sm.Needs{p}:
+      h => Empty.absurd({Sm.Obs{unobs(Sm.Needs{p})} == Sm.Needs{p} : Sm.R}, h)
+    case Sm.Spent{}:
+      h => Empty.absurd({Sm.Obs{unobs(Sm.Spent{})} == Sm.Spent{} : Sm.R}, h)
+
+law rb_eq:
+  for w: Sm.W
+  isobs(Sm.read(False{}, w)) -> {Ck.any.bad(unobs(Sm.read(False{}, w))) == wbad(w) : Bool}
+
+def rb_eq(w):
+  match w:
+    case Sm.WPair{+a, +b}:
+      +h =>
+        (%obs_eta(Sm.read(False{}, a))(read_pair_l(Sm.read(False{}, a), Sm.read(False{}, b))(h)) : {Ck.any.bad(unobs(Sm.read.pair(_, Sm.read(False{}, b)))) == wbad(Sm.WPair{a, b}) : Bool};
+         %obs_eta(Sm.read(False{}, b))(read_pair_r(Sm.read(False{}, a), Sm.read(False{}, b))(h)) : {Ck.any.bad(unobs(Sm.read.pair(Sm.Obs{unobs(Sm.read(False{}, a))}, _))) == wbad(Sm.WPair{a, b}) : Bool};
+         %rb_eq(a)(read_pair_l(Sm.read(False{}, a), Sm.read(False{}, b))(h)) : {Bool.or(Ck.any.bad(unobs(Sm.read(False{}, a))), Ck.any.bad(unobs(Sm.read(False{}, b)))) == Bool.or(_, wbad(b)) : Bool};
+         %rb_eq(b)(read_pair_r(Sm.read(False{}, a), Sm.read(False{}, b))(h)) : {Bool.or(Ck.any.bad(unobs(Sm.read(False{}, a))), Ck.any.bad(unobs(Sm.read(False{}, b)))) == Bool.or(Ck.any.bad(unobs(Sm.read(False{}, a))), _) : Bool};
+         {==})
+    case Sm.WMark{at}:
+      h => Empty.absurd({Ck.any.bad(unobs(Sm.read(False{}, Sm.WMark{at}))) == wbad(Sm.WMark{at}) : Bool}, h)
+    case Sm.WZero{}:
+      h => {==}
+    case Sm.WCode{fi, y}:
+      h => {==}
+    case Sm.WGate{}:
+      h => {==}
+    case Sm.WAbort{at}:
+      h => {==}
+    case Sm.WAborted{at, m}:
+      h => {==}
+    case Sm.WStuck{}:
+      h => {==}
+    case Sm.WHole{p}:
+      h => {==}
+
+law doh_wbad:
+  for v: Sm.W
+  {True{} == doh(v) : Bool} -> {wbad(v) == False{} : Bool}
+
+def doh_wbad(v):
+  match v:
+    case Sm.WPair{+a, +b}:
+      +h =>
+        (%Equal.sym(Bool, wbad(a), False{}, doh_wbad(a)(Equal.sym(Bool, doh(a), True{}, and_l(doh(a), doh(b))(Equal.sym(Bool, True{}, Bool.and(doh(a), doh(b)), h))))) : {Bool.or(_, wbad(b)) == False{} : Bool};
+         doh_wbad(b)(Equal.sym(Bool, doh(b), True{}, and_r(doh(a), doh(b))(Equal.sym(Bool, True{}, Bool.and(doh(a), doh(b)), h)))))
+    case Sm.WZero{}:
+      h => {==}
+    case Sm.WHole{p}:
+      h => {==}
+    case Sm.WCode{fi, y}:
+      h => Empty.absurd({wbad(Sm.WCode{fi, y}) == False{} : Bool}, true_false(h))
+    case Sm.WGate{}:
+      h => Empty.absurd({wbad(Sm.WGate{}) == False{} : Bool}, true_false(h))
+    case Sm.WAbort{at}:
+      h => Empty.absurd({wbad(Sm.WAbort{at}) == False{} : Bool}, true_false(h))
+    case Sm.WAborted{at, m}:
+      h => Empty.absurd({wbad(Sm.WAborted{at, m}) == False{} : Bool}, true_false(h))
+    case Sm.WStuck{}:
+      h => Empty.absurd({wbad(Sm.WStuck{}) == False{} : Bool}, true_false(h))
+    case Sm.WMark{at}:
+      h => Empty.absurd({wbad(Sm.WMark{at}) == False{} : Bool}, true_false(h))
+
+law hole_wbad:
+  for b: Bool
+  for +v: Sm.W
+  for +p: String
+  {b == doh(v) : Bool} -> {wbad(hole.or(b, v, p)) == False{} : Bool}
+
+def hole_wbad(b, v, p):
+  match b:
+    case True{}:
+      h => doh_wbad(v)(h)
+    case False{}:
+      h => {==}
+
+# Filling holes neither adds nor removes an abort or a stuck value.
+law wbad_hf:
+  for w: Sm.W
+  for +v: Sm.W
+  {wbad(hf(w, v)) == wbad(w) : Bool}
+
+def wbad_hf(w, v):
+  match w:
+    case Sm.WHole{+p}:
+      hole_wbad(doh(v), v, p)({==})
+    case Sm.WPair{+a, +b}:
+      match v:
+        case Sm.WPair{+c, +e}:
+          %wbad_hf(a, c) : {Bool.or(wbad(hf(a, c)), wbad(hf(b, e))) == Bool.or(_, wbad(b)) : Bool}
+          %wbad_hf(b, e) : {Bool.or(wbad(hf(a, c)), wbad(hf(b, e))) == Bool.or(wbad(hf(a, c)), _) : Bool}
+          {==}
+        case Sm.WZero{}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WAborted{+at, m}:
+      match v:
+        case Sm.WZero{}:
+          {==}
+        case Sm.WPair{c, e}:
+          {==}
+        case Sm.WCode{fi2, y2}:
+          {==}
+        case Sm.WGate{}:
+          {==}
+        case Sm.WAbort{at2}:
+          {==}
+        case Sm.WAborted{at2, m2}:
+          {==}
+        case Sm.WStuck{}:
+          {==}
+        case Sm.WHole{q}:
+          {==}
+        case Sm.WMark{at2}:
+          {==}
+    case Sm.WZero{}:
+      {==}
+    case Sm.WCode{fi, y}:
+      {==}
+    case Sm.WGate{}:
+      {==}
+    case Sm.WAbort{at}:
+      {==}
+    case Sm.WStuck{}:
+      {==}
+    case Sm.WMark{at}:
+      {==}
+
+# An abort or a stuck value read back from the partial input's run is
+# read back from the data's.
+law bad_rel:
+  for rp: Sm.R
+  for rd: Sm.R
+  for +o2: Sm.O
+  {rhf(rp, rd) == rd : Sm.R} -> nobs(rp) -> nobs(rd) -> isobs(Sm.read.r(rp)) -> {Ck.any.bad(unobs(Sm.read.r(rp))) == True{} : Bool} -> {Sm.read.r(rd) == Sm.Obs{o2} : Sm.R} -> {Ck.any.bad(o2) == True{} : Bool}
+
+def bad_rel(rp, rd, o2):
+  match rp:
+    case Sm.Val{+w}:
+      match rd:
+        case Sm.Val{+v}:
+          h => np => nd => +ho => hb => +hd2 =>
+            (%Equal.cong(Sm.R, Sm.O, r => unobs(r), Sm.read(False{}, v), Sm.Obs{o2}, hd2) : {Ck.any.bad(_) == True{} : Bool};
+             %Equal.sym(Bool, Ck.any.bad(unobs(Sm.read(False{}, v))), wbad(v), rb_eq(v)(obs_only(Sm.read(False{}, v), o2)(hd2))) : {_ == True{} : Bool};
+             %val_inj(hf(w, v), v, h) : {wbad(_) == True{} : Bool};
+             %Equal.sym(Bool, wbad(hf(w, v)), wbad(w), wbad_hf(w, v)) : {_ == True{} : Bool};
+             Equal.trans(Bool, wbad(w), Ck.any.bad(unobs(Sm.read(False{}, w))), True{}, Equal.sym(Bool, Ck.any.bad(unobs(Sm.read(False{}, w))), wbad(w), rb_eq(w)(ho)), hb))
+        case Sm.Obs{o}:
+          h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, nd)
+        case Sm.Fired{at}:
+          h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, obs_only(Sm.Fired{at}, o2)(hd2))
+        case Sm.Needs{p}:
+          h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, obs_only(Sm.Needs{p}, o2)(hd2))
+        case Sm.Spent{}:
+          h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, obs_only(Sm.Spent{}, o2)(hd2))
+    case Sm.Obs{o}:
+      h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, np)
+    case Sm.Fired{at}:
+      h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, ho)
+    case Sm.Needs{p}:
+      h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, ho)
+    case Sm.Spent{}:
+      h => np => nd => ho => hb => hd2 => Empty.absurd({Ck.any.bad(o2) == True{} : Bool}, ho)
+
+# Splitting
+# ---------
+
+law or_and_l:
+  for p: Bool
+  for q: Bool
+  for +r: Bool
+  {Bool.or(p, q) == True{} : Bool} -> {r == True{} : Bool} -> {Bool.or(Bool.and(p, r), Bool.and(q, r)) == True{} : Bool}
+
+def or_and_l(p, q, r):
+  match p:
+    case True{}:
+      h1 => h2 => (%Equal.sym(Bool, r, True{}, h2) : {Bool.or(_, Bool.and(q, r)) == True{} : Bool}; {==})
+    case False{}:
+      h1 => h2 =>
+        (%Equal.sym(Bool, q, True{}, h1) : {Bool.and(_, r) == True{} : Bool};
+         h2)
+
+law or_and_r:
+  for +p: Bool
+  for +q: Bool
+  for l: Bool
+  {Bool.or(p, q) == True{} : Bool} -> {l == True{} : Bool} -> {Bool.or(Bool.and(l, p), Bool.and(l, q)) == True{} : Bool}
+
+def or_and_r(p, q, l):
+  match l:
+    case True{}:
+      h1 => h2 => h1
+    case False{}:
+      h1 => h2 => Empty.absurd({False{} == True{} : Bool}, false_true(h2))
+
+# The checker's split: every input under i is under one of the two sides.
+law split_cover:
+  for i: E.X
+  for rest: List<&2, Bool>
+  for +d: Co.D
+  {refines(i, d) == True{} : Bool} -> {Bool.or(refines(Ck.split(i, rest, True{}), d), refines(Ck.split(i, rest, False{}), d)) == True{} : Bool}
+
+def split_cover(i, rest, d):
+  match i:
+    case E.XVar{q}:
+      match d:
+        case Co.DZero{}:
+          h => {==}
+        case Co.DPair{x, y}:
+          h => {==}
+    case E.XPair{+a, +b}:
+      match rest:
+        case Con{dd, +more}:
+          match dd:
+            case True{}:
+              match d:
+                case Co.DPair{+x, +y}:
+                  +h => or_and_l(refines(Ck.split(a, more, True{}), x), refines(Ck.split(a, more, False{}), x), refines(b, y))(split_cover(a, more, x)(and_l(refines(a, x), refines(b, y))(h)))(and_r(refines(a, x), refines(b, y))(h))
+                case Co.DZero{}:
+                  h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+            case False{}:
+              match d:
+                case Co.DPair{+x, +y}:
+                  +h => or_and_r(refines(Ck.split(b, more, True{}), y), refines(Ck.split(b, more, False{}), y), refines(a, x))(split_cover(b, more, y)(and_r(refines(a, x), refines(b, y))(h)))(and_l(refines(a, x), refines(b, y))(h))
+                case Co.DZero{}:
+                  h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+        case Nil{}:
+          h => (%Equal.sym(Bool, refines(E.XPair{a, b}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XZero{}:
+      h => (%Equal.sym(Bool, refines(E.XZero{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XEnv{}:
+      h => (%Equal.sym(Bool, refines(E.XEnv{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XSetEnv{y}:
+      h => (%Equal.sym(Bool, refines(E.XSetEnv{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XDefer{fi, b}:
+      h => (%Equal.sym(Bool, refines(E.XDefer{fi, b}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XGate{}:
+      h => (%Equal.sym(Bool, refines(E.XGate{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XLeft{y}:
+      h => (%Equal.sym(Bool, refines(E.XLeft{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XRight{y}:
+      h => (%Equal.sym(Bool, refines(E.XRight{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XAbort{at}:
+      h => (%Equal.sym(Bool, refines(E.XAbort{at}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XAborted{at, m}:
+      h => (%Equal.sym(Bool, refines(E.XAborted{at, m}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XEither{n, a, b}:
+      h => (%Equal.sym(Bool, refines(E.XEither{n, a, b}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XTest{tok, y}:
+      h => (%Equal.sym(Bool, refines(E.XTest{tok, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XStub{tok, y}:
+      h => (%Equal.sym(Bool, refines(E.XStub{tok, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XStage{sr, y}:
+      h => (%Equal.sym(Bool, refines(E.XStage{sr, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XCheck{site, tc, c}:
+      h => (%Equal.sym(Bool, refines(E.XCheck{site, tc, c}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XStep{tok, n, y}:
+      h => (%Equal.sym(Bool, refines(E.XStep{tok, n, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XAny{}:
+      h => (%Equal.sym(Bool, refines(E.XAny{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XBarrier{y}:
+      h => (%Equal.sym(Bool, refines(E.XBarrier{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XLefts{n, y}:
+      h => (%Equal.sym(Bool, refines(E.XLefts{n, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XRights{n, y}:
+      h => (%Equal.sym(Bool, refines(E.XRights{n, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XError{msg}:
+      h => (%Equal.sym(Bool, refines(E.XError{msg}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+
+law or_elim:
+  for p: Bool
+  for q: Bool
+  {Bool.or(p, q) == True{} : Bool} -> ({p == True{} : Bool} -> Empty) -> ({q == True{} : Bool} -> Empty) -> Empty
+
+def or_elim(p, q):
+  match p:
+    case True{}:
+      h => kp => kq => kp({==})
+    case False{}:
+      h => kp => kq => kq(h)
+
+
+# The checker's tree
+# ------------------
+
+# goodi(…, i): on d, an input under i that the guard passes, main fires
+# no site.
+def goodi(+pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, +d: Co.D, gfuel: Nat, any: Nat, site: E.Site, i: E.X) -> Type:
+  {refines(i, d) == True{} : Bool} -> {Ck.guard.on(gfuel, g, Sm.of.data(d)) == Ck.Pass{} : Ck.Gate} -> {Sm.run(any, pol, main, Sm.of.data(d)) == Sm.Fired{site} : Sm.R} -> Empty
+
+# What a job of the tree promises once explored to a proof.
+def good(+fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, +d: Co.D, +gfuel: Nat, +any: Nat, +site: E.Site, job: Ck.Job) -> Type:
+  match job:
+    case Ck.Node{+i, l}:
+      goodi(pol, main, g, d, gfuel, any, site, i)
+    case Ck.At{+i, l, s}:
+      {s == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> goodi(pol, main, g, d, gfuel, any, site, i)
+    case Ck.Then{+i, first}:
+      goodi(pol, main, g, d, gfuel, any, site, i)
+
+law step_obs:
+  for i: E.X
+  for r: Sm.R
+  provenv(Ck.step.verdict(Ck.main.step(i, r))) -> isobs(r)
+
+def step_obs(i, r):
+  match r:
+    case Sm.Obs{o}:
+      h => Unit{}
+    case Sm.Val{w}:
+      h => h
+    case Sm.Fired{at}:
+      h => h
+    case Sm.Needs{p}:
+      h => h
+    case Sm.Spent{}:
+      h => h
+
+# A leaf where main read back an answer.
+law main_leaf:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +any: Nat
+  for +site: E.Site
+  isobs(Sm.run(fuel, pol, main, i)) -> {refines(i, d) == True{} : Bool} -> {Sm.run(any, pol, main, Sm.of.data(d)) == Sm.Fired{site} : Sm.R} -> Empty
+
+def main_leaf(fuel, pol, main, i, d, any, site):
+  ho => hr => +hfr =>
+    no_fire_rel(Sm.sem(fuel, pol, Sm.JE{E.app(main, i), Sm.WZero{}}), Sm.sem(Nat.add(fuel, any), pol, Sm.JE{E.app(main, Sm.of.data(d)), Sm.WZero{}}), site)(app_rel(fuel, pol, main, i, d, any)(hr))(no_obs(fuel, pol, Sm.JE{E.app(main, i), Sm.WZero{}})(Unit{}))(no_fired(Nat.add(fuel, any), pol, Sm.JE{E.app(main, Sm.of.data(d)), Sm.WZero{}})(Unit{}))(ho)(%fuel_plus(fuel, any, pol, Sm.JE{E.app(main, Sm.of.data(d)), Sm.WZero{}})(fired_ans(Sm.sem(any, pol, Sm.JE{E.app(main, Sm.of.data(d)), Sm.WZero{}}), site)(hfr)) : {Sm.read.r(_) == Sm.Fired{site} : Sm.R}; hfr)
+
+def isref(gt: Ck.Gate) -> Data:
+  match gt:
+    case Ck.Refuse{}:
+      Unit
+    case _:
+      Empty
+
+def refb(gt: Ck.Gate) -> Bool:
+  match gt:
+    case Ck.Refuse{}:
+      True{}
+    case _:
+      False{}
+
+law refb_pick:
+  for b: Bool
+  {refb(Bool.pick(Ck.Gate, b, Ck.Refuse{}, Ck.Pass{})) == b : Bool}
+
+def refb_pick(b):
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+# The guard refused: its run read back an abort or a stuck value.
+law refused_obs:
+  for r: Sm.R
+  {Ck.Refuse{} == Ck.guard.gate(r) : Ck.Gate} -> isobs(r)
+
+def refused_obs(r):
+  match r:
+    case Sm.Obs{o}:
+      h => Unit{}
+    case Sm.Val{w}:
+      h => (%h : isref(_); Unit{})
+    case Sm.Fired{at}:
+      h => (%h : isref(_); Unit{})
+    case Sm.Needs{p}:
+      h => (%h : isref(_); Unit{})
+    case Sm.Spent{}:
+      h => (%h : isref(_); Unit{})
+
+law refused_bad:
+  for r: Sm.R
+  {Ck.Refuse{} == Ck.guard.gate(r) : Ck.Gate} -> {Ck.any.bad(unobs(r)) == True{} : Bool}
+
+def refused_bad(r):
+  match r:
+    case Sm.Obs{+o}:
+      h => Equal.sym(Bool, True{}, Ck.any.bad(o), Equal.trans(Bool, True{}, refb(Bool.pick(Ck.Gate, Ck.any.bad(o), Ck.Refuse{}, Ck.Pass{})), Ck.any.bad(o), Equal.cong(Ck.Gate, Bool, x => refb(x), Ck.Refuse{}, Ck.guard.gate(Sm.Obs{o}), h), refb_pick(Ck.any.bad(o))))
+    case Sm.Val{w}:
+      h => Empty.absurd({Ck.any.bad(unobs(Sm.Val{w})) == True{} : Bool}, (%h : isref(_); Unit{}))
+    case Sm.Fired{at}:
+      h => Empty.absurd({Ck.any.bad(unobs(Sm.Fired{at})) == True{} : Bool}, (%h : isref(_); Unit{}))
+    case Sm.Needs{p}:
+      h => Empty.absurd({Ck.any.bad(unobs(Sm.Needs{p})) == True{} : Bool}, (%h : isref(_); Unit{}))
+    case Sm.Spent{}:
+      h => Empty.absurd({Ck.any.bad(unobs(Sm.Spent{})) == True{} : Bool}, (%h : isref(_); Unit{}))
+
+def ispass(gt: Ck.Gate) -> Data:
+  match gt:
+    case Ck.Pass{}:
+      Unit
+    case _:
+      Empty
+
+def passb(gt: Ck.Gate) -> Bool:
+  match gt:
+    case Ck.Pass{}:
+      True{}
+    case _:
+      False{}
+
+law passb_pick:
+  for b: Bool
+  {passb(Bool.pick(Ck.Gate, b, Ck.Refuse{}, Ck.Pass{})) == Bool.not(b) : Bool}
+
+def passb_pick(b):
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+law passed_obs:
+  for r: Sm.R
+  {Ck.guard.gate(r) == Ck.Pass{} : Ck.Gate} -> isobs(r)
+
+def passed_obs(r):
+  match r:
+    case Sm.Obs{o}:
+      h => Unit{}
+    case Sm.Val{w}:
+      h => (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Val{w}), Ck.Pass{}, h) : ispass(_); Unit{})
+    case Sm.Fired{at}:
+      h => (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Fired{at}), Ck.Pass{}, h) : ispass(_); Unit{})
+    case Sm.Needs{p}:
+      h => (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Needs{p}), Ck.Pass{}, h) : ispass(_); Unit{})
+    case Sm.Spent{}:
+      h => (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Spent{}), Ck.Pass{}, h) : ispass(_); Unit{})
+
+law passed_good:
+  for r: Sm.R
+  {Ck.guard.gate(r) == Ck.Pass{} : Ck.Gate} -> {Bool.not(Ck.any.bad(unobs(r))) == True{} : Bool}
+
+def passed_good(r):
+  match r:
+    case Sm.Obs{+o}:
+      h => Equal.trans(Bool, Bool.not(Ck.any.bad(o)), passb(Bool.pick(Ck.Gate, Ck.any.bad(o), Ck.Refuse{}, Ck.Pass{})), True{}, Equal.sym(Bool, passb(Bool.pick(Ck.Gate, Ck.any.bad(o), Ck.Refuse{}, Ck.Pass{})), Bool.not(Ck.any.bad(o)), passb_pick(Ck.any.bad(o))), Equal.cong(Ck.Gate, Bool, x => passb(x), Ck.guard.gate(Sm.Obs{o}), Ck.Pass{}, h))
+    case Sm.Val{w}:
+      h => Empty.absurd({Bool.not(Ck.any.bad(unobs(Sm.Val{w}))) == True{} : Bool}, (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Val{w}), Ck.Pass{}, h) : ispass(_); Unit{}))
+    case Sm.Fired{at}:
+      h => Empty.absurd({Bool.not(Ck.any.bad(unobs(Sm.Fired{at}))) == True{} : Bool}, (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Fired{at}), Ck.Pass{}, h) : ispass(_); Unit{}))
+    case Sm.Needs{p}:
+      h => Empty.absurd({Bool.not(Ck.any.bad(unobs(Sm.Needs{p}))) == True{} : Bool}, (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Needs{p}), Ck.Pass{}, h) : ispass(_); Unit{}))
+    case Sm.Spent{}:
+      h => Empty.absurd({Bool.not(Ck.any.bad(unobs(Sm.Spent{}))) == True{} : Bool}, (%Equal.sym(Ck.Gate, Ck.guard.gate(Sm.Spent{}), Ck.Pass{}, h) : ispass(_); Unit{}))
+
+law not_true:
+  for b: Bool
+  {b == True{} : Bool} -> {Bool.not(b) == True{} : Bool} -> Empty
+
+def not_true(b):
+  match b:
+    case True{}:
+      h1 => h2 => false_true(h2)
+    case False{}:
+      h1 => h2 => false_true(h1)
+
+# A leaf where the guard refused: it refuses the data too.
+law guard_leaf:
+  for +fuel: Nat
+  for +gx: E.X
+  for +i: E.X
+  for +d: Co.D
+  for +gfuel: Nat
+  {Ck.Refuse{} == Ck.guard.gate(Sm.run(fuel, Sm.plain(), gx, i)) : Ck.Gate} -> {refines(i, d) == True{} : Bool} -> {Ck.guard.gate(Sm.run(gfuel, Sm.plain(), gx, Sm.of.data(d))) == Ck.Pass{} : Ck.Gate} -> Empty
+
+def guard_leaf(fuel, gx, i, d, gfuel):
+  +hrf => hr => +hp =>
+    not_true(Ck.any.bad(unobs(Sm.run(Nat.add(fuel, gfuel), Sm.plain(), gx, Sm.of.data(d))))) (bad_rel(Sm.sem(fuel, Sm.plain(), Sm.JE{E.app(gx, i), Sm.WZero{}}), Sm.sem(Nat.add(fuel, gfuel), Sm.plain(), Sm.JE{E.app(gx, Sm.of.data(d)), Sm.WZero{}}), unobs(Sm.run(Nat.add(fuel, gfuel), Sm.plain(), gx, Sm.of.data(d))))(app_rel(fuel, Sm.plain(), gx, i, d, gfuel)(hr))(no_obs(fuel, Sm.plain(), Sm.JE{E.app(gx, i), Sm.WZero{}})(Unit{}))(no_obs(Nat.add(fuel, gfuel), Sm.plain(), Sm.JE{E.app(gx, Sm.of.data(d)), Sm.WZero{}})(Unit{}))(refused_obs(Sm.run(fuel, Sm.plain(), gx, i))(hrf))(refused_bad(Sm.run(fuel, Sm.plain(), gx, i))(hrf))(Equal.sym(Sm.R, Sm.Obs{unobs(Sm.run(Nat.add(fuel, gfuel), Sm.plain(), gx, Sm.of.data(d)))}, Sm.run(Nat.add(fuel, gfuel), Sm.plain(), gx, Sm.of.data(d)), obs_eta(Sm.run(Nat.add(fuel, gfuel), Sm.plain(), gx, Sm.of.data(d)))(%fuel_plus(fuel, gfuel, Sm.plain(), Sm.JE{E.app(gx, Sm.of.data(d)), Sm.WZero{}})(read_ans(Sm.sem(gfuel, Sm.plain(), Sm.JE{E.app(gx, Sm.of.data(d)), Sm.WZero{}}))(passed_obs(Sm.run(gfuel, Sm.plain(), gx, Sm.of.data(d)))(hp))) : isobs(Sm.read.r(_)); passed_obs(Sm.run(gfuel, Sm.plain(), gx, Sm.of.data(d)))(hp))))) (%fuel_plus(fuel, gfuel, Sm.plain(), Sm.JE{E.app(gx, Sm.of.data(d)), Sm.WZero{}})(read_ans(Sm.sem(gfuel, Sm.plain(), Sm.JE{E.app(gx, Sm.of.data(d)), Sm.WZero{}}))(passed_obs(Sm.run(gfuel, Sm.plain(), gx, Sm.of.data(d)))(hp))) : {Bool.not(Ck.any.bad(unobs(Sm.read.r(_)))) == True{} : Bool}; passed_good(Sm.run(gfuel, Sm.plain(), gx, Sm.of.data(d)))(hp))
+
+law guard_ref:
+  for +fuel: Nat
+  for g: Maybe<&2, E.X>
+  for +i: E.X
+  for +d: Co.D
+  for +gfuel: Nat
+  {Ck.Refuse{} == Ck.guard.on(fuel, g, i) : Ck.Gate} -> {refines(i, d) == True{} : Bool} -> {Ck.guard.on(gfuel, g, Sm.of.data(d)) == Ck.Pass{} : Ck.Gate} -> Empty
+
+def guard_ref(fuel, g, i, d, gfuel):
+  match g:
+    case None{}:
+      hgt => hr => hp => (%hgt : isref(_); Unit{})
+    case Some{+gx}:
+      hgt => hr => hp => guard_leaf(fuel, gx, i, d, gfuel)(hgt)(hr)(hp)
+
+law leaf_gt:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +d: Co.D
+  for +gfuel: Nat
+  for +any: Nat
+  for +site: E.Site
+  for +i: E.X
+  for gt: Ck.Gate
+  {gt == Ck.guard.on(fuel, g, i) : Ck.Gate} -> {Ck.Settled{Ck.Proven{}} == Ck.node.step(gt, fuel, pol, main, i) : Ck.Step} -> goodi(pol, main, g, d, gfuel, any, site, i)
+
+def leaf_gt(fuel, pol, main, g, d, gfuel, any, site, i, gt):
+  match gt:
+    case Ck.Pass{}:
+      hgt => eq => hr => hg => hfr => main_leaf(fuel, pol, main, i, d, any, site)(step_obs(i, Sm.run(fuel, pol, main, i))(%eq : provenv(Ck.step.verdict(_)); Unit{}))(hr)(hfr)
+    case Ck.Refuse{}:
+      hgt => eq => hr => hg => hfr => guard_ref(fuel, g, i, d, gfuel)(hgt)(hr)(hg)
+    case Ck.Need{p}:
+      hgt => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), (%eq : provenv(Ck.step.verdict(_)); Unit{}))
+    case Ck.Lost{why}:
+      hgt => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), (%eq : provenv(Ck.step.verdict(_)); Unit{}))
+
+law leaf:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +d: Co.D
+  for +gfuel: Nat
+  for +any: Nat
+  for +site: E.Site
+  for +i: E.X
+  for v: Ck.Verdict
+  provenv(v) -> {Ck.Settled{v} == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> goodi(pol, main, g, d, gfuel, any, site, i)
+
+def leaf(fuel, pol, main, g, d, gfuel, any, site, i, v):
+  match v:
+    case Ck.Proven{}:
+      pv => eq => leaf_gt(fuel, pol, main, g, d, gfuel, any, site, i, Ck.guard.on(fuel, g, i))({==})(eq)
+    case Ck.Fires{inp, at}:
+      pv => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), pv)
+    case Ck.Unknown{why}:
+      pv => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), pv)
+
+law then_first:
+  for dd: Nat
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +i: E.X
+  for first: Ck.Seen
+  seenp(Ck.explore(dd, fuel, pol, main, g, Ck.Then{i, first})) -> seenp(first)
+
+def then_first(dd, fuel, pol, main, g, i, first):
+  match dd:
+    case 0n:
+      sp => Empty.absurd(seenp(first), sp)
+    case 1n+e:
+      match first:
+        case Ck.Seen{v, left}:
+          match v:
+            case Ck.Proven{}:
+              sp => Unit{}
+            case Ck.Fires{inp, at}:
+              sp => sp
+            case Ck.Unknown{why}:
+              sp => sp
+
+# Every job the checker explores to a proof keeps its promise.
+law tree:
+  for +depth: Nat
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +d: Co.D
+  for +gfuel: Nat
+  for +any: Nat
+  for +site: E.Site
+  for job: Ck.Job
+  seenp(Ck.explore(depth, fuel, pol, main, g, job)) -> good(fuel, pol, main, g, d, gfuel, any, site, job)
+
+def tree(depth, fuel, pol, main, g, d, gfuel, any, site, job):
+  match depth:
+    case 0n:
+      sp => Empty.absurd(good(fuel, pol, main, g, d, gfuel, any, site, job), sp)
+    case 1n+dd:
+      match job:
+        case Ck.Node{+i, l}:
+          match l:
+            case 0n:
+              sp => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), sp)
+            case 1n+l2:
+              sp => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.At{i, l2, Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i)})(sp)({==})
+        case Ck.At{+i, +l, s}:
+          match s:
+            case Ck.Settled{v}:
+              sp => eq => leaf(fuel, pol, main, g, d, gfuel, any, site, i, v)(sp)(eq)
+            case Ck.Fork{+p}:
+              +sp => eq => hr => +hg => +hfr => or_elim(refines(Ck.split(i, Ck.dirs(p), True{}), d), refines(Ck.split(i, Ck.dirs(p), False{}), d))(split_cover(i, Ck.dirs(p), d)(hr))(hT => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Node{Ck.split(i, Ck.dirs(p), True{}), l})(then_first(dd, fuel, pol, main, g, Ck.split(i, Ck.dirs(p), False{}), Ck.explore(dd, fuel, pol, main, g, Ck.Node{Ck.split(i, Ck.dirs(p), True{}), l}))(sp))(hT)(hg)(hfr))(hF => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Then{Ck.split(i, Ck.dirs(p), False{}), Ck.explore(dd, fuel, pol, main, g, Ck.Node{Ck.split(i, Ck.dirs(p), True{}), l})})(sp)(hF)(hg)(hfr))
+        case Ck.Then{+i, first}:
+          match first:
+            case Ck.Seen{v, left}:
+              match v:
+                case Ck.Proven{}:
+                  sp => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Node{i, left})(sp)
+                case Ck.Fires{inp, at}:
+                  sp => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), sp)
+                case Ck.Unknown{why}:
+                  sp => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), sp)
+
+# Law 5, every later call, with each of its words shared.
+law guarded_at:
+  for +depth: Nat
+  for +fuel: Nat
+  for +checks: List<&2, U32>
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +leaves: Nat
+  for +left: Nat
+  for +proven: {Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves) == Ck.Seen{Ck.Proven{}, left} : Ck.Seen}
+  for +input: Co.D
+  for +gfuel: Nat
+  for +passed: {Ck.guard.on(gfuel, g, Sm.of.data(input)) == Ck.Pass{} : Ck.Gate}
+  for +any: Nat
+  for +site: E.Site
+  {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, Sm.of.data(input)) != Sm.Fired{site} : Sm.R}
+
+def guarded_at(depth, fuel, checks, main, g, leaves, left, proven, input, gfuel, passed, any, site):
+  hf => tree(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, input, gfuel, any, site, Ck.Node{E.XVar{""}, leaves})(opened_s(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven)))({==})(passed)(hf)
+
+def Laws.certificate_guarded(depth, fuel, checks, main, g, leaves, left, proven, input, gfuel, passed, any, site):
+  guarded_at(depth, fuel, checks, main, g, leaves, left, proven, input, gfuel, passed, any, site)
