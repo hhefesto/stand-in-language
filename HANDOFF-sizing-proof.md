@@ -51,15 +51,31 @@ Contents:
 
 ---
 
-## 0. Status (2026-10-08)
+## 0. Status (2026-10-09)
 
 The user asked to run the plan, stopping at decisions. bend-port is the
 Bend version that keeps up with master's behaviour, so D2 was settled
-that way. S1 and S3's executable half are committed on `sizing-proof`:
-- `cb5b7e5`: Sem, the checker, `chain.over`, and the parity test;
-- `0968c2a`: the laws, and the proof of `fuel_more`.
+that way. Committed on `sizing-proof`:
+- "Add Sem, the core's meaning, and an erasure checker": Sem, the
+  checker, `chain.over`, and the parity test;
+- "State sizing's soundness laws, …": the laws, and the proof of
+  `fuel_more`;
+- "Prove sizing's semantic laws": the proofs of `what_runs`, `erasure`
+  and `counts_suffice`.
 
-Both passed the gate and `nix flake check`. Nothing is pushed.
+Each passed the gate and `nix flake check`. Nothing is pushed.
+
+**D1 decided (2026-10-09).** The user approved `bend/LAWS.bend` as it
+stood, with one amendment. Checking the laws for counterexamples before
+proving them showed `what_runs` false as written: it took any `E.X` as
+input. Take an input that is itself an `XCheck` numbered like one of
+main's erased checks, with a failing test, and main the identity. The
+witness erases the input's check and answers 0. The program that runs
+erases nothing in its input, so it runs that check and aborts, at any
+fuel. A run in Bend confirmed it. The user chose to take only data
+inputs (`Co.D`, run on `Sm.of.data(input)`). That is what the session
+gives main, and what the certificate laws already quantify over. The
+amendment is folded into the laws commit.
 
 **Done:**
 - **S0.1:** the filter fix landed on bend-port as `822f0c5` (plus a
@@ -78,6 +94,12 @@ Both passed the gate and `nix flake check`. Nothing is pushed.
   lines, in a few rounds against the checker. A planted error is caught.
   It also passes `--verdict`, BendTT's Lean-proven kernel (built as §8
   says). So does `Sem.bend` with its imports.
+- **S2:** `what_runs`, `erasure` and `counts_suffice` are proven in
+  `bend/PROOF.bend` and rechecked with `--verdict`. One simulation lemma,
+  `sim`, covers laws 3 and 4. A second, `runs`, with `prog_witness`,
+  covers law 2 (§5). `bend/dev/gate.sh proofs` checks the proofs, and
+  the kernel too when `BENDTT` is set. Only the two certificate laws are
+  open.
 - **S3, executable half:** `bend/Check.bend`, with `bend/dev/check.bend
   MODULE [RUNS]` to run it. Every erasure is proven, without counting the
   checker's own soundness, which is S4:
@@ -97,9 +119,6 @@ Both passed the gate and `nix flake check`. Nothing is pushed.
   counterexample: see D4), or "unknown".
 
 **Next:**
-- **D1:** the user (and Sam) approve or amend `bend/LAWS.bend`.
-- **S2:** prove `what_runs`, `erasure` and `counts_suffice`. Each is a
-  simulation between two runs of `sem`, built on `fuel_more`.
 - **S4:** prove the two certificate laws for `Check.bend`.
 - **S3, the rest:** wire the checker into sizing. This decides what
   happens to tictactoe's outputs (D3).
@@ -141,7 +160,10 @@ with the repo, so they are repeated here.
 - `nix flake check`;
 - the pre-commit hook (`bend bend/Everything.bend --check-only`).
 
-Once S1 starts, add `bend bend/PROOF.bend` (§5).
+`gate.sh` (in `all`, or `gate.sh proofs`) also checks `bend
+bend/PROOF.bend`. It must print ALL PROOFS CHECK, or exactly the open
+laws as TODOs. With `BENDTT` set (§8), it rechecks the proven laws with
+`--verdict`.
 
 ## 2. The goal, stated exactly
 
@@ -199,14 +221,15 @@ abort counts only if it reaches the result. A mark inside an abort's
 message makes the whole aborted value a mark, so `trunc` cannot swallow
 it.
 
-**The laws** (bend/LAWS.bend, a draft for D1):
+**The laws** (bend/LAWS.bend, approved at D1):
 1. `fuel_more`: more fuel never changes an answer. **Proven.**
-2. `what_runs`: what runs answers as the witness does under Erase, given
-   enough fuel.
+2. `what_runs`: on a data input, what runs answers as the witness does
+   under Erase, given enough fuel. **Proven.**
 3. `erasure`: if the watched witness answers (so no mark reaches the
    result) and the erased one answers too, they give the same answer.
+   **Proven.**
 4. `counts_suffice`: the same for Limit, i.e. the recursions unbounded
-   past their chains.
+   past their chains. **Proven.**
 5. `certificate_opening` and `certificate_guarded`: if the checker proves
    main, the watched witness fires on no admitted input, at any fuel.
 
@@ -424,19 +447,59 @@ see D4.
     - "fin"-style helpers match computed results, as Bend's
       insertion-sort demo does.
 
-### S2. Semantic lemmas, proven (medium). Next, after D1
+### S2. Semantic lemmas, proven (medium). Done
 
-- `what_runs`: a syntactic correspondence. `Sem` under Erase reads an
-  erasable `XCheck` as its value and an `XStub` as 0, exactly what
-  `E.resolve.checks` and an inert `E.bottom` write. It needs `fuel_more`
-  for the extra dispatch steps.
-- `erasure` and `counts_suffice`: the mark simulation (§4).
+- `what_runs`, as built (PROOF.bend, "Law 2: what runs"). `Sem` under
+  Erase reads an erasable `XCheck` as its value and an `XStub` as 0,
+  exactly what `E.resolve.checks` and an inert `E.bottom` write.
+  - `prog(es, x)` translates the witness into the program: an erased
+    check is its value, a kept one `E.check.of(True{}, …)`, a stub 0.
+    `prog_witness` proves `prog` of the witness equal to `Sz.program(…)`,
+    by induction on x.
+  - That needs `Sm.has(Ck.erasable(x, left), site)` to be
+    `Bool.not(Ck.kept(left, site))` for each kept site of x
+    (`erased_iff`, `cov_x`). So `U32.is_eq` must reflect equality
+    (`u32_eq`, `u32_refl`), by induction over `Word.cmp`'s 32 bits.
+  - `runs`: where the witness's run under Erase answers a value, the
+    program's run under `Sm.plain()` answers it too, on the same fuel.
+    The program is a step ahead at each check (`fm_step`).
+  - One case needs care: erasing a check can give the program the strict
+    if's shape (`ifx`) where the witness has a general application. Then
+    the program runs the strict if. `if_gen` proves the two agree
+    wherever the general one gives a value.
+  - A data input has no check or stub, so `prog` leaves it as it is
+    (`prog_data`).
+- `erasure` and `counts_suffice`: the mark simulation (§4), as built
+  below.
 - After S2, P7.6's erasure is proven correct on every input where the
   watched witness answers. What remains is knowing that for all inputs
   statically: S4.
 
-**Sketch of the mark simulation** (for `erasure`; `counts_suffice` is the
-same with Limit).
+**The mark simulation, as built** (PROOF.bend, "The mark simulation").
+- `fil(w, v)` is w with each mark replaced by what stands at its place
+  in v. w stands for v when `fil(w, v) == v`. `rfil` lifts that to
+  results: a watched result that is not a value stands for any result,
+  and anything stands for a result that is not a value. The relation is
+  an equation rather than an inductive one, so it can be reused (`+`) and
+  rewritten with.
+- `mj(j, ee, re)` is the job the other mode runs where the watched run
+  runs j. It is the same job over ee's filling of j's environment and
+  re's of its result. A watched check (`JWatch`) is its value there.
+- `sim(f, lim, checks, jw, ee, re, k)`: the watched run of jw on fuel f
+  stands for the other mode's run of `mj(jw, ee, re)` on fuel f + k. The
+  other mode is Erase, or Limit if lim. The slack k is for watched
+  checks: the watched run spends a step on the test, so the other run's
+  value is compared one step later (`add_succ`).
+- `set_step` and `if_step` take the cases that inspect two results
+  (`JSet`, `JIf`). They take the induction hypothesis as an argument
+  (`@j: Sm.Job -> …`), because matching `re` in `sim` after the job's
+  fields would consume them (§14).
+- `no_obs`: `sem` never answers `Obs`, which only readback does. Without
+  it the related results could be two unrelated readings.
+- `fuel_plus` is `fuel_more` k times, so both runs compare at
+  wfuel + mfuel. `agree(lim, …)` then gives both laws.
+
+**The original sketch** (kept for the reasoning behind the cases).
 
 `vw ~ ve` ("the watched value stands for the erased one") holds when:
 - `vw` is a mark: then any `ve`;
@@ -513,7 +576,9 @@ left:
 
 ## 6. Decisions for the user (and Sam)
 
-**D1 (open): the laws' wording,** `bend/LAWS.bend`.
+**D1 (decided 2026-10-09): the laws' wording,** `bend/LAWS.bend`.
+Approved as drafted, except `what_runs`, which was false as written and
+now takes data inputs only (§0).
 - The meaning is the IC's evaluation order (§2), not a lazy one.
 - The inputs are 0 plus whatever the guard admits, not only the states a
   session reaches. Sizing claims every input, and DESIGN §6 keeps the
@@ -523,7 +588,6 @@ left:
 - Erasure and the counts are stated where both runs answer, leaving
   termination to EAL.
 - These pin down what a Telomare program means, so Sam should see them.
-  Approve LAWS.bend before S2.
 
 **D2: decided** (2026-10-08). The fix landed on bend-port, which keeps up
 with master's behaviour.
@@ -754,7 +818,7 @@ User-space profiling works (`perf_event_paranoid` = 2).
   the verdict, and the runs taken (4096 by default). The corpus runs from
   `bend/dev/corpus`.
 - `fastdiff.sh BIN [SESSIONS [SEED]]`: S0.2's sized vs `--fast` sessions.
-- `gate.sh`: the gate (§11).
+- `gate.sh`: the gate (§11), with its `proofs` step (§1).
 
 Build a tool with `bend bend/dev/X.bend -o /tmp/X` (inside `nix develop`),
 and run it from the repo root: modules load as `M.tel` from the cwd.
@@ -946,6 +1010,33 @@ empty.
   `inputs.bend.path`; it was `/nix/store/mirj9jkif1lnsqj1n7g3645fwscl42hp-source`
   for rev `018751270e80`, release 2.0.34. Nothing from
   `~/src/formalTransformer` or `~/src/bend2`.
+
+**Proofs** (learned in S1 and S2):
+- `%e : P; body`, with `e : {a == b : T}`: P is the current goal with `_`
+  where b stands, and body proves P with a there. So it rewrites b into
+  a. Use `Equal.sym` for the other way.
+- A default case (`case _:`) in a proof does not refine the goal:
+  enumerate the constructors. Defaults in the definitions a proof
+  unfolds are fine once the scrutinee is a constructor.
+- Matching a binder consumes the pattern-bound binders introduced after
+  it. So match a def's parameters in their order, before the fields of
+  anything matched later. Where a case needs a field and an earlier
+  parameter both matched, move it to a helper that takes the induction
+  hypothesis as an argument.
+- A Pi type is `@x: A -> B`, and the domain stops at the first bare
+  `->`. A recursive call inside a lambda passed as an argument is
+  accepted when its first argument shrinks, by bend and by the kernel.
+- A lambda-bound hypothesis cannot be matched. Close an Empty one with
+  `Empty.absurd(T, h)`: T is not inferred, so write it out.
+- A rewrite cannot precede a match. Match first, or hand the rest to a
+  helper whose parameter stands for the computed value, and match there.
+- A law's own `for` binders are not shared (`+`). Where a proof uses one
+  twice, delegate to a helper law that shares them (`what_runs_at`).
+- `-x` marks a parameter used only in types: one passed to another lemma
+  must not have it. `+x` marks one used twice, equations included, and a
+  `+` parameter can still be matched.
+- Hypotheses whose types depend on matched variables come after the
+  matches, as arrows (`h => …`).
 
 ## 15. Nix gotchas
 

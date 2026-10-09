@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# gate.sh [build|tests|goldens|corpus|all]...: the handoff's verifying
-# checks by hand, as P1-P7 ran them. Binaries go to $GATE/bin and logs to
-# $GATE/logs; GATE defaults to /tmp/telomare-gate. Run from anywhere in the
-# repo, inside `nix develop`. `nix flake check` is the rest of the gate.
+# gate.sh [build|tests|goldens|corpus|proofs|all]...: the handoff's
+# verifying checks by hand, as P1-P7 ran them, and the proofs. Binaries go
+# to $GATE/bin and logs to $GATE/logs; GATE defaults to /tmp/telomare-gate.
+# Run from anywhere in the repo, inside `nix develop`. `nix flake check` is
+# the rest of the gate.
 set -uo pipefail
 S=${GATE:-/tmp/telomare-gate}
 R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
@@ -76,13 +77,39 @@ corpus() {
   cd "$R"
 }
 
+# PROOF.bend proves every law it has a def for: the open ones are its only
+# TODOs. With BENDTT (the kernel, HANDOFF-sizing-proof.md §8), the proven
+# laws are rechecked with --verdict, in a copy whose LAWS.bend lacks the
+# open ones.
+proofs() {
+  echo "== proofs"
+  local open=() n
+  for n in $(sed -n 's/^law \([a-z_]*\):.*/\1/p' bend/LAWS.bend); do
+    grep -q "^def Laws\.$n(" bend/PROOF.bend || open+=("$n")
+  done
+  bend bend/PROOF.bend > "$S/logs/proofs.out" 2>&1
+  if [ ${#open[@]} -eq 0 ]; then grep -qx "ALL PROOFS CHECK" "$S/logs/proofs.out"
+  else grep -qx "Error: ${#open[@]} TODOs\? found\." "$S/logs/proofs.out"; fi \
+    || { echo "PROOFS FAILED"; cat "$S/logs/proofs.out"; fail=1; return; }
+  echo "ok: open ${open[*]:-none}"
+  [ -n "${BENDTT:-}" ] || return
+  rm -rf "$S/verdict"; mkdir -p "$S/verdict"; cp bend/*.bend "$S/verdict/"
+  local re; re=$(IFS='|'; echo "${open[*]:-^$}")
+  awk -v re="^law ($re):" 'BEGIN {RS=""; ORS="\n\n"} { for (i = 1; i <= split($0, ls, "\n"); i++) if (ls[i] ~ re) next; print }' \
+    bend/LAWS.bend > "$S/verdict/LAWS.bend"
+  (cd "$S/verdict" && bend PROOF.bend --verdict) > "$S/logs/verdict.out" 2>&1
+  grep -qx "ALL PROOFS CHECK" "$S/logs/verdict.out" && echo "ok: --verdict" \
+    || { echo "VERDICT FAILED"; tail -20 "$S/logs/verdict.out"; fail=1; }
+}
+
 for s in "${steps[@]}"; do
   case $s in
     build) build ;;
     tests) tests ;;
     goldens) goldens ;;
     corpus) corpus ;;
-    all) build; tests; goldens; corpus ;;
+    proofs) proofs ;;
+    all) build; tests; goldens; corpus; proofs ;;
   esac
 done
 [ $fail -eq 0 ] && echo "GATE OK" || echo "GATE FAILED"
