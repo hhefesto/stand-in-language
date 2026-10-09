@@ -103,7 +103,7 @@ amendment is folded into the laws commit.
   covers law 2 (§5). `bend/dev/gate.sh proofs` checks the proofs, and
   the kernel too when `BENDTT` is set.
 - **S4:** `certificate_opening` and `certificate_guarded` are proven for
-  checker v1, and rechecked with `--verdict` (§5). All seven laws hold:
+  checker v1, and rechecked with `--verdict` (§5). All six laws hold:
   `bend bend/PROOF.bend --verdict` prints ALL PROOFS CHECK. PROOF.bend is
   about 7,700 lines.
 - **S0.3, tictactoe:** the 5,000,000-run check (`check tictactoe
