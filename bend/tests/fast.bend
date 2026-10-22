@@ -105,8 +105,8 @@ def sized.compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String
       Ss.Replay{[e], Ss.cost.none()}
     case Done{p}:
       match p:
-        case Fr.Program{run, g, +boundary}:
-          sized.of(guard.expr(g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)), lines)
+        case Fr.Program{run, +g, +boundary}:
+          sized.of(guard.expr(g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
 
 # The same session sized, as the command runs it.
 def sized(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:

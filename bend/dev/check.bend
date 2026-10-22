@@ -6,45 +6,17 @@ import ../Expr.bend as E
 import ../Sem.bend as Sm
 import ../Check.bend as Ck
 
-# `check MODULE [RUNS]`: the erasure checker (Check.bend) on MODULE's main,
-# guarded as the command guards it: its verdict, what it watched, and the
-# runs it took (at most RUNS, 4096 by default).
-
-# An input: a unary number as its value, a pair as (a b), an unknown
-# position as _. m: x as a number, if it is one.
-def shown(x: E.X, m: Maybe<&2, U32>) -> String:
-  match x:
-    case E.XPair{+a, +b}:
-      match m:
-        case Some{k}:
-          U32.show(k)
-        case None{}:
-          "(" ++ shown(a, E.to.int(a)) ++ " " ++ shown(b, E.to.int(b)) ++ ")"
-    case E.XZero{}:
-      "0"
-    case E.XVar{p}:
-      "_"
-    case _:
-      "?"
-
-def show(+x: E.X) -> String:
-  shown(x, E.to.int(x))
-
-def site(at: E.Site) -> String:
-  match at:
-    case E.AtCheck{n}:
-      "check " ++ U32.show(n)
-    case E.AtRecursion{t}:
-      "the bottom of recursion #" ++ U32.show(t)
-    case E.AtAbort{}:
-      "an abort"
+# `check MODULE [STEPS]`: the erasure checker (Check.bend) on MODULE's
+# main, guarded as the command guards it: its verdict, what it watched, and
+# the evaluation steps it took (at most STEPS, by default the compiler's
+# budget, Size.bend's check.work).
 
 def verdict(v: Ck.Verdict) -> String:
   match v:
     case Ck.Proven{}:
       "proven: no input fires an erased site"
     case Ck.Fires{+i, at}:
-      "fires " ++ site(at) ++ " on input " ++ show(i)
+      "fires " ++ Ck.at.name(at) ++ " on input " ++ Ck.show(i)
     case Ck.Unknown{why}:
       "unknown: " ++ why
 
@@ -58,7 +30,7 @@ def ints(xs: List<&2, U32>) -> String:
 def seen(+runs: Nat, s: Ck.Seen) -> String:
   match s:
     case Ck.Seen{v, left}:
-      verdict(v) ++ "\nruns: " ++ Nat.show(Nat.sub(runs, left))
+      verdict(v) ++ "\nsteps: " ++ Nat.show(Nat.sub(runs, left))
 
 def guard.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, E.X>:
   match r:
@@ -82,7 +54,7 @@ def watched(+runs: Nat, +x: E.X, +counts: List<&2, E.TS>, g: Maybe<&2, E.X>, +er
 
 def proven(+runs: Nat, +x: E.X, +counts: List<&2, E.TS>, g: Maybe<&2, E.X>, cs: Sz.Checks) -> String:
   match cs:
-    case Sz.Checks{v, +boundary, +reaching, +opening, proven}:
+    case Sz.Checks{v, +boundary, +reaching, +opening, proven, e}:
       match proven:
         case False{}:
           "sizing did not prove main for every input: nothing is erased"
@@ -104,9 +76,9 @@ def program(+runs: Nat, r: Result<&2, &2, String, Fr.Program>) -> String:
       e
     case Done{p}:
       match p:
-        case Fr.Program{run, g, +boundary}:
+        case Fr.Program{run, +g, +boundary}:
           +x = E.of.term3(run)
-          sized(runs, x, guard.of(g), Sz.size.at(65536, True{}, boundary, x))
+          sized(runs, x, guard.of(g), Sz.size.guarded(65536, boundary, g, x))
 
 def run(+runs: Nat, +entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
@@ -120,7 +92,7 @@ def runs.of(m: Maybe<&2, U32>) -> Nat:
     case Some{n}:
       U32.to_nat(n)
     case None{}:
-      4096n
+      Sz.check.work()
 
 def run.args(a: List<String>) -> IO(Unit):
   match a:
@@ -131,9 +103,9 @@ def run.args(a: List<String>) -> IO(Unit):
     case self <> +m <> rest:
       do IO<Unit>:
         r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(m)
-        run(4096n, m, r)
+        run(Sz.check.work(), m, r)
     case _:
-      IO.print("usage: check MODULE [RUNS]")
+      IO.print("usage: check MODULE [STEPS]")
 
 def main() -> IO(Unit):
   do IO<Unit>:

@@ -12,6 +12,10 @@ sizing budget in force: 65536 unrollings
 
 refinement checks: 0 discharged statically, 1 left to run time:
   simpleplus:14:31  at the session boundary
+erasures in main: proven, by the erasure checker in 200013887 evaluation steps
+  no input it is called on reaches an erased recursion bottom or check
+erasures in the guard: none; every recursion bottom and check stays a run-time abort
+  sizing did not prove the guard for every input
 
 recursion nesting (structural, approximate):
   triple         function             levels

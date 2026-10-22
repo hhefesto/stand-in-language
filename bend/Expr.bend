@@ -50,6 +50,24 @@ def site.eq(a: Site, b: Site) -> Bool:
 type TS is Data:
   TS{+tok: U32, +n: U32}
 
+def count.pick(yes: Bool, n: U32, later: U32) -> U32:
+  match yes:
+    case True{}:
+      n
+    case False{}:
+      later
+
+# The links a recursion site's chain gets: its count plus one; one never
+# reached gets one.
+def count.of(counts: List<&2, TS>, +tok: U32) -> U32:
+  match counts:
+    case Nil{}:
+      1
+    case Con{c, rest}:
+      match c:
+        case TS{t, n}:
+          count.pick(U32.is_eq(t, tok), (n + 1 : U32), count.of(rest, tok))
+
 type X is Data:
   XZero{}
   XPair{+a: X, +b: X}

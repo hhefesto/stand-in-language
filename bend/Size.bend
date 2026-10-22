@@ -3,6 +3,8 @@ import ./Expr.bend as E
 import ./Core.bend as Co
 import ./Term.bend as T
 import ./Loc.bend as L
+import ./Sem.bend as Sm
+import ./Check.bend as Ck
 
 # Sizing (haskell-final's Telomare.Size, Size.IR and the sizing half of
 # Telomare.Machine). One abstract run of main over a symbolic input finds
@@ -78,9 +80,23 @@ type SizeFail is Data:
 # opening call; proven: whether every other check is discharged. It is
 # when the main run explored every input main is called on: only the
 # boundary validates the input, with restrictions exactly what its checks
-# need, and the results are data, as a session's must be.
+# need, and the results are data, as a session's must be. erasure: what the
+# erasure checker made of what sizing proved.
 type Checks is Data:
-  Checks{+validating: Set(), +boundary: Set(), +reaching: Set(), +opening: Set(), +proven: Bool}
+  Checks{+validating: Set(), +boundary: Set(), +reaching: Set(), +opening: Set(), +proven: Bool, +erasure: Erasure}
+
+# Whether the erasures sizing proved are sound (HANDOFF-sizing-proof.md
+# §4): Unproven, when sizing proved nothing to erase; Checked, the erasure
+# checker's verdict on main's witness, and the runs it had left. Only a
+# Proven verdict erases: the theorem in PROOF.bend covers exactly that.
+type Erasure is Data:
+  Unproven{}
+  Checked{+seen: Ck.Seen}
+
+# Main as sizing received it, and its guard as the session runs it (as Sem
+# reads it, None if it has none): what the erasure checker runs.
+type Watched is Data:
+  Watched{+x: E.X, +g: Maybe<&2, E.X>}
 
 # The sized program, as the runnable core, the counts that sized it, and
 # what sizing proved of its checks.
@@ -1098,34 +1114,68 @@ def opened(m: Maybe<&2, E.X>) -> Set() & Bool:
     case Some{+v}:
       (reaching(v, Set.new()), data.only(v) && no.fail(fold.aborted(v)))
 
-def checks.of(+validating: Set(), +exact: Bool, +boundary: Set(), +v: E.X, r: Set() & Bool) -> Checks:
+# The erasure checker's budget: the evaluation steps its runs may take in
+# all (Check.bend), and how deep its input tree may grow.
+def check.work() -> Nat:
+  U32.to_nat(268435456)
+
+def check.depth() -> Nat:
+  U32.to_nat(100000)
+
+# The erasure checker on main's witness, watching the sites sizing would
+# erase (every check not in left, and every chain's bottom), when sizing
+# proved main.
+def erasure.of(proven: Bool, +left: Set(), +counts: List<&2, E.TS>, w: Watched) -> Erasure:
+  match proven:
+    case False{}:
+      Unproven{}
+    case True{}:
+      match w:
+        case Watched{+x, g}:
+          Checked{Ck.check(check.depth(), Sm.fuel(), Sm.Pol{Sm.Watch{}, Ck.erasable(x, left)}, Ck.witness(counts, x), g, check.work())}
+
+# Whether the checker proved the erasures: then, and only then, they are made.
+def erased(e: Erasure) -> Bool:
+  match e:
+    case Checked{s}:
+      match s:
+        case Ck.Seen{v, left}:
+          match v:
+            case Ck.Proven{}:
+              True{}
+            case _:
+              False{}
+    case Unproven{}:
+      False{}
+
+def minus(xs: List<&2, String>, +t: Set(), +acc: Set()) -> Set():
+  match xs:
+    case Nil{}:
+      acc
+    case Con{+x, rest}:
+      minus(rest, t, Bool.pick(Set(), Pair.snd(Set(), Bool, Set.has(t, x)), acc, Set.add(acc, x)))
+
+# The checks left to run time when sizing proves main: those whose abort
+# reaches the result, a boundary check only if it does on the opening call.
+def left.of(+boundary: Set(), +reaching: Set(), +opening: Set()) -> Set():
+  minus(Set.to_list(reaching), boundary, opening)
+
+def checks.proved(+validating: Set(), +boundary: Set(), +reaching: Set(), +opening: Set(), +proven: Bool, +counts: List<&2, E.TS>, w: Watched) -> Checks:
+  Checks{validating, boundary, reaching, opening, proven, erasure.of(proven, left.of(boundary, reaching, opening), counts, w)}
+
+def checks.of(+validating: Set(), +exact: Bool, +boundary: Set(), +v: E.X, r: Set() & Bool, +counts: List<&2, E.TS>, w: Watched) -> Checks:
   (opening, fine) = r
-  Checks{validating, boundary, reaching(v, Set.new()), opening,
-    within(Set.to_list(validating), boundary) && (none(validating) || exact) && data.only(v) && fine}
+  checks.proved(validating, boundary, reaching(v, Set.new()), opening,
+    within(Set.to_list(validating), boundary) && (none(validating) || exact) && data.only(v) && fine, counts, w)
 
 # What the main run proved of the checks (DESIGN §10's split): a check
 # whose abort reaches the result is left to run time; so is one that
 # validates the input, since the main run explored only input that passes
 # it, unless the session runs it at the boundary. Every other check is
-# discharged, if the main run explored every input main is called on.
-def checks(+validating: Set(), +exact: Bool, +boundary: Set(), +v: E.X, m0: Maybe<&2, E.X>) -> Checks:
-  checks.of(validating, exact, boundary, v, opened(m0))
-
-def count.pick(yes: Bool, n: U32, later: U32) -> U32:
-  match yes:
-    case True{}:
-      n
-    case False{}:
-      later
-
-def count.of(counts: List<&2, E.TS>, +tok: U32) -> U32:
-  match counts:
-    case Nil{}:
-      1
-    case Con{c, rest}:
-      match c:
-        case E.TS{t, n}:
-          count.pick(U32.is_eq(t, tok), (n + 1 : U32), count.of(rest, tok))
+# discharged, if the main run explored every input main is called on, and
+# the erasure checker proves it.
+def checks(+validating: Set(), +exact: Bool, +boundary: Set(), +v: E.X, m0: Maybe<&2, E.X>, +counts: List<&2, E.TS>, w: Watched) -> Checks:
+  checks.of(validating, exact, boundary, v, opened(m0), counts, w)
 
 # Each recursion site becomes a chain of its count plus one steps
 # (setSizes); one never reached gets one. inert: the chains' bottoms are
@@ -1133,7 +1183,7 @@ def count.of(counts: List<&2, E.TS>, +tok: U32) -> U32:
 def set.sizes(+counts: List<&2, E.TS>, +inert: Bool, x: E.X) -> E.X:
   match x:
     case E.XStub{+tok, y}:
-      E.sized.chain(tok, count.of(counts, tok), inert)
+      E.sized.chain(tok, E.count.of(counts, tok), inert)
     case E.XPair{a, b}:
       E.XPair{set.sizes(counts, inert, a), set.sizes(counts, inert, b)}
     case E.XSetEnv{a}:
@@ -1199,29 +1249,26 @@ def program(+counts: List<&2, E.TS>, +left: Maybe<&2, Set()>, +inert: Bool, +cm:
     case False{}:
       set.sizes(counts, inert, E.resolve.checks(left, cm))
 
-def minus(xs: List<&2, String>, +t: Set(), +acc: Set()) -> Set():
-  match xs:
-    case Nil{}:
-      acc
-    case Con{+x, rest}:
-      minus(rest, t, Bool.pick(Set(), Pair.snd(Set(), Bool, Set.has(t, x)), acc, Set.add(acc, x)))
-
 # What sizing proved, made true of the program (DESIGN §10's split). When
 # the main run explored every input main is called on, main keeps only the
 # checks whose abort reaches its result (a boundary check only if it does
 # on the opening call: on any other input the session ran it first), and
 # the rest become their values. The chains' bottoms then become inert: the
 # counts are sizing's certificate that no input reaches one (§10: "provably
-# dead if the certificate is right"). Otherwise the program keeps every
-# check and every bottom.
+# dead if the certificate is right"), and the erasure checker proves the
+# certificate right. Otherwise the program keeps every check and every
+# bottom.
+def discharged.if(erase: Bool, +cs: Checks, +counts: List<&2, E.TS>, +left: Set(), +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  match erase:
+    case False{}:
+      cored(counts, cs, E.core(program(counts, None{}, False{}, cm, cap)))
+    case True{}:
+      cored(counts, cs, E.core(program(counts, Some{left}, True{}, cm, cap)))
+
 def discharged(+cs: Checks, +counts: List<&2, E.TS>, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match cs:
-    case Checks{v, +boundary, +reaching, +opening, proven}:
-      match proven:
-        case False{}:
-          cored(counts, cs, E.core(program(counts, None{}, False{}, cm, cap)))
-        case True{}:
-          cored(counts, cs, E.core(program(counts, Some{minus(Set.to_list(reaching), boundary, opening)}, True{}, cm, cap)))
+    case Checks{v, +boundary, +reaching, +opening, proven, erasure}:
+      discharged.if(erased(erasure), cs, counts, left.of(boundary, reaching, opening), cm, cap)
 
 # The opening call, run as the main run runs.
 def opening.run(+cfg: Cfg, m0: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
@@ -1231,17 +1278,17 @@ def opening.run(+cfg: Cfg, m0: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
     case Some{x0}:
       Some{r.v(eval(fuel(), cfg, JEval{E.remove.checks(x0), E.XZero{}}))}
 
-def tidy(m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +m0: Maybe<&2, E.X>, +cm: E.X, +lim: R, +boundary: Set(), cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def tidy(m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +m0: Maybe<&2, E.X>, +cm: E.X, +lim: R, +boundary: Set(), w: Watched, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match m:
     case Some{fail}:
       Fail{fail}
     case None{}:
-      discharged(checks(r.c(lim), r.e(lim), boundary, r.v(run), opening.run(cfg, m0)), r.s(run), cm, cap)
+      discharged(checks(r.c(lim), r.e(lim), boundary, r.v(run), opening.run(cfg, m0), r.s(run), w), r.s(run), cm, cap)
 
-def main.run.from(+max: U32, +cm: E.X, +boundary: Set(), +lim: R, +mx: E.X, +m0: Maybe<&2, E.X>, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def main.run.from(+max: U32, +cm: E.X, +boundary: Set(), +lim: R, +mx: E.X, +m0: Maybe<&2, E.X>, w: Watched, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   +cfg = {Cfg{MSize{}, r.z(lim), max} : Cfg}
   +run = eval(fuel(), cfg, JEval{E.remove.checks(mx), E.XZero{}})
-  tidy(fold.aborted(r.v(run)), run, cfg, m0, cm, lim, boundary, cap)
+  tidy(fold.aborted(r.v(run)), run, cfg, m0, cm, lim, boundary, w, cap)
 
 # The session's opening call, main on 0, which sizing runs only when the
 # session also guards main: otherwise main is proven only if the main run
@@ -1253,13 +1300,13 @@ def opening.of(unguarded: Bool, +x: E.X) -> Maybe<&2, E.X>:
     case False{}:
       Some{E.app(x, E.XZero{})}
 
-def main.run(+max: U32, +cm: E.X, +boundary: Set(), +lim: R, +x: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def main.run(+max: U32, +cm: E.X, +boundary: Set(), +lim: R, +x: E.X, g: Maybe<&2, E.X>, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match cap:
     case True{}:
       main.run.from(max, cm, boundary, lim, E.app(x, initial.input(fuel(), Set.to_list(r.p(lim)), in.st(Set.to_list(r.p(lim)), ""))),
-                    opening.of(none(boundary), x), cap)
+                    opening.of(none(boundary), x), Watched{x, g}, cap)
     case False{}:
-      main.run.from(max, cm, boundary, lim, naked.envs(x), None{}, cap)
+      main.run.from(max, cm, boundary, lim, naked.envs(x), None{}, Watched{x, g}, cap)
 
 def capped(+x: E.X, cap: Bool) -> E.X:
   match cap:
@@ -1268,19 +1315,46 @@ def capped(+x: E.X, cap: Bool) -> E.X:
     case False{}:
       x
 
+# The guard as the erasure checker runs it.
+def guard.sem(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
+  match g:
+    case None{}:
+      None{}
+    case Some{v}:
+      Some{Sm.of.core(v)}
+
 # sizeTermM: size every recursion in x, cap it (apply it to the symbolic
 # input) as main is, and give the sized program, at a budget of max
 # unrollings per site. boundary: the checks, by number, the session runs
-# before main.
-def size.at(+max: U32, +cap: Bool, +boundary: Set(), +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
+# before main; g: the guard that runs them, sized, if main has one.
+def size.at(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
   +cm = capped(x, cap)
   main.run(max, cm, boundary,
            eval(fuel(), Cfg{MLimits{}, Set.new(), max}, JEval{convert.is(cm), E.XZero{}}),
-           x, cap)
+           x, guard.sem(g), cap)
 
 # A term no session guards.
 def size(+max: U32, +cap: Bool, +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
-  size.at(max, cap, Set.new(), x)
+  size.at(max, cap, Set.new(), None{}, x)
+
+# The core of a sized guard, if it sized.
+def guard.core(r: Result<&2, &2, SizeFail, Sized>) -> Maybe<&2, Co.V>:
+  match r:
+    case Fail{f}:
+      None{}
+    case Done{s}:
+      match s:
+        case Sized{counts, expr, checks}:
+          Some{expr}
+
+# Main sized as the compiler sizes it, its guard g (if it has one) sized
+# first: the tools' and tests' way to the program the compiler runs.
+def size.guarded(+max: U32, +boundary: Set(), g: Maybe<&2, T.C>, +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
+  match g:
+    case None{}:
+      size.at(max, True{}, boundary, None{}, x)
+    case Some{t}:
+      size.at(max, True{}, boundary, guard.core(size(max, True{}, E.of.term3(t))), x)
 
 # Failures, as the command reports them
 # -------------------------------------

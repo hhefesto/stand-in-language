@@ -10,6 +10,8 @@ sizing budget in force: 65536 unrollings
 
 refinement checks: 1 discharged statically, 0 left to run time:
   Prelude:111:23  discharged
+erasures in main: proven, by the erasure checker in 7022 evaluation steps
+  no input it is called on reaches an erased recursion bottom or check
 
 recursion nesting (structural, approximate):
   none reachable from the entry point

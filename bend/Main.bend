@@ -455,34 +455,69 @@ def failed(f: Failure) -> String:
 type Compiled is Data:
   Compiled{+run: T.C, +sized: Sz.Sized, +guard: Maybe<&2, Sz.Sized>}
 
-def guard.sized(+run: T.C, +s: Sz.Sized, +g: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Compiled>:
+def guard.sized(+g: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
   match r:
     case Fail{f}:
       Fail{Unsizable{f, g}}
     case Done{gs}:
-      Done{Compiled{run, s, Some{gs}}}
+      Done{Some{gs}}
 
 # The guard is certified and sized as main is: it runs on the IC too.
-def guard.certified(+run: T.C, +s: Sz.Sized, +g: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
+def guard.certified(+g: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
     case None{}:
-      guard.sized(run, s, g, Sz.size(budget(), True{}, E.of.term3(g)))
+      guard.sized(g, Sz.size(budget(), True{}, E.of.term3(g)))
 
-def guarded(+run: T.C, +s: Sz.Sized, g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Compiled>:
+# The session's guard, compiled, if main has input refinements.
+def guard.compiled(g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
   match g:
     case None{}:
-      Done{Compiled{run, s, None{}}}
+      Done{None{}}
     case Some{+t}:
-      guard.certified(run, s, t, EAL.certify(Lf.defer.lift(t)))
+      guard.certified(t, EAL.certify(Lf.defer.lift(t)))
 
-def sized(+run: T.C, g: Maybe<&2, T.C>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Compiled>:
+# Main sized, and its guard; a failure to size main is reported before the
+# guard's.
+def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, g: Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{f}:
       Fail{Unsizable{f, run}}
     case Done{s}:
-      guarded(run, s, g)
+      match g:
+        case Fail{e}:
+          Fail{e}
+        case Done{gs}:
+          Done{Compiled{run, s, gs}}
+
+def guard.expr(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Co.V>:
+  match g:
+    case None{}:
+      None{}
+    case Some{s}:
+      match s:
+        case Sz.Sized{counts, expr, checks}:
+          Some{expr}
+
+# The guard's checks, for the report.
+def guard.checks(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Sz.Checks>:
+  match g:
+    case None{}:
+      None{}
+    case Some{s}:
+      match s:
+        case Sz.Sized{counts, expr, checks}:
+          Some{checks}
+
+# Main is sized after its guard is, since the erasure checker runs main
+# only on the inputs the guard passes (HANDOFF-sizing-proof.md §4).
+def guarded(+run: T.C, +boundary: Set(), g: Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>) -> Result<&2, &2, Failure, Compiled>:
+  match g:
+    case Fail{e}:
+      sized(run, Sz.size.at(budget(), True{}, boundary, None{}, E.of.term3(run)), Fail{e})
+    case Done{+gs}:
+      sized(run, Sz.size.at(budget(), True{}, boundary, guard.expr(gs), E.of.term3(run)), Done{gs})
 
 # certifyMain gates the program before its sizing does (Driver's
 # compileMainReporting), whatever the action. It certifies the term that is
@@ -490,12 +525,13 @@ def sized(+run: T.C, g: Maybe<&2, T.C>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>
 # §3, §11.4). Certification runs first and
 # sizing after it, never side by side: EAL forks over the bodies, and run
 # alongside sizing the two would split the lanes and starve those forks.
+# So the guard is compiled, certified and sized, before main is sized.
 def certified(+run: T.C, g: Maybe<&2, T.C>, +boundary: Set(), c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
     case None{}:
-      sized(run, g, Sz.size.at(budget(), True{}, boundary, E.of.term3(run)))
+      guarded(run, boundary, guard.compiled(g))
 
 def resolved(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Result<&2, &2, Failure, Compiled>:
   match r:
@@ -534,8 +570,8 @@ def guard.stored(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Tc.Guard>:
 # The sized program as an artifact: haskell-final's `--ic --compile`, less
 # the IC certificate, and with the session's guard (version 5) if main has
 # input refinements.
-def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, g: Maybe<&2, Sz.Sized>) -> Tc.Telc:
-  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks), budget(), Ss.layouts(expr), guard.stored(g))
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, +g: Maybe<&2, Sz.Sized>) -> Tc.Telc:
+  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks, guard.checks(g)), budget(), Ss.layouts(expr), guard.stored(g))
 
 def prefix(n: Nat, s: String) -> String:
   match n:
@@ -562,15 +598,6 @@ def written(+path: String, t: Tc.Telc) -> IO(Unit):
         r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard}))
         wrote(path, Tc.nodes(expr), hash, r)
 
-def guard.expr(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Co.V>:
-  match g:
-    case None{}:
-      None{}
-    case Some{s}:
-      match s:
-        case Sz.Sized{counts, expr, checks}:
-          Some{expr}
-
 # What the session runs: main, and its guard if it has one, each prepared.
 def session.of(+expr: Co.V, g: Maybe<&2, Sz.Sized>) -> Ss.Prog:
   Ss.session(expr, guard.expr(g))
@@ -594,7 +621,7 @@ def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod
                 case Meter{}:
                   play(session.of(expr, g), Sized{}, True{})
                 case Report{}:
-                  IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry), checks))
+                  IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry), checks, guard.checks(g)))
                 case Compile{}:
                   written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks, g))
 

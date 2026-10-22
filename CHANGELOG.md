@@ -40,6 +40,15 @@
   term's Haskell `show`. Case programs, the Prelude's `Rational`, a user
   `Nat` type and a qualified import give haskell-final's output and
   interaction counts.
+* The Bend `telomare` erases a program's recursion bottoms and discharged
+  checks only where the erasure checker (`bend/Check.bend`) proves that no
+  input reaches them, and `bend/PROOF.bend` proves that its verdict makes
+  erasing safe. Sizing runs the checker on main and on its guard, within a
+  budget of 2^28 evaluation steps; where it cannot decide, the aborts stay.
+  `--certificate` has two new lines saying which erasures are proven, and
+  why the others stay. simpleplus is proven; tic-tac-toe is not, so its main
+  keeps its aborts (the game `1 4 2 5 3` takes 6,016,132 interactions
+  instead of 5,927,480), and sizing it takes about 7 s longer.
 * Reorganized the library into compiler-stage modules: `Telomare.Parse`,
   `Telomare.Expand`, `Telomare.Desugar`, `Telomare.Resolve`,
   `Telomare.TypeCheck`, `Telomare.Size` (+ `.IR`) with the shared

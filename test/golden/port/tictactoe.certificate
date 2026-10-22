@@ -24,6 +24,10 @@ refinement checks: 0 discharged statically, 3 left to run time:
   tictactoe:68:30  at the session boundary
   tictactoe:70:26  at the session boundary
   tictactoe:71:27  at the session boundary
+erasures in main: none; every recursion bottom and check stays a run-time abort
+  the erasure checker could not prove them unreachable: its budget of evaluation steps ran out
+erasures in the guard: none; every recursion bottom and check stays a run-time abort
+  sizing did not prove the guard for every input
 
 recursion nesting (structural, approximate):
   triple         function               levels
