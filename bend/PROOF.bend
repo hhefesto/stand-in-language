@@ -2681,7 +2681,7 @@ def prog_witness(x, counts, left, l):
     case E.XRight{+a}:
       h => (%Equal.sym(E.X, prog(Ck.unkept(l, left), Ck.witness(counts, a)), Sz.set.sizes(counts, True{}, E.resolve.checks(Some{left}, a)), prog_witness(a, counts, left, l)(h)) : {E.XRight{_} == E.XRight{Sz.set.sizes(counts, True{}, E.resolve.checks(Some{left}, a))} : E.X}; {==})
     case E.XStub{+tok, y}:
-      h => chain_prog(U32.to_nat(Sz.count.of(counts, tok)), Ck.unkept(l, left), tok, y)
+      h => chain_prog(U32.to_nat(E.count.of(counts, tok)), Ck.unkept(l, left), tok, y)
     case E.XZero{}:
       h => {==}
     case E.XEnv{}:
@@ -7386,6 +7386,201 @@ def or_elim(p, q):
       h => kp => kq => kq(h)
 
 
+# The counted evaluator
+# ---------------------
+#
+# The checker runs Sem.semc, which counts its steps for the budget. It
+# gives sem's result, so every step the checker takes is node.step's.
+
+law pair_c:
+  for ca: Sm.C
+  for cb: Sm.C
+  {Sm.c.r(Sm.pair.c(ca, cb)) == Sm.pair.of(Sm.c.r(ca), Sm.c.r(cb)) : Sm.R}
+
+def pair_c(ca, cb):
+  match ca:
+    case Sm.C{a, x}:
+      match cb:
+        case Sm.C{b, y}:
+          {==}
+
+law watch_c:
+  for +site: U32
+  for ct: Sm.C
+  for cc: Sm.C
+  {Sm.c.r(Sm.watch.c(site, ct, cc)) == Sm.checked(site, Sm.c.r(ct), Sm.c.r(cc)) : Sm.R}
+
+def watch_c(site, ct, cc):
+  match ct:
+    case Sm.C{t, x}:
+      match cc:
+        case Sm.C{c, y}:
+          {==}
+
+law left_c:
+  for c: Sm.C
+  {Sm.c.r(Sm.left.c(c)) == Sm.left.r(Sm.c.r(c)) : Sm.R}
+
+def left_c(c):
+  match c:
+    case Sm.C{r, m}:
+      {==}
+
+law right_c:
+  for c: Sm.C
+  {Sm.c.r(Sm.right.c(c)) == Sm.right.r(Sm.c.r(c)) : Sm.R}
+
+def right_c(c):
+  match c:
+    case Sm.C{r, m}:
+      {==}
+
+law read_c:
+  for c: Sm.C
+  {Sm.c.r(Sm.read.c(c)) == Sm.read.r(Sm.c.r(c)) : Sm.R}
+
+def read_c(c):
+  match c:
+    case Sm.C{r, m}:
+      {==}
+
+# Counting changes no result.
+law semc_sem:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for k: Sm.Kc
+  {Sm.c.r(Sm.semc(fuel, pol, k)) == Sm.sem(fuel, pol, Sm.kc.job(k)) : Sm.R}
+
+def semc_sem(fuel, pol, k):
+  match fuel:
+    case 0n:
+      {==}
+    case 1n+f:
+      match k:
+        case Sm.Go{job, +n}:
+          match job:
+            case Sm.JE{x, env}:
+              semc_sem(f, pol, Sm.Go{Sm.step(pol, x, env), 1n+n})
+            case Sm.JPair{+a, +b, +env}:
+              (%semc_sem(f, pol, Sm.Go{Sm.JE{a, env}, 1n+n})
+                 : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JPair{a, b, env}, n})) == Sm.pair.of(_, Sm.sem(f, pol, Sm.JE{b, env})) : Sm.R};
+               (%semc_sem(f, pol, Sm.Go{Sm.JE{b, env}, 0n})
+                  : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JPair{a, b, env}, n})) == Sm.pair.of(Sm.c.r(Sm.semc(f, pol, Sm.Go{Sm.JE{a, env}, 1n+n})), _) : Sm.R};
+                pair_c(Sm.semc(f, pol, Sm.Go{Sm.JE{a, env}, 1n+n}), Sm.semc(f, pol, Sm.Go{Sm.JE{b, env}, 0n}))))
+            case Sm.JSetE{+y, +env}:
+              (%semc_sem(f, pol, Sm.Go{Sm.JE{y, env}, 1n+n})
+                 : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JSetE{y, env}, n})) == Sm.sem(f, pol, Sm.JSet{_}) : Sm.R};
+               semc_sem(f, pol, Sm.SetK{Sm.semc(f, pol, Sm.Go{Sm.JE{y, env}, 1n+n})}))
+            case Sm.JSet{r}:
+              semc_sem(f, pol, Sm.Go{Sm.set.job(r), 1n+n})
+            case Sm.JIfE{+s, +l, +rt, +env}:
+              (%semc_sem(f, pol, Sm.Go{Sm.JE{s, env}, 1n+n})
+                 : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JIfE{s, l, rt, env}, n})) == Sm.sem(f, pol, Sm.JIf{_, l, rt, env}) : Sm.R};
+               semc_sem(f, pol, Sm.IfK{Sm.semc(f, pol, Sm.Go{Sm.JE{s, env}, 1n+n}), l, rt, env}))
+            case Sm.JIf{r, l, rt, env}:
+              semc_sem(f, pol, Sm.Go{Sm.if.job(r, l, rt, env), 1n+n})
+            case Sm.JLeft{+y, +env}:
+              (%semc_sem(f, pol, Sm.Go{Sm.JE{y, env}, 1n+n})
+                 : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JLeft{y, env}, n})) == Sm.left.r(_) : Sm.R};
+               left_c(Sm.semc(f, pol, Sm.Go{Sm.JE{y, env}, 1n+n})))
+            case Sm.JRight{+y, +env}:
+              (%semc_sem(f, pol, Sm.Go{Sm.JE{y, env}, 1n+n})
+                 : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JRight{y, env}, n})) == Sm.right.r(_) : Sm.R};
+               right_c(Sm.semc(f, pol, Sm.Go{Sm.JE{y, env}, 1n+n})))
+            case Sm.JWatch{+site, +tc, +c, +env}:
+              (%semc_sem(f, pol, Sm.Go{Sm.JE{E.app(tc, c), env}, 1n+n})
+                 : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JWatch{site, tc, c, env}, n})) == Sm.checked(site, _, Sm.sem(f, pol, Sm.JE{c, env})) : Sm.R};
+               (%semc_sem(f, pol, Sm.Go{Sm.JE{c, env}, 0n})
+                  : {Sm.c.r(Sm.semc(1n+f, pol, Sm.Go{Sm.JWatch{site, tc, c, env}, n})) == Sm.checked(site, Sm.c.r(Sm.semc(f, pol, Sm.Go{Sm.JE{E.app(tc, c), env}, 1n+n})), _) : Sm.R};
+                watch_c(site, Sm.semc(f, pol, Sm.Go{Sm.JE{E.app(tc, c), env}, 1n+n}), Sm.semc(f, pol, Sm.Go{Sm.JE{c, env}, 0n}))))
+            case Sm.JDone{r}:
+              {==}
+        case Sm.SetK{c}:
+          match c:
+            case Sm.C{r, m}:
+              semc_sem(f, pol, Sm.Go{Sm.set.job(r), 1n+m})
+        case Sm.IfK{c, l, rt, env}:
+          match c:
+            case Sm.C{r, m}:
+              semc_sem(f, pol, Sm.Go{Sm.if.job(r, l, rt, env), 1n+m})
+
+law runc_run:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +input: E.X
+  for +n: Nat
+  {Sm.c.r(Sm.runc(fuel, pol, main, input, n)) == Sm.run(fuel, pol, main, input) : Sm.R}
+
+def runc_run(fuel, pol, main, input, n):
+  (%semc_sem(fuel, pol, Sm.Go{Sm.JE{E.app(main, input), Sm.WZero{}}, n})
+     : {Sm.c.r(Sm.runc(fuel, pol, main, input, n)) == Sm.read.r(_) : Sm.R};
+   read_c(Sm.semc(fuel, pol, Sm.Go{Sm.JE{E.app(main, input), Sm.WZero{}}, n})))
+
+law main_c:
+  for +i: E.X
+  for c: Sm.C
+  {Ck.counted.s(Ck.main.c(i, c)) == Ck.main.step(i, Sm.c.r(c)) : Ck.Step}
+
+def main_c(i, c):
+  match c:
+    case Sm.C{r, n}:
+      {==}
+
+law node_c:
+  for gt: Ck.Gate
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +i: E.X
+  for +n: Nat
+  {Ck.counted.s(Ck.node.c(gt, fuel, pol, main, i, n)) == Ck.node.step(gt, fuel, pol, main, i) : Ck.Step}
+
+def node_c(gt, fuel, pol, main, i, n):
+  match gt:
+    case Ck.Pass{}:
+      (%runc_run(fuel, pol, main, i, n)
+         : {Ck.counted.s(Ck.node.c(Ck.Pass{}, fuel, pol, main, i, n)) == Ck.main.step(i, _) : Ck.Step};
+       main_c(i, Sm.runc(fuel, pol, main, i, n)))
+    case Ck.Refuse{}:
+      {==}
+    case Ck.Need{p}:
+      {==}
+    case Ck.Lost{why}:
+      {==}
+
+law gate_c:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +i: E.X
+  for c: Sm.C
+  {Ck.counted.s(Ck.gate.c(fuel, pol, main, i, c)) == Ck.node.step(Ck.guard.gate(Sm.c.r(c)), fuel, pol, main, i) : Ck.Step}
+
+def gate_c(fuel, pol, main, i, c):
+  match c:
+    case Sm.C{r, n}:
+      node_c(Ck.guard.gate(r), fuel, pol, main, i, n)
+
+# The checker's counted step is node.step.
+law node_counted:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for g: Maybe<&2, E.X>
+  for +i: E.X
+  {Ck.counted.s(Ck.node.counted(fuel, pol, main, g, i)) == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step}
+
+def node_counted(fuel, pol, main, g, i):
+  match g:
+    case None{}:
+      node_c(Ck.Pass{}, fuel, pol, main, i, 0n)
+    case Some{+gx}:
+      (%runc_run(fuel, Sm.plain(), gx, i, 0n)
+         : {Ck.counted.s(Ck.node.counted(fuel, pol, main, Some{gx}, i)) == Ck.node.step(Ck.guard.gate(_), fuel, pol, main, i) : Ck.Step};
+       gate_c(fuel, pol, main, i, Sm.runc(fuel, Sm.plain(), gx, i, 0n)))
+
+
 # The checker's tree
 # ------------------
 
@@ -7666,6 +7861,26 @@ def then_first(dd, fuel, pol, main, g, i, first):
             case Ck.Unknown{why}:
               sp => sp
 
+# A node, its counted step taken: its promise is the node's.
+law at_good:
+  for +fuel: Nat
+  for +pol: Sm.Pol
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +d: Co.D
+  for +gfuel: Nat
+  for +any: Nat
+  for +site: E.Site
+  for +i: E.X
+  for w: Nat
+  for c: Ck.Counted
+  {Ck.counted.s(c) == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> good(fuel, pol, main, g, d, gfuel, any, site, Ck.at.of(i, w, c)) -> goodi(pol, main, g, d, gfuel, any, site, i)
+
+def at_good(fuel, pol, main, g, d, gfuel, any, site, i, w, c):
+  match c:
+    case Ck.Counted{s, n}:
+      eq => gd => gd(eq)
+
 # Every job the checker explores to a proof keeps its promise.
 law tree:
   for +depth: Nat
@@ -7691,7 +7906,7 @@ def tree(depth, fuel, pol, main, g, d, gfuel, any, site, job):
             case 0n:
               sp => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), sp)
             case 1n+l2:
-              sp => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.At{i, l2, Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i)})(sp)({==})
+              sp => at_good(fuel, pol, main, g, d, gfuel, any, site, i, l2, Ck.node.counted(fuel, pol, main, g, i))(node_counted(fuel, pol, main, g, i))(tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.at.of(i, l2, Ck.node.counted(fuel, pol, main, g, i)))(sp))
         case Ck.At{+i, +l, s}:
           match s:
             case Ck.Settled{v}:

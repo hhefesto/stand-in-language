@@ -220,8 +220,8 @@ def compiled(r: Result<&2, &2, String, Fr.Program>, +lines: List<&2, String>) ->
       False{}
     case Done{p}:
       match p:
-        case Fr.Program{run, g, +boundary}:
-          sized(guard.of(g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)), lines)
+        case Fr.Program{run, +g, +boundary}:
+          sized(guard.of(g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
 
 def agrees(srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:
   compiled(Fr.compile.program(srcs, entry), lines)

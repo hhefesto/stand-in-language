@@ -3,6 +3,7 @@ import ./Loc.bend as L
 import ./Term.bend as T
 import ./Expr.bend as E
 import ./Size.bend as Sz
+import ./Check.bend as Ck
 import ./Levels.bend as Lv
 
 # The static report: what the compiler knows about a program's recursion
@@ -172,19 +173,22 @@ def has(s: Set(), +site: U32) -> Bool:
 
 def discharged(cs: Sz.Checks, +site: U32) -> Bool:
   match cs:
-    case Sz.Checks{validating, boundary, reaching, opening, proven}:
-      proven && Bool.not(has(boundary, site) || has(reaching, site) || has(opening, site))
+    case Sz.Checks{validating, boundary, reaching, opening, proven, erasure}:
+      Sz.erased(erasure) && Bool.not(has(boundary, site) || has(reaching, site) || has(opening, site))
 
 # What sizing proved of a check, and why it is left to run time if it is:
 # the session runs it before main (one of main's input refinements), or it
-# validates input otherwise, or its abort reaches the result.
+# validates input otherwise, or its abort reaches the result, or the erasure
+# checker did not prove it.
 def verdict(cs: Sz.Checks, +site: U32) -> String:
   match cs:
-    case Sz.Checks{validating, boundary, reaching, opening, proven}:
+    case Sz.Checks{validating, boundary, reaching, opening, proven, erasure}:
       Bool.pick(String, has(boundary, site), "at the session boundary",
         Bool.pick(String, has(validating, site), "at run time (validates input)",
           Bool.pick(String, has(reaching, site) || has(opening, site), "at run time (reaches the result)",
-            Bool.pick(String, proven, "discharged", "at run time (not proven for every input)"))))
+            Bool.pick(String, proven,
+              Bool.pick(String, Sz.erased(erasure), "discharged", "at run time (the erasure checker did not prove it)"),
+              "at run time (not proven for every input)"))))
 
 def check.place(+site: U32, m: Maybe<&2, String>) -> String:
   match m:
@@ -235,6 +239,46 @@ def checking.of(+ks: List<&2, Check>, +cs: Sz.Checks) -> List<&2, String>:
 # split): discharged, or left to run time and why.
 def checking(run: T.C, +cs: Sz.Checks) -> List<&2, String>:
   checking.of(List.sort(~Check, ~check.le, checks(run, [])), cs)
+
+# What the erasures in who rest on (HANDOFF-sizing-proof.md §4): the
+# program erases its recursion bottoms and discharged checks only where the
+# erasure checker proved that no input reaches them. Otherwise they stay as
+# run-time aborts, and the second line says why.
+def kept(+who: String, +why: String) -> List<&2, String>:
+  ["erasures in " ++ who ++ ": none; every recursion bottom and check stays a run-time abort",
+   "  " ++ why]
+
+def erasure.seen(+who: String, v: Ck.Verdict, +steps: Nat) -> List<&2, String>:
+  match v:
+    case Ck.Proven{}:
+      ["erasures in " ++ who ++ ": proven, by the erasure checker in " ++ Nat.show(steps) ++ " evaluation " ++ plural("step", Nat.is_eq(steps, 1n)),
+       "  no input it is called on reaches an erased recursion bottom or check"]
+    case Ck.Fires{+i, at}:
+      kept(who, "the erasure checker found input " ++ Ck.show(i) ++ " reaching " ++ Ck.at.name(at))
+    case Ck.Unknown{why}:
+      kept(who, "the erasure checker could not prove them unreachable: " ++ why)
+
+def erasure(+who: String, e: Sz.Erasure) -> List<&2, String>:
+  match e:
+    case Sz.Unproven{}:
+      kept(who, "sizing did not prove " ++ who ++ " for every input")
+    case Sz.Checked{s}:
+      match s:
+        case Ck.Seen{v, left}:
+          erasure.seen(who, v, Nat.sub(Sz.check.work(), left))
+
+def erasure.of(+who: String, cs: Sz.Checks) -> List<&2, String>:
+  match cs:
+    case Sz.Checks{validating, boundary, reaching, opening, proven, e}:
+      erasure(who, e)
+
+# Main's erasures, and its guard's if it has one.
+def erasures(+cs: Sz.Checks, g: Maybe<&2, Sz.Checks>) -> List<&2, String>:
+  match g:
+    case None{}:
+      erasure.of("main", cs)
+    case Some{gc}:
+      List.append(&2, String, erasure.of("main", cs), erasure.of("the guard", gc))
 
 # The structural pass's rows
 # --------------------------
@@ -372,14 +416,16 @@ def found(info: Result<&2, &2, String, Lv.Info>) -> Bool:
       True{}
 
 # The whole static report (renderStaticReport): the counts sizing inferred
-# for the program and what it proved of its checks, then the structural
-# reading of its source.
-def report(+counts: List<&2, E.TS>, +run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>, +cs: Sz.Checks) -> String:
+# for the program and what it proved of its checks, with what the erasures
+# rest on (gc: the guard's checks, if main has a guard), then the
+# structural reading of its source.
+def report(+counts: List<&2, E.TS>, +run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>, +cs: Sz.Checks, gc: Maybe<&2, Sz.Checks>) -> String:
   unlines(List.concat(&2, String, [
     ["static report: what the compiler knows without running the program", ""],
     sizing(counts, run, budget),
     [""],
     checking(run, cs),
+    erasures(cs, gc),
     [""],
     structural(info),
     closing(found(info))]))

@@ -77,7 +77,24 @@ def guard.stored(m: Maybe<&2, T.C>) -> Maybe<&2, Tc.Guard>:
     case Some{t}:
       guard.sized(Sz.size(65536, True{}, E.of.term3(t)))
 
-def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, g: Maybe<&2, Tc.Guard>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Tc.Telc>:
+# The guard's checks, for the report.
+def guard.checks.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Sz.Checks>:
+  match r:
+    case Fail{f}:
+      None{}
+    case Done{s}:
+      match s:
+        case Sz.Sized{counts, expr, checks}:
+          Some{checks}
+
+def guard.checks(m: Maybe<&2, T.C>) -> Maybe<&2, Sz.Checks>:
+  match m:
+    case None{}:
+      None{}
+    case Some{t}:
+      guard.checks.of(Sz.size(65536, True{}, E.of.term3(t)))
+
+def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, g: Maybe<&2, Tc.Guard>, gc: Maybe<&2, Sz.Checks>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Tc.Telc>:
   match r:
     case Fail{f}:
       None{}
@@ -85,7 +102,7 @@ def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, g: Maybe<&2, Tc.Gu
       match s:
         case Sz.Sized{+counts, +expr, checks}:
           +ms = mods(Fr.all(srcs))
-          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks), 65536,
+          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks, gc), 65536,
                      Ss.layouts(expr), g)}
 
 def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, Fr.Program>) -> Maybe<&2, Tc.Telc>:
@@ -94,8 +111,8 @@ def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, 
       None{}
     case Done{p}:
       match p:
-        case Fr.Program{+run, g, +boundary}:
-          sized(entry, srcs, run, guard.stored(g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)))
+        case Fr.Program{+run, +g, +boundary}:
+          sized(entry, srcs, run, guard.stored(g), guard.checks(g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)))
 
 # The program as --compile writes it: main, and its guard.
 def artifact(+srcs: List<&2, Fr.Src>, +entry: String) -> Maybe<&2, Tc.Telc>:
@@ -245,8 +262,8 @@ def source.run(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -
       Ss.Replay{[e], Ss.cost.none()}
     case Done{p}:
       match p:
-        case Fr.Program{run, g, +boundary}:
-          source.sized(guard.expr(g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)), lines)
+        case Fr.Program{run, +g, +boundary}:
+          source.sized(guard.expr(g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
 
 # What a decoded program shows, and what it spends, as its source does.
 def runs.alike(+srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:

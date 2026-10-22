@@ -41,8 +41,8 @@ def shown(r: Result<&2, &2, String, Fr.Program>) -> String:
       e
     case Done{p}:
       match p:
-        case Fr.Program{+run, g, +boundary}:
-          of.sized("main, guarded", Sz.size.at(65536, True{}, boundary, E.of.term3(run))) ++ "\n"
+        case Fr.Program{+run, +g, +boundary}:
+          of.sized("main, guarded", Sz.size.guarded(65536, boundary, g, E.of.term3(run))) ++ "\n"
             ++ of.sized("main, alone", Sz.size(65536, True{}, E.of.term3(run))) ++ "\n" ++ guard.of(g)
 
 def run(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):

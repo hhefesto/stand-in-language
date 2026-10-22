@@ -83,6 +83,12 @@ took 2.4 s before its input refinements moved to the session boundary (see
 [Design](#design)), which adds a second program, the guard, to certify, size
 and run.
 
+These times predate the erasure checker (see [Design](#design)), which now
+runs as part of sizing. On an AMD Ryzen 7 3700X it adds about 4 s to
+`simpleplus.tel`, where it proves the erasures, and about 7 s to
+`tictactoe.tel`, where it spends its whole budget and gives up. `--compile`
+(below) pays it once.
+
 Most of the difference is in EAL. The Bend analysis keeps its state in flat
 arrays of words, as the runtime keeps its net, instead of maps in a state
 monad. Its tags are small numbers instead of hashes compared as strings. It
@@ -93,7 +99,7 @@ certified a second one with every let binding inlined (3,054 bodies for
 tic-tac-toe, against 176). Every result is identical, and the capture
 layouts are byte for byte the same. The interaction net runs only the branch
 an `if` chooses (see [Design](#design)), so it runs the tic-tac-toe test game
-in 5.9 million interactions instead of 15.2 million, in about 0.7 s.
+in 6.0 million interactions instead of 15.2 million, in about 0.7 s.
 
 ### Design
 
@@ -149,7 +155,7 @@ in these places:
   more than the strict one does, each captured part going once to the
   chosen branch instead of fanning to both. Displays are unchanged;
   interaction counts are not haskell-final's (the tic-tac-toe test game
-  takes 5.9 million instead of 15.2 million), and a program whose dead
+  takes 6.0 million instead of 15.2 million), and a program whose dead
   branch never ends now finishes (`ratarith` in the parity corpus gives
   what haskell-final's reference evaluator gives, where its IC ran out of
   fuel).
@@ -179,16 +185,32 @@ in these places:
   is validated anywhere else is proven for nothing. Otherwise the split is
   exactly as sound as sizing's exploration.
 - A program proven so runs without what sizing discharged (DESIGN.md §10
-  and C5). Main's boundary checks and its discharged checks become the
-  values they checked, and every chain's bottom becomes 0 instead of an
-  abort: the counts are sizing's certificate that no input main is called
-  on reaches one (§10: the bottom "is provably dead if the certificate is
-  right"). A program whose checks are all discharged or at the boundary
-  has no Abort left in main. simpleplus is one: `3 4` takes 42,943
-  interactions instead of 782,347, nearly all of the difference being the
-  check no longer run inside main. tic-tac-toe is another. Elsewhere
-  counts drop a little: 150 to 146 for `tc_ultra_minimal`, and 91,147 to
-  90,345 for the Rational example.
+  and C5), where the erasure checker proves that too. Main's boundary
+  checks and its discharged checks become the values they checked, and
+  every chain's bottom becomes 0 instead of an abort. The counts are
+  sizing's claim that no input main is called on reaches a bottom (§10:
+  the bottom "is provably dead if the certificate is right"). The checker
+  (`bend/Check.bend`) does not take sizing's word for it. It runs main's
+  sized form, every erasable site still marked, over every input the
+  guard passes, splitting the input wherever the run needs to see it, and
+  it proves the erasures when no input reaches a marked site. That this
+  verdict makes erasing safe is proven (see [What is
+  proven](#what-is-proven)). Where the checker cannot decide, because it
+  finds an input that reaches one or because it spends its budget first,
+  every bottom and check stays a run-time abort, and `--certificate` says
+  so. simpleplus is proven: `3 4` takes 42,943 interactions instead of
+  782,347, nearly all of the difference being the check no longer run
+  inside main. tic-tac-toe is not: the checker gives up, so its main keeps
+  its aborts, and the game `1 4 2 5 3` takes 6,016,132 interactions instead
+  of 5,927,480 (1.5% more). Elsewhere counts drop a little: 150 to 146 for
+  `tc_ultra_minimal`, and 91,147 to 90,345 for the Rational example.
+- The checker's budget is work, not runs: 2^28 evaluation steps
+  (`check.work` in `bend/Size.bend`), counted over every run it makes.
+  simpleplus takes 200,013,887. A budget of runs would let a program whose
+  runs are long, like tic-tac-toe's, take minutes to give up (110 s at the
+  16,384 runs simpleplus needs); this one gives up in about 7 s. A budget
+  never makes an erasure unsafe: it only decides when the checker stops
+  and leaves the aborts in.
 - Like haskell-final, the port certifies the sized program only for the
   capture layouts that guide the IC; it does not refuse to run a program
   whose sized form fails certification (DESIGN.md's `admitIC` is not in
@@ -198,10 +220,46 @@ Of DESIGN.md's open questions (§11), three are resolved: the certified
 term is the executed one (§11.4), the IC runs only an `if`'s chosen branch
 (§11.3; both above), and `trace` (§11.7) is removed, since it had no
 runtime meaning and restoring it would need a side channel through the IC
-(C1/C4). Abort (§10, §11.6) is erased where sizing proves it dead. main's
+(C1/C4). Abort (§10, §11.6) is erased where sizing and the erasure checker
+prove it dead. main's
 input refinements run at the session boundary (§11.10), in a guard that
 keeps them as checks. Abort stays a core form there, in the guard, in the
 checks left to run time, and in programs sizing does not prove.
+
+### What is proven
+
+`bend/LAWS.bend` states, in Bend, what makes erasing safe, and
+`bend/PROOF.bend` proves it. `bend bend/PROOF.bend` checks the proofs, and
+`nix flake check` runs it. The laws read the core through `bend/Sem.bend`,
+its meaning in the IC's evaluation order:
+
+- **erasure** and **counts_suffice**: where a run with the erasable sites
+  watched answers, no marked site having reached its result, the same run
+  with them erased (as the program runs) or unbounded (as `--fast` runs)
+  gives the same answer, when it gives one.
+- **what_runs**: the program the compiler hands the runtime answers as the
+  checker's witness does with its sites erased.
+- **certificate_opening** and **certificate_guarded**: where the checker
+  says proven, neither the opening call nor a call on any input the guard
+  passes reaches an erasable site, at any fuel.
+- **fuel_more**: more fuel never changes an answer a run already has.
+
+The checker counts its evaluation steps for its budget with a copy of the
+evaluator, which is proven to give the evaluator's results (`semc_sem`),
+so its verdict rests on the meaning the laws are about.
+
+What this leaves trusted:
+
+- That the IC computes what `bend/Sem.bend` says. It is tested
+  (`bend/tests/sem.bend` runs both on whole sessions), not proven.
+- Termination. The laws compare answers where both runs give one; that
+  every run of a certified program ends is EAL's promise (DESIGN.md C2,
+  §5), and nothing proves it of the checked runs.
+- The laws are separate statements, not yet one theorem, and `what_runs`
+  is proven in one direction only.
+- Bend's checker. `bend bend/PROOF.bend --verdict` rechecks the proofs
+  with BendTT's kernel, which has a proof in Lean; it is run by hand, not
+  by `nix flake check`, because the kernel needs Lean 4.34.
 
 ## Quick Start
 
@@ -272,6 +330,10 @@ sizing budget in force: 65536 unrollings
 
 refinement checks: 0 discharged statically, 1 left to run time:
   simpleplus:14:31  at the session boundary
+erasures in main: proven, by the erasure checker in 200013887 evaluation steps
+  no input it is called on reaches an erased recursion bottom or check
+erasures in the guard: none; every recursion bottom and check stays a run-time abort
+  sizing did not prove the guard for every input
 
 recursion nesting (structural, approximate):
   triple         function             levels
@@ -299,6 +361,13 @@ sizing proved that no input makes its abort reach the result. Otherwise it is
 left to run time, and the report says why. simpleplus's `validInput` is a
 refinement of main's input, so the session runs it before main on each line
 it reads, and main runs without it.
+
+The two `erasures` lines say, for main and for its guard, whether the
+program that runs leaves out its recursion bottoms and discharged checks.
+It does only when the erasure checker proved that no input reaches them
+(see [Design](#design)); otherwise the second line says why they stay.
+On `tictactoe.tel` it reads "the erasure checker could not prove them
+unreachable: its budget of evaluation steps ran out".
 
 `--meter` runs the program and reports what the run cost: the interactions
 the net performed over the whole session, on stderr once the session ends.
@@ -331,7 +400,8 @@ bounds. Only the first is fixable by raising the budget. See
 ## Compiling once
 
 Certifying and sizing are the slow part (about 70 seconds for `tictactoe.tel`
-in haskell-final, 1.7 s here), and they give the same answer every time,
+in haskell-final, about 8 s here, most of it the erasure checker giving up),
+and they give the same answer every time,
 because sizing runs the program over a *symbolic* input. So they need only
 happen once:
 

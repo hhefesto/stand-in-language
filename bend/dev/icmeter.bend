@@ -58,8 +58,8 @@ def compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> 
       IO.print(e)
     case Done{p}:
       match p:
-        case Fr.Program{run, g, +boundary}:
-          sized(guard.expr(g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)), lines)
+        case Fr.Program{run, +g, +boundary}:
+          sized(guard.expr(g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
 
 def loaded(+entry: String, lines: List<&2, String>, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

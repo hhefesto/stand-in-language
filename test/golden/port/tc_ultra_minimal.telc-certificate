@@ -8,6 +8,8 @@ recursion sites (iterations, over every input):
 sizing budget in force: 65536 unrollings
 
 refinement checks: none
+erasures in main: proven, by the erasure checker in 4197 evaluation steps
+  no input it is called on reaches an erased recursion bottom or check
 
 recursion nesting (structural, approximate):
   triple                 function                      levels

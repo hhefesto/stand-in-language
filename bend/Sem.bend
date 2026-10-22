@@ -514,6 +514,126 @@ def read.r(r: R) -> R:
 def run(+fuel: Nat, +pol: Pol, main: E.X, input: E.X) -> R:
   read.r(sem(fuel, pol, JE{E.app(main, input), WZero{}}))
 
+# Counting
+# --------
+
+# The erasure checker's budget is evaluation steps (Check.bend), so it
+# runs sem counted: semc is sem that also counts the jobs it takes on fuel
+# left. Its result is sem's (PROOF.bend, semc_sem), so a verdict reached
+# with it is one reached with sem, which is what the laws read.
+#
+# A def may only call itself, and a match only open a parameter, so where
+# sem feeds one run's result to the next (JSetE, JIfE) semc hands itself
+# the result as a job (Kc's SetK, IfK) and opens it there.
+type C is Data:
+  C{+r: R, +n: Nat}
+
+# What semc runs: a job, counted from n; or JSet, JIf on c's result,
+# counted from c's count.
+type Kc is Data:
+  Go{+job: Job, +n: Nat}
+  SetK{+c: C}
+  IfK{+c: C, +l: E.X, +rt: E.X, +env: W}
+
+def c.r(c: C) -> R:
+  match c:
+    case C{r, n}:
+      r
+
+def c.n(c: C) -> Nat:
+  match c:
+    case C{r, n}:
+      n
+
+# The job k stands for (PROOF.bend), and the count it starts from.
+def kc.job(k: Kc) -> Job:
+  match k:
+    case Go{job, n}:
+      job
+    case SetK{c}:
+      JSet{c.r(c)}
+    case IfK{c, l, rt, env}:
+      JIf{c.r(c), l, rt, env}
+
+def kc.n(k: Kc) -> Nat:
+  match k:
+    case Go{job, n}:
+      n
+    case SetK{c}:
+      c.n(c)
+    case IfK{c, l, rt, env}:
+      c.n(c)
+
+def pair.c(ca: C, cb: C) -> C:
+  match ca:
+    case C{a, x}:
+      match cb:
+        case C{b, y}:
+          C{pair.of(a, b), Nat.add(x, y)}
+
+def watch.c(+site: U32, ct: C, cc: C) -> C:
+  match ct:
+    case C{t, x}:
+      match cc:
+        case C{c, y}:
+          C{checked(site, t, c), Nat.add(x, y)}
+
+def left.c(c: C) -> C:
+  match c:
+    case C{r, m}:
+      C{left.r(r), m}
+
+def right.c(c: C) -> C:
+  match c:
+    case C{r, m}:
+      C{right.r(r), m}
+
+def semc(+fuel: Nat, +pol: Pol, k: Kc) -> C:
+  match fuel:
+    case 0n:
+      C{Spent{}, kc.n(k)}
+    case 1n+f:
+      match k:
+        case Go{job, n}:
+          match job:
+            case JE{x, env}:
+              semc(f, pol, Go{step(pol, x, env), 1n+n})
+            case JPair{a, b, +env}:
+              pair.c(semc(f, pol, Go{JE{a, env}, 1n+n}), semc(f, pol, Go{JE{b, env}, 0n}))
+            case JSetE{y, env}:
+              semc(f, pol, SetK{semc(f, pol, Go{JE{y, env}, 1n+n})})
+            case JSet{r}:
+              semc(f, pol, Go{set.job(r), 1n+n})
+            case JIfE{s, l, rt, +env}:
+              semc(f, pol, IfK{semc(f, pol, Go{JE{s, env}, 1n+n}), l, rt, env})
+            case JIf{r, l, rt, env}:
+              semc(f, pol, Go{if.job(r, l, rt, env), 1n+n})
+            case JLeft{y, env}:
+              left.c(semc(f, pol, Go{JE{y, env}, 1n+n}))
+            case JRight{y, env}:
+              right.c(semc(f, pol, Go{JE{y, env}, 1n+n}))
+            case JWatch{+site, tc, +c, +env}:
+              watch.c(site, semc(f, pol, Go{JE{E.app(tc, c), env}, 1n+n}), semc(f, pol, Go{JE{c, env}, 0n}))
+            case JDone{r}:
+              C{r, n}
+        case SetK{c}:
+          match c:
+            case C{r, m}:
+              semc(f, pol, Go{set.job(r), 1n+m})
+        case IfK{c, l, rt, env}:
+          match c:
+            case C{r, m}:
+              semc(f, pol, Go{if.job(r, l, rt, env), 1n+m})
+
+def read.c(c: C) -> C:
+  match c:
+    case C{r, m}:
+      C{read.r(r), m}
+
+# run, counted from n.
+def runc(+fuel: Nat, +pol: Pol, main: E.X, input: E.X, n: Nat) -> C:
+  read.c(semc(fuel, pol, Go{JE{E.app(main, input), WZero{}}, n}))
+
 # What runs: every erasable site erased (no check is erasable but those
 # listed; a program with no XCheck and no XStub ignores them).
 def plain() -> Pol:

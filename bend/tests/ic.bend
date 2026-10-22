@@ -150,8 +150,8 @@ def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&
       Ss.Replay{[e], Ss.cost.none()}
     case Done{p}:
       match p:
-        case Fr.Program{run, g, +boundary}:
-          sized(guided, guard.of(guided, g), Sz.size.at(65536, True{}, boundary, E.of.term3(run)), lines)
+        case Fr.Program{run, +g, +boundary}:
+          sized(guided, guard.of(guided, g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
 
 # A session as the command runs it: main's input refinements run first, by
 # the guard, and both are guided by EAL.
@@ -453,7 +453,7 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       42943)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      5927480)))
+      6016132)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),
