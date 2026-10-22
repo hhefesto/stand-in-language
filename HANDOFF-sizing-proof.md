@@ -51,7 +51,43 @@ Contents:
 
 ---
 
-## 0. Status (2026-10-09)
+## 0. Status (2026-10-21)
+
+**S3 is done: the checker is wired in.** The user approved step 1 (wire
+the checker in), asked that `--certificate` say which erasures are
+proven, allowed pushing `sizing-proof` (no PR), and renamed `bend-port`
+to `bend` (done: `bend` is at `16dbe49f` on origin, `bend-port` deleted).
+- Sizing calls `Ck.check` on main's witness and on its guard's
+  (`Sz.erasure.of`, `Sz.erased`). Bottoms and discharged checks are erased
+  only when sizing proves the program and the checker proves it too;
+  otherwise every one stays an abort. The guard is sized first, since the
+  checker runs main only on inputs the guard passes. `count.of` moved to
+  `Expr.bend` so that Size and Check need not import each other.
+- `--certificate` prints `erasures in main:` and `erasures in the guard:`,
+  each proven (with the evaluation steps it took) or kept (and why).
+- **D3: tictactoe keeps its aborts,** as recommended to the user, who
+  asked for help deciding and has not overruled it. Erasing them would
+  save 1.5% of the game `1 4 2 5 3` (6,016,132 interactions kept,
+  5,927,480 erased) and needs checker v2 (S5).
+- **The budget is work, not runs.** At 16,384 runs, tictactoe took 110 s
+  to give up (6.2 ms a run against simpleplus's 0.31 ms). `Sem.semc`
+  counts evaluation steps; it is `sem` with a count beside each result,
+  and `semc_sem` (PROOF.bend) proves it gives `sem`'s result.
+  `Ck.explore` spends each node's steps (guard plus main) and one more
+  per leaf; `node_counted` and `at_good` carry `tree` over to it. The
+  certificate laws are unchanged: LAWS.bend is untouched, its `leaves`
+  argument is now the work budget. Budget 2^28 (`Sz.check.work`):
+  tc_ultra_minimal takes 4,197 steps, simpleplus 200,013,887 (about 4 s),
+  tictactoe gives up (`--certificate` in 8.5 s, was 110 s).
+- Two designs failed first, both on Bend's rules (no mutual recursion, a
+  match only on a parameter): helpers that call `semc` back (rejected),
+  and closures for the continuations (1.7 times slower). `semc` instead
+  hands itself the first result as a job (`Kc`'s `SetK`, `IfK`), and
+  counts the two halves of a pair separately.
+- Not done: `--verdict` on the new proofs (olimpo has no Lean 4.34 to
+  build the kernel); the merge into `bend`.
+
+## 0a. Status (2026-10-09)
 
 The user asked to run the plan, stopping at decisions. bend-port is the
 Bend version that keeps up with master's behaviour, so D2 was settled
