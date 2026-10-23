@@ -96,6 +96,12 @@ td:first-child { font-family: var(--mono); font-size: .8rem; white-space: nowrap
 }
 .bound .who { color: var(--muted); font-size: .72rem; }
 .note { font-size: .88rem; color: var(--muted); }
+.status {
+  background: var(--panel); border-left: 3px solid var(--hot);
+  border-radius: 0 6px 6px 0; padding: .6rem 1.1rem; margin: 1.4rem 0;
+  font-size: .92rem;
+}
+.status ul { margin: .3rem 0 .2rem; padding-left: 1.2rem; }
 svg text { font-family: var(--mono); font-size: 11px; fill: var(--ink); }
 svg text.dim { fill: var(--muted); font-size: 10px; }
 svg text.hotl { fill: var(--hot); }
@@ -115,6 +121,30 @@ svg .arrowhead { fill: var(--muted); stroke: none; }
 <h1>The Net That Counts Itself</h1>
 <p class="dek">Interaction nets, how Telomare runs on one, and how a graph
 whose every rewrite is local lets a compiler bound memory.</p>
+
+<div class="status">
+<p><strong>Status, 2026-10-22.</strong> This primer was written on
+2026-09-27 for PR #153, Telomare&rsquo;s Haskell runtime, kept at the tag
+<code>haskell-final</code>. Sections 1&ndash;4 still describe the runtime
+Telomare uses. Since then Telomare has been ported to Bend 2 (branch
+<code>bend</code>), and the interaction-net runtime is the only one left.
+What differs there:</p>
+<ul>
+<li>The runtime is <code>bend/IC.bend</code>. The <code>src/Telomare/&hellip;</code>
+paths, the <code>IntMap</code> node map of section 5 and the line numbers
+below are haskell-final&rsquo;s.</li>
+<li>A gate now runs only the arm it selects: an <code>if</code> hands the chosen
+branch just the parts of the environment it uses, and the other branch never
+runs. Interaction counts fell with it (tic-tac-toe&rsquo;s game
+<code>1 4 2 5 3</code> from 15,168,230 to 6,016,132).</li>
+<li>The space certificate of section 6 (the walk and the compositional
+estimate, <code>--ic --certificate</code>) is not ported. The port&rsquo;s
+<code>--meter</code> reports the interaction count alone.</li>
+<li>Aborts that sizing and an erasure checker prove dead are erased before
+the net is built. That every such erasure is sound is proven in Bend and
+rechecked by BendTT&rsquo;s kernel (<code>bend/SIZING-PROOF.md</code>).</li>
+</ul>
+</div>
 
 <h2><span class="no">1</span>Graphs that compute</h2>
 <p>An interaction net (Lafont, 1990) is a program that is literally a graph.
@@ -412,8 +442,10 @@ consumer and a value, plus duplicator meeting duplicator; in Lafont&rsquo;s
 system any two agents can meet. The consequence is visible in the runtime:
 an eraser cannot meet a duplicator or an unfinished computation, so it
 waits at the computation&rsquo;s output until a value arrives, then erases
-that. This is why the net fires both arms of a gate — the unselected arm
-runs to a value before its eraser can reach it.</p>
+that. This is why haskell-final&rsquo;s net fires both arms of a gate — the
+unselected arm runs to a value before its eraser can reach it. (The Bend
+port avoids that: an <code>if</code> becomes a gate that selects between two
+templates, and only the selected one is instantiated.)</p>
 <p><strong>Labels.</strong> A single δ cannot correctly copy a net that
 itself contains δs: the inner and outer duplicators would annihilate when
 they should pass through each other. Indexing duplicators by labels, so
