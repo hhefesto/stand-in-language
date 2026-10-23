@@ -1901,11 +1901,10 @@ The alignment steps that were done:
   - §8: DeferMap-native compilation.
 - §11.11, when the multi-runtime arrangement ends: the port has one
   runtime, so for the port it is answered.
-- From the sizing proof (bend/SIZING-PROOF.md §1):
-  - a `bend-proof` check in `nix flake check`, so that
-    `bend bend/PROOF.bend --verdict` must pass (it needs BendTT's kernel,
-    built with Lean 4.34, in Nix);
-  - checker v2, only if programs like tictactoe must lose their aborts.
+- From the sizing proof (bend/SIZING-PROOF.md §1): checker v2, only if
+  programs like tictactoe must lose their aborts. (The `bend-proof` check,
+  `--verdict` with BendTT's kernel built from the `lean` input, is in
+  `nix flake check` since 2026-10-22.)
 - Sam's second question after P7.5 (Abort out of the core and the IC
   entirely, P8) is still pending.
 - Appendix A analogues, kept for byte-identical output:
