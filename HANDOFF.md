@@ -9,6 +9,12 @@ and 8 threads, 15 GB). The user asked to go through P1–P7 in order, one
 local commit per step, stopping only at the decision points named below.
 Section 4 opens with where that stands.
 
+**Updated 2026-10-22.** The branch `bend-port` is now `bend` (the user's
+rename, 2026-10-21; older text here still says bend-port). The sizing
+proof (branch `sizing-proof`) is merged in: its notes are
+`bend/SIZING-PROOF.md`, its summary is under P7 ("Since the sizing
+proof"), and its open items are in section 8.
+
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
 parity corpus, committed for the move too). Drop both commits ("Hand off
@@ -243,8 +249,8 @@ expected to change that (section 4).
   pending.
 - The user set the branches' roles (2026-10-08). bend-port is the Bend
   version that keeps up with master's behaviour. The proof that sizing's
-  erasures are sound is on branch `sizing-proof`, which has its own
-  handoff (`HANDOFF-sizing-proof.md`) and merges back here.
+  erasures are sound was done on branch `sizing-proof` and is merged here
+  (2026-10-22, below).
 - Found while planning that proof, and fixed: `822f0c5`. Sizing's
   left-branch superposition filter (`Size.filter.at`) was inverted against
   haskell-final's `filterLeft`.
@@ -1367,6 +1373,24 @@ Asked of Sam (2026-10-08):
   `ic-meter-tictactoe` re-pinned; `port/tictactoe.ic-meter` and
   `.compile` re-recorded.
 
+**Since the sizing proof (merged 2026-10-22): erasure is proven, not
+trusted.** bend/SIZING-PROOF.md has the whole of it. In short:
+- `bend/Sem.bend` is the core's meaning (strict, as the IC runs), and
+  `bend/Check.bend` an erasure checker that runs main's watched witness
+  symbolically over every input the guard admits.
+- `bend/LAWS.bend` states six laws and `bend/PROOF.bend` proves them all:
+  more fuel changes no answer; what runs answers as the erased witness;
+  erasure and the counts change no answer where both runs give one; and
+  if the checker proves main, no admitted input reaches an erased site.
+- Sizing now erases bottoms and discharged checks only when the checker
+  proves them too, within 2^28 evaluation steps (`Sz.check.work`).
+  tc_ultra_minimal, simpleplus and the corpus are proven; tictactoe gives
+  up and keeps its aborts (the user accepted that: D3), which undoes
+  P7.6's results above for it (`ic-meter-tictactoe` is 6,016,132).
+- `--certificate` lists `erasures in main:` and `erasures in the guard:`,
+  each proven (with its steps) or kept (and why).
+- Its tools are in section 10 (`check`, `fastdiff.sh`, `gate.sh`).
+
 **Soundness:** classification is exactly as sound as sizing's path
 exploration. That is the evaluation that already makes the program total,
 so say so in the README line.
@@ -1877,6 +1901,13 @@ The alignment steps that were done:
   - §8: DeferMap-native compilation.
 - §11.11, when the multi-runtime arrangement ends: the port has one
   runtime, so for the port it is answered.
+- From the sizing proof (bend/SIZING-PROOF.md §1):
+  - a `bend-proof` check in `nix flake check`, so that
+    `bend bend/PROOF.bend --verdict` must pass (it needs BendTT's kernel,
+    built with Lean 4.34, in Nix);
+  - checker v2, only if programs like tictactoe must lose their aborts.
+- Sam's second question after P7.5 (Abort out of the core and the IC
+  entirely, P8) is still pending.
 - Appendix A analogues, kept for byte-identical output:
   - `__case_*` helper names, with the pruner keeping
     `and`/`listEqual`/`foldl`/`abort` by name (`Desugar.bend`,
@@ -1908,8 +1939,25 @@ The alignment steps that were done:
 - A full golden pass on haskell-final took ~11.5 min; the port's patterns
   take a few minutes.
 - Corpus parity: see section 10.
+- `bend/dev/gate.sh [build|tests|goldens|corpus|proofs|all]` runs the
+  build, the bend tests (expected lines from `nix/bend.nix`), the goldens,
+  the corpus and the proofs (`bend bend/PROOF.bend`, and `--verdict` too
+  when `BENDTT` names the kernel, bend/SIZING-PROOF.md §7), as P1–P7 and
+  the sizing proof did. Binaries and logs go to `$GATE` (default
+  `/tmp/telomare-gate`); it prints `GATE OK` or `GATE FAILED`. Run it
+  inside `nix develop`.
 
 ## 10. Dev tools and the parity corpus (`bend/dev/`, committed for the move)
+
+**The sizing proof's tools** (built from the repo root like the others):
+- `check MODULE [STEPS]`: the erasure checker (`Check.bend`) on MODULE's
+  main, guarded as the command guards it. It prints its verdict, what it
+  watched, and the evaluation steps it took (at most STEPS, by default
+  the compiler's budget, `Sz.check.work`). The corpus runs from
+  `bend/dev/corpus`.
+- `fastdiff.sh BIN [SESSIONS [SEED]]`: sized vs `--fast` sessions, a
+  differential test (bend/SIZING-PROOF.md §3).
+- `gate.sh`: the gate (section 9).
 
 Build a tool with `bend bend/dev/X.bend -o /tmp/X` (inside `nix develop`),
 and run it from the repo root: modules load as `M.tel` from the cwd.
@@ -2033,6 +2081,9 @@ empty.
 - `IC`, `Session`, `Main`.
 - `Levels` and `Certificate`: the static report.
 - `Text`, `Show`, `Loc`.
+- The sizing proof's: `Sem` (the meaning) and `Check` (the erasure checker),
+  both in `Everything.bend`; `LAWS` and `PROOF` (the claims and their
+  proofs), in it through PROOF.bend's import of LAWS.bend.
 
 **IC:**
 - The net is an `Array<U32>`, 8 words per agent. Active pairs are LIFO.
@@ -2098,6 +2149,33 @@ empty.
   `inputs.bend.path`; it was `/nix/store/mirj9jkif1lnsqj1n7g3645fwscl42hp-source`
   for rev `018751270e80`, release 2.0.34. Nothing from
   `~/src/formalTransformer` or `~/src/bend2`.
+
+**Proofs** (learned proving sizing sound, bend/SIZING-PROOF.md):
+- `%e : P; body`, with `e : {a == b : T}`: P is the current goal with `_`
+  where b stands, and body proves P with a there. So it rewrites b into
+  a. Use `Equal.sym` for the other way.
+- A default case (`case _:`) in a proof does not refine the goal:
+  enumerate the constructors. Defaults in the definitions a proof
+  unfolds are fine once the scrutinee is a constructor.
+- Matching a binder consumes the pattern-bound binders introduced after
+  it. So match a def's parameters in their order, before the fields of
+  anything matched later. Where a case needs a field and an earlier
+  parameter both matched, move it to a helper that takes the induction
+  hypothesis as an argument.
+- A Pi type is `@x: A -> B`, and the domain stops at the first bare
+  `->`. A recursive call inside a lambda passed as an argument is
+  accepted when its first argument shrinks, by bend and by the kernel.
+- A lambda-bound hypothesis cannot be matched. Close an Empty one with
+  `Empty.absurd(T, h)`: T is not inferred, so write it out.
+- A rewrite cannot precede a match. Match first, or hand the rest to a
+  helper whose parameter stands for the computed value, and match there.
+- A law's own `for` binders are not shared (`+`). Where a proof uses one
+  twice, delegate to a helper law that shares them (`what_runs_at`).
+- `-x` marks a parameter used only in types: one passed to another lemma
+  must not have it. `+x` marks one used twice, equations included, and a
+  `+` parameter can still be matched.
+- Hypotheses whose types depend on matched variables come after the
+  matches, as arrows (`h => …`).
 
 ## 13. Nix gotchas
 
