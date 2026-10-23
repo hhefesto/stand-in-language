@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fastdiff.sh BIN [SESSIONS [SEED]]: sized runs against --fast ones
-# (HANDOFF-sizing-proof.md S0.2). tictactoe and simpleplus are fed generated
+# (bend/SIZING-PROOF.md §3). tictactoe and simpleplus are fed generated
 # input, once sized and once unbounded, and every session whose displays
 # differ is printed with its input. A difference is an over-run (an erased
 # bottom reached: an IC stuck error) or a check discharged wrongly. It

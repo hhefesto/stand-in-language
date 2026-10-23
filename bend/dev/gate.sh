@@ -78,7 +78,7 @@ corpus() {
 }
 
 # PROOF.bend proves every law it has a def for: the open ones are its only
-# TODOs. With BENDTT (the kernel, HANDOFF-sizing-proof.md §8), the proven
+# TODOs. With BENDTT (the kernel, bend/SIZING-PROOF.md §7), the proven
 # laws are rechecked with --verdict, in a copy whose LAWS.bend lacks the
 # open ones.
 proofs() {
