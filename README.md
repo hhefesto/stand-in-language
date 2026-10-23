@@ -257,9 +257,10 @@ What this leaves trusted:
   §5), and nothing proves it of the checked runs.
 - The laws are separate statements, not yet one theorem, and `what_runs`
   is proven in one direction only.
-- Bend's checker. `bend bend/PROOF.bend --verdict` rechecks the proofs
-  with BendTT's kernel, which has a proof in Lean; it is run by hand, not
-  by `nix flake check`, because the kernel needs Lean 4.34.
+- BendTT's kernel, rather than Bend's checker: `nix flake check`'s
+  `bend-proof` rechecks the proofs with the kernel (`bend bend/PROOF.bend
+  --verdict`), which has a proof in Lean. The flake builds the kernel with
+  Lean 4.34 from its `lean` input, and `nix develop` sets `BENDTT` to it.
 
 [bend/SIZING-PROOF.md](bend/SIZING-PROOF.md) explains the laws, the
 checker and the proofs as built.
@@ -303,6 +304,7 @@ checker and the proofs as built.
    compiled to a native binary and run:
    ```sh
    $ bend bend/Everything.bend   # prints ALL PROOFS CHECK
+   $ bend bend/PROOF.bend --verdict   # the same, by BendTT's kernel
    $ nix flake check
    ```
 6. Profit!

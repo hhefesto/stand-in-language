@@ -25,8 +25,8 @@ Contents:
 **All six laws are proven** (§2), and `bend bend/PROOF.bend` prints ALL
 PROOFS CHECK. PROOF.bend is about 7,700 lines and is part of
 `Everything.bend`, so `bend-check` and the pre-commit hook check it.
-The proofs of laws 1 to 4 and of laws 5 were also rechecked with
-`--verdict` (BendTT's Lean-proven kernel, §7) when they were written.
+`nix flake check`'s `bend-proof` rechecks them with `--verdict`
+(BendTT's Lean-proven kernel, §7), which the flake builds.
 
 **The checker is wired into sizing.** Sizing calls `Ck.check` on main's
 witness and on its guard's (`Sz.erasure.of`, `Sz.erased`). Bottoms and
@@ -58,12 +58,8 @@ recursion, a match only on a parameter): helpers that call `semc` back
 instead hands itself the first result as a job (`Kc`'s `SetK`, `IfK`), and
 counts the two halves of a pair separately.
 
-**Open:**
-- A `bend-proof` check in `nix flake check`, so that
-  `bend bend/PROOF.bend --verdict` must print ALL PROOFS CHECK. It needs
-  the kernel built in Nix (§7). Until then `bend/dev/gate.sh proofs` runs
-  it by hand when `BENDTT` is set.
-- Checker v2 (§4), only if programs like tictactoe must lose their aborts.
+**Open:** checker v2 (§4), only if programs like tictactoe must lose
+their aborts.
 
 ## 2. The goal, stated exactly
 
@@ -514,7 +510,11 @@ The source is the flake input: `nix flake archive --json` →
 - `bend --verdict` re-checks with BendTT's kernel, a Lean program bend
   builds on first use. That build needs Lean v4.34.0 on PATH or under
   elan.
-- nixos-unstable's Lean 4.34.1 builds it in about a minute:
+- The flake builds it (`nix build .#bendtt`), with Lean 4.34.1 from its
+  `lean` input (Bend's own nixpkgs has Lean 4.30, which fails on
+  `ite_eq_left`). `nix develop` sets `BENDTT` to it, and the `bend-proof`
+  check runs `bend bend/PROOF.bend --verdict` with it (about 2 s). By hand,
+  nixos-unstable's Lean 4.34.1 builds it in about a minute:
   ```sh
   nix build github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8#lean4 --out-link $ROOTS/lean4
   mkdir K && cp $BEND/bend2/bendtt.lean K/ && cd K

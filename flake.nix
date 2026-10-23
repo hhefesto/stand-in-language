@@ -12,6 +12,10 @@
     # release archive over its own nixpkgs (bun, clang, autoPatchelf), which
     # is the one nixpkgs in the lock: only the `bend` command comes from it.
     bend.url = "github:bendlang/bend";
+    # Lean 4.34, which builds BendTT's kernel: `bend --verdict` re-checks the
+    # proofs with it (the `bend-proof` check). Bend's own nixpkgs has Lean
+    # 4.30, which cannot build the kernel. Only `lean4` comes from here.
+    lean.url = "github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8";
   };
 
   # An input's nixConfig is not applied transitively, so the caches this build
@@ -34,6 +38,7 @@
       self,
       corepkgs,
       bend,
+      lean,
     }:
     let
       project =
@@ -42,6 +47,7 @@
           inherit pkgs;
           src = ./.;
           bend = bend.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          leanPkgs = lean.legacyPackages.${pkgs.stdenv.hostPlatform.system};
         };
     in
     corepkgs.lib.mkFlake {

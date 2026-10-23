@@ -146,6 +146,12 @@
   running Nix's own get-env.sh, so only the same version finds it in the
   cache. Bump the pin with the maintainer's Nix. magic-nix-cache is gone:
   every upload was failing, and Cachix holds everything CI needs.
+* `nix flake check` runs `bend-proof`: BendTT's kernel rechecks the proofs
+  that sizing's erasures are sound (`bend bend/PROOF.bend --verdict`), so
+  they rest on the kernel's Lean proof rather than on Bend's checker. The
+  kernel (`packages.bendtt`) is built with Lean 4.34 from a new `lean` input
+  (Bend's nixpkgs has Lean 4.30, which cannot build it), and `nix develop`
+  sets `BENDTT` to it.
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

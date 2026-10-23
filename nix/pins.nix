@@ -42,4 +42,5 @@ in
 {
   corepkgs = fetch "corepkgs";
   bend = callFlake "bend";
+  lean = fetch "lean";
 }

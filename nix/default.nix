@@ -6,10 +6,21 @@
   pkgs,
   src,
   bend,
+  leanPkgs,
 }:
 let
-  project = import ./bend.nix { inherit pkgs src bend; };
-  devShells = import ./devshell.nix { inherit pkgs bend; };
+  project = import ./bend.nix {
+    inherit
+      pkgs
+      src
+      bend
+      leanPkgs
+      ;
+  };
+  devShells = import ./devshell.nix {
+    inherit pkgs bend;
+    inherit (project) bendtt;
+  };
   tools = import ./tools.nix {
     inherit pkgs;
     devShellNames = builtins.attrNames devShells;
@@ -19,6 +30,7 @@ let
   telomare = project.telomare;
   packages = {
     inherit telomare bend;
+    inherit (project) bendtt;
     default = telomare;
   };
 
@@ -30,11 +42,13 @@ let
   };
 
   # `nix flake check` builds the command, checks every Bend module (types,
-  # termination, laws), runs the tests, each built to a native binary, and
-  # runs the command on the goldens it covers.
+  # termination, laws), re-checks the proofs with BendTT's kernel, runs the
+  # tests, each built to a native binary, and runs the command on the goldens
+  # it covers.
   checks = {
     inherit telomare;
     bend-check = project.check;
+    bend-proof = project.proof;
     bend-tests = project.tests;
     goldens = project.goldens;
     push-cachix = tools.pushCachix;

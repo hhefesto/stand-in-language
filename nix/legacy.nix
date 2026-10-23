@@ -12,4 +12,5 @@ import ./. {
   pkgs = import ./pkgs.nix { inherit system; };
   src = ./..;
   bend = pins.bend.packages.${system}.default;
+  leanPkgs = import pins.lean { inherit system; };
 }

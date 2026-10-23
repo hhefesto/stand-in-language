@@ -4,6 +4,7 @@
   pkgs,
   src,
   bend,
+  leanPkgs,
 }:
 let
   inherit (pkgs) lib;
@@ -173,9 +174,20 @@ let
     mkdir -p $out/bin
     bend bend/Main.bend -o $out/bin/telomare
   '';
+
+  # BendTT's kernel, the Lean program `bend --verdict` re-checks proofs with
+  # (bend2/bendtt.lean in Bend's release; its soundness is proven in Lean).
+  # Bend would build it on first use with an elan or PATH Lean v4.34; here
+  # it is built once, with the `lean` input's Lean, and named by $BENDTT.
+  bendtt = leanPkgs.runCommandCC "bendtt" { nativeBuildInputs = [ leanPkgs.lean4 ]; } ''
+    cp ${bend}/libexec/bend/bend2/bendtt.lean .
+    lean -c bendtt.c bendtt.lean
+    leanc -O3 -DNDEBUG bendtt.c -o bendtt
+    install -Dm755 bendtt $out/bin/bendtt
+  '';
 in
 {
-  inherit telomare;
+  inherit telomare bendtt;
 
   # The command against what haskell-final printed (test/golden).
   goldens = pkgs.runCommand "goldens" { } ''
@@ -188,6 +200,14 @@ in
   # Every module type-checks, terminates and proves its laws.
   check = bendCommand "bend-check" bendSrc ''
     bend bend/Everything.bend | tee result
+    grep -qx "ALL PROOFS CHECK" result
+    touch $out
+  '';
+
+  # The proofs that sizing's erasures are sound (bend/PROOF.bend), re-checked
+  # by BendTT's kernel: Bend's checker is then out of the trusted base.
+  proof = bendCommand "bend-proof" bendSrc ''
+    BENDTT=${bendtt}/bin/bendtt bend bend/PROOF.bend --verdict | tee result
     grep -qx "ALL PROOFS CHECK" result
     touch $out
   '';

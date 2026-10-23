@@ -2,8 +2,13 @@
 # (`bend bend/Everything.bend`, `bend FILE.bend -o OUT`). corepkgs has no
 # plain `mkShell` (its `mkDevShell` adds process-compose and service
 # directories), so the shell is the derivation such a `mkShell` makes. No C
-# compiler of its own: Bend brings the clang it compiles with.
-{ pkgs, bend }:
+# compiler of its own: Bend brings the clang it compiles with. $BENDTT names
+# BendTT's kernel, so `bend FILE.bend --verdict` works here as well.
+{
+  pkgs,
+  bend,
+  bendtt,
+}:
 {
   default = pkgs.stdenvNoCC.mkDerivation {
     name = "telomare";
@@ -11,6 +16,7 @@
     # Bend's launcher otherwise checks for a newer release on every run.
     # (Under structured attributes only `env` reaches the environment.)
     env.BEND_NO_TELEMETRY = "1";
+    env.BENDTT = "${bendtt}/bin/bendtt";
     # corepkgs builds with structured attributes, which leave `name` an
     # unexported shell variable: direnv drops it, and prompts that show the
     # environment's name (any-nix-shell's reads `$name`) have none.
