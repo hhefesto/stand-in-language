@@ -511,7 +511,7 @@ def guard.checks(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Sz.Checks>:
           Some{checks}
 
 # Main is sized after its guard is, since the erasure checker runs main
-# only on the inputs the guard passes (HANDOFF-sizing-proof.md §4).
+# only on the inputs the guard passes (SIZING-PROOF.md §4).
 def guarded(+run: T.C, +boundary: Set(), g: Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>) -> Result<&2, &2, Failure, Compiled>:
   match g:
     case Fail{e}:

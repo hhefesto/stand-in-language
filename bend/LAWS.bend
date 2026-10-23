@@ -1,4 +1,4 @@
-# The claims that sizing's erasures are sound (HANDOFF-sizing-proof.md §2).
+# The claims that sizing's erasures are sound (SIZING-PROOF.md §2).
 # The human owns this file. PROOF.bend proves it, and once the user approves
 # a law (decision D1) nothing edits it; a law that turns out false is
 # reported, not reworded.

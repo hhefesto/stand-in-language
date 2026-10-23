@@ -85,7 +85,7 @@ type SizeFail is Data:
 type Checks is Data:
   Checks{+validating: Set(), +boundary: Set(), +reaching: Set(), +opening: Set(), +proven: Bool, +erasure: Erasure}
 
-# Whether the erasures sizing proved are sound (HANDOFF-sizing-proof.md
+# Whether the erasures sizing proved are sound (SIZING-PROOF.md
 # §4): Unproven, when sizing proved nothing to erase; Checked, the erasure
 # checker's verdict on main's witness, and the runs it had left. Only a
 # Proven verdict erases: the theorem in PROOF.bend covers exactly that.

@@ -225,7 +225,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       String.eq(filtered("L", False{}, "LL"), "b"),
       String.eq(filtered("R", False{}, "L"), "both")])))
     # tictactoe keeps its aborts: the erasure checker spends its budget on
-    # it and gives up (HANDOFF-sizing-proof.md D3).
+    # it and gives up (SIZING-PROOF.md §5, D3).
     IO.print(verdict("size-erased", all([
       String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
       String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),

@@ -240,7 +240,7 @@ def checking.of(+ks: List<&2, Check>, +cs: Sz.Checks) -> List<&2, String>:
 def checking(run: T.C, +cs: Sz.Checks) -> List<&2, String>:
   checking.of(List.sort(~Check, ~check.le, checks(run, [])), cs)
 
-# What the erasures in who rest on (HANDOFF-sizing-proof.md §4): the
+# What the erasures in who rest on (SIZING-PROOF.md §4): the
 # program erases its recursion bottoms and discharged checks only where the
 # erasure checker proved that no input reaches them. Otherwise they stay as
 # run-time aborts, and the second line says why.

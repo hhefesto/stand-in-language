@@ -2,7 +2,7 @@ import Base
 import ./Expr.bend as E
 import ./Sem.bend as Sm
 
-# The erasure checker (HANDOFF-sizing-proof.md §4, checker v1): whether a
+# The erasure checker (SIZING-PROOF.md §4, checker v1): whether a
 # sized program's erasures are sound, by running its witness under Sem
 # over every input the session can give it.
 #

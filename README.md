@@ -261,6 +261,9 @@ What this leaves trusted:
   with BendTT's kernel, which has a proof in Lean; it is run by hand, not
   by `nix flake check`, because the kernel needs Lean 4.34.
 
+[bend/SIZING-PROOF.md](bend/SIZING-PROOF.md) explains the laws, the
+checker and the proofs as built.
+
 ## Quick Start
 
 1. Clone this repository and change directory to it:
