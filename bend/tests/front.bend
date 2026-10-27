@@ -314,9 +314,9 @@ def main() -> IO(Unit):
   do IO<Unit>:
     prelude : Result<&1, &1, String, String> <- Tx.read_file("Prelude.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
-    plus : Result<&1, &1, String, String> <- Tx.read_file("simpleplus.tel")
+    plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
-    tchar : Result<&1, &1, String, String> <- Tx.read_file("testchar.tel")
+    tchar : Result<&1, &1, String, String> <- Tx.read_file("test/programs/testchar.tel")
     over : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/over-budget-recursion.tel")
     unb : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/unbounded-input-recursion.tel")
     report(text(prelude), text(ttt), text(plus), text(tc), text(tchar), text(over), text(unb))

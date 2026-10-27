@@ -295,6 +295,7 @@ checker and the proofs as built.
 4. Enter a Nix shell. It provides `bend`, pinned by the flake:
    ```sh
    $ nix develop # or nix develop -c zsh
+   $ nix develop .#full # the same plus haskell-language-server, hlint, stylish-haskell and ghcid
    ```
    (`nix develop` takes its interactive bash from whatever your flake registry
    calls `nixpkgs`. That is Nix's doing, not this flake's, which has no
@@ -322,7 +323,7 @@ knows without running the program, and `--meter`, which says what one run
 actually cost.
 
 ```sh
-$ telomare simpleplus.tel --certificate
+$ telomare test/programs/simpleplus.tel --certificate
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
@@ -379,7 +380,7 @@ the net performed over the whole session, on stderr once the session ends.
 That is a measurement of one run, not a prediction about the next:
 
 ```sh
-$ printf '3 4\n' | telomare simpleplus.tel --meter
+$ printf '3 4\n' | telomare test/programs/simpleplus.tel --meter
 enter two digits separated by a space
 3 plus 4 is 7
 IC interactions: 42943
@@ -430,7 +431,7 @@ interaction net like everything else, plays `tictactoe.tel` identically, and
 will even run programs the sizing pass rejects:
 
 ```sh
-$ printf '3 4\n' | telomare simpleplus.tel --fast --meter
+$ printf '3 4\n' | telomare test/programs/simpleplus.tel --fast --meter
 enter two digits separated by a space
 3 plus 4 is 7
 IC interactions: 735924
@@ -719,12 +720,12 @@ duplication strategy the runtime was designed around; where the EAL pass has
 no layout for a body, that body copies generically.
 
 ```sh
-telomare simpleplus.tel --ic                     # run on the net
-telomare simpleplus.tel --ic --meter             # plus peaks and interactions
-telomare simpleplus.tel --ic --certificate       # bound or estimate, any input
-telomare simpleplus.tel --ic --compile -o /tmp/sp.telc
-telomare /tmp/sp.telc --ic --certificate         # the stored certificate
-telomare simpleplus.tel --ic --draw-net          # net and templates, as SVG
+telomare test/programs/simpleplus.tel --ic                # run on the net
+telomare test/programs/simpleplus.tel --ic --meter        # plus peaks and interactions
+telomare test/programs/simpleplus.tel --ic --certificate  # bound or estimate, any input
+telomare test/programs/simpleplus.tel --ic --compile -o /tmp/sp.telc
+telomare /tmp/sp.telc --ic --certificate                  # the stored certificate
+telomare test/programs/simpleplus.tel --ic --draw-net     # net and templates, as SVG
 ```
 
 `--ic --draw-net` draws the prepared program as an SVG figure

@@ -27,25 +27,25 @@ case_ tc_ultra_minimal.telc-certificate tc_ultra_minimal.telc '' --certificate
 # testchar.tel uses `not` without importing the Prelude, so the command line
 # rejects it; the test suite prepended the Prelude to reach its parity cases
 # ('A' odd, 'B' even: haskell-final's test/Spec.hs). One case keeps the error.
-case_ testchar.run testchar.tel 'A\n'
+case_ testchar.run test/programs/testchar.tel 'A\n'
 
 # Two digits in, their sum out, over the Prelude; bad input aborts.
-case_ simpleplus.run simpleplus.tel '3 4\n'
-case_ simpleplus.run-carry simpleplus.tel '9 9\n'
-case_ simpleplus.run-abort simpleplus.tel '9 a\n'
-case_ simpleplus.certificate simpleplus.tel '' --certificate
-case_ simpleplus.ic simpleplus.tel '3 4\n' --ic
-case_ simpleplus.ic-carry simpleplus.tel '9 9\n' --ic
-case_ simpleplus.ic-abort simpleplus.tel '9 a\n' --ic
-case_ simpleplus.ic-meter simpleplus.tel '3 4\n' --ic --meter
-case_ simpleplus.ic-certificate simpleplus.tel '' --ic --certificate
-case_ simpleplus.ic-draw-net simpleplus.tel '' --ic --draw-net
-case_ simpleplus.ic-compile simpleplus.tel '' --ic --compile
-case_ simpleplus.telc-ic simpleplus.telc '3 4\n' --ic
-case_ simpleplus.telc-ic-certificate simpleplus.telc '' --ic --certificate
-case_ simpleplus.compile simpleplus.tel '' --compile
-case_ simpleplus.telc-run simpleplus.telc '3 4\n'
-case_ simpleplus.telc-certificate simpleplus.telc '' --certificate
+case_ simpleplus.run test/programs/simpleplus.tel '3 4\n'
+case_ simpleplus.run-carry test/programs/simpleplus.tel '9 9\n'
+case_ simpleplus.run-abort test/programs/simpleplus.tel '9 a\n'
+case_ simpleplus.certificate test/programs/simpleplus.tel '' --certificate
+case_ simpleplus.ic test/programs/simpleplus.tel '3 4\n' --ic
+case_ simpleplus.ic-carry test/programs/simpleplus.tel '9 9\n' --ic
+case_ simpleplus.ic-abort test/programs/simpleplus.tel '9 a\n' --ic
+case_ simpleplus.ic-meter test/programs/simpleplus.tel '3 4\n' --ic --meter
+case_ simpleplus.ic-certificate test/programs/simpleplus.tel '' --ic --certificate
+case_ simpleplus.ic-draw-net test/programs/simpleplus.tel '' --ic --draw-net
+case_ simpleplus.ic-compile test/programs/simpleplus.tel '' --ic --compile
+case_ simpleplus.telc-ic test/programs/simpleplus.telc '3 4\n' --ic
+case_ simpleplus.telc-ic-certificate test/programs/simpleplus.telc '' --ic --certificate
+case_ simpleplus.compile test/programs/simpleplus.tel '' --compile
+case_ simpleplus.telc-run test/programs/simpleplus.telc '3 4\n'
+case_ simpleplus.telc-certificate test/programs/simpleplus.telc '' --certificate
 
 # A whole game, player 1 taking the top row.
 case_ tictactoe.run tictactoe.tel '1\n4\n2\n5\n3\n'
@@ -70,10 +70,10 @@ case_ tictactoe.telc-certificate tictactoe.telc '' --certificate
 # unrolls each site made, the static report without counts, and the fuel
 # cap. The port's meter counts interactions and each unroll once, and its
 # fuel is interactions (test/golden/port).
-case_ simpleplus.fast simpleplus.tel '3 4\n' --fast
-case_ simpleplus.fast-meter simpleplus.tel '3 4\n' --fast --meter
-case_ simpleplus.fast-certificate simpleplus.tel '' --fast --certificate
-case_ simpleplus.fast-fuel simpleplus.tel '3 4\n' --fast --fuel 20
+case_ simpleplus.fast test/programs/simpleplus.tel '3 4\n' --fast
+case_ simpleplus.fast-meter test/programs/simpleplus.tel '3 4\n' --fast --meter
+case_ simpleplus.fast-certificate test/programs/simpleplus.tel '' --fast --certificate
+case_ simpleplus.fast-fuel test/programs/simpleplus.tel '3 4\n' --fast --fuel 20
 case_ tc_ultra_minimal.fast-meter tc_ultra_minimal.tel '' --fast --meter
 case_ tictactoe.fast tictactoe.tel '1\n9\n2\n8\n3\n' --fast
 

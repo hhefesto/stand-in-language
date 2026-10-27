@@ -49,6 +49,38 @@
   why the others stay. simpleplus is proven; tic-tac-toe is not, so its main
   keeps its aborts (the game `1 4 2 5 3` takes 6,016,132 interactions
   instead of 5,927,480), and sizing it takes about 7 s longer.
+* EAL certification now terminates by construction in every phase: each
+  DeferRef occurrence instantiates its body once (let-polymorphism over the
+  DeferMap DAG) and carries the instance's interface with its tag, so dispatch
+  only unifies and is bounded by sites times tags. The dispatch depth cap,
+  polyvariance cap and variable budget are gone. Self-application is rejected
+  as a cycle through an interface's argument half (the occurs check of arrow
+  types), with the cycle named in the error; cycles through captures remain
+  regular closure shapes. An abort that really aborts now has a bottom type
+  instead of being read as the identity, so sized recursion chains type
+  through their dead base. Numeral-of-numeral composition and the previously
+  pinned same-arity gate join certify.
+* The box constraints are solved exactly (presolve, sparse Gaussian elimination,
+  exact dual simplex from the slack basis); the level cap, the round budgets and
+  `EALSolverGaveUp` are gone, and an unsatisfiable system names the rows that
+  cannot hold together. The objective is total leaf depth. Depths are cumulative
+  per node, so equations have at most three terms.
+* A closed data tree under a pair constructor is one data leaf in the analysis
+  (one level of pair structure kept), not a node per pair: data is level-free,
+  and the per-component view bangs were what every instance copied.
+* The box constraints are solved once, in the global pass, and per-body levels
+  and env bangs are read off it. The standalone per-body passes run only when
+  main fails, to localize the failure: a certified main has certified every
+  body's instances, and a body's own constraints are a subset of its
+  instance's, so no body can fail on its own under a certified main. The
+  forced identity reading of an unresolved abort could previously fail a body
+  standalone and reject main through the dependency gate even though main's
+  own derivation certified; that false rejection is gone with the gate.
+* The box discipline is faithful EAL: occurrences sit exactly as deep as the
+  bangs they open, boxes pass through applications, projections and gate
+  switches instead of vanishing, a duplicated capture is contracted outside
+  its closure's box (the reading that types Church numerals), and data stays
+  level-free. Reported levels are now proof-net depths.
 * Reorganized the library into compiler-stage modules: `Telomare.Parse`,
   `Telomare.Expand`, `Telomare.Desugar`, `Telomare.Resolve`,
   `Telomare.TypeCheck`, `Telomare.Size` (+ `.IR`) with the shared
@@ -117,10 +149,14 @@
   GHC 9.10.3 bindist (added upstream for this, corepkgs#178 and #180), plus
   the `haskell-pkgs` snapshot (Stackage LTS 24), consumed with
   `corepkgs.lib.mkFlake`. The Nix code lives in `nix/`; the package
-  expression is a checked-in cabal2nix file (`nix/telomare-cabal2nix.nix`,
-  regenerate when `build-depends` change); `default.nix` and `shell.nix`
-  read the pins from `flake.lock` instead of going through flake-compat,
-  and are no longer built or cached by `push-cachix`.
+  expression is a checked-in cabal2nix file (`nix/telomare-cabal2nix.nix`),
+  regenerated from `telomare.cabal` by `nix run .#cabal2nix` with the
+  snapshot's cabal2nix; the `cabal2nix` workflow runs it on every push that
+  can change the file and appends the result to the branch as a commit (set
+  a `CABAL2NIX_TOKEN` secret for that commit to run CI like any push; without
+  one, the workflow starts Telomare CI on the branch itself); `default.nix`
+  and `shell.nix` read the pins from `flake.lock` instead of going through
+  flake-compat, and are no longer built or cached by `push-cachix`.
   `apps.telomare-lsp` now carries the version stamp like `apps.lsp`. The
   default dev shell is the minimum that builds the project (GHC and
   cabal-install); `nix develop .#full` adds haskell-language-server, hlint,
@@ -141,11 +177,27 @@
   the cache instead of rebuilding the LSP wrapper, the helper and
   ShellCheck. `systems` is `x86_64-linux` until corepkgs marks
   aarch64-linux supported.
-* CI installs Determinate Nix 3.22.5, the Nix `push-cachix` is run with,
+* CI installs Determinate Nix 3.23.3, the Nix `push-cachix` is run with,
   instead of Nix 2.31.5: `nix develop` builds its environment from the
   running Nix's own get-env.sh, so only the same version finds it in the
-  cache. Bump the pin with the maintainer's Nix. magic-nix-cache is gone:
+  cache. Bump the pin, in both workflows, with the maintainer's Nix.
+  magic-nix-cache is gone:
   every upload was failing, and Cachix holds everything CI needs.
+* CI pushes what it builds to the `telomare` cache. The cache signs with
+  a Cachix-managed key, which takes an auth token to push to, and CI was
+  offering only a signing key: every upload was refused (403), so nothing CI
+  built reached the cache. It now pushes with the `CACHIX_AUTH_TOKEN` secret.
+* Fixed `cabal test` in the dev shells, which found none of the test suites'
+  own dependencies (hspec, tasty-hunit, tasty-quickcheck): corepkgs' Haskell
+  builder defaults to `doCheck = false`, and `shellFor` gathers the
+  dependencies through a package built with that default. CI now dry-runs
+  `cabal test` in `nix develop` with no package index, so the plan has to
+  come from the shell alone.
+* haskell-language-server loads every Haskell file again: `hie.yaml` maps
+  the EAL, IC and conformance test modules to their suites, and `Common`,
+  which `telomare-test` still listed although only the resolver suite
+  imports it, belongs to that suite alone (a file in two components fails
+  to load in one of them).
 * `nix flake check` runs `bend-proof`: BendTT's kernel rechecks the proofs
   that sizing's erasures are sound (`bend bend/PROOF.bend --verdict`), so
   they rest on the kernel's Lean proof rather than on Bend's checker. The

@@ -38,6 +38,6 @@ for ((i = 0; i < N; i++)); do
   done
   run tictactoe.tel "$T/in"
   printf '%s %s\n' "${digits[RANDOM % ${#digits[@]}]}" "${digits[RANDOM % ${#digits[@]}]}" > "$T/in"
-  run simpleplus.tel "$T/in"
+  run test/programs/simpleplus.tel "$T/in"
 done
 echo "sessions: $((2 * N)); differing: $diffs"

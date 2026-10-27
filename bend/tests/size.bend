@@ -238,7 +238,7 @@ def main() -> IO(Unit):
   do IO<Unit>:
     prelude : Result<&1, &1, String, String> <- Tx.read_file("Prelude.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
-    plus : Result<&1, &1, String, String> <- Tx.read_file("simpleplus.tel")
+    plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     over : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/over-budget-recursion.tel")
     unb : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/unbounded-input-recursion.tel")

@@ -463,6 +463,6 @@ def main() -> IO(Unit):
   do IO<Unit>:
     prelude : Result<&1, &1, String, String> <- Tx.read_file("Prelude.tel")
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
-    plus : Result<&1, &1, String, String> <- Tx.read_file("simpleplus.tel")
+    plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
     report(text(prelude), text(tc), text(plus), text(ttt))

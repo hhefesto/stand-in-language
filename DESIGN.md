@@ -235,13 +235,13 @@ one more name than body slot (the extra name is the generated validator). This i
 elaboration-level convention, not parser behavior.
 - Serves: C1 (keeps UDTs out of the core entirely).
 
-**[open] The certified term is not the executed term.** `compileMainReporting` resolves
-the program twice: a `let`-inlined build (`main2Term3`) is EAL-certified and discarded,
-while a `let`-as-application build (`main2Term3let`) is what actually gets sized and
-run. The two are believed equivalent, but nothing checks it per-program. Unifying the
-two pipelines (or certifying the executed build) is a known destination — the
-DeferMap-native pipeline work (lifting, `linkDefers`, the parity harness) is
-scaffolding toward it.
+**[open] The certified term is not always the executed term.** One `let`-as-application
+build (`main2Term3`) is certified, sized and run. But a program that certifies only
+with its closed definitions copied into their uses (§5) is certified on that copy,
+while the shared build is what gets sized and run. Copying a closed value changes
+nothing the program computes, and on the IC runtime a duplicator meeting a closed
+value only ever copies it (the argument is in `specializeLets`), but nothing checks
+the two per program, and the IC runtime's correctness rests on EAL-typability (§7).
 
 ## 4. Totality: recursion and sizing
 
@@ -355,32 +355,133 @@ the program being EAL-typable, so `admitIC` re-certifies the compiled expression
 per program.
 - Serves: C2, C4.
 
-**[decision] Analysis caps produce rejections, never wrong certificates.** The
-constraint solver is a greedy propagate-then-repair heuristic with explicit budgets
-(level cap, dispatch depth cap, variable budget, polyvariance cap); incompleteness
-surfaces as `EALSolverGaveUp` naming a culprit, and a final exact verification pass
-backs the greedy assignment.
-- Serves: C2 (soundness is what totality rests on).
-- Rationale: soundness is non-negotiable; completeness is a quality knob that §11
-  tracks.
+**[decision] A closed `let`-bound definition is typed per use when sharing it fails.**
+A `let` resolves to an application of a lambda, so a definition reaches its uses
+through an env, as one value, and the box discipline gives it one depth. A definition
+used both directly and inside a closure that gets copied (by the program, or by
+sizing's unrolling of a recursion) needs two, and certification fails with
+`a duplicated value cannot be boxed`, though each use alone certifies. So when main
+fails, `inferEALLifted` retries on copies of the program with closed definitions
+substituted into their uses (HM's `let` rule, read as substitution), each copy typed
+at its own depth: first only the definitions the failure's blames point at, adding
+what the next failure points at until main certifies or nothing is left to add; then
+every closed definition with closure bodies left shared; then every closed
+definition everywhere. Guidance found on a copy is filed under the body it was copied
+from, whose layouts meet there; the runtime still runs the shared program (§3).
+- Serves: C2 (a rejection is a fact about the program, not about how the resolver
+  shares its definitions), C4.
+- Rationale: copying everything multiplies the system (simpleplus: 21K equations
+  shared, 132K with closure bodies left shared, 473K with everything copied); on
+  tictactoe the first does not certify and the second runs out of memory. Blame
+  already names the duplication (the blame decision below shapes it as the input to
+  repairs like this one). Each narrow round adds at least one of finitely many
+  definitions, so the retry ends without a budget.
+- Alternatives: copy in the resolver, so the copy is also what is sized and run
+  (sizing's input, the program and the sizing regression constants all change);
+  copy every definition up front.
 
-**[decision] Appliable values have no arrow structure.** A defer body is an atomic
-code tag (its content hash); tag sets *union* at joins instead of unifying, captures
-ride per-tag, and every `SetEnv` registers an apply site dispatched per-tag by a
-fixpoint — polyvariance finer than per-hash (per-site-per-tag), memoized by body-walk
-templates so it stays affordable. There is no occurs check: cyclic type bindings
-collapse to data. Unbounded self-application is caught as unbounded dispatch nesting.
-- Serves: C1 (the analysis mirrors the binder-free core), C4.
-- Rationale: with no binders, a "function type" has nothing to be an arrow over; code
-  identity is the hash, and dispatch-per-tag is the analysis-side analogue of the IC
-  template table.
+**[decision] Every analysis phase terminates by construction, not by budget.** The
+walk instantiates each DeferRef occurrence once (finite because the DeferMap is a
+DAG); dispatch only unifies, so its fixpoint is bounded by sites times tags;
+unification merges a finite number of classes. No phase has a depth cap, variable
+budget or polyvariance cap, and a rejection is a fact about the program (a type
+cycle, a box conflict), never "the analysis got tired".
+- Serves: C2 (a certificate's negative side must mean something), C1.
+- Rationale: a cap conflates "the program is bad" with "the analysis is lost", which
+  is how a false rejection was pinned for a month without anyone being able to tell
+  which it was.
 
-**[decision] Contraction is measured at projection-path granularity** — using `Left
-Env` and `Right Env` once each is linear destructuring, not duplication. Pairs are
-passive conduits (projections impose no level constraints).
-- Serves: C4.
-- Rationale: the compiled env encoding shares and re-projects pairs pervasively;
-  charging each projection as a duplication would reject nearly everything.
+**[decision] The box constraints are solved exactly.** The system is homogeneous
+(sums of variables equal a variable, no constants) with zero-forcings and lower
+bounds, so a rational solution scales to a natural one and rational feasibility
+decides natural feasibility. Three stages, none with a budget: a presolve that draws
+the arithmetic-free consequences (zeros propagate both ways, a total equal to one
+summand merges the classes, a cycle of `summand <= total` edges makes its members
+equal and its other summands zero, lower bounds add up) and reports a boxed/unboxed
+clash as `EALBoxConflict` with both blames; sparse Gaussian elimination that keeps
+nonnegativity, leaving inequalities over the free variables only, with vacuous rows
+dropped; and an exact dual simplex. The slack basis is dual feasible from the start
+(every weight is positive) and primal infeasible only on the rows a lower bound made
+negative, so each pivot repairs one such row: the shortest infeasible one, or, after
+1000 degenerate pivots in a row and until the next nondegenerate one, the one Bland's
+rule picks, so it cannot cycle (the 1000 switches rules; nothing gives up). A row with
+no negative entry names the origins that cannot hold together (`EALUnsatisfiable`).
+The objective is total leaf depth, so the reported levels are a shallowest decoration
+in aggregate, not a canonical least one; where several decorations attain it, the
+pivot rule picks which. Depths are cumulative, one variable per node
+(`depth = parent + edge`), so every equation has at most three terms. The level cap,
+the round budgets and `EALSolverGaveUp` are gone. A residual with equality rows (which
+elimination never leaves) falls back to a two-phase primal simplex.
+- Serves: C2 (a rejection is a fact about the program), C3 (levels that mean
+  something).
+- Rationale: the greedy repair could not tell "no solution" from "stopped looking",
+  and the per-occurrence skeleton produces zero-weight equation cycles it pumped
+  forever.
+
+**[decision] Appliable values are code tags carrying an interface.** A defer body is
+a code tag (its content hash); tag sets *union* at joins instead of unifying, and
+captures ride per-tag. Each DeferRef *occurrence* instantiates its body once (a fresh
+copy of the body's constraints, served from a per-body template that includes the
+nested instances), and the occurrence's tag carries that instance's interface: the
+env it consumes and the value it yields. Every `SetEnv` registers an apply site, and
+the dispatch fixpoint unifies the site's operand and result with the interface of
+every tag that reaches it. This is let-polymorphism over the DeferMap. A code class
+reachable from the *argument half* of its own env, or from its result, is
+self-application and is rejected outright (the occurs check of arrow types, stated on
+interfaces); a cycle through the *capture half* is a regular closure shape (a partial
+whose captured function is another such partial, a sized recursion chain) and is
+allowed, just as captures never appear in a simple type. Cycles through pair structure
+alone collapse to data. The result of an abort that really aborts (a pair message) is
+bottom, a value that never exists and absorbs every unification, so the dead base of a
+recursion chain joins with its live links.
+- Serves: C1 (the analysis mirrors the binder-free core), C2, C4.
+- Rationale: per-site-per-tag re-derivation (the previous design) was an unboundedly
+  polyvariant flow analysis — it effectively unfolded the program's evaluation at the
+  type level, needed a depth cap to terminate on self-application, and could not
+  distinguish a Church tower from omega except by how long it ran. Interfaces give
+  the finite skeleton that standard EAL inference assumes, and rank-1 is enough for
+  the corpus: numeral-of-numeral composition and the curried recursion family certify
+  with per-occurrence instances. The price is HM's: a λ-bound function used at two
+  incompatible shapes is monomorphic.
+- Alternatives: operand-keyed memoization of derivations (does not terminate on
+  self-application through fresh capture classes, and any finite abstraction of
+  operands conflates some Church tower with omega); a full occurs check through
+  captures (rejects sized recursion chains).
+
+**[decision] The box discipline is faithful EAL, read onto the compiled form.**
+Levels are proof-net depths, and the certificate's negative side means "no EAL
+decoration exists under these readings":
+- An env occurrence at a projection path sits exactly as deep as the bangs it opens:
+  the env's top bang plus the bangs of every component along the path. No slack: an
+  unopened box above a variable is not weakening, it is a use at the wrong level.
+- Contraction is charged at the duplicated prefix, to that component's bang; using
+  `Left Env` and `Right Env` once each is linear destructuring.
+- Boxes pass through, they never vanish. An application whose function carries `k`
+  boxes (on the applied pair and on the function) runs inside them: the operand must
+  carry at least `k` and the result gains `k`. This is the implicit `let !g = f in
+  !^k(g a)` the compiler never writes; without it a boxed result applied directly
+  (`$3 $2 succ 0`) is a dereliction. A projection adds the pair's boxes to the
+  component (`!(A x B) |- !A`), and a gate switch adds the branch pair's boxes to the
+  taken branch.
+- A capture that a closure body duplicates is contracted *outside the closure's box*,
+  one copy per door, exactly as `\g. !(\x. g (g x))` types Church numerals as
+  `!(A -o A) -o !(A -o A)`. The component's bang splits into one door (bounded by the
+  analysis-wide unit, so "exactly one" survives the homogeneous scaling) and the part
+  the body still opens, and every package built with that code carries its own bang,
+  which bounds the doors: the closure is born in the box its copies enter. Argument
+  duplication is contracted inside the body as usual.
+- Data is level-free: a component of a data tree keeps a free bang and a gate
+  scrutinee may sit under any boxes. Copying data is bounded work.
+- An abort that really aborts yields bottom (see above).
+- Serves: C2, C3, C4.
+- Rationale: the previous "pairs are passive conduits" rule let projections and
+  applications open boxes silently, so the levels meant "some assignment" and the
+  verdict meant "EAL-like". Under the faithful rules every corpus program that
+  certified before still certifies, with levels that are now depths.
+- Runtime caveat: the door reading places the fan inside the body instance where the
+  runtime places it, while the EAL proof places it outside the box. Whether that is
+  the invariant the pointer/fresh-label net needs is the unwritten correctness
+  argument (§7, §11).
 
 **[decision] Applying data is tolerated** (stuckness is a value until demanded,
 matching the call-by-need reference evaluator and the IC runtime's stuck-value
@@ -604,17 +705,30 @@ Collected here so contributors see it in one place.
 
 1. **Getting all semantically sound surface code to EAL-certify.** This is the central
    difficulty of the §5 approach: known false rejections are terminating programs that
-   are merely unaffordable or fall outside the fragment (church-255 monsters,
-   gate+literal mixing, the numeral-of-numeral composition `$3 $2 succ 0` as the
-   standing polymorphism frontier). Levers identified: worklist propagation, projected
-   interface summaries, constant-scrutinee gate folding. Two mechanisms are known to
-   cause typed-gate failures — occurs-check constructor/destructor cycles, and capture
-   shape — and fixing them converges on a 0CFA-style analysis.
-2. **Gate joins in EAL** — two pinned tests: arms of disagreeing arity are rejected
+   fall outside the rank-1 fragment (a λ-bound function used at two incompatible
+   shapes; `(\f -> f f) id`, which HM also rejects). Numeral-of-numeral composition
+   and the same-arity gate join, the two former frontier programs, certify under the
+   per-occurrence skeleton with the faithful box discipline and the exact solver.
+   Certification cost rose with exactness, and the cost is the exact solver, not
+   the instancing (the walk, the template copies and dispatch are a few percent).
+   The box constraints are solved once, in the global pass, which is the only pass
+   a program that certifies with its definitions shared runs (one that needs copies
+   runs one more per round of copying, §5): a certified main has certified every
+   body's instances, and a body's own constraints are a subset of its instance's, so
+   per-body guidance is read off the global solve. The standalone per-body passes
+   (walk, dispatch, presolve — where type cycles and boxed/unboxed clashes are
+   found) run only when main fails, to localize the failure; they instantiate each
+   body's subtree once per ancestor, and their cost is almost entirely presolve
+   over those copies. An infeasibility only the solver can see is reported on
+   main rather than on the body. The solver's dual simplex admits rows lazily
+   (only the rows the current point violates are in the tableau), and once the objective
+   has risen it sends the rows basic in their own slack back to waiting, so the
+   tableau holds about the rows that bind. Interface projection was tried and
+   reverted: the type structure mirrors the term's pair structure, so almost no bang
+   variable is interior and nothing projects away.
+2. **Gate joins in EAL** — one pinned test: arms of disagreeing arity are rejected
    (would need a real data⊔code lattice join at result positions; also blame should
-   name the gate, not the deep build site), and a same-arity join with a `$n` literal
-   blows the dispatch depth cap (a genuine false rejection, mechanism suspected but
-   unfixed).
+   name the gate, not the deep build site).
 3. **Strict vs lazy `if`.** Two conditionals coexist: user-facing `if` lowers to the
    *strict* gate shape only because sizing's input-restriction extraction can currently
    only see through that shape; the lazy form exists and is what recursion unrolling

@@ -14,15 +14,18 @@ jobs:
     # in a derivation built from that Nix's own get-env.sh, so only the same
     # version finds the published environment in the cache. The installer
     # sets `access-tokens` from the job's token.
-    - uses: DeterminateSystems/determinate-nix-action@v3.22.5
+    - uses: DeterminateSystems/determinate-nix-action@v3.23.3
       with:
         diagnostic-endpoint: ""
         extra-conf: |
           accept-flake-config = true
+    # The telomare cache signs with a Cachix-managed key, so pushing takes an
+    # auth token with write access; a signing key alone is refused (403).
+    # Pull requests from forks get no secrets and only pull.
     - uses: cachix/cachix-action@v17
       with:
         name: telomare
-        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
         extraPullNames: ekala-corepkgs
     - name: Check and test
       run: |
