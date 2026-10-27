@@ -15,6 +15,11 @@ proof (branch `sizing-proof`) is merged in: its notes are
 `bend/SIZING-PROOF.md`, its summary is under P7 ("Since the sizing
 proof"), and its open items are in section 8.
 
+**Updated 2026-10-27.** telomare/master (`9e7a58d1`, 27 commits past
+`2ae49e0a`) is merged into `bend` (`a68b9850`), at the user's request
+("bring master changes into bend first"), and the oracle is now master's
+Haskell `telomare`, not haskell-final (section 3, "Merging master").
+
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
 parity corpus, committed for the move too). Drop both commits ("Hand off
@@ -54,12 +59,13 @@ with the repo, so they are repeated here.
   covers one push. Open a PR only when asked.
 - Keep this HANDOFF.md current as work progresses.
 - Bend comes only from upstream (`github:bendlang/bend`, the flake's `bend`
-  input), and the only oracle is `haskell-final`. Use nothing from
+  input), and the only oracle is master's Haskell `telomare` (haskell-final
+  until the 2026-10-27 merge; section 3). Use nothing from
   `~/src/formalTransformer` or `~/src/bend2`.
 - Code must be elegant and fit the existing design naturally. Backtracking
   is fine.
-- Outputs (displays, errors, reports) stay byte-identical to
-  haskell-final's unless a step lists a difference by design (section 7).
+- Outputs (displays, errors, reports) stay byte-identical to the
+  oracle's unless a step lists a difference by design (section 7).
   A difference gets a `test/golden/port/NAME` expectation and a line in
   section 7.
 - DESIGN.md is Sam's (sfultong) document. Don't edit it. Record how the
@@ -196,6 +202,42 @@ vs 289.9 s, natarith 1.2 vs 16.3 s, natudt 4.1 vs 61.8 s, rat 2.5 vs
 31.3 s. haskell-final's ctprop peaked at 7.7 GB under `GHCRTS=-M8G`; run
 uncapped beside the session, it ran the laptop low on memory and was
 stopped.
+
+### Merging master (2026-10-27)
+
+`a68b9850` merges telomare/master `9e7a58d1`. The merge keeps the port's
+tree (Haskell, cabal and haskell.nix stay deleted; flake and `nix/` are
+the port's) and takes master's CI pin, CHANGELOG and test layout
+(`test/programs/`, Sam's `3d2853e1`). The commit after it ports master's
+language and compiler changes to Bend and re-records the oracle:
+- `0058cf46` refined lambda parameters `\(x : T)` are bare refinements,
+  checked statically, not UDTs; a pattern annotation in the wrong place is
+  an error (`Expand.bend`). The tests and `natudt.tel` that used them as
+  UDTs call the validator (`Nat x`), as master's NatUDTTests do.
+- `4dc028a7`, `2ae280e5`, `8bb0213f`: case lowering to nested ifs over the
+  scrutinee's spine, and builtins declared in one place (`Desugar.bend`).
+- `8371e7d8` (main2Term3let): a missing definition is found while lowering
+  lets and reported with its location, `missing definition "x" at line L,
+  column C` (`Lower.bend` `add.repeaters`, `missing.at`).
+- `3d2853e1`: the entry is read from its path; imports are looked up beside
+  it, then in the working directory (`Front.bend`, `Main.bend`).
+- `d6d5a309`: master's Prelude (`Bool` refinements on `and`/`not`) is
+  shared. Sizing gives master's bounds on every program as it is; a draft
+  of master's `refinementCheckStep` (`/tmp/bx/Size.bend.attempt1`)
+  changed tictactoe's bounds (`79 32 10 127` to `49 32 2 9`), so it was
+  dropped (section 8).
+- Not ported: master's EAL rework (`71e63053` … `9e7a58d1`, PR #157) and
+  `ac703afa` (Haskell IC template lookup). The port keeps its own EAL and
+  IC (section 7).
+
+`test/golden/expected/` and the corpus's `NAME.hs-certificate`,
+`NAME.hs-ic` and `NAME.hs-run` are master's output (built from
+`9e7a58d1`). Pinned counts now: tc_ultra_minimal 146, simpleplus `3 4`
+44,175, tictactoe `1 4 2 5 3` 6,166,768, Rational 93,471. `gate.sh all`
+passes: tests, 38 goldens, corpus 15/15 meters and certificates, proofs and
+`--verdict`. Spot checks against master (`/tmp/bx/ct`, `/tmp/bx/et`): case
+near-misses, nested case, partial builtins, edge programs all print the
+same, but for the two EAL differences in section 7.
 
 **A finding to keep:** `bend/dev/corpus/ratarith.tel` (Rational arithmetic)
 dies of fuel under both haskell-final `--ic` and the port:
@@ -1873,6 +1915,12 @@ The alignment steps that were done:
   `port/*.certificate`, `port/*.telc-certificate`, `port/*.compile`, and
   the corpus's `NAME.port-certificate`). The rest of the report is
   unchanged.
+- EAL is haskell-final's, not master's rework (since the 2026-10-27 merge).
+  Every golden and corpus program certifies on both. `main = (if 0 then
+  (\x -> x) else $1) succ 0` (EALTests' PINNED same-arity gate join)
+  certifies on master and is refused here, and a refusal can number its
+  tags differently (`#2357` here, `#1093` on master, for the same code vs
+  data failure).
 
 ## 8. Left open
 
@@ -1886,7 +1934,15 @@ The alignment steps that were done:
 - §11.11, when the multi-runtime arrangement ends: the port has one
   runtime, so for the port it is answered.
 - From the sizing proof (bend/SIZING-PROOF.md §1): checker v2, only if
-  programs like tictactoe must lose their aborts. (The `bend-proof` check,
+  programs like tictactoe must lose their aborts.
+- Since master's Prelude refined `not`'s argument to `Bool`, that check
+  validates the input inside tictactoe's guard as sizing reads it, so
+  sizing no longer proves tictactoe's guard and main for every input and
+  the erasure checker does not run on it (main keeps its aborts; the test
+  game costs 6,166,768 interactions, was 6,016,132). Master reads a check
+  nested in another in place (`refinementCheckStep`, `d6d5a309`); a port
+  must keep master's bounds, which the 2026-10-27 draft did not.
+- Master's EAL rework (PR #157 and before) is not ported. (The `bend-proof` check,
   `--verdict` with BendTT's kernel built from the `lean` input, is in
   `nix flake check` since 2026-10-22.)
 - Appendix A analogues, kept for byte-identical output:
@@ -1913,8 +1969,8 @@ The alignment steps that were done:
   `test/golden/run.sh /tmp/bin check 'GLOB'`. Modes: `record` (writes
   `expected/`, only with the oracle), `record-port` (writes `port/`) and
   `check`.
-- The goldens hold haskell-final's exit status, stdout, stderr and written
-  files for 41 cases (`test/golden/cases`). Where the port changes a format
+- The goldens hold the oracle's (master's since 2026-10-27) exit status,
+  stdout, stderr and written files for 41 cases (`test/golden/cases`). Where the port changes a format
   on purpose: list it in section 7 and re-record only that case, into
   `port/`.
 - A full golden pass on haskell-final took ~11.5 min; the port's patterns
