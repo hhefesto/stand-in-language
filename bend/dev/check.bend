@@ -38,7 +38,7 @@ def guard.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, E.X>:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           Some{Sm.of.core(expr)}
 
 def guard.of(m: Maybe<&2, T.C>) -> Maybe<&2, E.X>:
@@ -46,7 +46,7 @@ def guard.of(m: Maybe<&2, T.C>) -> Maybe<&2, E.X>:
     case None{}:
       None{}
     case Some{t}:
-      guard.sized(Sz.size(65536, True{}, E.of.term3(t)))
+      guard.sized(Sz.size(65536, True{}, t))
 
 def watched(+runs: Nat, +x: E.X, +counts: List<&2, E.TS>, g: Maybe<&2, E.X>, +erasable: List<&2, U32>) -> String:
   "erasable checks:" ++ ints(erasable) ++ "\n"
@@ -67,7 +67,7 @@ def sized(+runs: Nat, +x: E.X, g: Maybe<&2, E.X>, r: Result<&2, &2, Sz.SizeFail,
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{+counts, expr, checks}:
+        case Sz.Sized{+counts, expr, checks, pl}:
           proven(runs, x, counts, g, checks)
 
 def program(+runs: Nat, r: Result<&2, &2, String, Fr.Program>) -> String:

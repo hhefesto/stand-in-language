@@ -24,7 +24,7 @@ def of.sized(+name: String, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       name ++ ": sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{cs, +expr, checks}:
+        case Sz.Sized{cs, +expr, checks, pl}:
           +l = Lf.defer.lift(Lf.of.expr(expr))
           name ++ ": " ++ verdict(EAL.certify(l)) ++ ", " ++ U32.show(U32.from_nat(Map.size(&2, Lf.Shape, Ss.layouts(expr)))) ++ " layouts"
 
@@ -33,7 +33,7 @@ def guard.of(g: Maybe<&2, T.C>) -> String:
     case None{}:
       "no guard"
     case Some{t}:
-      of.sized("guard", Sz.size(65536, True{}, E.of.term3(t)))
+      of.sized("guard", Sz.size(65536, True{}, t))
 
 def shown(r: Result<&2, &2, String, Fr.Program>) -> String:
   match r:
@@ -42,8 +42,8 @@ def shown(r: Result<&2, &2, String, Fr.Program>) -> String:
     case Done{p}:
       match p:
         case Fr.Program{+run, +g, +boundary}:
-          of.sized("main, guarded", Sz.size.guarded(65536, boundary, g, E.of.term3(run))) ++ "\n"
-            ++ of.sized("main, alone", Sz.size(65536, True{}, E.of.term3(run))) ++ "\n" ++ guard.of(g)
+          of.sized("main, guarded", Sz.size.guarded(65536, boundary, g, run)) ++ "\n"
+            ++ of.sized("main, alone", Sz.size(65536, True{}, run)) ++ "\n" ++ guard.of(g)
 
 def run(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

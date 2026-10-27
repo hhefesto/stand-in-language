@@ -54,7 +54,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks}:
+        case Sz.Sized{cs, expr, checks, pl}:
           go(Ss.prepared(expr))
 
 def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
@@ -64,7 +64,7 @@ def compiled(r: Result<&2, &2, String, Fr.Terms>) -> IO(Unit):
     case Done{ts}:
       match ts:
         case Fr.Terms{cert, run}:
-          sized(Sz.size(65536, True{}, E.of.term3(run)))
+          sized(Sz.size(65536, True{}, run))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

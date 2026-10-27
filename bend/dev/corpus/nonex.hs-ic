@@ -1,2 +1,2 @@
 runtime error:
-Aborted, user abort: Non-exhaustive patterns in case
+Aborted, user abort: Non-exhaustive patterns in case (from pattern match at nonex:3:11)

@@ -20,7 +20,7 @@ def size.of(+t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("SIZING FAILED:\n" ++ Sz.render(f, t, 65536))
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks}:
+        case Sz.Sized{cs, expr, checks, pl}:
           IO.print("counts: " ++ counts(cs))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
@@ -28,7 +28,7 @@ def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
     case Fail{e}:
       IO.print("ERROR:\n" ++ e)
     case Done{+run}:
-      size.of(run, Sz.size(65536, True{}, E.of.term3(run)))
+      size.of(run, Sz.size(65536, True{}, run))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

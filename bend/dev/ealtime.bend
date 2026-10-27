@@ -72,7 +72,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> IO(Unit):
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           run("sized", Lf.defer.lift(Lf.of.expr(expr)))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
@@ -82,7 +82,7 @@ def compiled(r: Result<&2, &2, String, T.C>) -> IO(Unit):
     case Done{+t}:
       do IO<Unit>:
         run("term", Lf.defer.lift(t))
-        sized(Sz.size(65536, True{}, E.of.term3(t)))
+        sized(Sz.size(65536, True{}, t))
 
 def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

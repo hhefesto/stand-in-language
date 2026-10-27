@@ -1,3 +1,3 @@
 runtime error:
-Aborted, user abort: Non-exhaustive patterns in case
-IC interactions: 1173
+Aborted, user abort: Non-exhaustive patterns in case (from pattern match at nonex:3:11)
+IC interactions: 13445

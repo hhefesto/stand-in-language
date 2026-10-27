@@ -33,7 +33,7 @@ def sized.expr(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Co.V>:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           Some{expr}
 
 def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
@@ -41,7 +41,7 @@ def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
     case None{}:
       None{}
     case Some{t}:
-      sized.expr(Sz.size(65536, True{}, E.of.term3(t)))
+      sized.expr(Sz.size(65536, True{}, t))
 
 def sized(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> IO(Unit):
   match r:
@@ -49,7 +49,7 @@ def sized(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: L
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks}:
+        case Sz.Sized{counts, +expr, checks, pl}:
           report(Ss.replay(Ss.session(expr, g), Ss.Sized{}, lines))
 
 def compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> IO(Unit):
@@ -59,7 +59,7 @@ def compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> 
     case Done{p}:
       match p:
         case Fr.Program{run, +g, +boundary}:
-          sized(guard.expr(g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
+          sized(guard.expr(g), Sz.size.guarded(65536, boundary, g, run), lines)
 
 def loaded(+entry: String, lines: List<&2, String>, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:

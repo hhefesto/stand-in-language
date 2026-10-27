@@ -6,7 +6,7 @@ recursion sites (iterations, over every input):
   Prelude:44:18 (#2)   <= 10
   Prelude:62:23 (#3)   <= 9
   Prelude:81:42 (#4)   <= 12
-  Prelude:149:36 (#5)  <= 4
+  Prelude:148:36 (#5)  <= 4
   natarith:5:53 (#6)   <= 4
 
 sizing budget in force: 65536 unrollings

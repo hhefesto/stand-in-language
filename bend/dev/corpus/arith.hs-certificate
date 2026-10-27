@@ -9,12 +9,12 @@ recursion sites (iterations, over every input):
   Prelude:81:42 (#5)    <= 120
   Prelude:112:55 (#6)   <= 6
   Prelude:112:41 (#7)   <= 6
-  Prelude:149:36 (#8)   <= 4
-  Prelude:157:34 (#9)   <= 4
-  Prelude:157:15 (#10)  <= 60
-  Prelude:164:29 (#11)  <= 3
-  Prelude:165:29 (#12)  <= 1
-  Prelude:165:39 (#13)  <= 4
+  Prelude:148:36 (#8)   <= 4
+  Prelude:156:34 (#9)   <= 4
+  Prelude:156:15 (#10)  <= 60
+  Prelude:163:29 (#11)  <= 3
+  Prelude:164:29 (#12)  <= 1
+  Prelude:164:39 (#13)  <= 4
   arith:6:53 (#14)      <= 4
   arith:7:78 (#15)      <= 4
 
@@ -26,7 +26,7 @@ recursion nesting (structural, approximate):
   Prelude:48:17  Prelude.range        0
   Prelude:58:32  Prelude.foldr.fixed  0, 1
   Prelude:87:18  Prelude.dDiv         0, 1
-  Prelude:152:3  Prelude.gcd          0
+  Prelude:151:3  Prelude.gcd          0
 
 maximum nesting depth: 3
 

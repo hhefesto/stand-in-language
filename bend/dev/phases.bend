@@ -47,7 +47,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>, +t2
       IO.print("sizing failed")
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           run(expr, lines, t2)
 
 def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>, +t0: Nat) -> IO(Unit):
@@ -61,7 +61,7 @@ def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>, +t0: Nat) 
         +c : String = verdict(EAL.certify(Lf.defer.lift(run)))
         +t2 : Nat <- IO.now()
         IO.print("certify " ++ ms(t1, t2) ++ ": " ++ c)
-        +z : Result<&2, &2, Sz.SizeFail, Sz.Sized> = Sz.size(65536, True{}, E.of.term3(run))
+        +z : Result<&2, &2, Sz.SizeFail, Sz.Sized> = Sz.size(65536, True{}, run)
         +t3 : Nat <- IO.now()
         IO.print("size " ++ ms(t2, t3))
         sized(z, lines, t3)

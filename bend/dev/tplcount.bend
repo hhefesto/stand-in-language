@@ -23,7 +23,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           count(Ss.prepared(expr))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> String:
@@ -31,7 +31,7 @@ def compiled(r: Result<&2, &2, String, T.C>) -> String:
     case Fail{e}:
       e
     case Done{run}:
-      sized(Sz.size(65536, True{}, E.of.term3(run)))
+      sized(Sz.size(65536, True{}, run))
 
 def loaded(r: Result<&1, &1, String, List<&2, Fr.Src>>, +m: String) -> String:
   match r:

@@ -27,7 +27,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           dump(Lf.defer.lift(Lf.of.expr(expr)))
 
 def defers(t: T.C) -> U32:

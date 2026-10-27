@@ -5,10 +5,10 @@ recursion sites (iterations, over every input):
   Prelude:36:18 (#1)   <= 3
   Prelude:44:18 (#2)   <= 5
   Prelude:81:42 (#3)   <= 4
-  Prelude:149:36 (#4)  <= 2
-  Prelude:164:29 (#5)  <= 3
-  Prelude:165:29 (#6)  <= 1
-  Prelude:165:39 (#7)  <= 2
+  Prelude:148:36 (#4)  <= 2
+  Prelude:163:29 (#5)  <= 3
+  Prelude:164:29 (#6)  <= 1
+  Prelude:164:39 (#7)  <= 2
 
 sizing budget in force: 65536 unrollings
 
@@ -16,7 +16,7 @@ recursion nesting (structural, approximate):
   triple         function      levels
   Prelude:25:17  Prelude.d2c   0, 1, 2
   Prelude:87:18  Prelude.dDiv  0, 1
-  Prelude:152:3  Prelude.gcd   0
+  Prelude:151:3  Prelude.gcd   0
 
 maximum nesting depth: 3
 

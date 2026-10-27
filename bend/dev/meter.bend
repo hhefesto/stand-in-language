@@ -107,7 +107,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> 
       Ss.Replay{["sizing failed"], 0}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           Ss.replay(Ss.prepared(expr), lines)
 
 def compiled(r: Result<&2, &2, String, Fr.Terms>, lines: List<&2, String>) -> Ss.Replay:
@@ -117,7 +117,7 @@ def compiled(r: Result<&2, &2, String, Fr.Terms>, lines: List<&2, String>) -> Ss
     case Done{ts}:
       match ts:
         case Fr.Terms{cert, run}:
-          sized(Sz.size(65536, True{}, E.of.term3(run)), lines)
+          sized(Sz.size(65536, True{}, run), lines)
 
 def session(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
   compiled(Fr.compile(srcs, entry), lines)

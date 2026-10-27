@@ -1,7 +1,7 @@
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:81:42 (#0)  <= 122
+  Prelude:81:42 (#0)  <= 133
   natudt:7:20 (#1)    <= 3
 
 sizing budget in force: 65536 unrollings

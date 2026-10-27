@@ -52,7 +52,7 @@ corpus() {
   for ref in *.hs-ic *.hs-run; do
     p=${ref%.hs-*}
     o=$S/logs/corpus-$p.meter
-    timeout 600 "$B/telomare" $p.tel --meter < /dev/null > $o 2>&1
+    timeout 600 "$B/telomare" $p.tel --ic --meter < /dev/null > $o 2>&1
     [ -n "${CORPUS_RECORD:-}" ] && cp $o $p.port-ic-meter
     if ! diff -q <(grep -v '^IC interactions' $o) $ref > /dev/null; then echo "METER DISPLAY DIFF $p"; fail=1
     elif ! diff -q $o $p.port-ic-meter > /dev/null; then echo "METER DIFF $p"; fail=1
