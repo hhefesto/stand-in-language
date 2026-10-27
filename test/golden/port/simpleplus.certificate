@@ -3,24 +3,27 @@ status 0
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:30:18 (#0)     <= 11
-  Prelude:48:23 (#1)     <= 7
+  Prelude:44:18 (#0)     <= 11
+  Prelude:62:23 (#1)     <= 7
   simpleplus:12:42 (#2)  <= 10
   simpleplus:12:28 (#3)  <= 10
 
 sizing budget in force: 65536 unrollings
 
-refinement checks: 0 discharged statically, 1 left to run time:
+refinement checks: 3 discharged statically, 1 left to run time:
+  Prelude:17:8      discharged
+  Prelude:17:19     discharged
+  Prelude:21:8      discharged
   simpleplus:14:31  at the session boundary
-erasures in main: proven, by the erasure checker in 200013887 evaluation steps
+erasures in main: proven, by the erasure checker in 222334169 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
 erasures in the guard: none; every recursion bottom and check stays a run-time abort
   sizing did not prove the guard for every input
 
 recursion nesting (structural, approximate):
   triple         function             levels
-  Prelude:11:17  Prelude.d2c          0, 1
-  Prelude:44:32  Prelude.foldr.fixed  0, 1
+  Prelude:25:17  Prelude.d2c          0, 1
+  Prelude:58:32  Prelude.foldr.fixed  0, 1
 
 maximum nesting depth: 2
 

@@ -377,13 +377,13 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
     IO.print(verdict("eal-lift-udt", String.eq(
       main.hash(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"rat",
         "import Prelude\nmain = \\input -> (if dEqual (left (right (rPlus (fromRational 1 2) (fromRational 1 2)))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
-      "b75730207db05b27efcf8ab700f980be65a044216046b2f1082d4b5bebcc617f")))
+      "1295fd7251d3b05bd48d617eb60e7ec6df91e1307dcd009532e9ff165cda4127")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "627da040c4dc4096affc8f8f3db1077d99218f4a09dfca65b05dc35eb3842b97")))
     IO.print(verdict("eal-layouts-simpleplus", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus")),
-      "fd1fa24db14b3e8c40035ade3aed6fd40ec170b215d26634fb293c13fd171b71")))
+      "511f4156df47c0adfd2dde0abd301b4e620593d78d7459cac275def1da262b82")))
 
 def main() -> IO(Unit):
   do IO<Unit>:

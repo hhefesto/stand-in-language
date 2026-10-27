@@ -764,13 +764,26 @@ def stale.of(+hash: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(U
     case Done{srcs}:
       stale.if(Bool.not(String.eq(Tc.sources.hash(srcs), hash)))
 
+def stale.from(+entry: String, +hash: String, +beside: String, b: Result<&1, &1, String, String>) -> IO(Unit):
+  match b:
+    case Done{text}:
+      do IO<Unit>:
+        r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules.at(entry, beside)
+        stale.of(hash, r)
+    case Fail{e}:
+      do IO<Unit>:
+        r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
+        stale.of(hash, r)
+
 # An artifact outlives the sources it came from: when they are here and
 # hash otherwise now, that is worth saying, never refusing over
-# (warnIfStale).
-def stale(+entry: String, +hash: String) -> IO(Unit):
+# (warnIfStale). The sources are looked for beside the artifact first, then
+# in the working directory.
+def stale(+entry: String, +hash: String, +path: String) -> IO(Unit):
+  +beside = Fr.dir.of(path) ++ entry ++ ".tel"
   do IO<Unit>:
-    r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
-    stale.of(hash, r)
+    b : Result<&1, &1, String, String> <- Tx.read_file(beside)
+    stale.from(entry, hash, beside, b)
 
 def stored(+expr: Co.V, ls: List<&2, Tc.Layout>) -> IC.Prog:
   IC.prepare(expr, Tc.shapes(ls, Map.new(&2, Lf.Shape)))
@@ -815,7 +828,7 @@ def telc.decoded(act: Act, +path: String, r: Result<&2, &2, String, Tc.Telc>) ->
       match t:
         case Tc.Telc{+entry, +hash, cert, counts, places, budget, expr, layouts, guard}:
           do IO<Unit>:
-            stale(entry, hash)
+            stale(entry, hash, path)
             telc.acted(act, path, Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard})
 
 def telc.read(act: Act, +path: String, r: Result<&1, &1, String, List<&2, U32>>) -> IO(Unit):
@@ -856,7 +869,7 @@ def loaded(act: Act, h: Ss.How, +entry: String, +path: String, r: Result<&1, &1,
 def source.run(act: Act, h: Ss.How, o: Out, +f: String) -> IO(Unit):
   +entry = base.name(f)
   do IO<Unit>:
-    r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
+    r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules.at(entry, f)
     loaded(act, h, entry, out.path(o, f), r)
 
 def unsized(h: Ss.How) -> Bool:

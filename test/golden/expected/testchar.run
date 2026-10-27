@@ -1,4 +1,4 @@
 status 1
 --- stdout
 --- stderr
-RE (missing definition "not" at line 2, column 52)
+RE (missing definition "assert" at line 6, column 20)

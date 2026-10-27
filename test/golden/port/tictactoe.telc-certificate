@@ -3,38 +3,44 @@ status 0
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:30:18 (#0)     <= 79
-  Prelude:48:23 (#1)     <= 32
-  Prelude:62:24 (#2)     <= 10
-  Prelude:67:42 (#3)     <= 127
+  Prelude:44:18 (#0)     <= 79
+  Prelude:62:23 (#1)     <= 32
+  Prelude:76:24 (#2)     <= 10
+  Prelude:81:42 (#3)     <= 127
   tictactoe:31:50 (#4)   <= 9
   tictactoe:31:28 (#5)   <= 10
-  tictactoe:59:65 (#6)   <= 9
-  tictactoe:59:43 (#7)   <= 4
-  tictactoe:60:57 (#8)   <= 4
-  tictactoe:61:57 (#9)   <= 4
-  tictactoe:74:45 (#10)  <= 78
-  tictactoe:77:63 (#11)  <= 78
-  tictactoe:88:51 (#12)  <= 2
-  tictactoe:96:45 (#13)  <= 2
+  tictactoe:32:30 (#6)   <= 10
+  tictactoe:59:65 (#7)   <= 9
+  tictactoe:59:43 (#8)   <= 4
+  tictactoe:60:57 (#9)   <= 4
+  tictactoe:61:57 (#10)  <= 4
+  tictactoe:74:45 (#11)  <= 78
+  tictactoe:77:63 (#12)  <= 78
+  tictactoe:88:51 (#13)  <= 2
+  tictactoe:96:45 (#14)  <= 2
 
 sizing budget in force: 65536 unrollings
 
-refinement checks: 0 discharged statically, 3 left to run time:
+refinement checks: 0 discharged statically, 8 left to run time:
+  Prelude:17:8     at run time (not proven for every input)
+  Prelude:17:19    at run time (not proven for every input)
+  Prelude:19:7     at run time (not proven for every input)
+  Prelude:19:18    at run time (not proven for every input)
+  Prelude:21:8     at run time (validates input)
   tictactoe:68:30  at the session boundary
   tictactoe:70:26  at the session boundary
   tictactoe:71:27  at the session boundary
 erasures in main: none; every recursion bottom and check stays a run-time abort
-  the erasure checker could not prove them unreachable: its budget of evaluation steps ran out
+  sizing did not prove main for every input
 erasures in the guard: none; every recursion bottom and check stays a run-time abort
   sizing did not prove the guard for every input
 
 recursion nesting (structural, approximate):
   triple         function               levels
-  Prelude:11:17  Prelude.d2c            0, 1, 2
-  Prelude:39:13  Prelude.map            0, 1
-  Prelude:44:32  Prelude.foldr.fixed    0, 1, 2
-  Prelude:56:33  Prelude.zipWith.fixed  0, 1
+  Prelude:25:17  Prelude.d2c            0, 1, 2
+  Prelude:53:13  Prelude.map            0, 1
+  Prelude:58:32  Prelude.foldr.fixed    0, 1, 2
+  Prelude:70:33  Prelude.zipWith.fixed  0, 1
 
 maximum nesting depth: 3
 

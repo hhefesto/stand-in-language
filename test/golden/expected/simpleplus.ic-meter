@@ -3,7 +3,30 @@ status 0
 enter two digits separated by a space
 3 plus 4 is 7
 --- stderr
-IC interactions: 1517868
-IC logical storage peak: Resources {resourceAgents = 18579, resourcePorts = 38826, resourceWork = 82}
-IC static templates: Resources {resourceAgents = 14924, resourcePorts = 30960, resourceWork = 0}
-Excludes preparation workspace, readback, Haskell overhead, GC and RSS.
+interactions (measured): 1823349
+  era-leaf: 566601
+  era-pair: 563185
+  dup-leaf: 336100
+  dup-pair: 335433
+  split-pair: 9205
+  setenv-pair: 5020
+  apply-ref: 4644
+  dup-plan-copy: 4191
+  dup-closure: 1451
+  era-plan-drop: 1142
+  template-reused: 844
+  era-closure: 293
+  split-zero: 269
+  era-aborted: 250
+  apply-gate: 245
+  template-compiled: 204
+  split-aborted: 148
+  scrut-zero: 126
+  scrut-pair: 96
+  dup-aborted: 93
+  apply-erased: 63
+  apply-abort: 36
+  apply-aborted: 32
+  abort-zero: 27
+  scrut-aborted: 23
+  abort-pair: 9

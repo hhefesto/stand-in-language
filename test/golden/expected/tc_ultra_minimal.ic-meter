@@ -2,7 +2,23 @@ status 0
 --- stdout
 O
 --- stderr
-IC interactions: 524
-IC logical storage peak: Resources {resourceAgents = 559, resourcePorts = 1140, resourceWork = 10}
-IC static templates: Resources {resourceAgents = 660, resourcePorts = 1348, resourceWork = 0}
-Excludes preparation workspace, readback, Haskell overhead, GC and RSS.
+interactions (measured): 524
+  era-leaf: 182
+  era-pair: 161
+  split-pair: 70
+  setenv-pair: 46
+  apply-ref: 40
+  template-compiled: 16
+  template-reused: 14
+  dup-plan-copy: 9
+  dup-leaf: 6
+  apply-gate: 3
+  dup-closure: 3
+  dup-pair: 3
+  scrut-zero: 3
+  split-zero: 2
+  abort-pair: 1
+  apply-abort: 1
+  apply-aborted: 1
+  apply-erased: 1
+  era-aborted: 1

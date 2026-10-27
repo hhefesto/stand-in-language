@@ -44,17 +44,23 @@ ported: the static report (`--certificate`) as haskell-final prints it, and
 `--meter` with the interaction count only (see that section). haskell-final's
 other actions are not ported: `--ic --certificate` (the IC space
 certificate) and `--draw-net`.
-The sections that describe them say so. `test/golden/` records exactly what
-haskell-final printed for each example program and mode, and `nix flake
-check` runs the command on every case it covers (`test/golden/run.sh BIN_DIR
-check [PATTERN...]`). Where the port prints something else on purpose,
-`test/golden/port/` holds what it prints instead, beside haskell-final's
-record. To run haskell-final itself:
+The sections that describe them say so.
+
+The port follows master's behaviour: master is merged in (last on
+2026-10-27, at `9e7a58d1`), and its changes to the language and the
+compiler are ported to Bend. `test/golden/` records exactly what master's
+Haskell `telomare` printed for each example program and mode (haskell-final's
+until that merge), and `nix flake check` runs the command on every case it
+covers (`test/golden/run.sh BIN_DIR check [PATTERN...]`). Where the port
+prints something else on purpose, `test/golden/port/` holds what it prints
+instead, beside master's record. To run master's Haskell `telomare`, or
+haskell-final's:
 
 ```sh
+$ git worktree add ../telomare-master telomare/master   # the upstream remote
+$ cd ../telomare-master && nix develop -c cabal run telomare -- tictactoe.tel
 $ git worktree add ../telomare-haskell-final haskell-final
 $ cd ../telomare-haskell-final && nix build --accept-flake-config .#telomare
-$ ./result/bin/telomare tictactoe.tel
 ```
 
 ### Speed: Haskell to Bend
@@ -84,10 +90,11 @@ took 2.4 s before its input refinements moved to the session boundary (see
 and run.
 
 These times predate the erasure checker (see [Design](#design)), which now
-runs as part of sizing. On an AMD Ryzen 7 3700X it adds about 4 s to
-`simpleplus.tel`, where it proves the erasures, and about 7 s to
-`tictactoe.tel`, where it spends its whole budget and gives up. `--compile`
-(below) pays it once.
+runs as part of sizing, and the Prelude's `Bool` refinements (master's). On an
+AMD Ryzen 7 3700X the checker adds about 4 s to `simpleplus.tel`, where it
+proves the erasures. On `tictactoe.tel` it no longer runs, since sizing
+does not prove main (see [Design](#design)), and the whole run of the test
+game takes about 4.5 s. `--compile` (below) pays it once.
 
 Most of the difference is in EAL. The Bend analysis keeps its state in flat
 arrays of words, as the runtime keeps its net, instead of maps in a state
@@ -138,11 +145,13 @@ in these places:
   (haskell-final's Fast forced a recursion value at each projection, twice
   per application, so its unroll counts are double). It runs unguided:
   EAL's capture layouts are the sized program's.
-- EAL certifies the term that is sized and run (DESIGN.md §3, §11.4).
-  haskell-final certified a second term, built with every let binding
-  inlined at each use; the port no longer builds it. Every example
-  program certifies as it did, and a missing definition is reported as it
-  was.
+- EAL is haskell-final's, not master's reworked one (certification that
+  terminates by construction, exact dual simplex, shared definitions
+  copied into their uses, sizing extending the certificate). Every example
+  program certifies on both. One pinned program, `main = (if 0 then (\x ->
+  x) else $1) succ 0` (a gate joining arms of the same arity), certifies on
+  master and is refused here, and a refusal's message can number its tags
+  differently.
 - The IC runs only the branch an `if` chooses (DESIGN.md §11.3). The core
   keeps one conditional, the strict gate-switch, and sizing and EAL read
   it as before. The IC compiles each branch into a template of its own,
@@ -198,17 +207,20 @@ in these places:
   proven](#what-is-proven)). Where the checker cannot decide, because it
   finds an input that reaches one or because it spends its budget first,
   every bottom and check stays a run-time abort, and `--certificate` says
-  so. simpleplus is proven: `3 4` takes 42,943 interactions instead of
-  782,347, nearly all of the difference being the check no longer run
-  inside main. tic-tac-toe is not: the checker gives up, so its main keeps
-  its aborts, and the game `1 4 2 5 3` takes 6,016,132 interactions instead
-  of 5,927,480 (1.5% more). Elsewhere counts drop a little: 150 to 146 for
-  `tc_ultra_minimal`, and 91,147 to 90,345 for the Rational example.
+  so. simpleplus is proven: `3 4` takes 44,175 interactions (782,347 before
+  the erasures, with the Prelude of then), nearly all of the difference
+  being the check no longer run inside main. tic-tac-toe is not, and its
+  main keeps its aborts (the game `1 4 2 5 3` takes 6,166,768
+  interactions): since the Prelude refined `not`'s argument to `Bool`, that
+  check validates the input inside tic-tac-toe's guard, as sizing reads it,
+  so the guard and main are not proven for every input. Master reads a
+  check nested in another check in place (its `refinementCheckStep`); the
+  port does not yet. `tc_ultra_minimal` drops from 150 to 146.
 - The checker's budget is work, not runs: 2^28 evaluation steps
   (`check.work` in `bend/Size.bend`), counted over every run it makes.
-  simpleplus takes 200,013,887. A budget of runs would let a program whose
+  simpleplus takes 222,334,169. A budget of runs would let a program whose
   runs are long, like tic-tac-toe's, take minutes to give up (110 s at the
-  16,384 runs simpleplus needs); this one gives up in about 7 s. A budget
+  16,384 runs simpleplus needs); this one gave up on it in about 7 s. A budget
   never makes an erasure unsafe: it only decides when the checker stops
   and leaves the aborts in.
 - Like haskell-final, the port certifies the sized program only for the
@@ -327,24 +339,27 @@ $ telomare test/programs/simpleplus.tel --certificate
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:30:18 (#0)     <= 11
-  Prelude:48:23 (#1)     <= 7
+  Prelude:44:18 (#0)     <= 11
+  Prelude:62:23 (#1)     <= 7
   simpleplus:12:42 (#2)  <= 10
   simpleplus:12:28 (#3)  <= 10
 
 sizing budget in force: 65536 unrollings
 
-refinement checks: 0 discharged statically, 1 left to run time:
+refinement checks: 3 discharged statically, 1 left to run time:
+  Prelude:17:8      discharged
+  Prelude:17:19     discharged
+  Prelude:21:8      discharged
   simpleplus:14:31  at the session boundary
-erasures in main: proven, by the erasure checker in 200013887 evaluation steps
+erasures in main: proven, by the erasure checker in 222334169 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
 erasures in the guard: none; every recursion bottom and check stays a run-time abort
   sizing did not prove the guard for every input
 
 recursion nesting (structural, approximate):
   triple         function             levels
-  Prelude:11:17  Prelude.d2c          0, 1
-  Prelude:44:32  Prelude.foldr.fixed  0, 1
+  Prelude:25:17  Prelude.d2c          0, 1
+  Prelude:58:32  Prelude.foldr.fixed  0, 1
 
 maximum nesting depth: 2
 ...
@@ -361,19 +376,22 @@ recursion, last}` as written — so they do not line up row by row, and the
 report says so.
 
 The checks section splits the program's refinement checks as DESIGN.md §10
-asks. These are every `x : v = e`, plus Prelude's `abort`, the one check that
-`case`, UDT validators and pattern lambdas call. A check is *discharged* when
-sizing proved that no input makes its abort reach the result. Otherwise it is
-left to run time, and the report says why. simpleplus's `validInput` is a
-refinement of main's input, so the session runs it before main on each line
-it reads, and main runs without it.
+asks. These are every `x : v = e` and every refined lambda parameter `\(x :
+v) -> e`, plus Prelude's `abort`, the one check that `case`, UDT validators
+and pattern lambdas call. A check is *discharged* when sizing proved that no
+input makes its abort reach the result. Otherwise it is left to run time,
+and the report says why. The three Prelude checks are `and`'s and `not`'s
+arguments, refined to `Bool`. simpleplus's `validInput` is a refinement of
+main's input, so the session runs it before main on each line it reads, and
+main runs without it.
 
 The two `erasures` lines say, for main and for its guard, whether the
 program that runs leaves out its recursion bottoms and discharged checks.
 It does only when the erasure checker proved that no input reaches them
 (see [Design](#design)); otherwise the second line says why they stay.
-On `tictactoe.tel` it reads "the erasure checker could not prove them
-unreachable: its budget of evaluation steps ran out".
+On `tictactoe.tel` it reads "sizing did not prove main for every input":
+one of its checks, on `not`'s argument, validates the input inside the
+guard, as sizing reads it (see [Design](#design)).
 
 `--meter` runs the program and reports what the run cost: the interactions
 the net performed over the whole session, on stderr once the session ends.
@@ -383,13 +401,14 @@ That is a measurement of one run, not a prediction about the next:
 $ printf '3 4\n' | telomare test/programs/simpleplus.tel --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 42943
+IC interactions: 44175
 ```
 
 The count is the port's own: its net runs only the branch an `if` chooses,
 where haskell-final's built both, and main runs without the input check the
 session ran before it, so it is far lower than haskell-final's `--ic
---meter` count (1517868 for this run; see [Design](#design)). It is
+--meter` count (1517868 for this run, with the Prelude of then; see
+[Design](#design)). It is
 not a memory figure, deliberately. haskell-final's IC also
 printed the peaks of its net's "logical storage" (agents, port entries,
 pending pairs), but those counted its own representation of the net (a map of
@@ -406,7 +425,7 @@ bounds. Only the first is fixable by raising the budget. See
 ## Compiling once
 
 Certifying and sizing are the slow part (about 70 seconds for `tictactoe.tel`
-in haskell-final, about 8 s here, most of it the erasure checker giving up),
+in haskell-final, about 2 s here),
 and they give the same answer every time,
 because sizing runs the program over a *symbolic* input. So they need only
 happen once:
@@ -434,12 +453,12 @@ will even run programs the sizing pass rejects:
 $ printf '3 4\n' | telomare test/programs/simpleplus.tel --fast --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 735924
+IC interactions: 739027
 recursion unrolls (measured):     55 across 4 sites
 
   site   source            function          unrolls
-  #1     Prelude:48:23     Prelude.foldr     24
-  #0     Prelude:30:18     Prelude.dMinus    20
+  #1     Prelude:62:23     Prelude.foldr     24
+  #0     Prelude:44:18     Prelude.dMinus    20
   #2     simpleplus:12:42  simpleplus.doAdd  6
   #3     simpleplus:12:28  simpleplus.doAdd  5
 ```

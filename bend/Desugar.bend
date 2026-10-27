@@ -2,18 +2,29 @@ import Base
 import ./Loc.bend as L
 import ./Syntax.bend as S
 
-# Desugaring (haskell-final's Telomare.Desugar, desugarTerm): the builtins
-# bound around the program, the case helpers aliased, applications of
-# builtins turned into primitives where the builtin is in scope, and every
-# `case` lowered to nested ifs over the case helpers.
+# Desugaring (Telomare.Desugar, desugarTerm): the builtins bound around the
+# program, the case helpers aliased, applications of builtins turned into
+# their direct forms where the builtin is in scope, and every `case`
+# lowered to nested ifs over the case helpers.
+
+# An argument of an application, with the location of the application node
+# that supplies it.
+type Arg is Data:
+  Arg{+loc: L.Loc, +x: S.Expanded()}
+
+# An application split into its head and its arguments, first applied
+# first (applicationSpine).
+type Spine is Data:
+  Spine{+h: S.Expanded(), +args: List<&2, Arg>}
 
 type ON is Data:
   OT{+t: S.Expanded()}
-  OD{+d: OD}
   OP{+p: S.ExpandedPat()}
   OTs{+xs: List<&2, S.Expanded()>}
   OBs{+bs: List<&2, S.ExpandedBind()>}
   OAs{+alts: List<&2, S.ExpandedAlt()>}
+  OArgs{+args: List<&2, Arg>}
+  OSpine{+sp: Spine}
 
 type OV is Data:
   VT{+t: S.Expanded()}
@@ -21,12 +32,7 @@ type OV is Data:
   VTs{+xs: List<&2, S.Expanded()>}
   VBs{+bs: List<&2, S.ExpandedBind()>}
   VAs{+alts: List<&2, S.ExpandedAlt()>}
-
-# The walk: children first, then `optimize` at every node. An application
-# of an in-scope `pair` or `app` to two arguments is rebuilt at once; the
-# decision rides into the next step as ODirect.
-type OD is Data:
-  ODirect{+anno: L.Loc, +b: L.Loc, +c: L.Loc, +name: String, +x: S.Expanded(), +y: S.Expanded(), +yes: Bool}
+  VArgs{+args: List<&2, Arg>}
 
 def has(s: Set(), +n: String) -> Bool:
   Pair.snd(Set(), Bool, Set.has(s, n))
@@ -50,7 +56,8 @@ def lam2(+name: String, body: S.Expanded()) -> S.Expanded():
 def builtin(+name: String, val: S.Expanded()) -> S.ExpandedBind():
   S.Bind{L.Name{L.Builtin{name}, name}, val}
 
-# let zero = 0; left = \x -> left x; ... in t (addBuiltins)
+# let zero = 0; left = \x -> left x; ... in t (addBuiltins). Haskell's
+# `trace` is not a builtin here (HANDOFF P2).
 def add.builtins(t: S.Expanded()) -> S.Expanded():
   S.SLet{L.Gen{"addBuiltins"},
     [builtin("zero", S.SInt{L.Builtin{"zero"}, 0}),
@@ -82,8 +89,9 @@ def alias.if(yes: Bool, +loc: L.Loc, +name: String, alias: String, rest: List<&2
 def aliases(+names: Set(), +loc: L.Loc) -> List<&2, S.ExpandedBind()>:
   alias.if(has(names, "and"), loc, "and", "__case_and",
     alias.if(has(names, "foldl"), loc, "foldl", "__case_foldl",
-      alias.if(has(names, "listEqual"), loc, "listEqual", "__case_listEqual",
-        alias.if(has(names, "abort"), loc, "abort", "__case_abort", []))))
+      alias.if(has(names, "dEqual"), loc, "dEqual", "__case_dEqual",
+        alias.if(has(names, "listEqual"), loc, "listEqual", "__case_listEqual",
+          alias.if(has(names, "abort"), loc, "abort", "__case_abort", [])))))
 
 # __case_and = and, ... for the helpers the program binds, ahead of its own
 # bindings (addCaseHelperAliases).
@@ -132,6 +140,13 @@ def vas(v: OV) -> List<&2, S.ExpandedAlt()>:
     case _:
       []
 
+def vargs(v: OV) -> List<&2, Arg>:
+  match v:
+    case VArgs{args}:
+      args
+    case _:
+      []
+
 def is.builtin(l: L.Loc, +text: String) -> Bool:
   match l:
     case L.Builtin{name}:
@@ -174,86 +189,134 @@ def update.pat(p: S.ExpandedPat(), +scope: Set()) -> Set():
     case _:
       scope
 
-# `\__builtin_arg -> K x __builtin_arg` for a builtin short one argument.
-def partial.pair(+a: L.Loc, +x: S.Expanded()) -> S.Expanded():
-  S.SLam{a, L.Name{a, "__builtin_arg"}, S.SPair{S.loc(Empty, Unit, Empty, x), x, S.SVar{a, "__builtin_arg"}}}
+# The spine of t, its arguments ahead of acc.
+def spine(t: S.Expanded(), acc: List<&2, Arg>) -> Spine:
+  match t:
+    case S.SApp{a, f, x}:
+      spine(f, Arg{a, x} <> acc)
+    case other:
+      Spine{other, acc}
 
-def partial.app(+a: L.Loc, +x: S.Expanded()) -> S.Expanded():
-  S.SLam{a, L.Name{a, "__builtin_arg"}, S.SApp{S.loc(Empty, Unit, Empty, x), x, S.SVar{a, "__builtin_arg"}}}
+# The application again, the arguments applied in order.
+def rebuild(args: List<&2, Arg>, h: S.Expanded()) -> S.Expanded():
+  match args:
+    case Nil{}:
+      h
+    case Con{arg, rest}:
+      match arg:
+        case Arg{a, x}:
+          rebuild(rest, S.SApp{a, h, x})
 
-def optimize.pick(yes: Bool, new: S.Expanded(), old: S.Expanded()) -> S.Expanded():
-  match yes:
-    case True{}:
-      new
-    case False{}:
-      old
-
-def optimize.one(+scope: Set(), +a: L.Loc, +name: String, +x: S.Expanded(), +t: S.Expanded()) -> S.Expanded():
+# A one-argument builtin's direct form, at the location of the application
+# that supplies its argument.
+def unary(+name: String, +a: L.Loc, x: S.Expanded()) -> S.Expanded():
   match name:
     case "left":
-      optimize.pick(has(scope, "left"), S.SLeft{S.loc(Empty, Unit, Empty, x), x}, t)
+      S.SLeft{a, x}
+    case _:
+      S.SRight{a, x}
+
+def binary(+name: String, +a: L.Loc, x: S.Expanded(), y: S.Expanded()) -> S.Expanded():
+  match name:
+    case "pair":
+      S.SPair{a, x, y}
+    case _:
+      S.SApp{a, x, y}
+
+def is.unary(name: String) -> Bool:
+  match name:
+    case "left":
+      True{}
     case "right":
-      optimize.pick(has(scope, "right"), S.SRight{S.loc(Empty, Unit, Empty, x), x}, t)
-    case "pair":
-      optimize.pick(has(scope, "pair"), partial.pair(a, x), t)
-    case "app":
-      optimize.pick(has(scope, "app"), partial.app(a, x), t)
-    case _:
-      t
-
-def optimize.two(+scope: Set(), +a: L.Loc, +name: String, +x: S.Expanded(), +y: S.Expanded(), +t: S.Expanded()) -> S.Expanded():
-  match name:
-    case "pair":
-      optimize.pick(has(scope, "pair"), S.SPair{a, x, y}, t)
-    case "app":
-      optimize.pick(has(scope, "app"), S.SApp{a, x, y}, t)
-    case _:
-      t
-
-# After a node's children: an application of an in-scope builtin becomes
-# the primitive (optimize).
-def optimize(+scope: Set(), +t: S.Expanded()) -> S.Expanded():
-  match t:
-    case S.SApp{a, S.SApp{b, S.SVar{c, name}, x}, y}:
-      optimize.two(scope, a, name, x, y, t)
-    case S.SApp{a, S.SApp{b, f, x}, y}:
-      t
-    case S.SApp{a, S.SVar{c, name}, x}:
-      optimize.one(scope, a, name, x, t)
-    case _:
-      t
-
-def two.direct.if(yes: Bool, t: S.Expanded()) -> Maybe<&2, S.Expanded()>:
-  match yes:
-    case True{}:
-      Some{t}
-    case False{}:
-      None{}
-
-def two.direct(+scope: Set(), +anno: L.Loc, +name: String, +x: S.Expanded(), +y: S.Expanded()) -> Maybe<&2, S.Expanded()>:
-  match name:
-    case "pair":
-      two.direct.if(has(scope, "pair"), S.SPair{anno, x, y})
-    case "app":
-      two.direct.if(has(scope, "app"), S.SApp{anno, x, y})
-    case _:
-      None{}
-
-def direct(+scope: Set(), name: String) -> Bool:
-  match name:
-    case "pair":
-      has(scope, "pair")
-    case "app":
-      has(scope, "app")
+      True{}
     case _:
       False{}
 
-def direct.build(+anno: L.Loc, name: String, x: S.Expanded(), y: S.Expanded()) -> S.Expanded():
+def is.binary(name: String) -> Bool:
   match name:
     case "pair":
-      S.SPair{anno, x, y}
+      True{}
+    case "app":
+      True{}
     case _:
-      S.SApp{anno, x, y}
+      False{}
+
+def unary.applied(+name: String, args: List<&2, Arg>) -> Maybe<&2, Spine>:
+  match args:
+    case Nil{}:
+      None{}
+    case Con{arg, rest}:
+      match arg:
+        case Arg{+a, x}:
+          Some{spine(unary(name, a, x), rest)}
+
+# A binary builtin short its second argument awaits it:
+# `\__builtin_arg -> pair x __builtin_arg`.
+def binary.second(+name: String, +a: L.Loc, x: S.Expanded(), rest: List<&2, Arg>) -> Maybe<&2, Spine>:
+  match rest:
+    case Nil{}:
+      Some{Spine{S.SLam{a, L.Name{a, "__builtin_arg"}, binary(name, a, x, S.SVar{a, "__builtin_arg"})}, []}}
+    case Con{arg, more}:
+      match arg:
+        case Arg{+b, y}:
+          Some{spine(binary(name, b, x, y), more)}
+
+def binary.applied(+name: String, args: List<&2, Arg>) -> Maybe<&2, Spine>:
+  match args:
+    case Nil{}:
+      None{}
+    case Con{arg, rest}:
+      match arg:
+        case Arg{+a, x}:
+          binary.second(name, a, x, rest)
+
+def builtin.arity(un: Bool, bin: Bool, +name: String, args: List<&2, Arg>) -> Maybe<&2, Spine>:
+  match un:
+    case True{}:
+      unary.applied(name, args)
+    case False{}:
+      match bin:
+        case True{}:
+          binary.applied(name, args)
+        case False{}:
+          None{}
+
+def builtin.in.scope(yes: Bool, +name: String, args: List<&2, Arg>) -> Maybe<&2, Spine>:
+  match yes:
+    case True{}:
+      builtin.arity(is.unary(name), is.binary(name), name, args)
+    case False{}:
+      None{}
+
+# The spine with an in-scope builtin at its head applied to its arguments
+# (applyBuiltin): the direct form's own spine, then the arguments left
+# over. None when the head is no builtin, or it has no arguments.
+def direct(+scope: Set(), sp: Spine) -> Maybe<&2, Spine>:
+  match sp:
+    case Spine{h, args}:
+      match h:
+        case S.SVar{a, +name}:
+          builtin.in.scope(has(scope, name), name, args)
+        case _:
+          None{}
+
+# Rewrite builtin applications at the head until none is left (rewrite);
+# the direct form of `app` is an application, so its spine goes round
+# again.
+def rewrite(+fuel: Nat, +scope: Set(), d: Maybe<&2, Spine>, sp: Spine) -> S.Expanded():
+  match fuel:
+    case 0n:
+      match sp:
+        case Spine{h, args}:
+          rebuild(args, h)
+    case 1n+f:
+      match d:
+        case None{}:
+          match sp:
+            case Spine{h, args}:
+              rebuild(args, h)
+        case Some{+next}:
+          rewrite(f, scope, direct(scope, next), next)
 
 def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
   match fuel:
@@ -263,44 +326,33 @@ def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
       match n:
         case OT{t}:
           match t:
-            case S.SApp{anno, S.SApp{b, S.SVar{c, +name}, x}, y}:
-              go(f, scope, OD{ODirect{anno, b, c, name, x, y, direct(scope, name)}})
             case S.SApp{anno, a, y}:
-              VT{optimize(scope, S.SApp{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{y}))})}
+              go(f, scope, OSpine{spine(a, [Arg{anno, y}])})
             case S.SLam{anno, v, body}:
               VT{S.SLam{anno, v, vt(go(f, Set.del(scope, L.Name.text(v)), OT{body}))}}
             case S.SPair{anno, a, b}:
-              VT{optimize(scope, S.SPair{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b}))})}
+              VT{S.SPair{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b}))}}
             case S.SCheck{anno, a, b}:
-              VT{optimize(scope, S.SCheck{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b}))})}
+              VT{S.SCheck{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b}))}}
             case S.SIte{anno, a, b, c}:
-              VT{optimize(scope, S.SIte{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b})), vt(go(f, scope, OT{c}))})}
+              VT{S.SIte{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b})), vt(go(f, scope, OT{c}))}}
             case S.SLeft{anno, x}:
-              VT{optimize(scope, S.SLeft{anno, vt(go(f, scope, OT{x}))})}
+              VT{S.SLeft{anno, vt(go(f, scope, OT{x}))}}
             case S.SRight{anno, x}:
-              VT{optimize(scope, S.SRight{anno, vt(go(f, scope, OT{x}))})}
+              VT{S.SRight{anno, vt(go(f, scope, OT{x}))}}
             case S.SHash{anno, x}:
-              VT{optimize(scope, S.SHash{anno, vt(go(f, scope, OT{x}))})}
+              VT{S.SHash{anno, vt(go(f, scope, OT{x}))}}
             case S.SRec{anno, a, b, c}:
-              VT{optimize(scope, S.SRec{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b})), vt(go(f, scope, OT{c}))})}
+              VT{S.SRec{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b})), vt(go(f, scope, OT{c}))}}
             case S.SLet{anno, +binds, body}:
               +inner = update.binds(binds, scope)
-              VT{optimize(scope, S.SLet{anno, vbs(go(f, inner, OBs{binds})), vt(go(f, inner, OT{body}))})}
+              VT{S.SLet{anno, vbs(go(f, inner, OBs{binds})), vt(go(f, inner, OT{body}))}}
             case S.SList{anno, xs}:
-              VT{optimize(scope, S.SList{anno, vts(go(f, scope, OTs{xs}))})}
+              VT{S.SList{anno, vts(go(f, scope, OTs{xs}))}}
             case S.SCase{anno, scrut, alts, w}:
-              VT{optimize(scope, S.SCase{anno, vt(go(f, scope, OT{scrut})), vas(go(f, scope, OAs{alts})), w})}
+              VT{S.SCase{anno, vt(go(f, scope, OT{scrut})), vas(go(f, scope, OAs{alts})), w}}
             case other:
-              VT{optimize(scope, other)}
-        case OD{d}:
-          match d:
-            case ODirect{+anno, b, c, +name, x, y, yes}:
-              match yes:
-                case True{}:
-                  VT{optimize(scope, direct.build(anno, name, vt(go(f, scope, OT{x})), vt(go(f, scope, OT{y}))))}
-                case False{}:
-                  VT{optimize(scope, S.SApp{anno, vt(go(f, scope, OT{S.SApp{b, S.SVar{c, name}, x}})),
-                                         vt(go(f, scope, OT{y}))})}
+              VT{other}
         case OP{p}:
           match p:
             case S.PAnn{q, t}:
@@ -332,6 +384,19 @@ def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
                 case S.Alt{+p, body}:
                   VAs{S.Alt{vp(go(f, scope, OP{p})), vt(go(f, update.pat(p, scope), OT{body}))}
                       <> vas(go(f, scope, OAs{rest}))}
+        case OSpine{sp}:
+          match sp:
+            case Spine{h, args}:
+              +walked = {Spine{vt(go(f, scope, OT{h})), vargs(go(f, scope, OArgs{args}))} : Spine}
+              VT{rewrite(fuel, scope, direct(scope, walked), walked)}
+        case OArgs{args}:
+          match args:
+            case Nil{}:
+              VArgs{[]}
+            case Con{arg, rest}:
+              match arg:
+                case Arg{a, x}:
+                  VArgs{Arg{a, vt(go(f, scope, OT{x}))} <> vargs(go(f, scope, OArgs{rest}))}
 
 def builtin.names() -> Set():
   Set.from_list(["left", "right", "pair", "app"])
@@ -345,62 +410,31 @@ def optimize.builtins(t: S.Expanded()) -> S.Expanded():
 # Case lowering (lowerCases)
 # --------------------------
 
-# Paths into a pattern, each the projections from its root, first taken
-# first ("RL" is Left (Right x)): to its number leaves (findInts), string
-# leaves (findStrings) and pairs (pairRoute2Dirs), left to right.
+# The parts of a pattern case lowering inspects (PatternNode), each with
+# the path to it from the root, the projections first taken first ("RL"
+# is Left (Right x)).
+type Node is Data:
+  NPair{+path: String}
+  NInt{+path: String, +n: U32}
+  NStr{+path: String, +s: String}
+  NVar{+path: String, +name: L.Name}
 
-def ints.of(p: S.ExpandedPat(), +path: String) -> List<&2, String>:
+# Every pair, literal and variable of a pattern, in left-to-right preorder,
+# ahead of rest (patternNodes).
+def nodes.of(p: S.ExpandedPat(), +path: String, rest: List<&2, Node>) -> List<&2, Node>:
   match p:
     case S.PPair{a, b}:
-      List.append(&2, String, ints.of(a, path ++ "L"), ints.of(b, path ++ "R"))
+      NPair{path} <> nodes.of(a, path ++ "L", nodes.of(b, path ++ "R", rest))
     case S.PInt{n}:
-      [path]
-    case S.PAnn{q, t}:
-      ints.of(q, path)
-    case _:
-      []
-
-def strs.of(p: S.ExpandedPat(), +path: String) -> List<&2, String>:
-  match p:
-    case S.PPair{a, b}:
-      List.append(&2, String, strs.of(a, path ++ "L"), strs.of(b, path ++ "R"))
+      NInt{path, n} <> rest
     case S.PStr{t}:
-      [path]
-    case S.PAnn{q, t}:
-      strs.of(q, path)
-    case _:
-      []
-
-def pairs.of(p: S.ExpandedPat(), +path: String) -> List<&2, String>:
-  match p:
-    case S.PPair{a, b}:
-      path <> List.append(&2, String, pairs.of(a, path ++ "L"), pairs.of(b, path ++ "R"))
-    case S.PAnn{q, t}:
-      pairs.of(q, path)
-    case _:
-      []
-
-def var.add(+k: String, +path: String, r: Map<&2, String> & Bool) -> Map<&2, String>:
-  (m, has) = r
-  match has:
-    case True{}:
-      m
-    case False{}:
-      Map.set(&2, String, m, k, path)
-
-# Each pattern variable's path; the leftmost occurrence wins
-# (findPatternVars).
-def vars.of(p: S.ExpandedPat(), +path: String, m: Map<&2, String>) -> Map<&2, String>:
-  match p:
-    case S.PPair{a, b}:
-      vars.of(b, path ++ "R", vars.of(a, path ++ "L", m))
+      NStr{path, t} <> rest
     case S.PVar{name}:
-      +k = L.Name.text(name)
-      var.add(k, path, Map.has(&2, String, m, k))
+      NVar{path, name} <> rest
+    case S.PIgnore{}:
+      rest
     case S.PAnn{q, t}:
-      vars.of(q, path, m)
-    case _:
-      m
+      nodes.of(q, path, rest)
 
 def at(path: String, +x: S.Desugared()) -> S.Desugared():
   match path:
@@ -410,13 +444,6 @@ def at(path: String, +x: S.Desugared()) -> S.Desugared():
       at(rest, S.SRight{S.loc(Empty, Empty, Empty, x), x})
     case SNil{}:
       x
-
-def ats(paths: List<&2, String>, +x: S.Desugared()) -> List<&2, S.Desugared()>:
-  match paths:
-    case Nil{}:
-      []
-    case Con{path, rest}:
-      at(path, x) <> ats(rest, x)
 
 # A pattern's literal skeleton as a term, variables and ignores as 0
 # (patternToTerm).
@@ -441,55 +468,94 @@ def helper(+name: String) -> S.Desugared():
 def app(+f: S.Desugared(), x: S.Desugared()) -> S.Desugared():
   S.SApp{S.loc(Empty, Empty, Empty, f), f, x}
 
-def list.equal(a: S.Desugared(), b: S.Desugared()) -> S.Desugared():
-  app(app(helper("__case_listEqual"), a), b)
+def equal(+name: String, a: S.Desugared(), b: S.Desugared()) -> S.Desugared():
+  app(app(helper(name), a), b)
 
-def pair.check.at(+a: L.Loc, p: S.ExpandedPat(), +x: S.Desugared()) -> S.Desugared():
-  app(app(app(S.SVar{a, "__case_foldl"}, helper("__case_and")), S.SInt{a, 1}), S.SList{a, ats(pairs.of(p, ""), x)})
-
-# pairStructureCheck: the value has a pair wherever the pattern does.
-def pair.check(p: S.ExpandedPat(), +x: S.Desugared()) -> S.Desugared():
-  pair.check.at(L.Gen{"pairStructureCheck"}, p, x)
-
-def none(xs: List<&2, String>) -> Bool:
-  match xs:
+# Bool-valued checks that x has the pattern's pairs and literals
+# (matchChecks): a pair node, any value, is made a Bool before it reaches
+# `and`, whose arguments are refined to Bool; numbers are compared with
+# dEqual, strings whole with listEqual.
+def checks(+anno: L.Loc, +x: S.Desugared(), ns: List<&2, Node>) -> List<&2, S.Desugared()>:
+  match ns:
     case Nil{}:
-      True{}
-    case Con{x, rest}:
-      False{}
+      []
+    case Con{n, rest}:
+      match n:
+        case NPair{path}:
+          S.SIte{S.loc(Empty, Empty, Empty, x), at(path, x), S.SInt{anno, 1}, S.SInt{anno, 0}} <> checks(anno, x, rest)
+        case NInt{path, k}:
+          equal("__case_dEqual", at(path, x), S.SInt{anno, k}) <> checks(anno, x, rest)
+        case NStr{path, t}:
+          equal("__case_listEqual", at(path, x), S.SStr{anno, t}) <> checks(anno, x, rest)
+        case NVar{path, name}:
+          checks(anno, x, rest)
 
-def matches.pick(noints: Bool, nostrs: Bool, +ra: L.Loc, ieq: S.Desugared(), seq: S.Desugared(), pc: S.Desugared()) -> S.Desugared():
-  match noints:
+# The conjunction of non-empty checks (allOf).
+def all.of(+anno: L.Loc, cs: List<&2, S.Desugared()>) -> S.Desugared():
+  match cs:
+    case Nil{}:
+      S.SInt{anno, 1}
+    case Con{a, more}:
+      match more:
+        case Nil{}:
+          a
+        case Con{b, rest}:
+          match rest:
+            case Nil{}:
+              app(app(S.SVar{anno, "__case_and"}, a), b)
+            case Con{c, tail}:
+              app(app(app(S.SVar{anno, "__case_foldl"}, helper("__case_and")), S.SInt{anno, 1}),
+                  S.SList{anno, a <> b <> c <> tail})
+
+def var.keep(dup: Bool, +path: String, +name: L.Name, rest: List<&2, Node>) -> List<&2, Node>:
+  match dup:
     case True{}:
-      app(app(S.SVar{ra, "__case_and"}, seq), pc)
+      rest
     case False{}:
-      match nostrs:
-        case True{}:
-          app(app(S.SVar{ra, "__case_and"}, ieq), pc)
-        case False{}:
-          app(app(app(S.SVar{ra, "__case_foldl"}, helper("__case_and")), S.SInt{ra, 1}), S.SList{ra, [ieq, seq, pc]})
+      NVar{path, name} <> rest
 
-# Whether the value x matches pattern p: its number and string leaves are
-# the pattern's, and it has the pattern's pairs (at the alternative's
-# location ra; the leaf lists at the case's, anno).
-def matches(+anno: L.Loc, +ra: L.Loc, +p: S.ExpandedPat(), +x: S.Desugared()) -> S.Desugared():
-  +ns = ints.of(p, "")
-  +ss = strs.of(p, "")
-  matches.pick(none(ns), none(ss), ra,
-    list.equal(S.SList{anno, ats(ns, x)}, S.SList{anno, ats(ns, pattern.term(anno, p))}),
-    list.equal(S.SList{anno, ats(ss, x)}, S.SList{anno, ats(ss, pattern.term(anno, p))}),
-    pair.check(p, x))
+# The pattern's variables, in preorder, each once: the leftmost occurrence
+# of a repeated name wins.
+def vars(ns: List<&2, Node>, +seen: Set()) -> List<&2, Node>:
+  match ns:
+    case Nil{}:
+      []
+    case Con{n, rest}:
+      match n:
+        case NVar{+path, +name}:
+          var.keep(has(seen, L.Name.text(name)), path, name, vars(rest, Set.add(seen, L.Name.text(name))))
+        case _:
+          vars(rest, seen)
 
-# The alternative's result with its pattern's variables bound, in name
-# order, to the parts of x they name (mkCaseAlternative).
-def alt.bound(ks: List<&2, Sigma<&2, &2, String, _ => String>>, +ra: L.Loc, +x: S.Desugared(), r: S.Desugared()) -> S.Desugared():
-  match ks:
+# AppP (LamP name body) value: both at the body's location.
+def bind.one(name: L.Name, value: S.Desugared(), +body: S.Desugared()) -> S.Desugared():
+  S.SApp{S.loc(Empty, Empty, Empty, body), S.SLam{S.loc(Empty, Empty, Empty, body), name, body}, value}
+
+# The variables bound in r, each to its part of x, the first outermost
+# (bindPatternVars).
+def binds(vs: List<&2, Node>, +x: S.Desugared(), r: S.Desugared()) -> S.Desugared():
+  match vs:
     case Nil{}:
       r
-    case Con{kv, rest}:
-      match kv:
-        case (k, path):
-          S.SApp{ra, S.SLam{ra, L.Name{ra, k}, alt.bound(rest, ra, x, r)}, at(path, x)}
+    case Con{v, rest}:
+      match v:
+        case NVar{path, name}:
+          bind.one(name, at(path, x), binds(rest, x, r))
+        case _:
+          binds(rest, x, r)
+
+# ITEP: at the condition's location.
+def ite(+i: S.Desugared(), t: S.Desugared(), e: S.Desugared()) -> S.Desugared():
+  S.SIte{S.loc(Empty, Empty, Empty, i), i, t, e}
+
+# An alternative with no checks always matches, so the ones after it are
+# dropped.
+def alternative(+ra: L.Loc, cs: List<&2, S.Desugared()>, bound: S.Desugared(), next: S.Desugared()) -> S.Desugared():
+  match cs:
+    case Nil{}:
+      bound
+    case Con{c, more}:
+      ite(all.of(ra, c <> more), bound, next)
 
 # A case alternative lowered: its pattern (read for its shape only) and its
 # lowered result.
@@ -531,20 +597,33 @@ def darms(v: LV) -> List<&2, Arm>:
     case _:
       []
 
-# The alternatives as nested ifs, the last else aborting
-# (case2annidatedIfs).
+# The alternatives as nested ifs over x, tried in order, the last else
+# aborting (caseToNestedIfs); anno is the scrutinee's location.
 def ifs(+anno: L.Loc, +x: S.Desugared(), alts: List<&2, Arm>) -> S.Desugared():
   match alts:
     case Nil{}:
-      +xa = S.loc(Empty, Empty, Empty, x)
-      S.SIte{xa, S.SInt{xa, 1}, app(helper("__case_abort"), S.SStr{xa, "Non-exhaustive patterns in case"}), S.SInt{xa, 0}}
+      S.SIte{anno, S.SInt{anno, 1}, app(helper("__case_abort"), S.SStr{anno, "Non-exhaustive patterns in case"}), S.SInt{anno, 0}}
     case Con{alt, rest}:
       match alt:
-        case Arm{+p, +r}:
-          +ra = S.loc(Empty, Empty, Empty, r)
-          S.SIte{ra, matches(anno, ra, p, x),
-                 alt.bound(Map.to_list(&2, String, vars.of(p, "", Map.new(&2, String))), ra, x, r),
-                 ifs(anno, x, rest)}
+        case Arm{p, +r}:
+          +ns = nodes.of(p, "", [])
+          alternative(S.loc(Empty, Empty, Empty, r), checks(S.loc(Empty, Empty, Empty, r), x, ns),
+                      binds(vars(ns, Set.new()), x, r), ifs(anno, x, rest))
+
+# A scrutinee that is not a variable is bound once, to a name source code
+# cannot write, so the checks and bindings refer to it instead of copying
+# it.
+def case.bind(+anno: L.Loc, scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
+  +g = {L.GenIn{"case scrutinee", anno} : L.Loc}
+  +body = ifs(anno, S.SVar{g, "__case_scrutinee"}, arms)
+  S.SApp{S.loc(Empty, Empty, Empty, body), S.SLam{S.loc(Empty, Empty, Empty, body), L.Name{g, "__case_scrutinee"}, body}, scrut}
+
+def case.ifs(+scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
+  match scrut:
+    case S.SVar{+a, +name}:
+      ifs(a, S.SVar{a, name}, arms)
+    case _:
+      case.bind(S.loc(Empty, Empty, Empty, scrut), scrut, arms)
 
 # Children first, every case lowered.
 def lower(+fuel: Nat, n: ON) -> LV:
@@ -578,7 +657,7 @@ def lower(+fuel: Nat, n: ON) -> LV:
             case S.SList{a, xs}:
               DT{S.SList{a, dts(lower(f, OTs{xs}))}}
             case S.SCase{a, x, alts, w}:
-              DT{ifs(a, dt(lower(f, OT{x})), darms(lower(f, OAs{alts})))}
+              DT{case.ifs(dt(lower(f, OT{x})), darms(lower(f, OAs{alts})))}
             case S.SVar{a, name}:
               DT{S.SVar{a, name}}
             case S.SZero{a}:
@@ -619,7 +698,9 @@ def lower(+fuel: Nat, n: ON) -> LV:
                   DArms{Arm{p, dt(lower(f, OT{body}))} <> darms(lower(f, OAs{rest}))}
         case OP{p}:
           DT{S.SZero{L.Unknown{}}}
-        case OD{d}:
+        case OArgs{args}:
+          DT{S.SZero{L.Unknown{}}}
+        case OSpine{sp}:
           DT{S.SZero{L.Unknown{}}}
 
 def lower.cases(t: S.Expanded()) -> S.Desugared():

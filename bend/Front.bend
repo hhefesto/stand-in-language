@@ -23,10 +23,14 @@ type Src is Data:
 # Loading (getModulesFor)
 # -----------------------
 
+# A module is read from the entry's directory, or failing that from the
+# working directory (LBeside holds the first try); LRead names the file
+# it read.
 type LSt is Data:
   LQueue{+queue: List<&2, String>, +srcs: List<&2, Src>}
   LCheck{+seen: Bool, +m: String, +queue: List<&2, String>, +srcs: List<&2, Src>}
-  LRead{+m: String, +queue: List<&2, String>, +srcs: List<&2, Src>, +r: Result<&2, &2, String, String>}
+  LBeside{+m: String, +queue: List<&2, String>, +srcs: List<&2, Src>, +r: Result<&2, &2, String, String>}
+  LRead{+path: String, +m: String, +queue: List<&2, String>, +srcs: List<&2, Src>, +r: Result<&2, &2, String, String>}
 
 # Why the front end refused the program: modules that do not parse or
 # expand (every one of them), or a main that does not resolve.
@@ -79,8 +83,9 @@ def as.result(r: Result<&1, &1, String, String>) -> Result<&2, &2, String, Strin
     case Done{s}:
       Done{s}
 
-# Breadth first from the entry, each module once, newest first.
-def load(fuel: Nat, st: LSt) -> IO(Result<&1, &1, String, List<&2, Src>>):
+# Breadth first from the entry, each module once, newest first; dir is the
+# entry's directory, with its slash ("" for the working directory).
+def load(fuel: Nat, +dir: String, st: LSt) -> IO(Result<&1, &1, String, List<&2, Src>>):
   match fuel:
     case 0n:
       IO.pure(Result<&1, &1, String, List<&2, Src>>, Fail{"too many modules"})
@@ -91,25 +96,54 @@ def load(fuel: Nat, st: LSt) -> IO(Result<&1, &1, String, List<&2, Src>>):
             case Nil{}:
               IO.pure(Result<&1, &1, String, List<&2, Src>>, Done{srcs})
             case Con{+m, rest}:
-              load(f, LCheck{loaded(srcs, m), m, rest, srcs})
+              load(f, dir, LCheck{loaded(srcs, m), m, rest, srcs})
         case LCheck{seen, +m, queue, srcs}:
           match seen:
             case True{}:
-              load(f, LQueue{queue, srcs})
+              load(f, dir, LQueue{queue, srcs})
             case False{}:
               do IO<Result<&1, &1, String, List<&2, Src>>>:
-                r : Result<&1, &1, String, String> <- Tx.read_file(m ++ ".tel")
-                load(f, LRead{m, queue, srcs, as.result(r)})
-        case LRead{+m, queue, srcs, r}:
+                r : Result<&1, &1, String, String> <- Tx.read_file(dir ++ m ++ ".tel")
+                load(f, dir, LBeside{m, queue, srcs, as.result(r)})
+        case LBeside{+m, queue, srcs, r}:
           match r:
             case Fail{e}:
-              IO.pure(Result<&1, &1, String, List<&2, Src>>, Fail{m ++ ".tel: " ++ e})
+              do IO<Result<&1, &1, String, List<&2, Src>>>:
+                r2 : Result<&1, &1, String, String> <- Tx.read_file(m ++ ".tel")
+                load(f, dir, LRead{m ++ ".tel", m, queue, srcs, as.result(r2)})
+            case Done{text}:
+              load(f, dir, LRead{dir ++ m ++ ".tel", m, queue, srcs, Done{text}})
+        case LRead{path, +m, queue, srcs, r}:
+          match r:
+            case Fail{e}:
+              IO.pure(Result<&1, &1, String, List<&2, Src>>, Fail{path ++ ": " ++ e})
             case Done{+text}:
-              load(f, LQueue{List.append(&2, String, queue, imports(P.module(m, text))), Src{m, text} <> srcs})
+              load(f, dir, LQueue{List.append(&2, String, queue, imports(P.module(m, text))), Src{m, text} <> srcs})
 
-# The modules the entry module needs, entry included (getModulesFor).
+def dir.rev(rev: String) -> String:
+  match rev:
+    case SNil{}:
+      SNil{}
+    case SCon{Chr{47}, t}:
+      String.reverse(SCon{Chr{47}, t})
+    case SCon{c, t}:
+      dir.rev(t)
+
+# A file's directory with its trailing slash, "" for a bare name.
+def dir.of(file: String) -> String:
+  dir.rev(String.reverse(file))
+
+# The modules the entry module needs, entry included (getModulesFor): the
+# entry is read from file, and an import from beside it first, then from
+# the working directory (where Prelude.tel lives).
+def modules.at(+entry: String, +file: String) -> IO(Result<&1, &1, String, List<&2, Src>>):
+  do IO<Result<&1, &1, String, List<&2, Src>>>:
+    r : Result<&1, &1, String, String> <- Tx.read_file(file)
+    load(U32.to_nat(65536), dir.of(file), LRead{file, entry, [], [], as.result(r)})
+
+# The modules of the entry module M.tel in the working directory.
 def modules(+entry: String) -> IO(Result<&1, &1, String, List<&2, Src>>):
-  load(U32.to_nat(65536), LQueue{[entry], []})
+  modules.at(entry, entry ++ ".tel")
 
 # Compiling
 # ---------

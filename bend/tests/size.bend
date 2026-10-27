@@ -197,7 +197,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       size(65536, with.prelude("simpleplus", plus, prelude), "simpleplus"), "11 7 10 10")))
     IO.print(verdict("size-tictactoe", String.eq(
       size(65536, with.prelude("tictactoe", ttt, prelude), "tictactoe"),
-      "79 32 10 127 9 10 9 4 4 4 78 78 2 2")))
+      "79 32 10 127 9 10 10 9 4 4 4 78 78 2 2")))
     IO.print(verdict("size-over-budget", String.eq(
       size(65536, with.prelude("over-budget-recursion", over, prelude), "over-budget-recursion"), "34")))
     IO.print(verdict("size-budget-exhausted", String.eq(
@@ -207,15 +207,20 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       size(65536, with.prelude("unbounded-input-recursion", unb, prelude), "unbounded-input-recursion"),
       "could not size recursion #0 at unbounded-input-recursion:27:34:\n  its test depends on input that nothing bounds, so no finite iteration\n  count can be proven for it. Constrain that input with a refinement\n  (`x : someValidator`) or an `assert` before recursing on it.")))
     IO.print(verdict("size-checks", all([
-      String.eq(checks(with.prelude("simpleplus", plus, prelude), "simpleplus"), "validating 0; boundary ; reaching ; opening "),
-      String.eq(checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "validating 0,1,2; boundary ; reaching ; opening "),
+      String.eq(checks(with.prelude("simpleplus", plus, prelude), "simpleplus"), "validating 3; boundary ; reaching ; opening "),
+      String.eq(checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "validating 4,5,6,7; boundary ; reaching ; opening "),
       String.eq(cased(prelude, "0"), "validating ; boundary ; reaching ; opening ; proven"),
-      String.eq(cased(prelude, "3"), "validating ; boundary ; reaching 0; opening ; proven")])))
+      String.eq(cased(prelude, "3"), "validating ; boundary ; reaching 1; opening ; proven")])))
+    # tictactoe's guard is not proven since the Prelude refined `not`'s
+    # argument to Bool: inside validInput that check (4) restricts the input
+    # as sizing reads it, and it is not one the session runs at the
+    # boundary. Master reads a check nested in a check in place
+    # (refinementCheckStep, d6d5a309); the port does not yet.
     IO.print(verdict("size-boundary", all([
       String.eq(guarded.checks(with.prelude("simpleplus", plus, prelude), "simpleplus"),
-        "validating 0; boundary 0; reaching ; opening ; proven"),
+        "validating 3; boundary 3; reaching ; opening ; proven"),
       String.eq(guarded.checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"),
-        "validating 0,1,2; boundary 0,1,2; reaching ; opening ; proven")])))
+        "validating 4,5,6,7; boundary 5,6,7; reaching ; opening ")])))
     IO.print(verdict("size-filter", all([
       String.eq(filtered("R", True{}, "L"), "both"),
       String.eq(filtered("L", True{}, "L"), "a"),

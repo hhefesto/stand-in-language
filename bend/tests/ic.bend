@@ -325,10 +325,14 @@ def nat() -> String:
   unlines(["import Prelude",
     "[Nat, toNat, fromNat, nPlus, nMinus] = \\h ->",
     "  [ \\x -> (h, x)",
-    "  , \\(x : Nat) -> x",
-    "  , \\(aa : Nat) (bb : Nat) -> (h, d2c aa succ bb)",
-    "  , \\(aa : Nat) (bb : Nat) ->",
-    "      let sLeft = \\x -> case x of",
+    "  , \\x -> Nat x",
+    "  , \\a b -> let aa = Nat a",
+    "                bb = Nat b",
+    "            in (h, d2c aa succ bb)",
+    "  , \\a b ->",
+    "      let aa = Nat a",
+    "          bb = Nat b",
+    "          sLeft = \\x -> case x of",
     "                          (l, _) -> l",
     "                          y      -> abort \"can't subtract larger number from smaller one\"",
     "      in (h, d2c bb sLeft aa)",
@@ -437,10 +441,10 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, arithmetic(), "11111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 5469),
-      costs(prelude, pattern.lambda(), 5776),
-      costs(prelude, rational(), 90345),
-      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 548)])))
+      costs(prelude, case.nonexhaustive(), 1173),
+      costs(prelude, pattern.lambda(), 2716),
+      costs(prelude, rational(), 93471),
+      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 632)])))
     IO.print(verdict("ic-guard", all([
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", [""])),
         "runtime error:\nAborted, user abort: empty|start|"),
@@ -450,10 +454,10 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       146)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      42943)))
+      44175)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      6016132)))
+      6166768)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

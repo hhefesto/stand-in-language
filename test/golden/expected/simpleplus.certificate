@@ -3,8 +3,8 @@ status 0
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:30:18 (#0)     <= 11
-  Prelude:48:23 (#1)     <= 7
+  Prelude:44:18 (#0)     <= 11
+  Prelude:62:23 (#1)     <= 7
   simpleplus:12:42 (#2)  <= 10
   simpleplus:12:28 (#3)  <= 10
 
@@ -12,8 +12,8 @@ sizing budget in force: 65536 unrollings
 
 recursion nesting (structural, approximate):
   triple         function             levels
-  Prelude:11:17  Prelude.d2c          0, 1
-  Prelude:44:32  Prelude.foldr.fixed  0, 1
+  Prelude:25:17  Prelude.d2c          0, 1
+  Prelude:58:32  Prelude.foldr.fixed  0, 1
 
 maximum nesting depth: 2
 

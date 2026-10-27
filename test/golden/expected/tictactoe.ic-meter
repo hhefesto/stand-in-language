@@ -37,7 +37,30 @@ Player 2's turn
 please input number of square: 
 Player 2 wins!
 --- stderr
-IC interactions: 15168230
-IC logical storage peak: Resources {resourceAgents = 265483, resourcePorts = 579888, resourceWork = 342}
-IC static templates: Resources {resourceAgents = 45801, resourcePorts = 94592, resourceWork = 0}
-Excludes preparation workspace, readback, Haskell overhead, GC and RSS.
+interactions (measured): 33551402
+  era-leaf: 13457726
+  era-pair: 12927205
+  dup-leaf: 1992029
+  dup-pair: 1797180
+  split-pair: 1495342
+  dup-plan-copy: 882041
+  setenv-pair: 773818
+  apply-ref: 717979
+  dup-closure: 170667
+  era-plan-drop: 144364
+  split-zero: 68974
+  apply-gate: 50993
+  scrut-zero: 46347
+  era-closure: 39574
+  template-reused: 5796
+  scrut-pair: 4646
+  apply-erased: 2136
+  apply-abort: 2015
+  abort-zero: 1320
+  template-compiled: 1230
+  era-aborted: 1210
+  abort-pair: 695
+  apply-aborted: 695
+  split-aborted: 515
+  left-pair: 330
+  right-pair: 6

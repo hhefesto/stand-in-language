@@ -6,33 +6,16 @@ import ./Resolve.bend as Rs
 import ./Show.bend as Sh
 import ./Sha256.bend as Sha
 
-# From the desugared program to Term2 (haskell-final's Telomare.Resolve).
-# Haskell built two terms: main2Term3, every let binding inlined at each
-# use, which EAL certified, and main2Term3let, which was sized and run. The
-# port builds the second only, and EAL certifies the term that runs (DESIGN
-# §3, §11.4). `process` checks the variables as validateVariables did, so a
-# missing definition is reported where it is used; then annotateUnsizedCount,
-# letsToApps (lets become lambda redexes, each recursion site a placeholder
-# argument), debruijinizeApp and closeLams.
-
-# A let binding by name, as the variable check orders them.
-type NB is Data:
-  NB{+name: String, +val: S.Desugared()}
+# From the desugared program to Term2 (Telomare.Resolve, process2Term2).
+# One term serves EAL certification, sizing and running (main2Term3let):
+# annotateUnsizedCount, then letsToApps (lets become lambda redexes, each
+# recursion site a placeholder argument), which also checks the names: a
+# name the program never defines, among the ones the program reaches, is
+# reported at one of its uses. Then debruijinize and closeLams.
 
 type Cyc is Data:
   CEnd{}
   CAt{+c: String, +seen: Bool}
-
-type DN is Data:
-  DT{+t: S.Desugared()}
-  DTs{+xs: List<&2, S.Desugared()>}
-  DBs{+bs: List<&2, S.DesugaredBind()>}
-
-type VN is Data:
-  VTerm{+t: S.Desugared()}
-  VList{+xs: List<&2, S.Desugared()>}
-  VLet{+bs: List<&2, NB>, +inner: S.Desugared()}
-  VOrdered{+r: Result<&2, &2, Rs.ResErr, List<&2, NB>>, +inner: S.Desugared()}
 
 type Ctx is Data:
   Ctx{+k: T.LamKind, +name: String}
@@ -49,8 +32,13 @@ type AV is Data:
   AVT{+t: S.Lowering()}
   AVBs{+bs: List<&2, S.LoweringBind()>}
 
+# A name a term refers to without binding it, with where it is used: the
+# first use in a left-to-right walk (Haskell's left-biased Map union).
+def Refs() -> Data:
+  Map<&2, L.Loc>
+
 type LB is Data:
-  LB{+name: String, +t: T.Term1(), +refs: Set(), +c: Nat}
+  LB{+name: String, +t: T.Term1(), +refs: Refs(), +c: Nat}
 
 type LN is Data:
   LNT{+t: S.Lowering()}
@@ -58,16 +46,20 @@ type LN is Data:
   LNBs{+bs: List<&2, S.LoweringBind()>}
 
 type LV is Data:
-  LVT{+t: T.Term1(), +refs: Set()}
-  LVTs{+ts: List<&2, T.Term1()>, +refs: Set()}
+  LVT{+t: T.Term1(), +refs: Refs()}
+  LVTs{+ts: List<&2, T.Term1()>, +refs: Refs()}
   LVBs{+bs: List<&2, LB>}
 
 type TSt is Data:
   TSt{+todo: List<&2, String>, +acc: Set()}
 
 type ARS is Data:
-  ARGo{+empty: Bool, +refs: Set(), +t: T.Term1()}
-  ARFound{+found: Bool, +a: L.Loc, +x: T.Term1(), +v: String, +refs: Set()}
+  ARGo{+empty: Bool, +refs: Refs(), +t: T.Term1()}
+  ARFound{+found: Bool, +a: L.Loc, +x: T.Term1(), +v: String, +refs: Refs()}
+
+# A name the program uses and never defines, and where.
+type KL is Data:
+  KL{+k: String, +l: L.Loc}
 
 def R(-A: Data) -> Data:
   Result<&2, &2, Rs.ResErr, A>
@@ -77,9 +69,6 @@ def fuel() -> Nat:
 
 def has(s: Set(), +n: String) -> Bool:
   Pair.snd(Set(), Bool, Set.has(s, n))
-
-def union(a: Set(), b: Set()) -> Set():
-  Map.union(&2, Unit, a, b)
 
 def minus(bs: List<&2, String>, a: Set()) -> Set():
   match bs:
@@ -95,15 +84,6 @@ def generated.var() -> L.Loc:
 # seen here.
 def not.term() -> Rs.ResErr:
   Rs.MissingDefinitions{["(not a term)"]}
-
-def bind.names(bs: List<&2, S.DesugaredBind()>) -> List<&2, String>:
-  match bs:
-    case Nil{}:
-      []
-    case Con{b, rest}:
-      match b:
-        case S.Bind{name, val}:
-          L.Name.text(name) <> bind.names(rest)
 
 # Topological order (topologicalSort)
 # -----------------------------------
@@ -205,233 +185,12 @@ def topo(fuel: Nat, +deps: Map<&2, Set()>, +rem: List<&2, String>, acc: List<&2,
 def topological.sort(+names: List<&2, String>, +deps: Map<&2, Set()>) -> R(List<&2, String>):
   topo(fuel(), deps, names, [], find.ready(names, deps, names))
 
-# validateVariables (the variable check)
-# --------------------------------------
-
-def dd.var(yes: Bool, +name: String) -> Set():
-  match yes:
-    case True{}:
-      Set.add(Set.new(), name)
-    case False{}:
-      Set.new()
-
-# The names of `names` a let binding's value uses directly (getDirectDeps).
-def dd(+fuel: Nat, +names: Set(), n: DN) -> Set():
-  match fuel:
-    case 0n:
-      Set.new()
-    case 1n+f:
-      match n:
-        case DT{t}:
-          match t:
-            case S.SVar{loc, +name}:
-              dd.var(has(names, name), name)
-            case S.SLam{loc, v, body}:
-              Set.del(dd(f, names, DT{body}), L.Name.text(v))
-            case S.SLamN{loc, k, v, body, w}:
-              Empty.absurd(Set(), w)
-            case S.SLet{loc, +binds, body}:
-              +bound = bind.names(binds)
-              union(minus(bound, dd(f, names, DBs{binds})), minus(bound, dd(f, names, DT{body})))
-            case S.SIte{loc, a, b, c}:
-              union(dd(f, names, DT{a}), union(dd(f, names, DT{b}), dd(f, names, DT{c})))
-            case S.SPair{loc, a, b}:
-              union(dd(f, names, DT{a}), dd(f, names, DT{b}))
-            case S.SList{loc, xs}:
-              dd(f, names, DTs{xs})
-            case S.SApp{loc, a, b}:
-              union(dd(f, names, DT{a}), dd(f, names, DT{b}))
-            case S.SRec{loc, a, b, c}:
-              union(dd(f, names, DT{a}), union(dd(f, names, DT{b}), dd(f, names, DT{c})))
-            case S.SLeft{loc, x}:
-              dd(f, names, DT{x})
-            case S.SRight{loc, x}:
-              dd(f, names, DT{x})
-            case S.SCheck{loc, a, b}:
-              union(dd(f, names, DT{a}), dd(f, names, DT{b}))
-            case S.SHash{loc, x}:
-              dd(f, names, DT{x})
-            case _:
-              Set.new()
-        case DTs{xs}:
-          match xs:
-            case Nil{}:
-              Set.new()
-            case Con{x, rest}:
-              union(dd(f, names, DT{x}), dd(f, names, DTs{rest}))
-        case DBs{bs}:
-          match bs:
-            case Nil{}:
-              Set.new()
-            case Con{b, rest}:
-              match b:
-                case S.Bind{name, val}:
-                  union(dd(f, names, DT{val}), dd(f, names, DBs{rest}))
-
-def let.deps(bs: List<&2, S.DesugaredBind()>, +names: Set(), acc: Map<&2, Set()>) -> Map<&2, Set()>:
-  match bs:
-    case Nil{}:
-      acc
-    case Con{b, rest}:
-      match b:
-        case S.Bind{name, val}:
-          let.deps(rest, names, Map.set(&2, Set(), acc, L.Name.text(name), dd(fuel(), names, DT{val})))
-
-def intersects(xs: List<&2, String>, +s: Set()) -> Bool:
-  match xs:
-    case Nil{}:
-      False{}
-    case Con{x, rest}:
-      has(s, x) || intersects(rest, s)
-
-# Whether a binding uses one written after it (hasForwardRef).
-def forward(names: List<&2, String>, +deps: Map<&2, Set()>) -> Bool:
-  match names:
-    case Nil{}:
-      False{}
-    case Con{n, +rest}:
-      intersects(rest, deps.of(deps, n)) || forward(rest, deps)
-
-def nbs(bs: List<&2, S.DesugaredBind()>) -> List<&2, NB>:
-  match bs:
-    case Nil{}:
-      []
-    case Con{b, rest}:
-      match b:
-        case S.Bind{name, val}:
-          NB{L.Name.text(name), val} <> nbs(rest)
-
-def with.name.if(yes: Bool, b: NB, rest: List<&2, NB>) -> List<&2, NB>:
-  match yes:
-    case True{}:
-      b <> rest
-    case False{}:
-      rest
-
-def with.name(bs: List<&2, NB>, +n: String) -> List<&2, NB>:
-  match bs:
-    case Nil{}:
-      []
-    case Con{b, rest}:
-      match b:
-        case NB{+name, val}:
-          with.name.if(String.eq(name, n), NB{name, val}, with.name(rest, n))
-
-# [(name, def) | name <- sorted, (name', def) <- bindings, name == name']
-def in.order(sorted: List<&2, String>, +bs: List<&2, NB>) -> List<&2, NB>:
-  match sorted:
-    case Nil{}:
-      []
-    case Con{n, rest}:
-      List.append(&2, NB, with.name(bs, n), in.order(rest, bs))
-
-def let.sorted(+bs: List<&2, NB>, r: R(List<&2, String>)) -> R(List<&2, NB>):
-  match r:
-    case Fail{e}:
-      Fail{e}
-    case Done{sorted}:
-      Done{in.order(sorted, bs)}
-
-def let.order.pick(+bs: List<&2, S.DesugaredBind()>, +names: List<&2, String>, +deps: Map<&2, Set()>, fwd: Bool) ->
-  R(List<&2, NB>):
-  match fwd:
-    case True{}:
-      let.sorted(nbs(bs), topological.sort(names, deps))
-    case False{}:
-      Done{nbs(bs)}
-
-# The order a let's bindings are checked in: as written, unless one uses a
-# later one; then dependency order.
-def let.order(+bs: List<&2, S.DesugaredBind()>) -> R(List<&2, NB>):
-  +names = bind.names(bs)
-  +deps = let.deps(bs, Set.from_list(names), Map.new(&2, Set()))
-  let.order.pick(bs, names, deps, forward(names, deps))
-
 def pairs(+loc: L.Loc, xs: List<&2, T.Term1()>) -> T.Term1():
   match xs:
     case Nil{}:
       T.TZero{loc}
     case Con{x, rest}:
       T.TPair{loc, x, pairs(loc, rest)}
-
-def var.defined(+loc: L.Loc, +n: String, yes: Bool) -> R(Unit):
-  match yes:
-    case True{}:
-      Done{Unit{}}
-    case False{}:
-      Fail{Rs.MissingDefinitionAt{loc, n}}
-
-# Check every variable (validateVariables): a let's bindings in let.order's
-# order, each seeing those before it, then its body. The first undefined
-# one is the error, reported where it is used.
-def defined(+fuel: Nat, +names: Set(), n: VN) -> R(Unit):
-  match fuel:
-    case 0n:
-      Fail{Rs.MissingDefinitions{["(nesting too deep)"]}}
-    case 1n+f:
-      match n:
-        case VOrdered{r, inner}:
-          match r:
-            case Fail{e}:
-              Fail{e}
-            case Done{bs}:
-              defined(f, names, VLet{bs, inner})
-        case VLet{bs, inner}:
-          match bs:
-            case Nil{}:
-              defined(f, names, VTerm{inner})
-            case Con{b, rest}:
-              match b:
-                case NB{name, val}:
-                  do Result<&2, &2, Rs.ResErr, Unit>:
-                    ok : Unit <- defined(f, names, VTerm{val})
-                    defined(f, Set.add(names, name), VLet{rest, inner})
-        case VList{xs}:
-          match xs:
-            case Nil{}:
-              Done{Unit{}}
-            case Con{x, rest}:
-              do Result<&2, &2, Rs.ResErr, Unit>:
-                ok : Unit <- defined(f, names, VTerm{x})
-                defined(f, names, VList{rest})
-        case VTerm{t}:
-          match t:
-            case S.SLet{loc, binds, inner}:
-              defined(f, names, VOrdered{let.order(binds), inner})
-            case S.SLam{loc, v, body}:
-              defined(f, Set.add(names, L.Name.text(v)), VTerm{body})
-            case S.SLamN{loc, k, v, body, w}:
-              Empty.absurd(R(Unit), w)
-            case S.SVar{+loc, +name}:
-              var.defined(loc, name, has(names, name))
-            case S.SIte{loc, a, b, c}:
-              defined(f, names, VList{[a, b, c]})
-            case S.SInt{loc, k}:
-              Done{Unit{}}
-            case S.SStr{loc, s}:
-              Done{Unit{}}
-            case S.SZero{loc}:
-              Done{Unit{}}
-            case S.SPair{loc, a, b}:
-              defined(f, names, VList{[a, b]})
-            case S.SList{loc, xs}:
-              defined(f, names, VList{xs})
-            case S.SApp{loc, a, b}:
-              defined(f, names, VList{[a, b]})
-            case S.SRec{loc, a, b, c}:
-              defined(f, names, VList{[a, b, c]})
-            case S.SChurch{loc, k}:
-              Done{Unit{}}
-            case S.SLeft{loc, x}:
-              defined(f, names, VTerm{x})
-            case S.SRight{loc, x}:
-              defined(f, names, VTerm{x})
-            case S.SCheck{loc, a, b}:
-              defined(f, names, VList{[a, b]})
-            case S.SHash{loc, x}:
-              defined(f, names, VTerm{x})
-            case _:
-              Fail{not.term()}
 
 # de Bruijn indices (debruijinizeApp)
 # -------------------------------------------------
@@ -846,14 +605,47 @@ def lv.t(v: LV) -> T.Term1():
     case _:
       T.TZero{L.Unknown{}}
 
-def lv.refs(v: LV) -> Set():
+def lv.refs(v: LV) -> Refs():
   match v:
     case LVT{t, refs}:
       refs
     case LVTs{ts, refs}:
       refs
     case _:
-      Set.new()
+      Map.new(&2, L.Loc)
+
+# The union of two reference maps, a's use of a name kept over b's.
+def refs.union(a: Refs(), b: Refs()) -> Refs():
+  Map.union(&2, L.Loc, b, a)
+
+def refs.one(+name: String, +loc: L.Loc) -> Refs():
+  Map.set(&2, L.Loc, Map.new(&2, L.Loc), name, loc)
+
+def refs.keys(r: Refs()) -> Set():
+  Set.from_list(Map.keys(&2, L.Loc, r))
+
+def refs.size(r: Refs()) -> Nat:
+  Map.size(&2, L.Loc, r)
+
+def refs.has(r: Refs(), +n: String) -> Bool:
+  Pair.snd(Refs(), Bool, Map.has(&2, L.Loc, r, n))
+
+def restrict.if(keep: Bool, +k: String, +l: L.Loc, acc: Refs()) -> Refs():
+  match keep:
+    case True{}:
+      Map.set(&2, L.Loc, acc, k, l)
+    case False{}:
+      acc
+
+# The entries whose names are in keep (restrictKeys).
+def restrict(kvs: List<&2, Sigma<&2, &2, String, _ => L.Loc>>, +keep: Set(), acc: Refs()) -> Refs():
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +l):
+          restrict(rest, keep, restrict.if(has(keep, k), k, l, acc))
 
 def lv.ts(v: LV) -> List<&2, T.Term1()>:
   match v:
@@ -901,7 +693,24 @@ def lb.deps(bs: List<&2, LB>, acc: Map<&2, Set()>) -> Map<&2, Set()>:
     case Con{b, rest}:
       match b:
         case LB{name, t, refs, c}:
-          lb.deps(rest, Map.set(&2, Set(), acc, name, refs))
+          lb.deps(rest, Map.set(&2, Set(), acc, name, refs.keys(refs)))
+
+def lb.refs.if(yes: Bool, refs: Refs(), acc: Refs()) -> Refs():
+  match yes:
+    case True{}:
+      refs.union(acc, refs)
+    case False{}:
+      acc
+
+# What the live bindings refer to, in their written order, after acc.
+def lb.refs(bs: List<&2, LB>, +live: Set(), acc: Refs()) -> Refs():
+  match bs:
+    case Nil{}:
+      acc
+    case Con{b, rest}:
+      match b:
+        case LB{+name, t, refs, c}:
+          lb.refs(rest, live, lb.refs.if(has(live, name), refs, acc))
 
 def lb.with.name.if(yes: Bool, b: LB, rest: List<&2, LB>) -> List<&2, LB>:
   match yes:
@@ -973,12 +782,16 @@ def bindings.wrap(bs: List<&2, LB>, body: T.Term1()) -> T.Term1():
           make.binding(name, t, c, bindings.wrap(rest, body))
 
 # A let becomes lambda redexes in dependency order, dropping the bindings
-# its body cannot reach; what it still needs from outside is its refs.
+# its body cannot reach; what it still needs from outside is its refs: the
+# body's, then the live bindings', as written.
 def let.build(+inner: LV, +bs: List<&2, LB>, sorted: List<&2, String>) -> LV:
   +deps = lb.deps(bs, Map.new(&2, Set()))
-  +trans = transitive(fuel(), deps, TSt{Set.to_list(lv.refs(inner)), Set.new()})
+  +trans = transitive(fuel(), deps, TSt{Map.keys(&2, L.Loc, lv.refs(inner)), Set.new()})
   +live = lb.live(lb.in.order(sorted, bs), trans)
-  LVT{bindings.wrap(List.reverse(&2, LB, live), lv.t(inner)), minus(lb.names(live), trans)}
+  +bound = Set.from_list(lb.names(live))
+  +used = lb.refs(bs, bound, lv.refs(inner))
+  LVT{bindings.wrap(List.reverse(&2, LB, live), lv.t(inner)),
+      restrict(Map.to_list(&2, L.Loc, used), minus(lb.names(live), trans), Map.new(&2, L.Loc))}
 
 def lb.cons(name: String, +v: LV, c: Nat, r: LV) -> LV:
   LVBs{LB{name, lv.t(v), lv.refs(v), c} <> lv.bs(r)}
@@ -999,7 +812,7 @@ def list.lv(+a: L.Loc, +x: LV) -> LV:
   LVT{pairs(a, lv.ts(x)), lv.refs(x)}
 
 def lts.cons(+x: LV, +r: LV) -> LV:
-  LVTs{lv.t(x) <> lv.ts(r), union(lv.refs(x), lv.refs(r))}
+  LVTs{lv.t(x) <> lv.ts(r), refs.union(lv.refs(x), lv.refs(r))}
 
 def app.mk(a: L.Loc, x: T.Term1(), y: T.Term1()) -> T.Term1():
   T.TApp{a, x, y}
@@ -1017,22 +830,22 @@ def rec.mk(a: L.Loc, x: T.Term1(), y: T.Term1(), z: T.Term1()) -> T.Term1():
   T.TRec{a, x, y, z}
 
 def two(~k: L.Loc -> T.Term1() -> T.Term1() -> T.Term1(), +x: LV, +y: LV, a: L.Loc) -> LV:
-  LVT{k(a, lv.t(x), lv.t(y)), union(lv.refs(x), lv.refs(y))}
+  LVT{k(a, lv.t(x), lv.t(y)), refs.union(lv.refs(x), lv.refs(y))}
 
 def three(~k: L.Loc -> T.Term1() -> T.Term1() -> T.Term1() -> T.Term1(), +x: LV, +y: LV, +z: LV, a: L.Loc) -> LV:
-  LVT{k(a, lv.t(x), lv.t(y), lv.t(z)), union(lv.refs(x), union(lv.refs(y), lv.refs(z)))}
+  LVT{k(a, lv.t(x), lv.t(y), lv.t(z)), refs.union(lv.refs(x), refs.union(lv.refs(y), lv.refs(z)))}
 
-def lam.kind.of(+refs: Set(), placeholder: Bool) -> T.LamKind:
+def lam.kind.of(+refs: Refs(), placeholder: Bool) -> T.LamKind:
   match placeholder:
     case True{}:
       T.Open{}
     case False{}:
-      lam.kind(Set.size(refs))
+      lam.kind(refs.size(refs))
 
 # A lambda is closed when nothing inside refers outside it and it is no
 # placeholder lambda.
 def lam.done(a: L.Loc, +name: String, +b: LV, placeholder: Bool) -> LV:
-  +refs = Set.del(lv.refs(b), name)
+  +refs = Map.del(&2, L.Loc, lv.refs(b), name)
   LVT{T.TLam{a, lam.kind.of(refs, placeholder), name, lv.t(b)}, refs}
 
 def let.after.sorted(inner: LV, +bs: List<&2, LB>, r: R(List<&2, String>)) -> R(LV):
@@ -1065,7 +878,7 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
         case LNTs{xs}:
           match xs:
             case Nil{}:
-              Done{LVTs{[], Set.new()}}
+              Done{LVTs{[], Map.new(&2, L.Loc)}}
             case Con{x, rest}:
               do Result<&2, &2, Rs.ResErr, LV>:
                 x2 : LV <- lta(f, LNT{x})
@@ -1073,8 +886,8 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
                 return lts.cons(x2, r2)
         case LNT{t}:
           match t:
-            case S.SVar{a, +name}:
-              Done{LVT{T.TVar{a, name}, Set.add(Set.new(), name)}}
+            case S.SVar{+a, +name}:
+              Done{LVT{T.TVar{a, name}, refs.one(name, a)}}
             case S.SLam{a, v, body}:
               do Result<&2, &2, Rs.ResErr, LV>:
                 b2 : LV <- lta(f, LNT{body})
@@ -1132,15 +945,78 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
                 x2 : LV <- lta(f, LNTs{xs})
                 return list.lv(a, x2)
             case S.SInt{a, k}:
-              Done{LVT{T.ints.i2t(String, U32.to_nat(k), a), Set.new()}}
+              Done{LVT{T.ints.i2t(String, U32.to_nat(k), a), Map.new(&2, L.Loc)}}
             case S.SStr{a, s}:
-              Done{LVT{T.ints.s2t(String, s, a), Set.new()}}
+              Done{LVT{T.ints.s2t(String, s, a), Map.new(&2, L.Loc)}}
             case S.SZero{a}:
-              Done{LVT{T.TZero{a}, Set.new()}}
+              Done{LVT{T.TZero{a}, Map.new(&2, L.Loc)}}
             case S.SChurch{a, k}:
-              Done{LVT{T.TChurch{a, k}, Set.new()}}
+              Done{LVT{T.TChurch{a, k}, Map.new(&2, L.Loc)}}
             case _:
               Fail{not.term()}
+
+def is.placeholder(k: String) -> Bool:
+  match k:
+    case SCon{Chr{58}, t}:
+      True{}
+    case _:
+      False{}
+
+def kls.if(yes: Bool, +k: String, +l: L.Loc, rest: List<&2, KL>) -> List<&2, KL>:
+  match yes:
+    case True{}:
+      rest
+    case False{}:
+      KL{k, l} <> rest
+
+# The references that are no placeholder.
+def kls(kvs: List<&2, Sigma<&2, &2, String, _ => L.Loc>>) -> List<&2, KL>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +l):
+          kls.if(is.placeholder(k), k, l, kls(rest))
+
+def kl.pick(c: Cmp, x: KL, y: KL) -> KL:
+  match c:
+    case LT{}:
+      x
+    case _:
+      y
+
+def kl.less(x: KL, y: KL) -> KL:
+  match x:
+    case KL{+kx, lx}:
+      match y:
+        case KL{+ky, ly}:
+          kl.pick(Pair.snd(String & String, Cmp, String.cmp(kx, ky)), KL{kx, lx}, KL{ky, ly})
+
+# The name first in order (Map.toList's first).
+def kl.min(xs: List<&2, KL>, best: KL) -> KL:
+  match xs:
+    case Nil{}:
+      best
+    case Con{x, rest}:
+      kl.min(rest, kl.less(x, best))
+
+def missing.at(kl: KL) -> Rs.ResErr:
+  match kl:
+    case KL{k, l}:
+      Rs.MissingDefinitionAt{l, k}
+
+def missing.of(xs: List<&2, KL>, +refs: Refs()) -> Rs.ResErr:
+  match xs:
+    case Nil{}:
+      Rs.MissingDefinitions{Map.keys(&2, L.Loc, refs)}
+    case Con{x, rest}:
+      missing.at(kl.min(rest, x))
+
+# A name left over that no placeholder accounts for is one the program
+# never defines: the first by name, where it is used.
+def missing(+refs: Refs()) -> Rs.ResErr:
+  missing.of(kls(Map.to_list(&2, L.Loc, refs)), refs)
 
 # The references left over at the top are the placeholders of recursion
 # sites outside every binding, each applied in turn (addRepeaters).
@@ -1157,31 +1033,30 @@ def add.repeaters(fuel: Nat, st: ARS) -> R(T.Term1()):
             case False{}:
               match t:
                 case T.TApp{a, x, T.TVar{b, +v}}:
-                  add.repeaters(f, ARFound{has(refs, v), a, x, v, refs})
+                  add.repeaters(f, ARFound{refs.has(refs, v), a, x, v, refs})
                 case _:
-                  Fail{Rs.MissingDefinitions{Set.to_list(refs)}}
+                  Fail{missing(refs)}
         case ARFound{found, +a, x, v, +refs}:
           match found:
             case False{}:
-              Fail{Rs.MissingDefinitions{Set.to_list(refs)}}
+              Fail{missing(refs)}
             case True{}:
-              +rest = Set.del(refs, v)
+              +rest = Map.del(&2, L.Loc, refs, v)
               do Result<&2, &2, Rs.ResErr, T.Term1()>:
-                x2 : T.Term1() <- add.repeaters(f, ARGo{Nat.is_eq(Set.size(rest), 0n), rest, x})
+                x2 : T.Term1() <- add.repeaters(f, ARGo{Nat.is_eq(refs.size(rest), 0n), rest, x})
                 return T.TApp{a, x2, T.TRep{a}}
 
 def cleanup(v: LV) -> R(T.Term1()):
   match v:
     case LVT{t, +refs}:
-      add.repeaters(fuel(), ARGo{Nat.is_eq(Set.size(refs), 0n), refs, t})
+      add.repeaters(fuel(), ARGo{Nat.is_eq(refs.size(refs), 0n), refs, t})
     case _:
       Fail{not.term()}
 
-# main2Term3let's Term2, the one EAL certifies and the command runs. Its
-# variables are checked first, as main2Term3 checked them.
+# main2Term3let's Term2, the one EAL certifies, sizing sizes and the
+# command runs.
 def process(+t: S.Desugared()) -> R(T.Term2()):
   do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
-    ok : Unit <- defined(fuel(), Set.new(), VTerm{t})
     v : LV <- lta(fuel(), LNT{cap.top(annotate(fuel(), AT{t})(0n))})
     t1 : T.T<String> <- cleanup(v)
     t2 : T.T<Nat> <- debruijn(fuel(), [], t1)

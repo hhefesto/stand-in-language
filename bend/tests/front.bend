@@ -297,10 +297,10 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       "tc_ultra_minimal:6:25 (#0)")))
     IO.print(verdict("sites-simpleplus", String.eq(
       sites(Fr.compile(with.prelude("simpleplus", plus, prelude), "simpleplus")),
-      "Prelude:30:18 (#0), Prelude:48:23 (#1), simpleplus:12:42 (#2), simpleplus:12:28 (#3)")))
+      "Prelude:44:18 (#0), Prelude:62:23 (#1), simpleplus:12:42 (#2), simpleplus:12:28 (#3)")))
     IO.print(verdict("sites-tictactoe", String.eq(
       sites(Fr.compile(with.prelude("tictactoe", ttt, prelude), "tictactoe")),
-      "Prelude:30:18 (#0), Prelude:48:23 (#1), Prelude:62:24 (#2), Prelude:67:42 (#3), tictactoe:31:50 (#4), tictactoe:31:28 (#5), tictactoe:59:65 (#6), tictactoe:59:43 (#7), tictactoe:60:57 (#8), tictactoe:61:57 (#9), tictactoe:74:45 (#10), tictactoe:77:63 (#11), tictactoe:88:51 (#12), tictactoe:96:45 (#13)")))
+      "Prelude:44:18 (#0), Prelude:62:23 (#1), Prelude:76:24 (#2), Prelude:81:42 (#3), tictactoe:31:50 (#4), tictactoe:31:28 (#5), tictactoe:32:30 (#6), tictactoe:59:65 (#7), tictactoe:59:43 (#8), tictactoe:60:57 (#9), tictactoe:61:57 (#10), tictactoe:74:45 (#11), tictactoe:77:63 (#12), tictactoe:88:51 (#13), tictactoe:96:45 (#14)")))
     IO.print(verdict("sites-limits", String.eq(
       sites(Fr.compile(with.prelude("over-budget-recursion", over, prelude), "over-budget-recursion")),
       "over-budget-recursion:30:34 (#0)") && String.eq(
@@ -308,7 +308,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       "unbounded-input-recursion:27:34 (#0)")))
     IO.print(verdict("testchar-error", String.eq(
       error(Fr.compile([Fr.Src{"testchar", tchar}], "testchar")),
-      "RE (missing definition \"not\" at line 2, column 52)")))
+      "RE (missing definition \"assert\" at line 6, column 20)")))
 
 def main() -> IO(Unit):
   do IO<Unit>:

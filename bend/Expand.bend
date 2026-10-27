@@ -3,15 +3,17 @@ import ./Loc.bend as L
 import ./Syntax.bend as S
 import ./Show.bend as Sh
 
-# Expansion (haskell-final's Telomare.Expand): multi-pattern lambdas become
-# single-binder lambdas over case destructuring, let definitions become plain
-# bindings, a refinement `x : T = v` becomes a check, and list assignments
-# and UDT declarations become their per-slot bindings.
+# Expansion (Telomare.Expand): multi-pattern lambdas become single-binder
+# lambdas over case destructuring, let definitions become plain bindings, a
+# refinement `x : T = v` becomes a check, as does a lambda parameter
+# `(x : T)`, and list assignments and UDT declarations become their
+# per-slot bindings.
 
 type ExpErr is Data:
   ListArityMismatch{+loc: L.Loc, +names: Nat, +slots: Nat}
   UDTBodyNotList{+loc: L.Loc, +tname: String, +desc: String}
   UDTArityMismatch{+loc: L.Loc, +tname: String, +names: Nat, +slots: Nat}
+  MisplacedPatternAnnotation{+loc: L.Loc}
   MissingMain{}
 
 # The lets and lambdas a list assignment's list literal sits under, outermost
@@ -40,7 +42,7 @@ type EN is Data:
   ETerms{+xs: List<&2, S.Parsed()>}
   EBinds{+bs: List<&2, S.ParsedBind()>}
   EDefs{+ds: List<&2, S.Def>}
-  EAlts{+alts: List<&2, S.ParsedAlt()>}
+  EAlts{+loc: L.Loc, +alts: List<&2, S.ParsedAlt()>}
 
 type EV is Data:
   VT{+t: S.Expanded()}
@@ -108,6 +110,9 @@ def render(e: ExpErr) -> String:
       "UDT declaration for [" ++ tname ++ "] has " ++ Nat.show(names)
         ++ " names for " ++ Nat.show(slots) ++ " value slots; expected one type name "
         ++ "plus one name per slot" ++ at.loc(loc)
+    case MisplacedPatternAnnotation{loc}:
+      "refinement annotations (p : T) are only supported at the top of a "
+        ++ "lambda parameter" ++ at.loc(loc)
     case MissingMain{}:
       "missing 'main' definition"
 
@@ -209,7 +214,7 @@ def plain(+loc: L.Loc, +names: List<&2, L.Name>, +body: S.Expanded(), s: Slots) 
 
 # \__udt_v -> if dEqual (left __udt_v) h then right __udt_v else abort "not T"
 def validator(+loc: L.Loc, tname: String, +h: String) -> S.Expanded():
-  S.SLam{loc, L.Name{L.GenIn{"annotated pattern lambda", loc}, "__udt_v"},
+  S.SLam{loc, L.Name{L.GenIn{"UDT validator", loc}, "__udt_v"},
     S.SIte{loc,
       S.SApp{loc, S.SApp{loc, S.SVar{loc, "dEqual"}, S.SLeft{loc, S.SVar{loc, "__udt_v"}}},
              S.SVar{loc, h}},
@@ -340,13 +345,24 @@ def lam.names(ps: List<&2, S.ExpandedLPat()>, +i: Nat) -> List<&2, L.Name>:
     case Con{p, rest}:
       lam.name(i, p) <> lam.names(rest, 1n+i)
 
-# One parameter's destructuring around the body (applyDestructure).
-def destructure(+lt: L.Loc, p: S.ExpandedPat(), +v: String, inner: S.Expanded()) -> S.Expanded():
+# One parameter's destructuring around the body (applyDestructure), at the
+# lambda's location lt; the parameter starts at loc. A refinement `(p : T)`
+# binds the checked value: `\(x : T) -> body` is `\v -> let x = T checks v
+# in body`, as `let x : T = v` would be, and an annotated pattern that is no
+# variable is destructured from that binding. Only the top of a parameter
+# is annotated (lpats.ok).
+def destructure(+lt: L.Loc, +loc: L.Loc, p: S.ExpandedPat(), +v: String, inner: S.Expanded()) -> S.Expanded():
   match p:
     case S.PVar{name}:
       inner
-    case S.PAnn{q, +t}:
-      S.SCase{lt, S.SApp{S.loc(Empty, Unit, Empty, t), t, S.SVar{lt, v}}, [S.Alt{q, inner}], Unit{}}
+    case S.PAnn{q, t}:
+      match q:
+        case S.PVar{name}:
+          S.SLet{lt, [S.Bind{name, S.SCheck{loc, t, S.SVar{lt, v}}}], inner}
+        case other:
+          S.SLet{lt, [S.Bind{L.Name{L.GenIn{"annotated lambda pattern", loc}, v ++ "_checked"},
+                             S.SCheck{loc, t, S.SVar{lt, v}}}],
+            destructure(lt, loc, other, v ++ "_checked", inner)}
     case other:
       S.SCase{lt, S.SVar{lt, v},
         [S.Alt{other, inner},
@@ -364,7 +380,7 @@ def destructure.all(ps: List<&2, S.ExpandedLPat()>, +lt: L.Loc, names: List<&2, 
             case Nil{}:
               body
             case Con{n, nrest}:
-              destructure(lt, p, L.Name.text(n), destructure.all(rest, lt, nrest, body))
+              destructure(lt, loc, p, L.Name.text(n), destructure.all(rest, lt, nrest, body))
 
 # A lambda takes its body's annotation (LamP).
 def lams(names: List<&2, L.Name>, +anno: L.Loc, body: S.Expanded()) -> S.Expanded():
@@ -381,6 +397,53 @@ def multi.lambda.go(+names: List<&2, L.Name>, +d: S.Expanded()) -> S.Expanded():
 def multi.lambda(+lt: L.Loc, +pats: List<&2, S.ExpandedLPat()>, body: S.Expanded()) -> S.Expanded():
   +names = lam.names(pats, 0n)
   multi.lambda.go(names, destructure.all(pats, lt, names, body))
+
+# Where a refinement annotation may stand
+# ---------------------------------------
+
+def has.ann(p: S.ExpandedPat()) -> Bool:
+  match p:
+    case S.PAnn{q, t}:
+      True{}
+    case S.PPair{a, b}:
+      has.ann(a) || has.ann(b)
+    case _:
+      False{}
+
+def plain.if(ann: Bool, +loc: L.Loc, p: S.ExpandedPat()) -> R(S.ExpandedPat()):
+  match ann:
+    case True{}:
+      Fail{MisplacedPatternAnnotation{loc}}
+    case False{}:
+      Done{p}
+
+# A pattern with no annotation anywhere (checkPlainPattern): a case
+# alternative's, or a lambda parameter's under its annotations.
+def plain.ok(+loc: L.Loc, +p: S.ExpandedPat()) -> R(S.ExpandedPat()):
+  plain.if(has.ann(p), loc, p)
+
+# A lambda parameter: annotations at its top, a plain pattern under them
+# (checkLambdaPattern).
+def lpat.ok(+loc: L.Loc, p: S.ExpandedPat()) -> R(S.ExpandedPat()):
+  match p:
+    case S.PAnn{q, t}:
+      do Result<&2, &2, ExpErr, S.ExpandedPat()>:
+        q2 : S.ExpandedPat() <- lpat.ok(loc, q)
+        return S.PAnn{q2, t}
+    case other:
+      plain.ok(loc, other)
+
+def lpats.ok(ps: List<&2, S.ExpandedLPat()>) -> R(List<&2, S.ExpandedLPat()>):
+  match ps:
+    case Nil{}:
+      Done{[]}
+    case Con{lp, rest}:
+      match lp:
+        case S.LPat{+loc, p}:
+          do Result<&2, &2, ExpErr, List<&2, S.ExpandedLPat()>>:
+            p2 : S.ExpandedPat() <- lpat.ok(loc, p)
+            r2 : List<&2, S.ExpandedLPat()> <- lpats.ok(rest)
+            return S.LPat{loc, p2} <> r2
 
 # The expansion walk
 # ------------------
@@ -457,8 +520,9 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
             case S.SLamPat{loc, pats, body, w}:
               do Result<&2, &2, ExpErr, EV>:
                 p2 : EV <- ex(f, ELPats{pats})
+                ps : List<&2, S.ExpandedLPat()> <- lpats.ok(vlps(p2))
                 b2 : EV <- ex(f, ETerm{body})
-                return VT{multi.lambda(loc, vlps(p2), vt(b2))}
+                return VT{multi.lambda(loc, ps, vt(b2))}
             case S.SPair{loc, a, b}:
               do Result<&2, &2, ExpErr, EV>:
                 a2 : EV <- ex(f, ETerm{a})
@@ -507,10 +571,10 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
               do Result<&2, &2, ExpErr, EV>:
                 x2 : EV <- ex(f, ETerms{xs})
                 return VT{S.SList{loc, vts(x2)}}
-            case S.SCase{loc, scrut, alts, w}:
+            case S.SCase{+loc, scrut, alts, w}:
               do Result<&2, &2, ExpErr, EV>:
                 s2 : EV <- ex(f, ETerm{scrut})
-                a2 : EV <- ex(f, EAlts{alts})
+                a2 : EV <- ex(f, EAlts{loc, alts})
                 return VT{S.SCase{loc, vt(s2), vas(a2), w}}
             case S.SVar{loc, name}:
               ok.t(S.SVar{loc, name})
@@ -598,7 +662,7 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
                     bs : List<&2, S.ExpandedBind()> <- expand.list(loc, names, vt(b2))
                     r2 : EV <- ex(f, EDefs{rest})
                     binds.then(bs, r2)
-        case EAlts{alts}:
+        case EAlts{+loc, alts}:
           match alts:
             case Nil{}:
               Done{VAs{[]}}
@@ -607,9 +671,10 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
                 case S.Alt{p, body}:
                   do Result<&2, &2, ExpErr, EV>:
                     p2 : EV <- ex(f, EPat{p})
+                    q : S.ExpandedPat() <- plain.ok(loc, vp(p2))
                     b2 : EV <- ex(f, ETerm{body})
-                    r2 : EV <- ex(f, EAlts{rest})
-                    return VAs{S.Alt{vp(p2), vt(b2)} <> vas(r2)}
+                    r2 : EV <- ex(f, EAlts{loc, rest})
+                    return VAs{S.Alt{q, vt(b2)} <> vas(r2)}
 
 def fuel() -> Nat:
   U32.to_nat(4294967295)

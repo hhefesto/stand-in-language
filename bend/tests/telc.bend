@@ -330,7 +330,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
                 Tc.sources.hash(with.prelude(prelude, "simpleplus", plus)))])))
     IO.print(verdict("telc-nodes", all([
       U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 868),
-      U32.is_eq(nodes(sp), 23768)])))
+      U32.is_eq(nodes(sp), 41388)])))
 
 def main() -> IO(Unit):
   do IO<Unit>:

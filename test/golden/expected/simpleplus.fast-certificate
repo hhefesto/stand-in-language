@@ -7,8 +7,8 @@ iterations: not inferred, because this program was not sized.
 
 recursion nesting (structural, approximate):
   triple         function             levels
-  Prelude:11:17  Prelude.d2c          0, 1
-  Prelude:44:32  Prelude.foldr.fixed  0, 1
+  Prelude:25:17  Prelude.d2c          0, 1
+  Prelude:58:32  Prelude.foldr.fixed  0, 1
 
 maximum nesting depth: 2
 

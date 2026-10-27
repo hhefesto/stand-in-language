@@ -1,6 +1,10 @@
-status 0
+status 1
 --- stdout
 --- stderr
-wrote simpleplus.net.svg (entry 17 agents; 27 of 90 templates, 399 of 14,917 agents; --draw-limit 400)
---- files
-0c159b20d7de4886f25e24e87fd50ec505d996f8328cd62d2cd6d8ea33628c92 147901 simpleplus.net.svg
+Invalid option `--draw-net'
+
+Usage: telomare TELOMARE-FILE 
+                [--compile [-o|--output FILE] | --certificate | --meter] 
+                [--fast [--fuel N] | --ic]
+
+  A simple but robust virtual machine
