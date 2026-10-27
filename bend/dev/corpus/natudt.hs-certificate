@@ -1,26 +1,26 @@
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:48:23 (#0)  <= 2
-  Prelude:54:23 (#1)  <= 1
-  Prelude:62:24 (#2)  <= 1
-  Prelude:67:42 (#3)  <= 234
-  natudt:5:35 (#4)    <= 3
+  Prelude:81:42 (#0)  <= 122
+  natudt:7:20 (#1)    <= 3
 
 sizing budget in force: 65536 unrollings
 
 recursion nesting (structural, approximate):
   triple         function     levels
-  Prelude:11:17  Prelude.d2c  0, 1
+  Prelude:25:17  Prelude.d2c  0, 1, 2
 
-maximum nesting depth: 2
+maximum nesting depth: 3
 
 bindings used below the level they were bound at:
+  natudt.nPlus.h      !!  (2 levels below its binding)
   Prelude.d2c.b       !  (1 level below its binding)
   Prelude.d2c.f       !  (1 level below its binding)
   Prelude.dEqual.b    !  (1 level below its binding)
   natudt.__udt_Nat.h  !  (1 level below its binding)
-  natudt.nPlus.h      !  (1 level below its binding)
+  natudt.nPlus.Nat    !  (1 level below its binding)
+  natudt.nPlus.b      !  (1 level below its binding)
+  natudt.nPlus.bb     !  (1 level below its binding)
 
 The two lists index differently: a count above is per instantiation (a
 recursion reached from two places is sized separately at each), while a

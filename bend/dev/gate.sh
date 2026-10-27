@@ -45,24 +45,23 @@ corpus() {
   echo "== corpus"
   cd "$R/bend/dev/corpus"
   local m=0 c=0
-  # From P4 on, counts differ from haskell-final's by design: the displays
-  # must still equal its --ic ones (or its reference evaluator's, P.hs-run,
-  # where its IC ran dry), and the whole output the port's record when there
-  # is one (P.port-ic-meter; CORPUS_RECORD=1 writes them).
-  for f in *.hs-ic-meter; do
-    p=${f%.hs-ic-meter}
+  # The displays must equal the oracle's (master's --ic, P.hs-ic, or its
+  # plain run, P.hs-run, where its IC is too slow or runs dry), and the
+  # whole output the port's record (P.port-ic-meter; CORPUS_RECORD=1
+  # writes them). Interaction counts are the port's own (from P4 on).
+  for ref in *.hs-ic *.hs-run; do
+    p=${ref%.hs-*}
     o=$S/logs/corpus-$p.meter
     timeout 600 "$B/telomare" $p.tel --meter < /dev/null > $o 2>&1
     [ -n "${CORPUS_RECORD:-}" ] && cp $o $p.port-ic-meter
-    want=$f; [ -f $p.port-ic-meter ] && want=$p.port-ic-meter
-    ref=$f; [ -f $p.hs-run ] && ref=$p.hs-run
-    if ! diff -q <(grep -v '^IC interactions' $o) <(grep -v '^IC interactions' $ref) > /dev/null; then echo "METER DISPLAY DIFF $p"; fail=1
-    elif ! diff -q $o $want > /dev/null; then echo "METER DIFF $p"; fail=1
+    if ! diff -q <(grep -v '^IC interactions' $o) $ref > /dev/null; then echo "METER DISPLAY DIFF $p"; fail=1
+    elif ! diff -q $o $p.port-ic-meter > /dev/null; then echo "METER DIFF $p"; fail=1
     else m=$((m+1)); fi
   done
-  # From P7.2 on, the report has a checks section haskell-final's lacks:
-  # without it, the report must equal haskell-final's, and whole, the
-  # port's record (P.port-certificate; CORPUS_RECORD=1 writes them).
+  # From P7.2 on, the report has a checks section the oracle's lacks:
+  # without it, the report must equal the oracle's (master's, since the
+  # 2026-10-27 merge), and whole, the port's record (P.port-certificate;
+  # CORPUS_RECORD=1 writes them).
   for f in *.hs-certificate; do
     p=${f%.hs-certificate}
     o=$S/logs/corpus-$p.certificate

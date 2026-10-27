@@ -1,16 +1,19 @@
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:48:23 (#0)  <= 5
-  Prelude:54:23 (#1)  <= 4
-  Prelude:62:24 (#2)  <= 4
-  Prelude:67:42 (#3)  <= 116
+  Prelude:62:23 (#0)  <= 10
+  Prelude:68:23 (#1)  <= 6
+  Prelude:76:24 (#2)  <= 9
+  Prelude:81:42 (#3)  <= 116
 
 sizing budget in force: 65536 unrollings
 
-refinement checks: 1 discharged statically, 0 left to run time:
-  Prelude:111:23  discharged
-erasures in main: proven, by the erasure checker in 326399 evaluation steps
+refinement checks: 4 discharged statically, 0 left to run time:
+  Prelude:17:8    discharged
+  Prelude:17:19   discharged
+  Prelude:21:8    discharged
+  Prelude:125:23  discharged
+erasures in main: proven, by the erasure checker in 1074546 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
 
 recursion nesting (structural, approximate):
