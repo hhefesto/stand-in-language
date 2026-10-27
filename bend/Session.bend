@@ -309,6 +309,52 @@ def answer(p: Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -
     case Prog{+m, g}:
       answered(g, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
 
+# The same iterations as the command runs them, in IO: the IC run by ~rt,
+# IC.run itself (run.pure) or bend/Native.bend's, whose loop is C
+# (bend/effs/ic.c) and gives the same run.
+
+def Runner() -> Type:
+  IC.Prog -> IC.Net -> Co.D -> U32 -> IO(IC.Run)
+
+def run.pure(p: IC.Prog, net: IC.Net, input: Co.D, fuel: U32) -> IO(IC.Run):
+  IO.pure(IC.Run, IC.run(p, net, input, fuel))
+
+def turn.by(~rt: Runner(), +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+  do IO<Turn>:
+    r : IC.Run <- rt(m, net, input, fuel(h))
+    return turn(h, r, cost)
+
+def start.by(~rt: Runner(), p: Prog, +h: How) -> IO(Turn):
+  match p:
+    case Prog{+m, g}:
+      turn.by(~rt, h, m, IC.net.new(m), Co.DZero{}, cost.none())
+
+def checked.by(~rt: Runner(), v: Maybe<&2, Outcome>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> IO(Turn):
+  match v:
+    case None{}:
+      turn.by(~rt, h, m, net, input, cost)
+    case Some{o}:
+      IO.pure(Turn, turn.of(net, o, cost))
+
+def guarded.by(~rt: Runner(), r: IC.Run, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+  match r:
+    case IC.Run{gnet, out, +spent, unrolls}:
+      checked.by(~rt, guard.verdict(h, out), h, m, net, input, cost.plus(cost, spent, []))
+
+def answered.by(~rt: Runner(), g: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+  match g:
+    case None{}:
+      turn.by(~rt, h, m, net, input, cost)
+    case Some{+gp}:
+      do IO<Turn>:
+        r : IC.Run <- rt(gp, IC.net.new(gp), input, fuel(h))
+        guarded.by(~rt, r, h, m, net, input, cost)
+
+def answer.by(~rt: Runner(), p: Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> IO(Turn):
+  match p:
+    case Prog{+m, g}:
+      answered.by(~rt, g, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
+
 # A session on given lines, for the tests: the displays, newest first, and
 # what it spent. It ends where the session would, or where the lines run
 # out.

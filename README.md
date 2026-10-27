@@ -108,6 +108,22 @@ layouts are byte for byte the same. The interaction net runs only the branch
 an `if` chooses (see [Design](#design)), so it runs the tic-tac-toe test game
 in 6.0 million interactions instead of 15.2 million, in about 0.7 s.
 
+The net's loop is C. `bend/effs/ic.c`, a Bend foreign effect called from
+`bend/Native.bend`, fires the pairs on the same net, by the same rules, in
+the same order as `bend/IC.bend`. IC.bend stays the definition: it fires
+the few pairs the C hands back (those that make a stuck value or count a
+`--fast` unroll), it is what the tests and the proofs read, and
+`bend/Main.bend`'s own `main` still runs it. A test
+(`bend/tests/native.bend`) runs terms and the example sessions both ways
+and checks that they leave the same net, word for word. On the AMD Ryzen 7
+3700X, from a compiled program (`--compile`), the tic-tac-toe game `1 4 2 5
+3` (6.2 million interactions) takes 0.65 s instead of 1.54 s, and a program
+checking eighteen of the Prelude's arithmetic functions (5.3 million) 0.34 s
+instead of 1.09 s.
+The C fires about 50 million interactions a second; most of what is left
+is Bend's: reading the program, building its templates and reading the
+results back.
+
 ### Design
 
 [DESIGN.md](DESIGN.md) is the maintainer's design document: Telomare's

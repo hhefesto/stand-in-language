@@ -1,5 +1,7 @@
 # The Bend sources and the checks over them. A build sees the .bend files
-# under bend/ and nothing else, so an edit to prose or Nix rebuilds nothing.
+# under bend/ and the C and JS of the port's own effects (bend/effs: the
+# IC's loop in C, Native.bend) and nothing else, so an edit to prose or Nix
+# rebuilds nothing.
 {
   pkgs,
   src,
@@ -9,7 +11,10 @@
 let
   inherit (pkgs) lib;
 
-  bendFiles = lib.fileset.fileFilter (file: file.hasExt "bend") (src + "/bend");
+  bendFiles = lib.fileset.unions [
+    (lib.fileset.fileFilter (file: file.hasExt "bend") (src + "/bend"))
+    (src + "/bend/effs")
+  ];
 
   bendSrc = lib.fileset.toSource {
     root = src;
@@ -129,6 +134,10 @@ let
       "telc-hash"
       "telc-nodes"
     ];
+    native = [
+      "native-terms"
+      "native-sessions"
+    ];
     sem = [
       "sem-tc_ultra_minimal"
       "sem-simpleplus"
@@ -169,10 +178,11 @@ let
       ${script}
     '';
 
-  # The `telomare` command, bend/Main.bend compiled to a native binary.
+  # The `telomare` command, compiled to a native binary: bend/Native.bend,
+  # which is bend/Main.bend's command with the IC's loop in C.
   telomare = bendCommand "telomare" bendSrc ''
     mkdir -p $out/bin
-    bend bend/Main.bend -o $out/bin/telomare
+    bend bend/Native.bend -o $out/bin/telomare
   '';
 
   # BendTT's kernel, the Lean program `bend --verdict` re-checks proofs with

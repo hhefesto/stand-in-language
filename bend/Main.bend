@@ -382,16 +382,18 @@ def metered(meter: Bool, r: Run, c: Ss.Cost) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
-def got(+p: Ss.Prog, +h: Ss.How, net: IC.Net, i: Tx.In, st: Co.D, c: Ss.Cost, g: Tx.Got) -> IO(SS):
+def got(~rt: Ss.Runner(), +p: Ss.Prog, +h: Ss.How, net: IC.Net, i: Tx.In, st: Co.D, c: Ss.Cost, g: Tx.Got) -> IO(SS):
   match g:
     case Tx.GLine{text}:
-      IO.pure(SS, STurn{i, Ss.answer(p, h, net, text, st, c)})
+      do IO<SS>:
+        t : Ss.Turn <- Ss.answer.by(~rt, p, h, net, text, st, c)
+        return STurn{i, t}
     case Tx.GEnd{}:
       IO.die(SS, 1, "telomare: <stdin>: hGetLine: end of file")
     case Tx.GErr{msg}:
       IO.die(SS, 1, "telomare: <stdin>: hGetLine: " ++ msg)
 
-def session(fuel: Nat, +p: Ss.Prog, +r: Run, +meter: Bool, s: SS) -> IO(Unit):
+def session(~rt: Ss.Runner(), fuel: Nat, +p: Ss.Prog, +r: Run, +meter: Bool, s: SS) -> IO(Unit):
   match fuel:
     case 0n:
       IO.die(Unit, 1, "telomare: too many iterations")
@@ -403,7 +405,7 @@ def session(fuel: Nat, +p: Ss.Prog, +r: Run, +meter: Bool, s: SS) -> IO(Unit):
               do IO<Unit>:
                 IO.print(display)
                 l : Tx.Line <- Tx.read_line(i)
-                session(k, p, r, meter, SLine{net, st, c, l})
+                session(~rt, k, p, r, meter, SLine{net, st, c, l})
             case Ss.Ends{display, c}:
               do IO<Unit>:
                 IO.print(display)
@@ -414,11 +416,13 @@ def session(fuel: Nat, +p: Ss.Prog, +r: Run, +meter: Bool, s: SS) -> IO(Unit):
           match l:
             case Tx.Line{i, g}:
               do IO<Unit>:
-                next : SS <- got(p, how(r), net, i, st, c, g)
-                session(k, p, r, meter, next)
+                next : SS <- got(~rt, p, how(r), net, i, st, c, g)
+                session(~rt, k, p, r, meter, next)
 
-def play(+p: Ss.Prog, +r: Run, meter: Bool) -> IO(Unit):
-  session(U32.to_nat(4294967295), p, r, meter, STurn{Tx.Closed{}, Ss.start(p, how(r))})
+def play(~rt: Ss.Runner(), +p: Ss.Prog, +r: Run, meter: Bool) -> IO(Unit):
+  do IO<Unit>:
+    t : Ss.Turn <- Ss.start.by(~rt, p, how(r))
+    session(~rt, U32.to_nat(4294967295), p, r, meter, STurn{Tx.Closed{}, t})
 
 # The pipeline (compileModules, then the action)
 # ----------------------------------------------
@@ -606,7 +610,7 @@ def session.of(+expr: Co.V, g: Maybe<&2, Sz.Sized>) -> Ss.Prog:
 # under the EAL capture layouts of the sized term, so closures are copied
 # as EAL planned; the static report needs neither, and reads the modules
 # as written. Compiling writes the artifact to path.
-def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod>, +entry: String, srcs: List<&2, Fr.Src>, +path: String) -> IO(Unit):
+def acted(~rt: Ss.Runner(), r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod>, +entry: String, srcs: List<&2, Fr.Src>, +path: String) -> IO(Unit):
   match r:
     case Fail{f}:
       IO.die(Unit, 1, failed(f))
@@ -617,9 +621,9 @@ def acted(r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod
             case Sz.Sized{+counts, +expr, +checks}:
               match act:
                 case Play{}:
-                  play(session.of(expr, g), Sized{}, False{})
+                  play(~rt, session.of(expr, g), Sized{}, False{})
                 case Meter{}:
-                  play(session.of(expr, g), Sized{}, True{})
+                  play(~rt, session.of(expr, g), Sized{}, True{})
                 case Report{}:
                   IO.write(Ct.report(counts, run, budget(), Lv.info(mods, entry), checks, guard.checks(g)))
                 case Compile{}:
@@ -694,14 +698,14 @@ def unguided(m: Maybe<&2, Co.V>) -> Maybe<&2, IC.Prog>:
 
 # The unsized program run, unguided: EAL's capture layouts are the sized
 # term's, and there is none.
-def fast.acted(r: Result<&2, &2, Failure, Unbounded>, +meter: Bool, +fuel: U32, +mods: List<&2, Rs.Mod>) -> IO(Unit):
+def fast.acted(~rt: Ss.Runner(), r: Result<&2, &2, Failure, Unbounded>, +meter: Bool, +fuel: U32, +mods: List<&2, Rs.Mod>) -> IO(Unit):
   match r:
     case Fail{f}:
       IO.die(Unit, 1, failed(f))
     case Done{u}:
       match u:
         case Unbounded{run, v, g}:
-          play(Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), unguided(g)}, Unsized{fuel, Ct.locs(run, Map.new(&2, L.Loc)), mods}, meter)
+          play(~rt, Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), unguided(g)}, Unsized{fuel, Ct.locs(run, Map.new(&2, L.Loc)), mods}, meter)
 
 def modules.ok(errs: List<&2, Fr.ModErr>) -> Bool:
   match errs:
@@ -724,19 +728,19 @@ def fast.reported(+entry: String, m: Fr.Mods) -> IO(Unit):
     case Fr.Mods{+mods, +errs}:
       fast.report(mods, errs, entry, modules.ok(errs))
 
-def fast.ran(+meter: Bool, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
+def fast.ran(~rt: Ss.Runner(), +meter: Bool, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
   match m:
     case Fr.Mods{+mods, errs}:
-      fast.acted(fast.resolved(Fr.program(Fr.Mods{mods, errs}, entry)), meter, fuel, mods)
+      fast.acted(~rt, fast.resolved(Fr.program(Fr.Mods{mods, errs}, entry)), meter, fuel, mods)
 
-def fast.parsed(act: Act, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
+def fast.parsed(~rt: Ss.Runner(), act: Act, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
   match act:
     case Report{}:
       fast.reported(entry, m)
     case Play{}:
-      fast.ran(False{}, fuel, entry, m)
+      fast.ran(~rt, False{}, fuel, entry, m)
     case Meter{}:
-      fast.ran(True{}, fuel, entry, m)
+      fast.ran(~rt, True{}, fuel, entry, m)
     case Compile{}:
       IO.die(Unit, 1, "--compile sizes the program, so it cannot be combined with --fast")
 
@@ -799,28 +803,28 @@ def stored.guard(g: Maybe<&2, Tc.Guard>) -> Maybe<&2, IC.Prog>:
 
 # A compiled program run, and its guard, under the capture layouts it
 # stores.
-def telc.play(t: Tc.Telc, meter: Bool) -> IO(Unit):
+def telc.play(~rt: Ss.Runner(), t: Tc.Telc, meter: Bool) -> IO(Unit):
   match t:
     case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, guard}:
-      play(Ss.Prog{stored(expr, layouts), stored.guard(guard)}, Sized{}, meter)
+      play(~rt, Ss.Prog{stored(expr, layouts), stored.guard(guard)}, Sized{}, meter)
 
 def telc.cert(t: Tc.Telc) -> IO(Unit):
   match t:
     case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard}:
       IO.write(cert)
 
-def telc.acted(act: Act, +path: String, t: Tc.Telc) -> IO(Unit):
+def telc.acted(~rt: Ss.Runner(), act: Act, +path: String, t: Tc.Telc) -> IO(Unit):
   match act:
     case Compile{}:
       IO.die(Unit, 1, path ++ " is already compiled")
     case Report{}:
       telc.cert(t)
     case Play{}:
-      telc.play(t, False{})
+      telc.play(~rt, t, False{})
     case Meter{}:
-      telc.play(t, True{})
+      telc.play(~rt, t, True{})
 
-def telc.decoded(act: Act, +path: String, r: Result<&2, &2, String, Tc.Telc>) -> IO(Unit):
+def telc.decoded(~rt: Ss.Runner(), act: Act, +path: String, r: Result<&2, &2, String, Tc.Telc>) -> IO(Unit):
   match r:
     case Fail{msg}:
       IO.die(Unit, 1, path ++ ": " ++ msg)
@@ -829,48 +833,48 @@ def telc.decoded(act: Act, +path: String, r: Result<&2, &2, String, Tc.Telc>) ->
         case Tc.Telc{+entry, +hash, cert, counts, places, budget, expr, layouts, guard}:
           do IO<Unit>:
             stale(entry, hash, path)
-            telc.acted(act, path, Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard})
+            telc.acted(~rt, act, path, Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, guard})
 
-def telc.read(act: Act, +path: String, r: Result<&1, &1, String, List<&2, U32>>) -> IO(Unit):
+def telc.read(~rt: Ss.Runner(), act: Act, +path: String, r: Result<&1, &1, String, List<&2, U32>>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.die(Unit, 1, "telomare: " ++ path ++ ": " ++ e)
     case Done{bs}:
-      telc.decoded(act, path, Tc.decode(bs))
+      telc.decoded(~rt, act, path, Tc.decode(bs))
 
 # A compiled program: nothing to parse, certify or size (runArtifact).
-def telc.run(act: Act, fast: Bool, +path: String) -> IO(Unit):
+def telc.run(~rt: Ss.Runner(), act: Act, fast: Bool, +path: String) -> IO(Unit):
   do IO<Unit>:
     noted(fast)
     r : Result<&1, &1, String, List<&2, U32>> <- Tx.Bytes.read(path)
-    telc.read(act, path, r)
+    telc.read(~rt, act, path, r)
 
 # The source
 # ----------
 
 # The modules parsed and expanded once, for both the compiler and the
 # static report.
-def parsed(act: Act, h: Ss.How, +entry: String, +path: String, srcs: List<&2, Fr.Src>, m: Fr.Mods) -> IO(Unit):
+def parsed(~rt: Ss.Runner(), act: Act, h: Ss.How, +entry: String, +path: String, srcs: List<&2, Fr.Src>, m: Fr.Mods) -> IO(Unit):
   match h:
     case Ss.Sized{}:
       match m:
         case Fr.Mods{+mods, errs}:
-          acted(compile(Fr.Mods{mods, errs}, entry), act, mods, entry, srcs, path)
+          acted(~rt, compile(Fr.Mods{mods, errs}, entry), act, mods, entry, srcs, path)
     case Ss.Fast{fuel}:
-      fast.parsed(act, fuel, entry, m)
+      fast.parsed(~rt, act, fuel, entry, m)
 
-def loaded(act: Act, h: Ss.How, +entry: String, +path: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
+def loaded(~rt: Ss.Runner(), act: Act, h: Ss.How, +entry: String, +path: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.die(Unit, 1, failed(Unread{e}))
     case Done{+srcs}:
-      parsed(act, h, entry, path, srcs, Fr.all(srcs))
+      parsed(~rt, act, h, entry, path, srcs, Fr.all(srcs))
 
-def source.run(act: Act, h: Ss.How, o: Out, +f: String) -> IO(Unit):
+def source.run(~rt: Ss.Runner(), act: Act, h: Ss.How, o: Out, +f: String) -> IO(Unit):
   +entry = base.name(f)
   do IO<Unit>:
     r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules.at(entry, f)
-    loaded(act, h, entry, out.path(o, f), r)
+    loaded(~rt, act, h, entry, out.path(o, f), r)
 
 def unsized(h: Ss.How) -> Bool:
   match h:
@@ -880,65 +884,65 @@ def unsized(h: Ss.How) -> Bool:
       True{}
 
 # A .telc is an artifact, whatever else the command line says.
-def file.run(telc: Bool, act: Act, h: Ss.How, o: Out, +f: String) -> IO(Unit):
+def file.run(~rt: Ss.Runner(), telc: Bool, act: Act, h: Ss.How, o: Out, +f: String) -> IO(Unit):
   match telc:
     case True{}:
-      telc.run(act, unsized(h), f)
+      telc.run(~rt, act, unsized(h), f)
     case False{}:
-      source.run(act, h, o, f)
+      source.run(~rt, act, h, o, f)
 
-def run.file(act: Act, h: Ss.How, o: Out, file: Maybe<&2, String>) -> IO(Unit):
+def run.file(~rt: Ss.Runner(), act: Act, h: Ss.How, o: Out, file: Maybe<&2, String>) -> IO(Unit):
   match file:
     case Some{+f}:
-      file.run(String.ends_with(f, ".telc"), act, h, o, f)
+      file.run(~rt, String.ends_with(f, ".telc"), act, h, o, f)
     case None{}:
       IO.die(Unit, 2, usage())
 
 # haskell-final's `--ic --certificate` was another report, the IC space
 # certificate, which the port does not have: refuse it rather than answer
 # with the static report.
-def run.cmd(act: Act, ic: Bool, h: Ss.How, o: Out, file: Maybe<&2, String>) -> IO(Unit):
+def run.cmd(~rt: Ss.Runner(), act: Act, ic: Bool, h: Ss.How, o: Out, file: Maybe<&2, String>) -> IO(Unit):
   match act:
     case Report{}:
       match ic:
         case True{}:
           IO.die(Unit, 2, "telomare: --ic --certificate (the IC space certificate) is not in the Bend port; haskell-final has it. --certificate alone gives the static report")
         case False{}:
-          run.file(Report{}, h, o, file)
+          run.file(~rt, Report{}, h, o, file)
     case other:
-      run.file(other, h, o, file)
+      run.file(~rt, other, h, o, file)
 
-def fast.checked(act: Act, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
+def fast.checked(~rt: Ss.Runner(), act: Act, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
   match f:
     case FuelNext{}:
       IO.die(Unit, 2, "telomare: --fuel takes a number of interactions\n" ++ usage())
     case FuelOf{n}:
-      run.cmd(act, False{}, Ss.Fast{n}, o, file)
+      run.cmd(~rt, act, False{}, Ss.Fast{n}, o, file)
     case NoFuel{}:
-      run.cmd(act, False{}, Ss.Fast{fast.fuel()}, o, file)
+      run.cmd(~rt, act, False{}, Ss.Fast{fast.fuel()}, o, file)
 
-def sized.checked(act: Act, ic: Bool, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
+def sized.checked(~rt: Ss.Runner(), act: Act, ic: Bool, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
   match f:
     case NoFuel{}:
-      run.cmd(act, ic, Ss.Sized{}, o, file)
+      run.cmd(~rt, act, ic, Ss.Sized{}, o, file)
     case _:
       IO.die(Unit, 2, "telomare: --fuel caps an unsized run; give it with --fast\n" ++ usage())
 
-def fast.ic(ic: Bool, act: Act, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
+def fast.ic(~rt: Ss.Runner(), ic: Bool, act: Act, o: Out, file: Maybe<&2, String>, f: Fuel) -> IO(Unit):
   match ic:
     case True{}:
       IO.die(Unit, 2, "telomare: --fast and --ic are separate runtimes; give one\n" ++ usage())
     case False{}:
-      fast.checked(act, o, file, f)
+      fast.checked(~rt, act, o, file, f)
 
 # --fast and --ic name two runtimes in haskell-final, --fuel caps only an
 # unsized run, and -o names only --compile's output.
-def checked(act: Act, ic: Bool, unsized: Bool, f: Fuel, o: Out, file: Maybe<&2, String>) -> IO(Unit):
+def checked(~rt: Ss.Runner(), act: Act, ic: Bool, unsized: Bool, f: Fuel, o: Out, file: Maybe<&2, String>) -> IO(Unit):
   match unsized:
     case True{}:
-      fast.ic(ic, act, o, file, f)
+      fast.ic(~rt, ic, act, o, file, f)
     case False{}:
-      sized.checked(act, ic, o, file, f)
+      sized.checked(~rt, act, ic, o, file, f)
 
 def out.bad(act: Act, o: Out) -> Maybe<&2, String>:
   match act:
@@ -955,29 +959,35 @@ def out.bad(act: Act, o: Out) -> Maybe<&2, String>:
         case _:
           Some{"telomare: -o names the file --compile writes; give it with --compile\n" ++ usage()}
 
-def command.out(bad: Maybe<&2, String>, act: Act, ic: Bool, fast: Bool, f: Fuel, o: Out, file: Maybe<&2, String>) -> IO(Unit):
+def command.out(~rt: Ss.Runner(), bad: Maybe<&2, String>, act: Act, ic: Bool, fast: Bool, f: Fuel, o: Out, file: Maybe<&2, String>) -> IO(Unit):
   match bad:
     case Some{msg}:
       IO.die(Unit, 2, msg)
     case None{}:
-      checked(act, ic, fast, f, o, file)
+      checked(~rt, act, ic, fast, f, o, file)
 
-def command(c: Cmd) -> IO(Unit):
+def command(~rt: Ss.Runner(), c: Cmd) -> IO(Unit):
   match c:
     case Cmd{+act, flag, ic, fast, fuel, +out, file}:
-      command.out(out.bad(act, out), act, ic, fast, fuel, out, file)
+      command.out(~rt, out.bad(act, out), act, ic, fast, fuel, out, file)
     case Bad{msg}:
       IO.die(Unit, 2, msg)
 
 # The command line, program name first (IO.args keeps argv[0]).
-def args(xs: List<String>) -> IO(Unit):
+def args(~rt: Ss.Runner(), xs: List<String>) -> IO(Unit):
   match xs:
     case self <> rest:
-      command(args.go(rest, Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}}))
+      command(~rt, args.go(rest, Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}}))
     case _:
-      command(Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}})
+      command(~rt, Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}})
 
-def main() -> IO(Unit):
+def app(~rt: Ss.Runner()) -> IO(Unit):
   do IO<Unit>:
     xs : List<String> <- IO.args()
-    args(xs)
+    args(~rt, xs)
+
+# The command, its IC run by IC.run itself. bend/Native.bend's main is the
+# same command with the IC's loop in C (bend/effs/ic.c), which gives the
+# same runs; the telomare binary is built from it.
+def main() -> IO(Unit):
+  app(~Ss.run.pure)

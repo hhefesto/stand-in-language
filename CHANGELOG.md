@@ -214,6 +214,13 @@
   guard and main for every input, so its main keeps its aborts (the game
   `1 4 2 5 3` takes 6,166,768 interactions) and the erasure checker no
   longer runs on it.
+* The `telomare` command runs the interaction net's loop in C
+  (`bend/effs/ic.c`, a Bend foreign effect, through `bend/Native.bend`): the
+  same net, rules and order as `bend/IC.bend`, which fires the few pairs the
+  C hands back and stays the definition (`bend/Main.bend`'s `main` runs it).
+  Displays and interaction counts are unchanged, and `bend/tests/native.bend`
+  checks that both loops leave the same net word for word. A compiled
+  tic-tac-toe game runs in 0.65 s instead of 1.54 s.
 
 ## 0.1.0.0 -- YYYY-mm-dd
 
