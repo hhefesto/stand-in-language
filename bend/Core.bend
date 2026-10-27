@@ -1,4 +1,5 @@
 import Base
+import ./Loc.bend as L
 
 # The runnable core (haskell-final's IR.Core CompiledExpr and IR.Base
 # BasicExpr): what sizing hands the runtime, and what the runtime hands
@@ -12,7 +13,11 @@ type D is Data:
   DZero{}
   DPair{+a: D, +b: D}
 
-# The eight machine forms, Abort, and an aborted value (a result only).
+# The eight machine forms and Abort. An abort is master's single node
+# (98de497c): evaluating VAbort{o, m} evaluates m and gives an aborted
+# value, the same node, which keeps only m's data. Under a defer it is code
+# that has not run; outside every defer, in an evaluated term, it has
+# fired. o says what raised it.
 type V is Data:
   VZero{}
   VPair{+a: V, +b: V}
@@ -22,8 +27,7 @@ type V is Data:
   VGate{}
   VLeft{+x: V}
   VRight{+x: V}
-  VAbort{}
-  VAborted{+m: D}
+  VAbort{+o: L.Origin, +m: V}
 
 def of.data(d: D) -> V:
   match d:
@@ -156,19 +160,29 @@ def step.w() -> U32:
 def refinement.tc() -> U32:
   neg(10)
 
+# A refinement check's gate and its passing branch (refinementCheckB).
+def refinement.gate.ind() -> U32:
+  neg(11)
+
+def refinement.pass.ind() -> U32:
+  neg(12)
+
+# The identity an abort applied to 0 gives, in sizing's and Sem's reading
+# of an abort as a function (haskell-final's): only ever a dropped value
+# there, never in a sized program, so it shares -11.
 def abort.ind() -> U32:
   neg(11)
 
-# From -12 down, the step of an unbounded recursion (--fast): -12 less its
+# From -13 down, the step of an unbounded recursion (--fast): -13 less its
 # site's token.
 def limit.ind(+tok: U32) -> U32:
-  neg((12 + tok : U32))
+  neg((13 + tok : U32))
 
 def is.limit(+fi: U32) -> Bool:
-  U32.is_ge(fi, 2147483648) && U32.is_le(fi, neg(12))
+  U32.is_ge(fi, 2147483648) && U32.is_le(fi, neg(13))
 
 def limit.tok(+fi: U32) -> U32:
-  (neg(fi) - 12 : U32)
+  (neg(fi) - 13 : U32)
 
 # Builders (IR.Builder)
 # ---------------------
@@ -243,14 +257,12 @@ def show(v: V) -> String:
       "Fix \"LeftSF (\"" ++ show(a) ++ "\")\""
     case VRight{a}:
       "Fix \"RightSF (\"" ++ show(a) ++ "\")\""
-    case VAbort{}:
-      "Fix \"AbortF\""
-    case VAborted{m}:
-      "Fix \"(AbortedF \"" ++ show.data(m) ++ "\")\""
+    case VAbort{o, m}:
+      "Fix (AbortF (" ++ L.origin.show(o) ++ ") (" ++ show(m) ++ "))"
 
 # Haskell's prettyPrint of a StuckExpr: one child continues the line, a
-# pair's second child goes on the next line under the first. Abort shows
-# as "!"; an aborted value is no StuckExpr, and shows as "?".
+# pair's second child goes on the next line under the first. An abort
+# shows as "!" and what raised it, then its message.
 def pretty.at(v: V, +col: Nat) -> String:
   match v:
     case VZero{}:
@@ -270,10 +282,9 @@ def pretty.at(v: V, +col: Nat) -> String:
       "L " ++ pretty.at(a, (col + 2n : Nat))
     case VRight{a}:
       "R " ++ pretty.at(a, (col + 2n : Nat))
-    case VAbort{}:
-      "!"
-    case VAborted{m}:
-      "?"
+    case VAbort{o, m}:
+      +h = "!" ++ L.origin.render(o) ++ " "
+      h ++ pretty.at(m, (col + String.length(h) : Nat))
 
 def pretty(v: V) -> String:
   pretty.at(v, 0n)

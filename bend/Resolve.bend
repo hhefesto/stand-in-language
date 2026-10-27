@@ -88,7 +88,7 @@ def has(s: Set(), +n: String) -> Bool:
 # -----------------------------
 
 def case.refs() -> Set():
-  Set.from_list(["and", "listEqual", "foldl", "abort"])
+  Set.from_list(["and", "listEqual", "foldl"])
 
 def fv(+fuel: Nat, n: FN) -> Set():
   match fuel:
@@ -106,7 +106,7 @@ def fv(+fuel: Nat, n: FN) -> Set():
               Set.del(fv(f, FT{body}), L.Name.text(v))
             case S.SPair{loc, a, b}:
               union(fv(f, FT{a}), fv(f, FT{b}))
-            case S.SCheck{loc, a, b}:
+            case S.SCheck{loc, k, a, b}:
               union(fv(f, FT{a}), fv(f, FT{b}))
             case S.SIte{loc, a, b, c}:
               union(fv(f, FT{a}), union(fv(f, FT{b}), fv(f, FT{c})))
@@ -302,8 +302,8 @@ def qualify(+fuel: Nat, +names: Set(), +q: String, +bound: Set(), n: QN) -> QV:
               VT{S.SLam{loc, v, vt(qualify(f, names, q, Set.add(bound, L.Name.text(v)), QT{body}))}}
             case S.SPair{loc, a, b}:
               VT{S.SPair{loc, vt(qualify(f, names, q, bound, QT{a})), vt(qualify(f, names, q, bound, QT{b}))}}
-            case S.SCheck{loc, a, b}:
-              VT{S.SCheck{loc, vt(qualify(f, names, q, bound, QT{a})), vt(qualify(f, names, q, bound, QT{b}))}}
+            case S.SCheck{loc, k, a, b}:
+              VT{S.SCheck{loc, k, vt(qualify(f, names, q, bound, QT{a})), vt(qualify(f, names, q, bound, QT{b}))}}
             case S.SIte{loc, a, b, c}:
               VT{S.SIte{loc, vt(qualify(f, names, q, bound, QT{a})), vt(qualify(f, names, q, bound, QT{b})),
                          vt(qualify(f, names, q, bound, QT{c}))}}

@@ -37,30 +37,26 @@ Player 2's turn
 please input number of square: 
 Player 2 wins!
 --- stderr
-interactions (measured): 33551402
-  era-leaf: 13457726
-  era-pair: 12927205
-  dup-leaf: 1992029
+interactions (measured): 33560000
+  era-leaf: 13459142
+  era-pair: 12927246
+  dup-leaf: 1993349
   dup-pair: 1797180
-  split-pair: 1495342
+  split-pair: 1498038
   dup-plan-copy: 882041
-  setenv-pair: 773818
-  apply-ref: 717979
+  setenv-pair: 775068
+  apply-ref: 720673
   dup-closure: 170667
   era-plan-drop: 144364
   split-zero: 68974
-  apply-gate: 50993
-  scrut-zero: 46347
+  apply-gate: 52313
+  scrut-zero: 47667
   era-closure: 39574
-  template-reused: 5796
+  template-reused: 5838
   scrut-pair: 4646
-  apply-erased: 2136
-  apply-abort: 2015
-  abort-zero: 1320
-  template-compiled: 1230
-  era-aborted: 1210
-  abort-pair: 695
-  apply-aborted: 695
+  era-aborted: 2530
+  apply-erased: 2082
+  template-compiled: 1320
   split-aborted: 515
   left-pair: 330
   right-pair: 6

@@ -1,5 +1,0 @@
-status 0
---- stdout
-runtime error: out of fuel after 20 interactions.
-This run is not sized, so nothing proved it terminates. Raise the cap with --fuel N, or lift it entirely with --fuel 0.
---- stderr

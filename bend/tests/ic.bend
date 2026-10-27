@@ -3,6 +3,7 @@ import ../Front.bend as Fr
 import ../Term.bend as T
 import ../Size.bend as Sz
 import ../Expr.bend as E
+import ../Loc.bend as Lc
 import ../Core.bend as Co
 import ../Lift.bend as Lf
 import ../EAL.bend as EAL
@@ -62,6 +63,10 @@ def num(n: Nat) -> Co.V:
     case 1n+k:
       p(z(), num(k))
 
+# An abort of message m, from nowhere in particular.
+def ab(m: Co.V) -> Co.V:
+  Co.VAbort{Lc.unknown.origin(), m}
+
 # Unapplied, a value; applied to itself, it never stops.
 def omega() -> Co.V:
   d(1, se(p(left(env()), env())))
@@ -73,9 +78,9 @@ def omega.applied() -> Co.V:
 # --------
 
 # What icEval gives: the value, the abort it carries, or the runtime error.
-def result.of(m: Maybe<&2, Co.D>, +x: Co.V) -> String:
+def result.of(m: Maybe<&2, Ss.Fired>, +x: Co.V) -> String:
   match m:
-    case Some{msg}:
+    case Some{Ss.Fired{o, msg}}:
       "abort " ++ Co.show.data(msg)
     case None{}:
       Co.show(x)
@@ -85,7 +90,7 @@ def result(r: IC.Run) -> String:
     case IC.Run{net, out, spent, unrolls}:
       match out:
         case IC.RBOk{+x}:
-          result.of(Ss.aborted(x), x)
+          result.of(Ss.fired(x), x)
         case IC.RBErr{f}:
           "error " ++ IC.fault.show(f)
 
@@ -125,7 +130,7 @@ def guard.sized(guided: Bool, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks}:
+        case Sz.Sized{counts, +expr, checks, pl}:
           Some{prepared(guided, expr)}
 
 def guard.of(guided: Bool, m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
@@ -133,7 +138,7 @@ def guard.of(guided: Bool, m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
     case None{}:
       None{}
     case Some{t}:
-      guard.sized(guided, Sz.size(65536, True{}, E.of.term3(t)))
+      guard.sized(guided, Sz.size(65536, True{}, t))
 
 def sized(guided: Bool, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -141,8 +146,8 @@ def sized(guided: Bool, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
-          Ss.replay(Ss.Prog{prepared(guided, expr), g}, Ss.Sized{}, lines)
+        case Sz.Sized{counts, expr, checks, pl}:
+          Ss.replay(Ss.Prog{prepared(guided, expr), g, Some{pl}}, Ss.Sized{}, lines)
 
 def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -151,7 +156,7 @@ def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&
     case Done{p}:
       match p:
         case Fr.Program{run, +g, +boundary}:
-          sized(guided, guard.of(guided, g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
+          sized(guided, guard.of(guided, g), Sz.size.guarded(65536, boundary, g, run), lines)
 
 # A session as the command runs it: main's input refinements run first, by
 # the guard, and both are guided by EAL.
@@ -246,11 +251,11 @@ def all.agree(srcs: List<&2, IC.Src>) -> Bool:
 def collected.agree(r: IC.Code & IC.Coll) -> Bool:
   (entry, c) = r
   match c:
-    case IC.Coll{next, srcs, seen, hs}:
+    case IC.Coll{next, srcs, seen, hs, org}:
       agrees(entry) && all.agree(srcs)
 
 def wired(expr: Co.V) -> Bool:
-  collected.agree(IC.collect(Co.app(expr, Co.VEnv{}))(IC.Coll{3, IC.selectors(), Map.new(&2, U32), None{}}))
+  collected.agree(IC.collect(Co.app(expr, Co.VEnv{}))(IC.Coll{3, IC.selectors(), Map.new(&2, U32), None{}, IC.org.none()}))
 
 def usage.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
   match r:
@@ -258,7 +263,7 @@ def usage.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
       False{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           wired(expr)
 
 def usage.term(r: Result<&2, &2, String, T.C>) -> Bool:
@@ -266,7 +271,7 @@ def usage.term(r: Result<&2, &2, String, T.C>) -> Bool:
     case Fail{e}:
       False{}
     case Done{run}:
-      usage.sized(Sz.size(65536, True{}, E.of.term3(run)))
+      usage.sized(Sz.size(65536, True{}, run))
 
 def usage.agrees(srcs: List<&2, Fr.Src>, +entry: String) -> Bool:
   usage.term(Fr.compile(srcs, entry))
@@ -358,8 +363,9 @@ def with.prelude(+prelude: String, +name: String, text: String) -> List<&2, Fr.S
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, text}]
 
 # A refinement of main's input whose value main never uses: the session
-# runs it on every line, before main, so an empty line ends the session
-# with its abort; the opening call, on 0, is not checked.
+# runs it on every line, before main, and an empty line fails it; master's
+# program answers that line, and never looks at the value, so the session
+# goes on as master's does.
 def unused.refinement() -> String:
   unlines(["import Prelude",
            "main = \\input -> let x : (\\v -> if v then 0 else (1, \"empty\")) = left input",
@@ -407,11 +413,14 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       gives(Co.gate.switch(d(105, env()), z(), p(z(), z())), z()),
       gives(Co.gate.switch(z(), p(z(), z()), se(p(d(113, env()), p(z(), z())))), p(z(), z()))])))
     IO.print(verdict("ic-abort", all([
-      gives(se(p(Co.VAbort{}, z())), d(Co.abort.ind(), env())),
-      gives(se(p(se(p(Co.VAbort{}, z())), p(z(), z()))), p(z(), z())),
-      aborts(se(p(Co.VAbort{}, p(z(), z()))), p(z(), z())),
-      aborts(left(se(p(Co.VAbort{}, p(z(), z())))), p(z(), z())),
-      gives(Co.gate.switch(z(), left(se(p(Co.VAbort{}, p(z(), z())))), z()), z())])))
+      aborts(ab(z()), z()),
+      aborts(ab(p(z(), z())), p(z(), z())),
+      aborts(ab(ab(p(z(), z()))), p(z(), z())),
+      aborts(left(ab(p(z(), z()))), p(z(), z())),
+      aborts(se(p(ab(z()), z())), z()),
+      aborts(p(z(), ab(p(z(), z()))), p(z(), z())),
+      gives(d(120, ab(z())), d(120, ab(z()))),
+      gives(Co.gate.switch(z(), left(ab(p(z(), z()))), z()), z())])))
     IO.print(verdict("ic-church", all([
       gives(Co.app(Co.app(church.two(), succ.c()), z()), num(2n)),
       gives(Co.app(Co.app(church.two(), Co.app(church.two(), succ.c())), z()), num(4n)),
@@ -433,7 +442,7 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, case.all(), "Hi, sam!"),
       shows(prelude, case.reachable(), "True"),
       shows(prelude, case.ignore(), "True"),
-      shows(prelude, case.nonexhaustive(), "runtime error:\nAborted, user abort: Non-exhaustive patterns in case"),
+      shows(prelude, case.nonexhaustive(), "runtime error:\nAborted, user abort: Non-exhaustive patterns in case (from pattern match at M:3:11)"),
       shows(prelude, pattern.lambda(), "pat")])))
     IO.print(verdict("ic-udt", all([
       shows(prelude, rational(), "ok"),
@@ -441,23 +450,23 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, arithmetic(), "11111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 1173),
-      costs(prelude, pattern.lambda(), 2716),
-      costs(prelude, rational(), 93471),
+      costs(prelude, case.nonexhaustive(), 13445),
+      costs(prelude, pattern.lambda(), 2702),
+      costs(prelude, rational(), 85217),
       U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 632)])))
     IO.print(verdict("ic-guard", all([
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", [""])),
-        "runtime error:\nAborted, user abort: empty|start|"),
+        "got a line|start|"),
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", ["a"])), "got a line|start|")])))
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
       146)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      44175)))
+      44344)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      6166768)))
+      6180262)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

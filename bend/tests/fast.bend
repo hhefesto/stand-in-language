@@ -3,6 +3,7 @@ import ../Front.bend as Fr
 import ../Term.bend as T
 import ../Size.bend as Sz
 import ../Expr.bend as E
+import ../Loc.bend as Lc
 import ../Core.bend as Co
 import ../Lift.bend as Lf
 import ../IC.bend as IC
@@ -58,7 +59,7 @@ def fast.of(r: Result<&2, &2, String, Co.V>, g: Maybe<&2, IC.Prog>, +h: Ss.How, 
     case Fail{form}:
       Ss.Replay{["left " ++ form], Ss.cost.none()}
     case Done{v}:
-      Ss.replay(Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), g}, h, lines)
+      Ss.replay(Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), g, None{}}, h, lines)
 
 def fast.compiled(r: Result<&2, &2, String, Fr.Program>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -80,7 +81,7 @@ def sized.expr(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Co.V>:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           Some{expr}
 
 def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
@@ -88,7 +89,7 @@ def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
     case None{}:
       None{}
     case Some{t}:
-      sized.expr(Sz.size(65536, True{}, E.of.term3(t)))
+      sized.expr(Sz.size(65536, True{}, t))
 
 def sized.of(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -96,8 +97,8 @@ def sized.of(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks}:
-          Ss.replay(Ss.session(expr, g), Ss.Sized{}, lines)
+        case Sz.Sized{counts, +expr, checks, +pl}:
+          Ss.replay(Ss.session(expr, g, pl), Ss.Sized{}, lines)
 
 def sized.compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -106,7 +107,7 @@ def sized.compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String
     case Done{p}:
       match p:
         case Fr.Program{run, +g, +boundary}:
-          sized.of(guard.expr(g), Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
+          sized.of(guard.expr(g), Sz.size.guarded(65536, boundary, g, run), lines)
 
 # The same session sized, as the command runs it.
 def sized(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
@@ -177,7 +178,7 @@ def closure(+fi: U32, code: E.X) -> E.X:
 def base.case() -> Result<&2, &2, String, Co.V>:
   +step = E.limit.code(0)
   +trb = {E.XPair{closure(30, E.XZero{}), E.XPair{E.XZero{}, E.XPair{closure(31, E.XLeft{E.XEnv{}}), E.XZero{}}}} : E.X}
-  E.core(E.app(E.XPair{step, E.XPair{step, trb}}, E.XPair{E.XZero{}, E.XZero{}}))
+  E.core(Map.new(&2, Lc.Origin), E.app(E.XPair{step, E.XPair{step, trb}}, E.XPair{E.XZero{}, E.XZero{}}))
 
 def base.run(r: IC.Run) -> Bool:
   match r:
@@ -213,7 +214,7 @@ def unsized.fails(r: Result<&2, &2, String, T.C>) -> Bool:
     case Fail{e}:
       False{}
     case Done{run}:
-      size.fails(Sz.size(65536, True{}, E.of.term3(run)))
+      size.fails(Sz.size(65536, True{}, run))
 
 def report(+prelude: String, +tc: String, +plus: String, +ttt: String, +unb: String) -> IO(Unit):
   do IO<Unit>:

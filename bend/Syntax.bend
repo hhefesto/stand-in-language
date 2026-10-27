@@ -50,7 +50,7 @@ type Surf<-P: Data, -C: Data, -N: Data> is Data:
   SLamPat{+loc: L.Loc, +pats: List<&2, LPat<P, C, N>>, +body: Surf<P, C, N>, +sugar: P}
   SZero{+loc: L.Loc}
   SPair{+loc: L.Loc, +a: Surf<P, C, N>, +b: Surf<P, C, N>}
-  SCheck{+loc: L.Loc, +tc: Surf<P, C, N>, +c: Surf<P, C, N>}
+  SCheck{+loc: L.Loc, +kind: L.AbortKind, +tc: Surf<P, C, N>, +c: Surf<P, C, N>}
   SIte{+loc: L.Loc, +i: Surf<P, C, N>, +t: Surf<P, C, N>, +e: Surf<P, C, N>}
   SLeft{+loc: L.Loc, +x: Surf<P, C, N>}
   SRight{+loc: L.Loc, +x: Surf<P, C, N>}
@@ -143,7 +143,7 @@ def loc(-P: Data, -C: Data, -N: Data, t: Surf<P, C, N>) -> L.Loc:
       loc
     case SPair{loc, a, b}:
       loc
-    case SCheck{loc, tc, c}:
+    case SCheck{loc, k, tc, c}:
       loc
     case SIte{loc, i, t, e}:
       loc
@@ -171,3 +171,10 @@ def loc(-P: Data, -C: Data, -N: Data, t: Surf<P, C, N>) -> L.Loc:
       loc
     case SLamN{loc, n, v, body, w}:
       loc
+
+# An abort with message msg (abortTerm): a check that always fails, its
+# answer (1, msg). Generated code and the `abort` builtin build it in place
+# rather than call a shared function, so each abort carries its own kind
+# and location.
+def abort.term(-P: Data, -C: Data, -N: Data, +kind: L.AbortKind, +loc: L.Loc, msg: Surf<P, C, N>) -> Surf<P, C, N>:
+  SCheck{loc, kind, SLam{loc, L.Name{loc, "__abort_checked"}, SPair{loc, SInt{loc, 1}, msg}}, SInt{loc, 1}}

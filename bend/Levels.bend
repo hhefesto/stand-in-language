@@ -258,7 +258,7 @@ def kids(t: S.Expanded()) -> List<&2, S.Expanded()>:
   match t:
     case S.SPair{loc, a, b}:
       [a, b]
-    case S.SCheck{loc, a, b}:
+    case S.SCheck{loc, k, a, b}:
       [a, b]
     case S.SIte{loc, i, a, b}:
       [i, a, b]

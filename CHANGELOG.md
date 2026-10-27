@@ -212,8 +212,34 @@
   the working directory. The goldens are master's output. With master's
   `Bool` refinements in the Prelude, sizing no longer proves tic-tac-toe's
   guard and main for every input, so its main keeps its aborts (the game
-  `1 4 2 5 3` takes 6,166,768 interactions) and the erasure checker no
+  `1 4 2 5 3` takes 6,180,262 interactions since `98de497c`) and the erasure checker no
   longer runs on it.
+* The Bend `telomare` follows master to `98de497c`: an abort carries where it
+  came from (master's `AbortOrigin`), so a run-time abort says what raised
+  it (`Aborted, user abort: invalid input (from refinement check at
+  simpleplus:14:31)`); `abort` and `trace` are builtins again (`trace` the
+  identity, as master resolves it), `abort` a check that always fails at
+  its call; the case and lambda-pattern aborts and the UDT validators' are
+  checks of their own kind; and the core's abort is master's single node,
+  which evaluates its message and is the aborted value
+  (`refinementCheckB`'s new shape, the chain bottom `AbortB` on its
+  message). Sizing gives master's new bounds (natudt's Prelude:81:42 is
+  133). The artifact stores each abort's origin, so the port's versions are
+  now 6 and 7, and earlier ones are refused.
+* The Bend `telomare` has master's runtimes and command line again: a plain
+  run and `--meter` use the reference evaluator (`bend/Reference.bend`,
+  master's Eval.Reference as Eval.Meter counts it: steps and nodes built),
+  on master's program, every check and chain bottom in it, which sizing now
+  also hands on (`Sized.plain`) and `.telc` stores; `--fast` is master's
+  Fast interpreter (`bend/Fast.bend`: checks kept, recursion unrolled on
+  demand, fuel and meter in applications and unrollings, gate selections
+  counted); `--ic` runs the net. Each prints what master prints, counts
+  included, so the goldens' plain, `--meter` and `--fast` cases need no
+  port record. `--certificate` is master's static report; `--ic
+  --certificate` adds the port's section on what the IC run checks and
+  erases. A line main's session guard refuses is answered by master's
+  program, so a refinement whose value main never uses no longer ends the
+  session.
 * The `telomare` command runs the interaction net's loop in C
   (`bend/effs/ic.c`, a Bend foreign effect, through `bend/Native.bend`): the
   same net, rules and order as `bend/IC.bend`, which fires the few pairs the

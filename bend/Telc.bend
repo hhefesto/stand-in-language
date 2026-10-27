@@ -11,17 +11,21 @@ import ./Certificate.bend as Ct
 
 # Compiled programs (haskell-final's Telomare.Artifact): a sized program
 # with what a run and `--certificate` need, so neither needs the sources
-# again. The bytes are haskell-final's version 4: "TELC", the version, the
+# again. The bytes are haskell-final's version 4 layout, with master's
+# abort node (98de497c: tag 8, its origin, its message), so the port
+# numbers its own versions, 6 and 7: "TELC", the version, the
 # entry module, the sources' hash, the static report as rendered, the
 # sizing report (each site's count and location, and the budget), the
 # sized program, haskell-final's IC certificate (the port writes none, and
-# skips one it reads), and the capture layouts the program runs under.
+# skips one it reads), the capture layouts the program runs under, and
+# master's program (every check and chain bottom in it), which a plain run
+# evaluates.
 # Integers are int64 little-endian; a string is its UTF-8 length, then its
 # UTF-8; a Maybe is byte 0, or 1 and the value; a map is its length, then
 # its entries in ascending key order. A program whose session is guarded
-# (Front's guard) is a port extension, version 5: version 4's bytes, then
-# the guard's program and layouts as main's are written. haskell-final
-# refuses it by its version, rather than run main unguarded.
+# (Front's guard) is a port extension, version 7: version 6's bytes, then
+# the guard's program and layouts as main's are written. A Haskell
+# telomare refuses both by their version.
 
 # A site's count (None: not sized) and a site's location, by token.
 type Count is Data:
@@ -40,14 +44,14 @@ type Guard is Data:
 
 type Telc is Data:
   Telc{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
-       +budget: U32, +expr: Co.V, +layouts: List<&2, Layout>, +guard: Maybe<&2, Guard>}
+       +budget: U32, +expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +guard: Maybe<&2, Guard>}
 
-# haskell-final's version, and the port's for a guarded session.
+# The port's version, and its version for a guarded session.
 def version() -> U32:
-  4
+  6
 
 def version.guarded() -> U32:
-  5
+  7
 
 # The sources' hash (sourcesHash): SHA-256 of every module's name and text
 # with their lengths, the modules sorted by name, in lowercase hex.
@@ -83,6 +87,8 @@ def nodes(v: Co.V) -> U32:
       (1 + nodes(x) : U32)
     case Co.VRight{x}:
       (1 + nodes(x) : U32)
+    case Co.VAbort{o, m}:
+      (1 + nodes(m) : U32)
     case _:
       1
 
@@ -139,8 +145,8 @@ def layouts.of(m: Map<&2, Lf.Shape>) -> List<&2, Layout>:
 # A sized program as an artifact: its entry, the sources' hash, the static
 # report as rendered, each site's count and location, the budget, the
 # program and its capture layouts.
-def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, ls: Map<&2, Lf.Shape>, guard: Maybe<&2, Guard>) -> Telc:
-  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, expr, layouts.of(ls), guard}
+def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, ls: Map<&2, Lf.Shape>, plain: Co.V, guard: Maybe<&2, Guard>) -> Telc:
+  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, expr, layouts.of(ls), plain, guard}
 
 # A guard's sized program and its layouts, as stored.
 def guard.of(expr: Co.V, ls: Map<&2, Lf.Shape>) -> Guard:
@@ -201,6 +207,11 @@ def put.loc(l: L.Loc, rest: List<&2, U32>) -> List<&2, U32>:
     case L.Unknown{}:
       5 <> rest
 
+def put.origin(o: L.Origin, rest: List<&2, U32>) -> List<&2, U32>:
+  match o:
+    case L.Origin{k, l}:
+      L.kind.tag(k) <> put.loc(l, rest)
+
 def put.basic(d: Co.D, rest: List<&2, U32>) -> List<&2, U32>:
   match d:
     case Co.DZero{}:
@@ -226,10 +237,8 @@ def put.expr(v: Co.V, rest: List<&2, U32>) -> List<&2, U32>:
       6 <> put.expr(x, rest)
     case Co.VRight{x}:
       7 <> put.expr(x, rest)
-    case Co.VAbort{}:
-      8 <> rest
-    case Co.VAborted{m}:
-      9 <> put.basic(m, rest)
+    case Co.VAbort{o, m}:
+      8 <> put.origin(o, put.expr(m, rest))
 
 def put.shape(s: Lf.Shape, rest: List<&2, U32>) -> List<&2, U32>:
   match s:
@@ -302,10 +311,10 @@ def version.of(g: Maybe<&2, Guard>) -> U32:
 
 def encode(t: Telc) -> List<&2, U32>:
   match t:
-    case Telc{entry, hash, cert, counts, places, budget, expr, layouts, +guard}:
+    case Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, +guard}:
       84 <> 69 <> 76 <> 67 <> put.int(version.of(guard),
         put.string(entry, put.string(hash, put.string(cert,
-          put.report(counts, places, budget, put.program(expr, layouts, put.guard(guard)))))))
+          put.report(counts, places, budget, put.program(expr, layouts, put.expr(plain, put.guard(guard))))))))
 
 # Reading
 # -------
@@ -469,6 +478,20 @@ def basic(+fuel: Nat) -> G(Co.D):
 def defer(+fi: U32, x: G(Co.V)) -> G(Co.V):
   G.bind(Co.V, Co.V, x, b => G.pure(Co.V, Co.VDefer{fi, b}))
 
+def origin.kind(m: Maybe<&2, L.AbortKind>, +t: U32) -> G(L.AbortKind):
+  match m:
+    case Some{k}:
+      G.pure(L.AbortKind, k)
+    case None{}:
+      G.fail(L.AbortKind, "unknown abort kind " ++ U32.show(t))
+
+def origin(+fuel: Nat) -> G(L.Origin):
+  do G<L.Origin>:
+    +t : U32 <- byte()
+    k : L.AbortKind <- origin.kind(L.kind.of.tag(t), t)
+    l : L.Loc <- loc(fuel)
+    return L.Origin{k, l}
+
 def expr.node(+t: U32, a: G(Co.V), b: G(Co.V), +fuel: Nat) -> G(Co.V):
   match t:
     case 0:
@@ -491,9 +514,10 @@ def expr.node(+t: U32, a: G(Co.V), b: G(Co.V), +fuel: Nat) -> G(Co.V):
     case 7:
       G.bind(Co.V, Co.V, a, x => G.pure(Co.V, Co.VRight{x}))
     case 8:
-      G.pure(Co.V, Co.VAbort{})
-    case 9:
-      G.bind(Co.D, Co.V, basic(fuel), m => G.pure(Co.V, Co.VAborted{m}))
+      do G<Co.V>:
+        o : L.Origin <- origin(fuel)
+        m : Co.V <- a
+        return Co.VAbort{o, m}
     case _:
       G.fail(Co.V, "unknown compiled node tag " ++ U32.show(t))
 
@@ -659,8 +683,9 @@ def fields(+entry: String, +v: U32) -> G(Telc):
     c : Unit <- ic.cert(m)
     nl : U32 <- int()
     ls : List<&2, Layout> <- layouts(U32.to_nat(nl))
+    p : Co.V <- expr(fuel())
     g : Maybe<&2, Guard> <- guard.read(U32.is_eq(v, version.guarded()))
-    return Telc{entry, hash, cert, cs, ps, budget, x, ls, g}
+    return Telc{entry, hash, cert, cs, ps, budget, x, ls, p, g}
 
 # What a file holds: an artifact, or why it is none (the magic or the
 # version, said as is; anything else is unreadable).

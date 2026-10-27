@@ -25,7 +25,7 @@ type F is Data:
   FApp{+loc: L.Loc, +f: F, +x: F}
   FOpen{+loc: L.Loc, +outer: List<&2, Nat>, +body: F}
   FClosed{+loc: L.Loc, +body: F}
-  FCheck{+loc: L.Loc, +tc: F, +c: F}
+  FCheck{+loc: L.Loc, +kind: L.AbortKind, +tc: F, +c: F}
   FIte{+loc: L.Loc, +i: F, +t: F, +e: F}
   FLeft{+loc: L.Loc, +x: F}
   FRight{+loc: L.Loc, +x: F}
@@ -110,8 +110,8 @@ def mk.pair(a: L.Loc, x: F, y: F) -> F:
 def mk.app(a: L.Loc, x: F, y: F) -> F:
   FApp{a, x, y}
 
-def mk.check(a: L.Loc, x: F, y: F) -> F:
-  FCheck{a, x, y}
+def fr.check(+a: L.Loc, +k: L.AbortKind, +x: FR, +y: FR) -> FR:
+  FR{FCheck{a, k, fr.t(x), fr.t(y)}, union(fr.frees(x), fr.frees(y))}
 
 def mk.ite(a: L.Loc, x: F, y: F, z: F) -> F:
   FIte{a, x, y, z}
@@ -149,8 +149,8 @@ def frees(+fuel: Nat, t: T.Term2()) -> FR:
               FR{FClosed{a, fr.t(frees(f, body))}, []}
             case _:
               open.fr(a, frees(f, body))
-        case T.TCheck{a, x, y}:
-          fr2(~mk.check, a, frees(f, x), frees(f, y))
+        case T.TCheck{+a, +k, x, y}:
+          fr.check(a, k, frees(f, x), frees(f, y))
         case T.TIte{a, x, y, z}:
           fr3(~mk.ite, a, frees(f, x), frees(f, y), frees(f, z))
         case T.TLeft{a, x}:
@@ -336,12 +336,12 @@ def build(+fuel: Nat, +ren: Ren, t: F) -> B(T.C):
             b2 : T.C <- build(f, RId{}, body)
             fi : U32 <- next.fi()
             return T.CPair{a, T.CDefer{gs(), fi, b2}, T.CZero{gb()}}
-        case FCheck{+a, x, y}:
+        case FCheck{+a, +k, x, y}:
           do B<T.C>:
             site : U32 <- next.chk()
             x2 : T.C <- build(f, ren, x)
             y2 : T.C <- build(f, ren, y)
-            return T.CCheck{a, a, site, x2, y2}
+            return T.CCheck{a, L.Origin{k, a}, site, x2, y2}
         case FIte{a, x, y, z}:
           do B<T.C>:
             x2 : T.C <- build(f, ren, x)

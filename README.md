@@ -19,35 +19,35 @@ This project is in active development. Do expect bugs and general trouble, and p
 
 Telomare is being rewritten in [Bend 2](https://github.com/bendlang/bend). The
 Haskell implementation was removed after the tag `haskell-final`, the last
-commit that has it. The port keeps one runtime, the interaction-net runtime
-(`--ic`), and runs `--fast` on it too. haskell-final's other runtimes are
-not coming back: the reference evaluator behind the plain run, the REPL and
-the LSP; the metered evaluator behind `--meter` without `--ic`; and the
-Fast interpreter.
+commit that has it. The port has master's three runtimes: the reference
+evaluator behind a plain run and its `--meter` (`bend/Reference.bend`),
+the unsized Fast interpreter behind `--fast` (`bend/Fast.bend`), and the
+interaction-net runtime behind `--ic` (`bend/IC.bend`, its loop in C).
+Not yet ported: the REPL, the LSP, and master's EAL rework.
 
-The Bend `telomare` command is the flake's default app. It runs a program on
-the IC runtime, as haskell-final's `telomare FILE.tel --ic` did (`--ic` is
-accepted and changes nothing):
+The Bend `telomare` command is the flake's default app. It takes master's
+command line:
 
 ```sh
-$ nix run . -- tictactoe.tel
+$ nix run . -- tictactoe.tel                 # the reference evaluator
+$ nix run . -- tictactoe.tel --ic            # the interaction net
 $ nix run . -- tictactoe.tel --certificate   # what is known without running it
 $ nix run . -- tictactoe.tel --meter         # run it, then what the run cost
 $ nix run . -- tictactoe.tel --fast          # run it unsized
 ```
 
-As in haskell-final, the program must pass EAL certification before it is
-sized (a program that does not certify is refused with the reason, exit 1),
-and the EAL capture layouts of the sized program guide the runtime's closure
-copying. Both reports of [Resource reporting](#resource-reporting) are
-ported: the static report (`--certificate`) as haskell-final prints it, and
-`--meter` with the interaction count only (see that section). haskell-final's
-other actions are not ported: `--ic --certificate` (the IC space
-certificate) and `--draw-net`.
-The sections that describe them say so.
+As on master, the program must pass EAL certification before it is sized
+(a program that does not certify is refused with the reason, exit 1). A
+plain run, `--meter` and `--fast` print exactly what master prints, steps
+and nodes built and unroll tables included. `--ic` runs the port's own
+program, where sizing's proven erasures are made and main's input
+refinements run at the session boundary (a line they refuse is answered
+by master's program, so the displays stay master's); its `--meter` counts
+interactions, and `--ic --certificate` adds what the IC run checks and
+erases to the static report. The sections that describe them say so.
 
 The port follows master's behaviour: master is merged in (last on
-2026-10-27, at `9e7a58d1`), and its changes to the language and the
+2026-10-27, at `98de497c`), and its changes to the language and the
 compiler are ported to Bend. `test/golden/` records exactly what master's
 Haskell `telomare` printed for each example program and mode (haskell-final's
 until that merge), and `nix flake check` runs the command on every case it
@@ -223,10 +223,10 @@ in these places:
   proven](#what-is-proven)). Where the checker cannot decide, because it
   finds an input that reaches one or because it spends its budget first,
   every bottom and check stays a run-time abort, and `--certificate` says
-  so. simpleplus is proven: `3 4` takes 44,175 interactions (782,347 before
+  so. simpleplus is proven: `3 4` takes 44,344 interactions (782,347 before
   the erasures, with the Prelude of then), nearly all of the difference
   being the check no longer run inside main. tic-tac-toe is not, and its
-  main keeps its aborts (the game `1 4 2 5 3` takes 6,166,768
+  main keeps its aborts (the game `1 4 2 5 3` takes 6,180,262
   interactions): since the Prelude refined `not`'s argument to `Bool`, that
   check validates the input inside tic-tac-toe's guard, as sizing reads it,
   so the guard and main are not proven for every input. Master reads a
@@ -246,9 +246,8 @@ in these places:
 
 Of DESIGN.md's open questions (§11), three are resolved: the certified
 term is the executed one (§11.4), the IC runs only an `if`'s chosen branch
-(§11.3; both above), and `trace` (§11.7) is removed, since it had no
-runtime meaning and restoring it would need a side channel through the IC
-(C1/C4). Abort (§10, §11.6) is erased where sizing and the erasure checker
+(§11.3; both above), and `trace` (§11.7) is master's: a builtin that is
+the identity once resolved. Abort (§10, §11.6) is erased where sizing and the erasure checker
 prove it dead. main's
 input refinements run at the session boundary (§11.10), in a guard that
 keeps them as checks. Abort stays a core form there, in the guard, in the
@@ -367,7 +366,7 @@ refinement checks: 3 discharged statically, 1 left to run time:
   Prelude:17:19     discharged
   Prelude:21:8      discharged
   simpleplus:14:31  at the session boundary
-erasures in main: proven, by the erasure checker in 222334169 evaluation steps
+erasures in main: proven, by the erasure checker in 223976086 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
 erasures in the guard: none; every recursion bottom and check stays a run-time abort
   sizing did not prove the guard for every input
@@ -417,7 +416,7 @@ That is a measurement of one run, not a prediction about the next:
 $ printf '3 4\n' | telomare test/programs/simpleplus.tel --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 44175
+IC interactions: 44344
 ```
 
 The count is the port's own: its net runs only the branch an `if` chooses,
@@ -469,7 +468,7 @@ will even run programs the sizing pass rejects:
 $ printf '3 4\n' | telomare test/programs/simpleplus.tel --fast --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 739027
+IC interactions: 744959
 recursion unrolls (measured):     55 across 4 sites
 
   site   source            function          unrolls

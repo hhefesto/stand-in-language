@@ -54,6 +54,10 @@ let
     "*.ic-abort"
     "*.ic-carry"
     "*.ic-meter"
+    "*.ic-certificate"
+    "*.ic-compile"
+    "*.telc-ic"
+    "*.telc-ic-certificate"
     "*.certificate"
     "*.test-game"
     "*.test-game-ic"
@@ -62,6 +66,7 @@ let
     "*.compile"
     "*.telc-run"
     "*.telc-certificate"
+    "repl.*"
   ];
 
   # Each test under bend/tests prints one `ok NAME` line per group it checks
@@ -179,10 +184,12 @@ let
     '';
 
   # The `telomare` command, compiled to a native binary: bend/Native.bend,
-  # which is bend/Main.bend's command with the IC's loop in C.
+  # which is bend/Main.bend's command with the IC's loop in C; and the REPL,
+  # `telomare-repl` (bend/Repl.bend).
   telomare = bendCommand "telomare" bendSrc ''
     mkdir -p $out/bin
     bend bend/Native.bend -o $out/bin/telomare
+    bend bend/Repl.bend -o $out/bin/telomare-repl
   '';
 
   # BendTT's kernel, the Lean program `bend --verdict` re-checks proofs with

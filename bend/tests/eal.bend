@@ -213,7 +213,7 @@ def after(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           main.outcome(Lf.of.expr(expr))
 
 # Its verdicts before and after sizing (compileUnitTest: no cap).
@@ -222,7 +222,7 @@ def sized(r: Result<&2, &2, String, T.C>) -> String:
     case Fail{e}:
       "error " ++ e
     case Done{+t}:
-      main.outcome(t) ++ "/" ++ after(Sz.size(65536, False{}, E.of.term3(t)))
+      main.outcome(t) ++ "/" ++ after(Sz.size(65536, False{}, t))
 
 def gated.after(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
   match r:
@@ -230,7 +230,7 @@ def gated.after(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
       False{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           +bs = bodies(Lf.defer.lift(Lf.of.expr(expr)))
           U32.is_eq(certified(bs), U32.from_nat(Map.size(&2, Lf.Body, bs)))
 
@@ -240,7 +240,7 @@ def sized.all(r: Result<&2, &2, String, T.C>) -> Bool:
     case Fail{e}:
       False{}
     case Done{t}:
-      gated.after(Sz.size(65536, False{}, E.of.term3(t)))
+      gated.after(Sz.size(65536, False{}, t))
 
 def layouts.go(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Shape>>) -> String:
   match kvs:
@@ -261,7 +261,7 @@ def layouts.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           layouts.text(EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
 
 # The digest of a program's capture layouts, sized as the command sizes it.
@@ -270,7 +270,7 @@ def layouts.digest(r: Result<&2, &2, String, T.C>) -> String:
     case Fail{e}:
       "error " ++ e
     case Done{t}:
-      Sha.string(layouts.sized(Sz.size(65536, True{}, E.of.term3(t))))
+      Sha.string(layouts.sized(Sz.size(65536, True{}, t)))
 
 # The hash of a program's lifted main, which every body's hash, and so every
 # `#` constant, reaches.
@@ -342,7 +342,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       String.eq(uses(p(lft(env()), defer(90, p(env(), env())))), "[L] 1 UnknownLoc;"),
       String.eq(contraction(p(lft(env()), defer(90, p(env(), env())))), "none"),
       String.eq(uses(lft(p(env(), rgt(env())))), "[] 1 UnknownLoc;[R] 1 UnknownLoc;"),
-      String.eq(uses(lft(T.CCheck{l(), l(), 0, p(env(), env()), T.CEnv{Lc.Gen{"value occurrence"}}})),
+      String.eq(uses(lft(T.CCheck{l(), Lc.Origin{Lc.KRefine{}, l()}, 0, p(env(), env()), T.CEnv{Lc.Gen{"value occurrence"}}})),
         "[L] 1 GeneratedLoc \"value occurrence\" Nothing;"),
       String.eq(uses(p(rgt(T.CUnsized{Lc.Gen{"first hole"}, 1}), rgt(T.CEnv{Lc.Gen{"second env"}}))),
         "[R] 2 GeneratedLoc \"first hole\" Nothing;"),
@@ -377,13 +377,13 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
     IO.print(verdict("eal-lift-udt", String.eq(
       main.hash(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"rat",
         "import Prelude\nmain = \\input -> (if dEqual (left (right (rPlus (fromRational 1 2) (fromRational 1 2)))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
-      "1295fd7251d3b05bd48d617eb60e7ec6df91e1307dcd009532e9ff165cda4127")))
+      "439bec5fe5d4c22477ccbdab84430070c23ad8eb8e631241b9c71d074235d03a")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "627da040c4dc4096affc8f8f3db1077d99218f4a09dfca65b05dc35eb3842b97")))
     IO.print(verdict("eal-layouts-simpleplus", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus")),
-      "511f4156df47c0adfd2dde0abd301b4e620593d78d7459cac275def1da262b82")))
+      "df61eecc88845c32d7d83152abc0ab3f8e335f8fdddbfb2dae5629bb671218e8")))
 
 def main() -> IO(Unit):
   do IO<Unit>:

@@ -88,7 +88,7 @@ def loop(n: Nat, s: Step) -> IO(IC.Net):
                     r : Array<U32> & Array<U32> & U32 & U32 & U32 & U32 & U32 & U32 & U32 & U32 <- nt.reduce(mem, tpl, sp, bump, free, label, left, err, cap)
                     loop(f, step(IC.pop(back(cold, r))))
 
-def finish(+bodies: Map<&2, Co.V>, r: IC.CS & U32) -> IO(IC.Run):
+def finish(+bodies: IC.Read, r: IC.CS & U32) -> IO(IC.Run):
   (cs, +root) = r
   do IO<IC.Run>:
     net : IC.Net <- loop(U32.to_nat(4294967295), Firing{IC.cs.net(cs)})
@@ -97,8 +97,8 @@ def finish(+bodies: Map<&2, Co.V>, r: IC.CS & U32) -> IO(IC.Run):
 # IC.run, with the loop in C.
 def run(p: IC.Prog, net: IC.Net, input: Co.D, fuel: U32) -> IO(IC.Run):
   match p:
-    case IC.Prog{entry, +bodies, words, maxk}:
-      finish(bodies, IC.start(entry, input)(IC.CS{IC.reset(net, fuel), Map.new(&2, List<&2, U32>)}))
+    case IC.Prog{entry, +bodies, words, maxk, +os}:
+      finish(IC.Read{bodies, os}, IC.start(entry, input)(IC.CS{IC.reset(net, fuel), Map.new(&2, List<&2, U32>)}))
 
 def main() -> IO(Unit):
   M.app(~run)

@@ -56,13 +56,15 @@ def lam2(+name: String, body: S.Expanded()) -> S.Expanded():
 def builtin(+name: String, val: S.Expanded()) -> S.ExpandedBind():
   S.Bind{L.Name{L.Builtin{name}, name}, val}
 
-# let zero = 0; left = \x -> left x; ... in t (addBuiltins). Haskell's
-# `trace` is not a builtin here (HANDOFF P2).
+# let zero = 0; left = \x -> left x; ... in t (addBuiltins). `trace` is
+# the identity: master resolves its direct form to its argument.
 def add.builtins(t: S.Expanded()) -> S.Expanded():
   S.SLet{L.Gen{"addBuiltins"},
     [builtin("zero", S.SInt{L.Builtin{"zero"}, 0}),
      builtin("left", lam1("left", b.left(L.Builtin{"left"}))),
      builtin("right", lam1("right", b.right(L.Builtin{"right"}))),
+     builtin("trace", lam1("trace", S.SVar{L.Builtin{"trace"}, "x"})),
+     builtin("abort", lam1("abort", S.abort.term(Empty, Unit, Empty, L.KUser{}, L.Builtin{"abort"}, S.SVar{L.Builtin{"abort"}, "x"}))),
      builtin("pair", lam2("pair", S.SPair{L.Builtin{"pair"}, S.SVar{L.Builtin{"pair"}, "x"}, S.SVar{L.Builtin{"pair"}, "y"}})),
      builtin("app", lam2("app", S.SApp{L.Builtin{"app"}, S.SVar{L.Builtin{"app"}, "x"}, S.SVar{L.Builtin{"app"}, "y"}}))],
     t}
@@ -90,8 +92,7 @@ def aliases(+names: Set(), +loc: L.Loc) -> List<&2, S.ExpandedBind()>:
   alias.if(has(names, "and"), loc, "and", "__case_and",
     alias.if(has(names, "foldl"), loc, "foldl", "__case_foldl",
       alias.if(has(names, "dEqual"), loc, "dEqual", "__case_dEqual",
-        alias.if(has(names, "listEqual"), loc, "listEqual", "__case_listEqual",
-          alias.if(has(names, "abort"), loc, "abort", "__case_abort", [])))))
+        alias.if(has(names, "listEqual"), loc, "listEqual", "__case_listEqual", []))))
 
 # __case_and = and, ... for the helpers the program binds, ahead of its own
 # bindings (addCaseHelperAliases).
@@ -213,6 +214,10 @@ def unary(+name: String, +a: L.Loc, x: S.Expanded()) -> S.Expanded():
   match name:
     case "left":
       S.SLeft{a, x}
+    case "trace":
+      x
+    case "abort":
+      S.abort.term(Empty, Unit, Empty, L.KUser{}, a, x)
     case _:
       S.SRight{a, x}
 
@@ -228,6 +233,10 @@ def is.unary(name: String) -> Bool:
     case "left":
       True{}
     case "right":
+      True{}
+    case "trace":
+      True{}
+    case "abort":
       True{}
     case _:
       False{}
@@ -332,8 +341,8 @@ def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
               VT{S.SLam{anno, v, vt(go(f, Set.del(scope, L.Name.text(v)), OT{body}))}}
             case S.SPair{anno, a, b}:
               VT{S.SPair{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b}))}}
-            case S.SCheck{anno, a, b}:
-              VT{S.SCheck{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b}))}}
+            case S.SCheck{anno, k, a, b}:
+              VT{S.SCheck{anno, k, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b}))}}
             case S.SIte{anno, a, b, c}:
               VT{S.SIte{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b})), vt(go(f, scope, OT{c}))}}
             case S.SLeft{anno, x}:
@@ -399,7 +408,7 @@ def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
                   VArgs{Arg{a, vt(go(f, scope, OT{x}))} <> vargs(go(f, scope, OArgs{rest}))}
 
 def builtin.names() -> Set():
-  Set.from_list(["left", "right", "pair", "app"])
+  Set.from_list(["left", "right", "trace", "abort", "pair", "app"])
 
 def fuel() -> Nat:
   U32.to_nat(4294967295)
@@ -599,31 +608,32 @@ def darms(v: LV) -> List<&2, Arm>:
 
 # The alternatives as nested ifs over x, tried in order, the last else
 # aborting (caseToNestedIfs); anno is the scrutinee's location.
-def ifs(+anno: L.Loc, +x: S.Desugared(), alts: List<&2, Arm>) -> S.Desugared():
+def ifs(+cloc: L.Loc, +anno: L.Loc, +x: S.Desugared(), alts: List<&2, Arm>) -> S.Desugared():
   match alts:
     case Nil{}:
-      S.SIte{anno, S.SInt{anno, 1}, app(helper("__case_abort"), S.SStr{anno, "Non-exhaustive patterns in case"}), S.SInt{anno, 0}}
+      S.SIte{anno, S.SInt{anno, 1}, S.abort.term(Empty, Empty, Empty, L.KCase{}, cloc, S.SStr{cloc, "Non-exhaustive patterns in case"}), S.SInt{anno, 0}}
     case Con{alt, rest}:
       match alt:
         case Arm{p, +r}:
           +ns = nodes.of(p, "", [])
           alternative(S.loc(Empty, Empty, Empty, r), checks(S.loc(Empty, Empty, Empty, r), x, ns),
-                      binds(vars(ns, Set.new()), x, r), ifs(anno, x, rest))
+                      binds(vars(ns, Set.new()), x, r), ifs(cloc, anno, x, rest))
 
 # A scrutinee that is not a variable is bound once, to a name source code
 # cannot write, so the checks and bindings refer to it instead of copying
 # it.
-def case.bind(+anno: L.Loc, scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
+def case.bind(+cloc: L.Loc, +anno: L.Loc, scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
   +g = {L.GenIn{"case scrutinee", anno} : L.Loc}
-  +body = ifs(anno, S.SVar{g, "__case_scrutinee"}, arms)
+  +body = ifs(cloc, anno, S.SVar{g, "__case_scrutinee"}, arms)
   S.SApp{S.loc(Empty, Empty, Empty, body), S.SLam{S.loc(Empty, Empty, Empty, body), L.Name{g, "__case_scrutinee"}, body}, scrut}
 
-def case.ifs(+scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
+# cloc is the case's location, for its abort.
+def case.ifs(+cloc: L.Loc, +scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
   match scrut:
     case S.SVar{+a, +name}:
-      ifs(a, S.SVar{a, name}, arms)
+      ifs(cloc, a, S.SVar{a, name}, arms)
     case _:
-      case.bind(S.loc(Empty, Empty, Empty, scrut), scrut, arms)
+      case.bind(cloc, S.loc(Empty, Empty, Empty, scrut), scrut, arms)
 
 # Children first, every case lowered.
 def lower(+fuel: Nat, n: ON) -> LV:
@@ -640,8 +650,8 @@ def lower(+fuel: Nat, n: ON) -> LV:
               DT{S.SLam{a, v, dt(lower(f, OT{body}))}}
             case S.SPair{a, x, y}:
               DT{S.SPair{a, dt(lower(f, OT{x})), dt(lower(f, OT{y}))}}
-            case S.SCheck{a, x, y}:
-              DT{S.SCheck{a, dt(lower(f, OT{x})), dt(lower(f, OT{y}))}}
+            case S.SCheck{a, k, x, y}:
+              DT{S.SCheck{a, k, dt(lower(f, OT{x})), dt(lower(f, OT{y}))}}
             case S.SIte{a, x, y, z}:
               DT{S.SIte{a, dt(lower(f, OT{x})), dt(lower(f, OT{y})), dt(lower(f, OT{z}))}}
             case S.SLeft{a, x}:
@@ -656,8 +666,8 @@ def lower(+fuel: Nat, n: ON) -> LV:
               DT{S.SLet{a, dbs(lower(f, OBs{binds})), dt(lower(f, OT{body}))}}
             case S.SList{a, xs}:
               DT{S.SList{a, dts(lower(f, OTs{xs}))}}
-            case S.SCase{a, x, alts, w}:
-              DT{case.ifs(dt(lower(f, OT{x})), darms(lower(f, OAs{alts})))}
+            case S.SCase{+a, x, alts, w}:
+              DT{case.ifs(a, dt(lower(f, OT{x})), darms(lower(f, OAs{alts})))}
             case S.SVar{a, name}:
               DT{S.SVar{a, name}}
             case S.SZero{a}:

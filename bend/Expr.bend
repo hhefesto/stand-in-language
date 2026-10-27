@@ -1,6 +1,7 @@
 import Base
 import ./Term.bend as T
 import ./Core.bend as Co
+import ./Loc.bend as L
 
 # Sizing's expression (haskell-final's IR.Base and Size.IR): Term3 without
 # its locations, plus the abstract values sizing works with. Sizing ends by
@@ -15,14 +16,14 @@ import ./Core.bend as Co
 
 # Where an abort comes from: a refinement check, by its number; a recursion,
 # by token, run past its size (a sized chain's bottom, or sizing's own
-# aborts as it unrolls); or an Abort in the program as written (Split
-# builds none). Aborted values keep their site, so sizing can tell which
-# checks can reach the result.
+# aborts as it unrolls); or an abort of the runnable core read back as X,
+# with what raised it (Split builds none). Aborted values keep their site,
+# so sizing can tell which checks can reach the result.
 
 type Site is Data:
   AtCheck{+n: U32}
   AtRecursion{+tok: U32}
-  AtAbort{}
+  AtAbort{+o: L.Origin}
 
 def site.eq(a: Site, b: Site) -> Bool:
   match a:
@@ -38,9 +39,9 @@ def site.eq(a: Site, b: Site) -> Bool:
           U32.is_eq(t, u)
         case _:
           False{}
-    case AtAbort{}:
+    case AtAbort{o}:
       match b:
-        case AtAbort{}:
+        case AtAbort{p}:
           True{}
         case _:
           False{}
@@ -113,10 +114,10 @@ def of.term3(t: T.C) -> X:
     case T.CRight{loc, x}:
       XRight{of.term3(x)}
     case T.CAbort{loc}:
-      XAbort{AtAbort{}}
+      XAbort{AtAbort{L.unknown.origin()}}
     case T.CUnsized{loc, tok}:
       XStub{tok, XEnv{}}
-    case T.CCheck{loc, cloc, site, tc, c}:
+    case T.CCheck{loc, o, site, tc, c}:
       XCheck{site, of.term3(tc), of.term3(c)}
 
 # Builders (Machine.hs)
@@ -192,6 +193,15 @@ def step.body(+tok: U32, +n: U32) -> X:
 def approx.body() -> X:
   gate.switch(app(var(4n), var(0n)), app(app(var(3n), var(1n)), var(0n)), app(var(2n), var(0n)))
 
+# master's abort node (AbortB o m) as X writes it: the abort applied to its
+# message. The core reads it back as the one node (`core`). Sizing, Sem and
+# the laws read an abort as haskell-final's function, which aborts on a
+# pair and is the identity on 0; every abort a program holds is applied to
+# a message that is a pair wherever its value is used (a failed check's
+# answer, a chain's (0, token)), so the two readings agree on the runs.
+def abort.with(+at: Site, m: X) -> X:
+  fill(XAbort{at}, m)
+
 # A chain's bottom: a closure that aborts with (0, token) when applied; or,
 # where sizing proved no input reaches it, 0, so the program holds no Abort
 # for it (DESIGN §10).
@@ -200,7 +210,7 @@ def bottom(+tok: U32, inert: Bool) -> X:
     case True{}:
       XZero{}
     case False{}:
-      XPair{XDefer{Co.step.w(), fill(fill(XAbort{AtRecursion{tok}}, XRight{XEnv{}}), XLeft{XEnv{}})},
+      XPair{XDefer{Co.step.w(), abort.with(AtRecursion{tok}, XRight{XEnv{}})},
             XPair{XZero{}, int.u32(tok)}}
 
 # n links over a bottom: each runs one approximant step, recurring into the
@@ -261,10 +271,19 @@ def check.left(left: Maybe<&2, Set()>, +site: U32) -> Bool:
     case Some{s}:
       Pair.snd(Set(), Bool, Set.has(s, U32.show(site)))
 
+# A check left to run time (refinementCheckB): `let r = tc c in (if r then
+# abort r else id) c`. The outer defer (environment (tc, c)) computes r
+# once and hands (r, c) to the gate, whose branches have the strict
+# gate-switch shape; a passing check builds an aborted value and drops it.
 def check.of(here: Bool, +site: U32, tc: X, c: X) -> X:
   match here:
     case True{}:
-      fill(XDefer{Co.refinement.tc(), fill(fill(XAbort{AtCheck{site}}, app(XLeft{XEnv{}}, XRight{XEnv{}})), XRight{XEnv{}})},
+      fill(XDefer{Co.refinement.tc(),
+             XSetEnv{XPair{XDefer{Co.refinement.gate.ind(),
+                             XSetEnv{XPair{gate.switch(XDefer{Co.refinement.pass.ind(), XEnv{}},
+                                                       abort.with(AtCheck{site}, XLeft{XEnv{}}), XLeft{XEnv{}}),
+                                           XRight{XEnv{}}}}},
+                           XPair{app(XLeft{XEnv{}}, XRight{XEnv{}}), XRight{XEnv{}}}}}},
            XPair{tc, c})
     case False{}:
       c
@@ -316,6 +335,47 @@ def to.int(x: X) -> Maybe<&2, U32>:
 # The runnable core
 # -----------------
 
+# What raised each check's abort, by check number: the origins of the
+# program's checks, which sizing hands the core.
+def origins.add(t: T.C, acc: Map<&2, L.Origin>) -> Map<&2, L.Origin>:
+  match t:
+    case T.CCheck{a, o, +site, x, y}:
+      origins.add(y, origins.add(x, Map.set(&2, L.Origin, acc, U32.show(site), o)))
+    case T.CPair{a, x, y}:
+      origins.add(y, origins.add(x, acc))
+    case T.CSetEnv{a, x}:
+      origins.add(x, acc)
+    case T.CDefer{a, fi, x}:
+      origins.add(x, acc)
+    case T.CLeft{a, x}:
+      origins.add(x, acc)
+    case T.CRight{a, x}:
+      origins.add(x, acc)
+    case _:
+      acc
+
+def origins(t: T.C) -> Map<&2, L.Origin>:
+  origins.add(t, Map.new(&2, L.Origin))
+
+# What raised an abort at a site, as far as the site says.
+def site.origin(at: Site) -> L.Origin:
+  match at:
+    case AtAbort{o}:
+      o
+    case AtRecursion{tok}:
+      L.recursion.origin()
+    case AtCheck{n}:
+      L.unknown.origin()
+
+def origin.of(+os: Map<&2, L.Origin>, at: Site) -> L.Origin:
+  match at:
+    case AtCheck{+n}:
+      Pair.snd(Map<&2, L.Origin>, L.Origin, Map.get(L.Origin, L.unknown.origin(), os, U32.show(n)))
+    case AtRecursion{tok}:
+      L.recursion.origin()
+    case AtAbort{o}:
+      o
+
 def core.pair(a: Result<&2, &2, String, Co.V>, b: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
   match a:
     case Done{x}:
@@ -355,57 +415,56 @@ def core.right(a: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
     case Fail{e}:
       Fail{e}
 
-def core.data.pair(a: Result<&2, &2, String, Co.D>, b: Result<&2, &2, String, Co.D>) -> Result<&2, &2, String, Co.D>:
-  match a:
-    case Done{x}:
-      match b:
-        case Done{y}:
-          Done{Co.DPair{x, y}}
-        case Fail{e}:
-          Fail{e}
-    case Fail{e}:
-      Fail{e}
-
-def core.data(x: X) -> Result<&2, &2, String, Co.D>:
-  match x:
-    case XZero{}:
-      Done{Co.DZero{}}
-    case XPair{a, b}:
-      core.data.pair(core.data(a), core.data(b))
-    case _:
-      Fail{"a non-data abort message"}
-
-def core.aborted(m: Result<&2, &2, String, Co.D>) -> Result<&2, &2, String, Co.V>:
+def core.abort(+o: L.Origin, m: Result<&2, &2, String, Co.V>) -> Result<&2, &2, String, Co.V>:
   match m:
-    case Done{d}:
-      Done{Co.VAborted{d}}
+    case Done{x}:
+      Done{Co.VAbort{o, x}}
     case Fail{e}:
       Fail{e}
 
-# The sized program as the runnable core, or the first form sizing should
-# have removed from it (a sizing bug).
-def core(x: X) -> Result<&2, &2, String, Co.V>:
+def core.data(x: X) -> Result<&2, &2, String, Co.V>:
   match x:
     case XZero{}:
       Done{Co.VZero{}}
     case XPair{a, b}:
-      core.pair(core(a), core(b))
+      core.pair(core.data(a), core.data(b))
+    case _:
+      Fail{"a non-data abort message"}
+
+# The sized program as the runnable core, or the first form sizing should
+# have removed from it (a sizing bug). An abort applied to its message
+# (abort.with) is master's one abort node; an abort alone is code no
+# sized program holds.
+def core(+os: Map<&2, L.Origin>, x: X) -> Result<&2, &2, String, Co.V>:
+  match x:
+    case XZero{}:
+      Done{Co.VZero{}}
+    case XPair{a, b}:
+      core.pair(core(os, a), core(os, b))
     case XEnv{}:
       Done{Co.VEnv{}}
     case XSetEnv{a}:
-      core.setenv(core(a))
+      match a:
+        case XPair{f, m}:
+          match f:
+            case XAbort{at}:
+              core.abort(origin.of(os, at), core(os, m))
+            case other:
+              core.setenv(core.pair(core(os, other), core(os, m)))
+        case other:
+          core.setenv(core(os, other))
     case XDefer{+fi, a}:
-      core.defer(fi, core(a))
+      core.defer(fi, core(os, a))
     case XGate{}:
       Done{Co.VGate{}}
     case XLeft{a}:
-      core.left(core(a))
+      core.left(core(os, a))
     case XRight{a}:
-      core.right(core(a))
+      core.right(core(os, a))
     case XAbort{at}:
-      Done{Co.VAbort{}}
+      Fail{"an abort applied to nothing"}
     case XAborted{at, m}:
-      core.aborted(core.data(m))
+      core.abort(origin.of(os, at), core.data(m))
     case XEither{n, a, b}:
       Fail{"a superposition"}
     case XTest{tok, a}:
@@ -433,5 +492,5 @@ def core(x: X) -> Result<&2, &2, String, Co.V>:
 
 # The program run unsized (term3ToFast): its checks removed and every
 # recursion site unbounded, as the runnable core.
-def fast(t: T.C) -> Result<&2, &2, String, Co.V>:
-  core(unbounded(remove.checks(of.term3(t))))
+def fast(+t: T.C) -> Result<&2, &2, String, Co.V>:
+  core(origins(t), unbounded(remove.checks(of.term3(t))))

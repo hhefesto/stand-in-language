@@ -3,6 +3,7 @@ import ../Front.bend as Fr
 import ../Term.bend as T
 import ../Size.bend as Sz
 import ../Expr.bend as E
+import ../Loc.bend as Lc
 import ../Core.bend as Co
 import ../IC.bend as IC
 import ../Session.bend as Ss
@@ -200,7 +201,7 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, +lines: List<&2, String>) ->
       IO.pure(Bool, False{})
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks}:
+        case Sz.Sized{counts, expr, checks, pl}:
           +m = Ss.prepared(expr)
           iter(1n+List.length(&2, String, lines), m, Again{lines, True{}, IC.net.new(m), IC.net.new(m), Co.DZero{}})
 
@@ -211,7 +212,7 @@ def compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> 
     case Done{p}:
       match p:
         case Fr.Program{run, g, +boundary}:
-          sized(Sz.size.guarded(65536, boundary, g, E.of.term3(run)), lines)
+          sized(Sz.size.guarded(65536, boundary, g, run), lines)
 
 def session(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> IO(Bool):
   compiled(Fr.compile.program(srcs, entry), lines)
@@ -229,8 +230,8 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       both(Co.app(Co.app(church.two(), Co.app(church.two(), succ.c())), z()), IC.default.fuel()),
       both(se(p(d(102, p(env(), env())), d(103, env()))), IC.default.fuel()),
       both(Co.gate.switch(z(), p(z(), z()), se(p(d(113, env()), p(z(), z())))), IC.default.fuel()),
-      both(se(p(Co.VAbort{}, p(z(), z()))), IC.default.fuel()),
-      both(left(se(p(Co.VAbort{}, p(z(), z())))), IC.default.fuel()),
+      both(Co.VAbort{Lc.unknown.origin(), p(z(), z())}, IC.default.fuel()),
+      both(left(Co.VAbort{Lc.unknown.origin(), Co.VAbort{Lc.unknown.origin(), z()}}), IC.default.fuel()),
       both(se(p(z(), z())), IC.default.fuel()),
       both(se(z()), IC.default.fuel()),
       both(Co.gate.switch(d(105, env()), z(), p(z(), z())), IC.default.fuel()),

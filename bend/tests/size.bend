@@ -48,7 +48,7 @@ def sized(+max: U32, +t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Strin
       Sz.render(f, t, max)
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks}:
+        case Sz.Sized{cs, expr, checks, pl}:
           counts(cs)
 
 def size.term(+max: U32, r: Result<&2, &2, String, T.C>) -> String:
@@ -56,7 +56,7 @@ def size.term(+max: U32, r: Result<&2, &2, String, T.C>) -> String:
     case Fail{e}:
       e
     case Done{+run}:
-      sized(max, run, Sz.size(max, True{}, E.of.term3(run)))
+      sized(max, run, Sz.size(max, True{}, run))
 
 # The counts, in token order, or the failure as the command reports it.
 def size(+max: U32, srcs: List<&2, Fr.Src>, +entry: String) -> String:
@@ -91,7 +91,7 @@ def checked(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks}:
+        case Sz.Sized{cs, expr, checks, pl}:
           checks.text(checks)
 
 def checked.term(r: Result<&2, &2, String, T.C>) -> String:
@@ -99,7 +99,7 @@ def checked.term(r: Result<&2, &2, String, T.C>) -> String:
     case Fail{e}:
       e
     case Done{run}:
-      checked(Sz.size(65536, True{}, E.of.term3(run)))
+      checked(Sz.size(65536, True{}, run))
 
 # What sizing proved of the checks, by number, with no guard.
 def checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
@@ -112,7 +112,7 @@ def guarded.program(r: Result<&2, &2, String, Fr.Program>) -> Result<&2, &2, Sz.
     case Done{p}:
       match p:
         case Fr.Program{run, +g, +boundary}:
-          Sz.size.guarded(65536, boundary, g, E.of.term3(run))
+          Sz.size.guarded(65536, boundary, g, run)
 
 def guarded.sized(srcs: List<&2, Fr.Src>, +entry: String) -> Result<&2, &2, Sz.SizeFail, Sz.Sized>:
   guarded.program(Fr.compile.program(srcs, entry))
@@ -125,7 +125,7 @@ def guarded.checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
 # Whether an Abort is left in the code that runs.
 def has.abort(x: Co.V) -> Bool:
   match x:
-    case Co.VAbort{}:
+    case Co.VAbort{o, m}:
       True{}
     case Co.VPair{a, b}:
       has.abort(a) || has.abort(b)
@@ -146,7 +146,7 @@ def aborts.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks}:
+        case Sz.Sized{cs, expr, checks, pl}:
           Bool.pick(String, has.abort(expr), "Abort", "none")
 
 def aborts.term(r: Result<&2, &2, String, T.C>) -> String:
@@ -154,7 +154,7 @@ def aborts.term(r: Result<&2, &2, String, T.C>) -> String:
     case Fail{e}:
       e
     case Done{run}:
-      aborts.of(Sz.size(65536, True{}, E.of.term3(run)))
+      aborts.of(Sz.size(65536, True{}, run))
 
 # Whether the sized program holds an Abort.
 def aborts(srcs: List<&2, Fr.Src>, +entry: String) -> String:

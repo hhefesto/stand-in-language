@@ -219,7 +219,7 @@ def validator(+loc: L.Loc, tname: String, +h: String) -> S.Expanded():
       S.SApp{loc, S.SApp{loc, S.SVar{loc, "dEqual"}, S.SLeft{loc, S.SVar{loc, "__udt_v"}}},
              S.SVar{loc, h}},
       S.SRight{loc, S.SVar{loc, "__udt_v"}},
-      S.SApp{loc, S.SVar{loc, "abort"}, S.SStr{loc, "not " ++ tname}}}}
+      S.abort.term(Empty, Unit, Empty, L.KValidator{}, loc, S.SStr{loc, "not " ++ tname})}}
 
 def generated(+parent: L.Loc, +name: String) -> L.Name:
   L.Name{L.GenIn{name, parent}, name}
@@ -358,16 +358,16 @@ def destructure(+lt: L.Loc, +loc: L.Loc, p: S.ExpandedPat(), +v: String, inner: 
     case S.PAnn{q, t}:
       match q:
         case S.PVar{name}:
-          S.SLet{lt, [S.Bind{name, S.SCheck{loc, t, S.SVar{lt, v}}}], inner}
+          S.SLet{lt, [S.Bind{name, S.SCheck{loc, L.KRefine{}, t, S.SVar{lt, v}}}], inner}
         case other:
           S.SLet{lt, [S.Bind{L.Name{L.GenIn{"annotated lambda pattern", loc}, v ++ "_checked"},
-                             S.SCheck{loc, t, S.SVar{lt, v}}}],
+                             S.SCheck{loc, L.KRefine{}, t, S.SVar{lt, v}}}],
             destructure(lt, loc, other, v ++ "_checked", inner)}
     case other:
       S.SCase{lt, S.SVar{lt, v},
         [S.Alt{other, inner},
-         S.Alt{S.PIgnore{}, S.SApp{lt, S.SVar{lt, "abort"},
-                                   S.SStr{lt, "buildMultiLambda: pattern not reached"}}}], Unit{}}
+         S.Alt{S.PIgnore{}, S.abort.term(Empty, Unit, Empty, L.KCase{}, loc,
+                                   S.SStr{loc, "buildMultiLambda: pattern not reached"})}], Unit{}}
 
 def destructure.all(ps: List<&2, S.ExpandedLPat()>, +lt: L.Loc, names: List<&2, L.Name>, body: S.Expanded()) -> S.Expanded():
   match ps:
@@ -528,11 +528,11 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
                 a2 : EV <- ex(f, ETerm{a})
                 b2 : EV <- ex(f, ETerm{b})
                 return VT{S.SPair{loc, vt(a2), vt(b2)}}
-            case S.SCheck{loc, a, b}:
+            case S.SCheck{loc, k, a, b}:
               do Result<&2, &2, ExpErr, EV>:
                 a2 : EV <- ex(f, ETerm{a})
                 b2 : EV <- ex(f, ETerm{b})
-                return VT{S.SCheck{loc, vt(a2), vt(b2)}}
+                return VT{S.SCheck{loc, k, vt(a2), vt(b2)}}
             case S.SIte{loc, a, b, c}:
               do Result<&2, &2, ExpErr, EV>:
                 a2 : EV <- ex(f, ETerm{a})
@@ -655,7 +655,7 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
                     c2 : EV <- ex(f, ETerm{check})
                     b2 : EV <- ex(f, ETerm{body})
                     r2 : EV <- ex(f, EDefs{rest})
-                    binds.then([S.Bind{name, S.SCheck{cloc, vt(c2), vt(b2)}}], r2)
+                    binds.then([S.Bind{name, S.SCheck{cloc, L.KRefine{}, vt(c2), vt(b2)}}], r2)
                 case S.DList{loc, names, body}:
                   do Result<&2, &2, ExpErr, EV>:
                     b2 : EV <- ex(f, ETerm{body})

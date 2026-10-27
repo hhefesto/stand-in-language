@@ -2,5 +2,5 @@ status 0
 --- stdout
 enter two digits separated by a space
 runtime error:
-Aborted, user abort: invalid input
+Aborted, user abort: invalid input (from refinement check at simpleplus:14:31)
 --- stderr

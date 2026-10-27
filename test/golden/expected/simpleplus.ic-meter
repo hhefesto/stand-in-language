@@ -3,30 +3,27 @@ status 0
 enter two digits separated by a space
 3 plus 4 is 7
 --- stderr
-interactions (measured): 1823349
-  era-leaf: 566601
-  era-pair: 563185
-  dup-leaf: 336100
-  dup-pair: 335433
-  split-pair: 9205
-  setenv-pair: 5020
-  apply-ref: 4644
+interactions (measured): 1828960
+  era-leaf: 567980
+  era-pair: 564534
+  dup-leaf: 337478
+  dup-pair: 336783
+  split-pair: 9261
+  setenv-pair: 5060
+  apply-ref: 4700
   dup-plan-copy: 4191
   dup-closure: 1451
   era-plan-drop: 1142
-  template-reused: 844
+  template-reused: 850
   era-closure: 293
+  era-aborted: 277
+  apply-gate: 273
   split-zero: 269
-  era-aborted: 250
-  apply-gate: 245
-  template-compiled: 204
+  template-compiled: 218
+  scrut-zero: 153
   split-aborted: 148
-  scrut-zero: 126
-  scrut-pair: 96
+  scrut-pair: 97
   dup-aborted: 93
   apply-erased: 63
-  apply-abort: 36
-  apply-aborted: 32
-  abort-zero: 27
+  apply-aborted: 24
   scrut-aborted: 23
-  abort-pair: 9

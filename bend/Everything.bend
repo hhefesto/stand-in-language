@@ -26,8 +26,11 @@ import ./Session.bend as Session
 import ./Levels.bend as Levels
 import ./Certificate.bend as Certificate
 import ./Meter.bend as Meter
+import ./Reference.bend as Reference
+import ./Fast.bend as Fast
 import ./Telc.bend as Telc
 import ./Main.bend as Main
+import ./Repl.bend as Repl
 import ./PROOF.bend as Proof
 
 # Every module of the port, and the proofs of LAWS.bend, so that

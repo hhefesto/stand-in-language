@@ -22,7 +22,7 @@
 #define NT_ERA     3
 #define NT_ZERO    4
 #define NT_GATE    5
-#define NT_ABORT   6
+#define NT_UNUSED6 6   // haskell-final's abort function, gone since master's 98de497c
 #define NT_REF     7
 #define NT_PAIR    8
 #define NT_ABORTED 9
@@ -31,22 +31,20 @@
 #define NT_SETENV  12
 #define NT_APPLY   13
 #define NT_SCRUT   14
-#define NT_SCRUTAB 15
+#define NT_UNUSED15 15
 #define NT_LEFT    16
 #define NT_RIGHT   17
 #define NT_STUCK   18
 #define NT_KINDS   19
 
-// Core.bend's function indices of the selectors (neg(2), neg(3), neg(11)).
+// Core.bend's function indices of the selectors (neg(2), neg(3)).
 #define NT_LEFT_GATE  0xFFFFFFFEu
 #define NT_RIGHT_GATE 0xFFFFFFFDu
-#define NT_ABORT_IND  0xFFFFFFF5u
 
 // The rules, as IC.bend's type Rule names them. NT_BEND: left to Bend.
 enum {
   NT_NONE, NT_BEND, NT_SETENV_PAIR, NT_PASS, NT_APPLY_REF, NT_AWAIT_GATE,
-  NT_AWAIT_ABORT, NT_PASS_APP, NT_SELECT_GATE, NT_SCRUT_PAIR,
-  NT_SELECT_ABORT, NT_ABORT_PAIR, NT_PROJECT_LEFT, NT_PROJECT_RIGHT,
+  NT_PASS_APP, NT_SELECT_GATE, NT_SCRUT_PAIR, NT_PROJECT_LEFT, NT_PROJECT_RIGHT,
   NT_SPLIT_PAIR, NT_SPLIT_ZERO, NT_SPLIT_ABORTED, NT_SPLIT_STUCK,
   NT_ERA_PAIR, NT_ERA_ABORTED, NT_ERA_LEAF, NT_DUP_PLANNED, NT_DUP_ABORTED,
   NT_DUP_DUP, NT_DUP_LEAF
@@ -72,7 +70,7 @@ static u8 nt_rule[NT_KINDS][NT_KINDS];
 
 // is.value
 static bool nt_value(u32 k) {
-  return k == NT_ZERO || k == NT_GATE || k == NT_ABORT || k == NT_REF
+  return k == NT_ZERO || k == NT_GATE || k == NT_REF
       || k == NT_PAIR || k == NT_ABORTED || k == NT_STUCK;
 }
 
@@ -94,7 +92,6 @@ static u8 nt_rule_of(u32 ka, u32 kb) {
       switch (kb) {
         case NT_REF:     return NT_APPLY_REF;
         case NT_GATE:    return NT_AWAIT_GATE;
-        case NT_ABORT:   return NT_AWAIT_ABORT;
         case NT_ABORTED: return NT_PASS_APP;
         case NT_STUCK:   return NT_PASS_APP;
         default:         return v ? NT_BEND : NT_NONE;
@@ -102,10 +99,6 @@ static u8 nt_rule_of(u32 ka, u32 kb) {
     case NT_SCRUT:
       if (kb == NT_ZERO) return NT_SELECT_GATE;
       if (kb == NT_PAIR) return NT_SCRUT_PAIR;
-      return nt_pass(kb, NT_BEND);
-    case NT_SCRUTAB:
-      if (kb == NT_ZERO) return NT_SELECT_ABORT;
-      if (kb == NT_PAIR) return NT_ABORT_PAIR;
       return nt_pass(kb, NT_BEND);
     case NT_LEFT:
     case NT_RIGHT:
@@ -427,11 +420,10 @@ static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
       nt_del2(x, n, m);
       nt_instantiate(x, j.a, i.p1, i.p2);
       return;
-    case NT_AWAIT_GATE:
-    case NT_AWAIT_ABORT: {
+    case NT_AWAIT_GATE: {
       nt_spend(x);
       nt_del2(x, n, m);
-      u32 sc = nt_alloc(x, r == NT_AWAIT_GATE ? NT_SCRUT : NT_SCRUTAB, 0, 0);
+      u32 sc = nt_alloc(x, NT_SCRUT, 0, 0);
       nt_connect(x, sc * 4, i.p1);
       nt_connect(x, sc * 4 + 1, i.p2);
       return;
@@ -444,12 +436,10 @@ static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
       nt_connect(x, m * 4, i.p2);
       return;
     }
-    case NT_SELECT_GATE:
-    case NT_SELECT_ABORT: {
+    case NT_SELECT_GATE: {
       nt_spend(x);
       nt_del2(x, n, m);
-      u32 sel = r == NT_SELECT_GATE ? nt_alloc(x, NT_REF, 0, NT_LEFT_GATE)
-                                    : nt_alloc(x, NT_REF, 2, NT_ABORT_IND);
+      u32 sel = nt_alloc(x, NT_REF, 0, NT_LEFT_GATE);
       nt_connect(x, sel * 4, i.p1);
       return;
     }
@@ -462,14 +452,6 @@ static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
       nt_connect(x, er * 4, j.p2);
       u32 sel = nt_alloc(x, NT_REF, 1, NT_RIGHT_GATE);
       nt_connect(x, sel * 4, i.p1);
-      return;
-    }
-    case NT_ABORT_PAIR: {
-      nt_spend(x);
-      nt_delete(x, n);
-      u32 ab = nt_alloc(x, NT_ABORTED, 0, 0);
-      nt_connect(x, ab * 4 + 1, m * 4);
-      nt_connect(x, ab * 4, i.p1);
       return;
     }
     case NT_PROJECT_LEFT:
@@ -501,8 +483,8 @@ static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
       x->label += 1;
       u32 dm = nt_alloc(x, NT_DUP, l, 0);
       nt_connect(x, dm * 4, j.p1);
-      u32 a1 = nt_alloc(x, NT_ABORTED, 0, 0);
-      u32 a2 = nt_alloc(x, NT_ABORTED, 0, 0);
+      u32 a1 = nt_alloc(x, NT_ABORTED, j.a, 0);  // both halves keep the origin
+      u32 a2 = nt_alloc(x, NT_ABORTED, j.a, 0);
       nt_connect(x, a1 * 4 + 1, dm * 4 + 1);
       nt_connect(x, a1 * 4, i.p1);
       nt_connect(x, a2 * 4 + 1, dm * 4 + 2);
@@ -551,8 +533,8 @@ static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
     case NT_DUP_ABORTED: {
       nt_spend(x);
       nt_del2(x, n, m);
-      u32 a1 = nt_alloc(x, NT_ABORTED, 0, 0);
-      u32 a2 = nt_alloc(x, NT_ABORTED, 0, 0);
+      u32 a1 = nt_alloc(x, NT_ABORTED, j.a, 0);
+      u32 a2 = nt_alloc(x, NT_ABORTED, j.a, 0);
       u32 dm = nt_alloc(x, NT_DUP, i.a, 0);
       nt_alloc(x, NT_ZERO, 0, 0);  // as IC.bend's alloc4 makes it: a fourth, unused
       nt_connect(x, dm * 4, j.p1);

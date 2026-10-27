@@ -260,11 +260,11 @@ def debruijn(+fuel: Nat, +ctx: List<&2, Ctx>, t: T.Term1()) -> R(T.Term2()):
             x2 : T.T<Nat> <- debruijn(f, ctx, x)
             y2 : T.T<Nat> <- debruijn(f, ctx, y)
             return T.TPair{a, x2, y2}
-        case T.TCheck{a, x, y}:
+        case T.TCheck{a, k, x, y}:
           do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
             x2 : T.T<Nat> <- debruijn(f, ctx, x)
             y2 : T.T<Nat> <- debruijn(f, ctx, y)
-            return T.TCheck{a, x2, y2}
+            return T.TCheck{a, k, x2, y2}
         case T.TIte{a, x, y, z}:
           do Result<&2, &2, Rs.ResErr, T.T<Nat>>:
             x2 : T.T<Nat> <- debruijn(f, ctx, x)
@@ -317,8 +317,8 @@ def close.lams(+fuel: Nat, +naked: Bool, t: T.Term2()) -> T.Term2():
           T.TApp{a, close.lams(f, naked, x), close.lams(f, naked, y)}
         case T.TPair{a, x, y}:
           T.TPair{a, close.lams(f, naked, x), close.lams(f, naked, y)}
-        case T.TCheck{a, x, y}:
-          T.TCheck{a, close.lams(f, naked, x), close.lams(f, naked, y)}
+        case T.TCheck{a, k, x, y}:
+          T.TCheck{a, k, close.lams(f, naked, x), close.lams(f, naked, y)}
         case T.TIte{a, x, y, z}:
           T.TIte{a, close.lams(f, naked, x), close.lams(f, naked, y), close.lams(f, naked, z)}
         case T.TRec{a, x, y, z}:
@@ -369,8 +369,8 @@ def show(t: T.Term2(), +paren: Bool, acc: String) -> String:
       lp(paren) ++ "Fix AppUPF " ++ show(f, True{}, " " ++ show(x, True{}, rp(paren, acc)))
     case T.TLam{a, k, name, body}:
       lp(paren) ++ "Fix LamUPF " ++ kind.show(k) ++ " " ++ show(body, True{}, rp(paren, acc))
-    case T.TCheck{a, x, y}:
-      lp(paren) ++ "Fix CheckUPF " ++ show(x, True{}, " " ++ show(y, True{}, rp(paren, acc)))
+    case T.TCheck{a, k, x, y}:
+      lp(paren) ++ "Fix CheckUPF " ++ L.kind.show(k) ++ " " ++ show(x, True{}, " " ++ show(y, True{}, rp(paren, acc)))
     case T.TIte{a, x, y, z}:
       lp(paren) ++ "Fix ITEUPF " ++ show(x, True{}, " " ++ show(y, True{}, " " ++ show(z, True{}, rp(paren, acc))))
     case T.TLeft{a, x}:
@@ -407,8 +407,8 @@ def hashes(t: T.Term2(), +loc: L.Loc) -> T.Term2():
       T.TApp{a, hashes(f, loc), hashes(x, loc)}
     case T.TLam{a, k, name, body}:
       T.TLam{a, k, name, hashes(body, loc)}
-    case T.TCheck{a, x, y}:
-      T.TCheck{a, hashes(x, loc), hashes(y, loc)}
+    case T.TCheck{a, k, x, y}:
+      T.TCheck{a, k, hashes(x, loc), hashes(y, loc)}
     case T.TIte{a, x, y, z}:
       T.TIte{a, hashes(x, loc), hashes(y, loc), hashes(z, loc)}
     case T.TLeft{a, x}:
@@ -547,11 +547,11 @@ def annotate(+fuel: Nat, n: AN) -> St(AV):
                 a2 : AV <- annotate(f, AT{a})
                 b2 : AV <- annotate(f, AT{b})
                 return AVT{S.SPair{loc, avt(a2), avt(b2)}}
-            case S.SCheck{loc, a, b}:
+            case S.SCheck{loc, k, a, b}:
               do St<AV>:
                 a2 : AV <- annotate(f, AT{a})
                 b2 : AV <- annotate(f, AT{b})
-                return AVT{S.SCheck{loc, avt(a2), avt(b2)}}
+                return AVT{S.SCheck{loc, k, avt(a2), avt(b2)}}
             case S.SIte{loc, a, b, c}:
               do St<AV>:
                 a2 : AV <- annotate(f, AT{a})
@@ -820,9 +820,6 @@ def app.mk(a: L.Loc, x: T.Term1(), y: T.Term1()) -> T.Term1():
 def pair.mk(a: L.Loc, x: T.Term1(), y: T.Term1()) -> T.Term1():
   T.TPair{a, x, y}
 
-def check.mk(a: L.Loc, x: T.Term1(), y: T.Term1()) -> T.Term1():
-  T.TCheck{a, x, y}
-
 def ite.mk(a: L.Loc, x: T.Term1(), y: T.Term1(), z: T.Term1()) -> T.Term1():
   T.TIte{a, x, y, z}
 
@@ -831,6 +828,9 @@ def rec.mk(a: L.Loc, x: T.Term1(), y: T.Term1(), z: T.Term1()) -> T.Term1():
 
 def two(~k: L.Loc -> T.Term1() -> T.Term1() -> T.Term1(), +x: LV, +y: LV, a: L.Loc) -> LV:
   LVT{k(a, lv.t(x), lv.t(y)), refs.union(lv.refs(x), lv.refs(y))}
+
+def check.two(+a: L.Loc, +k: L.AbortKind, +x: LV, +y: LV) -> LV:
+  LVT{T.TCheck{a, k, lv.t(x), lv.t(y)}, refs.union(lv.refs(x), lv.refs(y))}
 
 def three(~k: L.Loc -> T.Term1() -> T.Term1() -> T.Term1() -> T.Term1(), +x: LV, +y: LV, +z: LV, a: L.Loc) -> LV:
   LVT{k(a, lv.t(x), lv.t(y), lv.t(z)), refs.union(lv.refs(x), refs.union(lv.refs(y), lv.refs(z)))}
@@ -911,11 +911,11 @@ def lta(+fuel: Nat, n: LN) -> R(LV):
                 x2 : LV <- lta(f, LNT{x})
                 y2 : LV <- lta(f, LNT{y})
                 return two(~pair.mk, x2, y2, a)
-            case S.SCheck{a, x, y}:
+            case S.SCheck{a, k, x, y}:
               do Result<&2, &2, Rs.ResErr, LV>:
                 x2 : LV <- lta(f, LNT{x})
                 y2 : LV <- lta(f, LNT{y})
-                return two(~check.mk, x2, y2, a)
+                return check.two(a, k, x2, y2)
             case S.SIte{a, x, y, z}:
               do Result<&2, &2, Rs.ResErr, LV>:
                 x2 : LV <- lta(f, LNT{x})

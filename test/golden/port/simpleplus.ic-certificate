@@ -15,7 +15,7 @@ refinement checks: 3 discharged statically, 1 left to run time:
   Prelude:17:19     discharged
   Prelude:21:8      discharged
   simpleplus:14:31  at the session boundary
-erasures in main: proven, by the erasure checker in 222334169 evaluation steps
+erasures in main: proven, by the erasure checker in 223976086 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
 erasures in the guard: none; every recursion bottom and check stays a run-time abort
   sizing did not prove the guard for every input

@@ -344,5 +344,5 @@ def at.name(at: E.Site) -> String:
       "check " ++ U32.show(n)
     case E.AtRecursion{t}:
       "the bottom of recursion #" ++ U32.show(t)
-    case E.AtAbort{}:
+    case E.AtAbort{o}:
       "an abort"

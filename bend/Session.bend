@@ -1,5 +1,6 @@
 import Base
 import ./Core.bend as Co
+import ./Loc.bend as L
 import ./Lift.bend as Lf
 import ./EAL.bend as EAL
 import ./IC.bend as IC
@@ -10,8 +11,11 @@ import ./Meter.bend as Mt
 # IR.Base.convertAbortMessage). A program is run on 0 first, then on
 # (line, state) for each line read, while it answers (display, state) and
 # the state is not 0. Before main sees a line, the session runs main's
-# input refinements on it, if main has any (Front's guard): one that fails
-# ends the session as main would have, with its abort.
+# input refinements on it, if main has any (Front's guard). When they
+# pass, main runs as sizing left it, without the checks the guard ran;
+# when one fails, master's program runs instead, every check in it, so the
+# line is answered as master answers it (a refinement whose value main
+# never uses does not end the session).
 
 # Print the display and go on with the state; print it and end; or fail
 # as the Haskell did with `error`.
@@ -46,48 +50,49 @@ def abort.message(+x: Co.D) -> String:
     case other:
       "unexpected abort: " ++ Co.show.data(other)
 
-def first.aborted(a: Maybe<&2, Co.D>, b: Maybe<&2, Co.D>) -> Maybe<&2, Co.D>:
+# An abort that fired: what raised it and its message.
+type Fired is Data:
+  Fired{+o: L.Origin, +m: Co.D}
+
+def first.fired(a: Maybe<&2, Fired>, b: Maybe<&2, Fired>) -> Maybe<&2, Fired>:
   match a:
     case Some{x}:
       Some{x}
     case None{}:
       b
 
-# The leftmost aborted message anywhere in the result (icRuntimeResult).
-def aborted(x: Co.V) -> Maybe<&2, Co.D>:
-  match x:
-    case Co.VAborted{m}:
-      Some{m}
+# An abort message as data: anything that is neither 0 nor a pair (a
+# closure, say) reads as 0 (messageData).
+def message.data(v: Co.V) -> Co.D:
+  match v:
     case Co.VPair{a, b}:
-      first.aborted(aborted(a), aborted(b))
-    case Co.VDefer{fi, b}:
-      aborted(b)
+      Co.DPair{message.data(a), message.data(b)}
+    case _:
+      Co.DZero{}
+
+# The leftmost abort that has fired in the result (firedAbort): one
+# outside every defer, since one under a defer is code that has not run.
+# An abort inside another's message is the one that counts.
+def fired(x: Co.V) -> Maybe<&2, Fired>:
+  match x:
+    case Co.VAbort{+o, +m}:
+      first.fired(fired(m), Some{Fired{o, message.data(m)}})
+    case Co.VPair{a, b}:
+      first.fired(fired(a), fired(b))
     case Co.VSetEnv{a}:
-      aborted(a)
+      fired(a)
     case Co.VLeft{a}:
-      aborted(a)
+      fired(a)
     case Co.VRight{a}:
-      aborted(a)
+      fired(a)
     case _:
       None{}
 
-# An Abort left in the result (a CompiledExpr that is no StuckExpr).
-def has.abort(x: Co.V) -> Bool:
-  match x:
-    case Co.VAbort{}:
-      True{}
-    case Co.VPair{a, b}:
-      has.abort(a) || has.abort(b)
-    case Co.VDefer{fi, b}:
-      has.abort(b)
-    case Co.VSetEnv{a}:
-      has.abort(a)
-    case Co.VLeft{a}:
-      has.abort(a)
-    case Co.VRight{a}:
-      has.abort(a)
-    case _:
-      False{}
+# "Aborted, " and what the abort says (AbortRunTime's show, describeAbort).
+def fired.text(f: Fired) -> String:
+  match f:
+    case Fired{o, m}:
+      "Aborted, " ++ abort.message(m) ++ L.origin.suffix(o)
 
 # A state of 0 ends the session after this display.
 def next(+text: String, st: Co.D) -> Outcome:
@@ -122,12 +127,12 @@ def converted(abort: Bool, +x: Co.V) -> Outcome:
         case _:
           Crash{"Telomare.Driver.funWrapWith: unexpected iteration value"}
 
-def value(m: Maybe<&2, Co.D>, +x: Co.V) -> Outcome:
+def value(m: Maybe<&2, Fired>, +x: Co.V) -> Outcome:
   match m:
-    case Some{msg}:
-      Stop{"runtime error:\nAborted, " ++ abort.message(msg)}
+    case Some{f}:
+      Stop{"runtime error:\n" ++ fired.text(f)}
     case None{}:
-      converted(has.abort(x), x)
+      converted(False{}, x)
 
 # How a program runs: sized, under the IC's default fuel; or unsized
 # (--fast), each iteration capped at fuel interactions, 0 for no cap (the
@@ -162,10 +167,10 @@ def failed.how(h: How, f: IC.Fault) -> Outcome:
     case Fast{n}:
       failed.fast(f)
 
-def guard.aborted(m: Maybe<&2, Co.D>) -> Maybe<&2, Outcome>:
+def guard.aborted(m: Maybe<&2, Fired>) -> Maybe<&2, Outcome>:
   match m:
-    case Some{msg}:
-      Some{Stop{"runtime error:\nAborted, " ++ abort.message(msg)}}
+    case Some{f}:
+      Some{Stop{"runtime error:\n" ++ fired.text(f)}}
     case None{}:
       None{}
 
@@ -177,7 +182,7 @@ def guard.verdict(h: How, r: IC.RB) -> Maybe<&2, Outcome>:
     case IC.RBErr{f}:
       Some{failed.how(h, f)}
     case IC.RBOk{x}:
-      guard.aborted(aborted(x))
+      guard.aborted(fired(x))
 
 # What an iteration's result means for the session.
 def outcome(h: How, r: IC.RB) -> Outcome:
@@ -185,7 +190,7 @@ def outcome(h: How, r: IC.RB) -> Outcome:
     case IC.RBErr{f}:
       failed.how(h, f)
     case IC.RBOk{+x}:
-      value(aborted(x), x)
+      value(fired(x), x)
 
 # EAL's capture layouts for the sized program (ealCaptureLayouts).
 def layouts(expr: Co.V) -> Map<&2, Lf.Shape>:
@@ -199,11 +204,11 @@ def prepared(+expr: Co.V) -> IC.Prog:
 # What the session runs: main, and the guard it runs on each line before
 # main, if main has input refinements.
 type Prog is Data:
-  Prog{+main: IC.Prog, +guard: Maybe<&2, IC.Prog>}
+  Prog{+main: IC.Prog, +guard: Maybe<&2, IC.Prog>, +full: Maybe<&2, Co.V>}
 
 # A program no guard comes before.
 def alone(p: IC.Prog) -> Prog:
-  Prog{p, None{}}
+  Prog{p, None{}, None{}}
 
 def guard.prepared(g: Maybe<&2, Co.V>) -> Maybe<&2, IC.Prog>:
   match g:
@@ -212,10 +217,18 @@ def guard.prepared(g: Maybe<&2, Co.V>) -> Maybe<&2, IC.Prog>:
     case Some{+x}:
       Some{prepared(x)}
 
+# master's program, for the lines the guard refuses, if there is a guard.
+def full.if(g: Maybe<&2, Co.V>, +full: Co.V) -> Maybe<&2, Co.V>:
+  match g:
+    case None{}:
+      None{}
+    case Some{x}:
+      Some{full}
+
 # What the session runs, from main's sized program and the guard's, each
-# prepared under its capture layouts.
-def session(+main: Co.V, g: Maybe<&2, Co.V>) -> Prog:
-  Prog{prepared(main), guard.prepared(g)}
+# prepared under its capture layouts, and master's program.
+def session(+main: Co.V, +g: Maybe<&2, Co.V>, +full: Co.V) -> Prog:
+  Prog{prepared(main), guard.prepared(g), full.if(g, full)}
 
 # The session (evalSessionCore)
 # -----------------------------
@@ -274,40 +287,56 @@ def turn(h: How, r: IC.Run, before: Cost) -> Turn:
     case IC.Run{net, out, +spent, unrolls}:
       turn.of(net, outcome(h, out), cost.plus(before, spent, unrolls))
 
+# A run of master's program in main's place: its net is its own, so main's
+# goes on.
+def turn.kept(net: IC.Net, h: How, r: IC.Run, before: Cost) -> Turn:
+  match r:
+    case IC.Run{fnet, out, +spent, unrolls}:
+      turn.of(net, outcome(h, out), cost.plus(before, spent, unrolls))
+
+# The line the guard refused, answered by master's program.
+def full.run(f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+  match f:
+    case None{}:
+      turn(h, IC.run(m, net, input, fuel(h)), cost)
+    case Some{+v}:
+      +fp = prepared(v)
+      turn.kept(net, h, IC.run(fp, IC.net.new(fp), input, fuel(h)), cost)
+
 # The first iteration runs on 0, unguarded.
 def start(p: Prog, +h: How) -> Turn:
   match p:
-    case Prog{+m, g}:
+    case Prog{+m, g, f}:
       turn(h, IC.run(m, IC.net.new(m), Co.DZero{}, fuel(h)), cost.none())
 
-def checked(v: Maybe<&2, Outcome>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> Turn:
+def checked(v: Maybe<&2, Outcome>, f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> Turn:
   match v:
     case None{}:
       turn(h, IC.run(m, net, input, fuel(h)), cost)
     case Some{o}:
-      turn.of(net, o, cost)
+      full.run(f, h, m, net, input, cost)
 
 # Main on input, once the guard's run r passes it. The guard's
 # interactions count; its unrolls do not, since its recursion sites are
 # its own and the meter's table locates main's.
-def guarded(r: IC.Run, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+def guarded(r: IC.Run, f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
   match r:
     case IC.Run{gnet, out, +spent, unrolls}:
-      checked(guard.verdict(h, out), h, m, net, input, cost.plus(cost, spent, []))
+      checked(guard.verdict(h, out), f, h, m, net, input, cost.plus(cost, spent, []))
 
-def answered(g: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+def answered(g: Maybe<&2, IC.Prog>, f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
   match g:
     case None{}:
       turn(h, IC.run(m, net, input, fuel(h)), cost)
     case Some{+gp}:
-      guarded(IC.run(gp, IC.net.new(gp), input, fuel(h)), h, m, net, input, cost)
+      guarded(IC.run(gp, IC.net.new(gp), input, fuel(h)), f, h, m, net, input, cost)
 
 # The next iteration runs on the line read and the state the last one left,
 # once the guard passes them.
 def answer(p: Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> Turn:
   match p:
-    case Prog{+m, g}:
-      answered(g, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
+    case Prog{+m, g, f}:
+      answered(g, f, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
 
 # The same iterations as the command runs them, in IO: the IC run by ~rt,
 # IC.run itself (run.pure) or bend/Native.bend's, whose loop is C
@@ -326,34 +355,44 @@ def turn.by(~rt: Runner(), +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost
 
 def start.by(~rt: Runner(), p: Prog, +h: How) -> IO(Turn):
   match p:
-    case Prog{+m, g}:
+    case Prog{+m, g, f}:
       turn.by(~rt, h, m, IC.net.new(m), Co.DZero{}, cost.none())
 
-def checked.by(~rt: Runner(), v: Maybe<&2, Outcome>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> IO(Turn):
+def full.by(~rt: Runner(), f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+  match f:
+    case None{}:
+      turn.by(~rt, h, m, net, input, cost)
+    case Some{+v}:
+      +fp = prepared(v)
+      do IO<Turn>:
+        r : IC.Run <- rt(fp, IC.net.new(fp), input, fuel(h))
+        return turn.kept(net, h, r, cost)
+
+def checked.by(~rt: Runner(), v: Maybe<&2, Outcome>, f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> IO(Turn):
   match v:
     case None{}:
       turn.by(~rt, h, m, net, input, cost)
     case Some{o}:
-      IO.pure(Turn, turn.of(net, o, cost))
+      full.by(~rt, f, h, m, net, input, cost)
 
-def guarded.by(~rt: Runner(), r: IC.Run, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+def guarded.by(~rt: Runner(), r: IC.Run, f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
   match r:
     case IC.Run{gnet, out, +spent, unrolls}:
-      checked.by(~rt, guard.verdict(h, out), h, m, net, input, cost.plus(cost, spent, []))
+      checked.by(~rt, guard.verdict(h, out), f, h, m, net, input, cost.plus(cost, spent, []))
 
-def answered.by(~rt: Runner(), g: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+def answered.by(~rt: Runner(), g: Maybe<&2, IC.Prog>, f: Maybe<&2, Co.V>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
   match g:
     case None{}:
       turn.by(~rt, h, m, net, input, cost)
     case Some{+gp}:
       do IO<Turn>:
         r : IC.Run <- rt(gp, IC.net.new(gp), input, fuel(h))
-        guarded.by(~rt, r, h, m, net, input, cost)
+        guarded.by(~rt, r, f, h, m, net, input, cost)
 
 def answer.by(~rt: Runner(), p: Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> IO(Turn):
   match p:
-    case Prog{+m, g}:
-      answered.by(~rt, g, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
+    case Prog{+m, g, f}:
+      answered.by(~rt, g, f, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
 
 # A session on given lines, for the tests: the displays, newest first, and
 # what it spent. It ends where the session would, or where the lines run

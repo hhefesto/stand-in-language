@@ -123,3 +123,191 @@ def render_verbose(l: Loc) -> String:
       "unknown location"
     case Src{file, start, stop}:
       verbose.plain(render(Src{file, start, stop}))
+
+# Where an abort came from (IR.Base's AbortKind and AbortOrigin):
+# compile-time metadata an abort carries into the aborted value it becomes,
+# so a run-time failure can say what raised it. The location is the call
+# for `abort`, the `case` for a pattern match, and the annotation for a
+# refinement check.
+type AbortKind is Data:
+  KRefine{}
+  KUser{}
+  KCase{}
+  KValidator{}
+  KRecursion{}
+  KSizing{}
+  KUnknown{}
+
+type Origin is Data:
+  Origin{+kind: AbortKind, +loc: Loc}
+
+def unknown.origin() -> Origin:
+  Origin{KUnknown{}, Unknown{}}
+
+# The abort at the bottom of every sized recursion chain.
+def recursion.origin() -> Origin:
+  Origin{KRecursion{}, Gen{"sized recursion chain"}}
+
+# The aborts the sizing analysis makes up.
+def sizing.origin() -> Origin:
+  Origin{KSizing{}, Gen{"sizing"}}
+
+def Origin.kind(o: Origin) -> AbortKind:
+  match o:
+    case Origin{kind, loc}:
+      kind
+
+def kind.is.refine(k: AbortKind) -> Bool:
+  match k:
+    case KRefine{}:
+      True{}
+    case _:
+      False{}
+
+def kind.is.unknown(k: AbortKind) -> Bool:
+  match k:
+    case KUnknown{}:
+      True{}
+    case _:
+      False{}
+
+# The kind's number in an artifact (Artifact's putOrigin).
+def kind.tag(k: AbortKind) -> U32:
+  match k:
+    case KRefine{}:
+      0
+    case KUser{}:
+      1
+    case KCase{}:
+      2
+    case KValidator{}:
+      3
+    case KRecursion{}:
+      4
+    case KSizing{}:
+      5
+    case KUnknown{}:
+      6
+
+def kind.eq(a: AbortKind, b: AbortKind) -> Bool:
+  U32.is_eq(kind.tag(a), kind.tag(b))
+
+def kind.of.tag(+n: U32) -> Maybe<&2, AbortKind>:
+  match n:
+    case 0:
+      Some{KRefine{}}
+    case 1:
+      Some{KUser{}}
+    case 2:
+      Some{KCase{}}
+    case 3:
+      Some{KValidator{}}
+    case 4:
+      Some{KRecursion{}}
+    case 5:
+      Some{KSizing{}}
+    case 6:
+      Some{KUnknown{}}
+    case _:
+      None{}
+
+# The constructor's name, as Haskell's derived Show gives it.
+def kind.show(k: AbortKind) -> String:
+  match k:
+    case KRefine{}:
+      "RefinementAbort"
+    case KUser{}:
+      "UserAbort"
+    case KCase{}:
+      "CaseAbort"
+    case KValidator{}:
+      "ValidatorAbort"
+    case KRecursion{}:
+      "RecursionAbort"
+    case KSizing{}:
+      "SizingAbort"
+    case KUnknown{}:
+      "UnknownAbort"
+
+def kind.describe(k: AbortKind) -> String:
+  match k:
+    case KRefine{}:
+      "refinement check"
+    case KUser{}:
+      "abort"
+    case KCase{}:
+      "pattern match"
+    case KValidator{}:
+      "type validator"
+    case KRecursion{}:
+      "recursion limit"
+    case KSizing{}:
+      "sizing analysis"
+    case KUnknown{}:
+      "unknown source"
+
+def at.compact(r: Maybe<&2, String>) -> String:
+  match r:
+    case Some{s}:
+      " at " ++ s
+    case None{}:
+      ""
+
+# What raised an abort, e.g. "refinement check at 3:9" (renderAbortOrigin).
+def origin.render(o: Origin) -> String:
+  match o:
+    case Origin{kind, loc}:
+      kind.describe(kind) ++ at.compact(render_compact(loc))
+
+# What follows an abort's message: " (from ...)", or nothing for an abort
+# of unknown origin (describeAbort).
+def origin.suffix(o: Origin) -> String:
+  match o:
+    case Origin{kind, loc}:
+      Bool.pick(String, kind.is.unknown(kind), "", " (from " ++ origin.render(Origin{kind, loc}) ++ ")")
+
+def Origin.loc(o: Origin) -> Loc:
+  match o:
+    case Origin{kind, loc}:
+      loc
+
+def pos.show(p: Pos) -> String:
+  match p:
+    case Pos{line, col, off}:
+      "SourcePosition {sourcePositionLine = " ++ U32.show(line) ++ ", sourcePositionColumn = "
+        ++ U32.show(col) ++ ", sourcePositionOffset = " ++ U32.show(off) ++ "}"
+
+def file.show(+f: String, none: Bool) -> String:
+  match none:
+    case True{}:
+      "Nothing"
+    case False{}:
+      "Just " ++ Show.string(f)
+
+# The derived Show of a LocTag; `paren` when it is an argument.
+def show(l: Loc, +paren: Bool) -> String:
+  match l:
+    case Src{+file, start, stop}:
+      Bool.pick(String, paren, "(", "") ++ "SourceLoc (SourceSpan {sourceSpanFile = "
+        ++ file.show(file, String.is_empty(file)) ++ ", sourceSpanStart = " ++ pos.show(start)
+        ++ ", sourceSpanEnd = " ++ pos.show(stop) ++ "})" ++ Bool.pick(String, paren, ")", "")
+    case GenIn{reason, parent}:
+      Bool.pick(String, paren, "(", "") ++ "GeneratedLoc " ++ Show.string(reason) ++ " (Just "
+        ++ show(parent, True{}) ++ ")" ++ Bool.pick(String, paren, ")", "")
+    case Gen{reason}:
+      Bool.pick(String, paren, "(", "") ++ "GeneratedLoc " ++ Show.string(reason) ++ " Nothing"
+        ++ Bool.pick(String, paren, ")", "")
+    case Builtin{name}:
+      Bool.pick(String, paren, "(", "") ++ "BuiltinLoc " ++ Show.string(name) ++ Bool.pick(String, paren, ")", "")
+    case RuntimeLoc{}:
+      "RuntimeLoc"
+    case DecompiledLoc{}:
+      "DecompiledLoc"
+    case Unknown{}:
+      "UnknownLoc"
+
+# `show` of an AbortOrigin (a derived record Show, at precedence 0).
+def origin.show(o: Origin) -> String:
+  match o:
+    case Origin{k, l}:
+      "AbortOrigin {abortKind = " ++ kind.show(k) ++ ", abortLoc = " ++ show(l, False{}) ++ "}"

@@ -3,10 +3,10 @@
 #   case_ NAME PROGRAM STDIN [ARGS...]   telomare ARGS on PROGRAM, fed STDIN
 #   repl_ NAME EXPR                      telomare-repl --expr EXPR
 #
-# STDIN takes printf %b escapes, one line per input the program asks for. The
-# port keeps the IC runtime only, so the cases are the interaction-net ones
-# plus the plain sized run, whose output is the semantics IC must reproduce,
-# and the static report. A program's cases share one directory, in order: its
+# STDIN takes printf %b escapes, one line per input the program asks for.
+# The cases cover the plain run (the reference evaluator), the interaction
+# net (--ic), unsized runs (--fast), the static report, artifacts and the
+# REPL. A program's cases share one directory, in order: its
 # `--compile` (haskell-final's `--ic --compile` too) writes the .telc the
 # `telc` cases then run.
 
@@ -68,8 +68,7 @@ case_ tictactoe.telc-certificate tictactoe.telc '' --certificate
 
 # Unsized (--fast): the same displays with every recursion unbounded, the
 # unrolls each site made, the static report without counts, and the fuel
-# cap. The port's meter counts interactions and each unroll once, and its
-# fuel is interactions (test/golden/port).
+# cap.
 case_ simpleplus.fast test/programs/simpleplus.tel '3 4\n' --fast
 case_ simpleplus.fast-meter test/programs/simpleplus.tel '3 4\n' --fast --meter
 case_ simpleplus.fast-certificate test/programs/simpleplus.tel '' --fast --certificate

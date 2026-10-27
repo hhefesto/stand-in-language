@@ -1,6 +1,6 @@
 status 0
 --- stdout
 --- stderr
-wrote tc_ultra_minimal.telc (868 nodes, sources a2a06b3bc4b3)
+wrote tc_ultra_minimal.telc (875 nodes, sources a2a06b3bc4b3)
 --- files
-05beb8872b5f41caeebeacd4aee0ed28ea381439208848782fc274bb0752be52 3419 tc_ultra_minimal.telc
+4e2aca922b9cba95bef90bdbdc9e4d1a35df3b8fbb2962ad3dc58e5cc883e908 4396 tc_ultra_minimal.telc

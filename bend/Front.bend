@@ -216,10 +216,17 @@ def main.or(r: Result<&2, &2, Rs.ResErr, S.Expanded()>) -> Result<&2, &2, Err, S
 type Refined is Data:
   Refined{+name: String, +loc: L.Loc}
 
+def refined.if(yes: Bool, +name: String, +loc: L.Loc, rest: List<&2, Refined>) -> List<&2, Refined>:
+  match yes:
+    case True{}:
+      Refined{name, loc} <> rest
+    case False{}:
+      rest
+
 def refined.add(+name: String, v: S.Desugared(), rest: List<&2, Refined>) -> List<&2, Refined>:
   match v:
-    case S.SCheck{+loc, tc, c}:
-      Refined{name, loc} <> rest
+    case S.SCheck{+loc, k, tc, c}:
+      refined.if(L.kind.is.refine(k), name, loc, rest)
     case _:
       rest
 
@@ -303,8 +310,8 @@ def at.boundary(+locs: Set(), m: Maybe<&2, String>, +site: U32, +acc: Set()) -> 
 # Main's checks the guard runs, by number: those at a refinement's location.
 def boundary(t: T.C, +locs: Set(), acc: Set()) -> Set():
   match t:
-    case T.CCheck{a, cloc, +site, x, y}:
-      boundary(y, locs, boundary(x, locs, at.boundary(locs, L.render_compact(cloc), site, acc)))
+    case T.CCheck{a, o, +site, x, y}:
+      boundary(y, locs, boundary(x, locs, at.boundary(locs, L.render_compact(L.Origin.loc(o)), site, acc)))
     case T.CPair{a, x, y}:
       boundary(y, locs, boundary(x, locs, acc))
     case T.CSetEnv{a, x}:

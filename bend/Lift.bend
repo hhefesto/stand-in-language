@@ -24,7 +24,7 @@ type L is Data:
   LRight{+loc: Lc.Loc, +x: L}
   LAbort{+loc: Lc.Loc}
   LUnsized{+loc: Lc.Loc, +tok: U32}
-  LCheck{+loc: Lc.Loc, +cloc: Lc.Loc, +tc: L, +c: L}
+  LCheck{+loc: Lc.Loc, +o: Lc.Origin, +tc: L, +c: L}
   LRef{+loc: Lc.Loc, +h: String}
 
 # A lifted body and the first index it was seen with.
@@ -61,40 +61,9 @@ type Lifted is Data:
 # The bodies found so far, by hash, and the hashes already taken, by text:
 # inlining repeats bodies, and a repeat costs a lookup, not a digest.
 
-def pos.show(p: Lc.Pos) -> String:
-  match p:
-    case Lc.Pos{line, col, off}:
-      "SourcePosition {sourcePositionLine = " ++ U32.show(line) ++ ", sourcePositionColumn = "
-        ++ U32.show(col) ++ ", sourcePositionOffset = " ++ U32.show(off) ++ "}"
-
-def file.show(+f: String, none: Bool) -> String:
-  match none:
-    case True{}:
-      "Nothing"
-    case False{}:
-      "Just " ++ Sh.string(f)
-
 # The derived Show of a LocTag; `paren` when it is an argument.
 def loc.show(l: Lc.Loc, +paren: Bool) -> String:
-  match l:
-    case Lc.Src{+file, start, stop}:
-      Bool.pick(String, paren, "(", "") ++ "SourceLoc (SourceSpan {sourceSpanFile = "
-        ++ file.show(file, String.is_empty(file)) ++ ", sourceSpanStart = " ++ pos.show(start)
-        ++ ", sourceSpanEnd = " ++ pos.show(stop) ++ "})" ++ Bool.pick(String, paren, ")", "")
-    case Lc.GenIn{reason, parent}:
-      Bool.pick(String, paren, "(", "") ++ "GeneratedLoc " ++ Sh.string(reason) ++ " (Just "
-        ++ loc.show(parent, True{}) ++ ")" ++ Bool.pick(String, paren, ")", "")
-    case Lc.Gen{reason}:
-      Bool.pick(String, paren, "(", "") ++ "GeneratedLoc " ++ Sh.string(reason) ++ " Nothing"
-        ++ Bool.pick(String, paren, ")", "")
-    case Lc.Builtin{name}:
-      Bool.pick(String, paren, "(", "") ++ "BuiltinLoc " ++ Sh.string(name) ++ Bool.pick(String, paren, ")", "")
-    case Lc.RuntimeLoc{}:
-      "RuntimeLoc"
-    case Lc.DecompiledLoc{}:
-      "DecompiledLoc"
-    case Lc.Unknown{}:
-      "UnknownLoc"
+  Lc.show(l, paren)
 
 # `show (Fix Term3LiftingF)`, onto acc: data-fix's Show over Show1
 # instances that quote their constructor text.
@@ -118,8 +87,8 @@ def show.go(l: L, acc: String) -> String:
       "Fix \"AbortF\"" ++ acc
     case LUnsized{loc, tok}:
       "Fix \"Term3LUnsizedUnsizedRecursionToken {unUnsizedRecursionToken = " ++ U32.show(tok) ++ "}\"" ++ acc
-    case LCheck{loc, cloc, tc, c}:
-      "Fix \"Term3LCheckingWrapper(\"" ++ loc.show(cloc, False{}) ++ "\", \""
+    case LCheck{loc, o, tc, c}:
+      "Fix \"Term3LCheckingWrapper(\"" ++ Lc.origin.show(o) ++ "\", \""
         ++ show.go(tc, "\", \"" ++ show.go(c, "\")\"" ++ acc))
     case LRef{loc, h}:
       "Fix \"Term3LDeferRef \"" ++ h ++ acc
@@ -198,11 +167,11 @@ def lift(t: T.C) -> D(L):
       D.pure(L, LAbort{loc})
     case T.CUnsized{loc, tok}:
       D.pure(L, LUnsized{loc, tok})
-    case T.CCheck{loc, cloc, site, tc, c}:
+    case T.CCheck{loc, o, site, tc, c}:
       do D<L>:
         tc2 : L <- lift(tc)
         c2 : L <- lift(c)
-        return LCheck{loc, cloc, tc2, c2}
+        return LCheck{loc, o, tc2, c2}
 
 def lifted(r: L & Map<&2, Body>) -> Lifted:
   (l, m) = r
@@ -212,7 +181,8 @@ def defer.lift(t: T.C) -> Lifted:
   lifted(lift(t)(Map.new(&2, Body)))
 
 # compiled2Term3: a sized program as Term3, every node at one generated
-# location. An aborted value (a result, never a program) reads as Abort.
+# location. An abort reads as haskell-final's, Abort applied to its
+# message, which is the form this EAL (haskell-final's) types.
 def of.expr.at(v: Co.V, +loc: Lc.Loc) -> T.C:
   match v:
     case Co.VZero{}:
@@ -231,10 +201,8 @@ def of.expr.at(v: Co.V, +loc: Lc.Loc) -> T.C:
       T.CLeft{loc, of.expr.at(a, loc)}
     case Co.VRight{a}:
       T.CRight{loc, of.expr.at(a, loc)}
-    case Co.VAbort{}:
-      T.CAbort{loc}
-    case Co.VAborted{m}:
-      T.CAbort{loc}
+    case Co.VAbort{o, m}:
+      T.CSetEnv{loc, T.CPair{loc, T.CAbort{loc}, of.expr.at(m, loc)}}
 
 def of.expr(v: Co.V) -> T.C:
   of.expr.at(v, Lc.Gen{"compiled2Term3"})

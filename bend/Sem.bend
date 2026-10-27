@@ -646,7 +646,7 @@ def of.data(d: Co.D) -> E.X:
     case Co.DPair{a, b}:
       E.XPair{of.data(a), of.data(b)}
 
-# The runnable core as X (an Abort's site is unknown there).
+# The runnable core as X (an abort's site is its origin there).
 def of.core(v: Co.V) -> E.X:
   match v:
     case Co.VZero{}:
@@ -665,7 +665,5 @@ def of.core(v: Co.V) -> E.X:
       E.XLeft{of.core(a)}
     case Co.VRight{a}:
       E.XRight{of.core(a)}
-    case Co.VAbort{}:
-      E.XAbort{E.AtAbort{}}
-    case Co.VAborted{m}:
-      E.XAborted{E.AtAbort{}, of.data(m)}
+    case Co.VAbort{o, m}:
+      E.abort.with(E.AtAbort{o}, of.core(m))

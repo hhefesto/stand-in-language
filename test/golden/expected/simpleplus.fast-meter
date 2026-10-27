@@ -3,8 +3,8 @@ status 0
 enter two digits separated by a space
 3 plus 4 is 7
 --- stderr
-function applications (measured): 2,671
-gate selections (measured):       143
+function applications (measured): 2,699
+gate selections (measured):       171
 recursion unrolls (measured):     110 across 4 sites
 
   site   source            function          unrolls

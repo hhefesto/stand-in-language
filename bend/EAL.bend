@@ -458,7 +458,7 @@ def usage(l: Lf.L, +path: String, acc: Map<&2, Use>) -> Map<&2, Use>:
       usage(x, "L" ++ path, acc)
     case Lf.LRight{loc, x}:
       usage(x, "R" ++ path, acc)
-    case Lf.LCheck{loc, cloc, tc, c}:
+    case Lf.LCheck{loc, o, tc, c}:
       usage(c, path, acc)
     case Lf.LPair{loc, a, b}:
       usage(b, "", usage(a, "", acc))
@@ -524,7 +524,7 @@ def to.a(l: Lf.L, +ranks: Map<&2, U32>) -> A:
       ARight{loc, to.a(x, ranks)}
     case Lf.LAbort{loc}:
       AAbort{loc}
-    case Lf.LCheck{loc, cloc, tc, c}:
+    case Lf.LCheck{loc, o, tc, c}:
       ACheck{loc, to.a(c, ranks)}
     case Lf.LRef{loc, h}:
       ARef{loc, Pair.snd(Map<&2, U32>, U32, Map.get(U32, missing(), ranks, h))}
@@ -4173,7 +4173,7 @@ def refs(l: Lf.L, +acc: List<&2, String>) -> List<&2, String>:
       refs(x, acc)
     case Lf.LRight{loc, x}:
       refs(x, acc)
-    case Lf.LCheck{loc, cloc, tc, c}:
+    case Lf.LCheck{loc, o, tc, c}:
       refs(c, refs(tc, acc))
     case _:
       acc

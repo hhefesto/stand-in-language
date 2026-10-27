@@ -101,7 +101,7 @@ type Watched is Data:
 # The sized program, as the runnable core, the counts that sized it, and
 # what sizing proved of its checks.
 type Sized is Data:
-  Sized{+counts: List<&2, E.TS>, +expr: Co.V, +checks: Checks}
+  Sized{+counts: List<&2, E.TS>, +expr: Co.V, +checks: Checks, +plain: Co.V}
 
 type InSt is Data:
   InSt{+split: Bool, +p: String}
@@ -1231,11 +1231,16 @@ def r.e(r: R) -> Bool:
       e
 
 # The sized program handed on as the runnable core (H1: the runtime cannot
-# be given a sizing form).
-def cored(+counts: List<&2, E.TS>, cs: Checks, r: Result<&2, &2, String, Co.V>) -> Result<&2, &2, SizeFail, Sized>:
+# be given a sizing form), and master's program, every check and chain
+# bottom in it: what the reference evaluator runs, as master runs it.
+def cored(+counts: List<&2, E.TS>, cs: Checks, r: Result<&2, &2, String, Co.V>, p: Result<&2, &2, String, Co.V>) -> Result<&2, &2, SizeFail, Sized>:
   match r:
     case Done{v}:
-      Done{Sized{counts, v, cs}}
+      match p:
+        case Done{pv}:
+          Done{Sized{counts, v, cs, pv}}
+        case Fail{form}:
+          Fail{Leftover{form}}
     case Fail{form}:
       Fail{Leftover{form}}
 
@@ -1258,17 +1263,18 @@ def program(+counts: List<&2, E.TS>, +left: Maybe<&2, Set()>, +inert: Bool, +cm:
 # dead if the certificate is right"), and the erasure checker proves the
 # certificate right. Otherwise the program keeps every check and every
 # bottom.
-def discharged.if(erase: Bool, +cs: Checks, +counts: List<&2, E.TS>, +left: Set(), +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def discharged.if(+os: Map<&2, L.Origin>, erase: Bool, +cs: Checks, +counts: List<&2, E.TS>, +left: Set(), +cm: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match erase:
     case False{}:
-      cored(counts, cs, E.core(program(counts, None{}, False{}, cm, cap)))
+      +plain = E.core(os, program(counts, None{}, False{}, cm, cap))
+      cored(counts, cs, plain, plain)
     case True{}:
-      cored(counts, cs, E.core(program(counts, Some{left}, True{}, cm, cap)))
+      cored(counts, cs, E.core(os, program(counts, Some{left}, True{}, cm, cap)), E.core(os, program(counts, None{}, False{}, cm, cap)))
 
-def discharged(+cs: Checks, +counts: List<&2, E.TS>, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def discharged(+os: Map<&2, L.Origin>, +cs: Checks, +counts: List<&2, E.TS>, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match cs:
     case Checks{v, +boundary, +reaching, +opening, proven, erasure}:
-      discharged.if(erased(erasure), cs, counts, left.of(boundary, reaching, opening), cm, cap)
+      discharged.if(os, erased(erasure), cs, counts, left.of(boundary, reaching, opening), cm, cap)
 
 # The opening call, run as the main run runs.
 def opening.run(+cfg: Cfg, m0: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
@@ -1278,17 +1284,17 @@ def opening.run(+cfg: Cfg, m0: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
     case Some{x0}:
       Some{r.v(eval(fuel(), cfg, JEval{E.remove.checks(x0), E.XZero{}}))}
 
-def tidy(m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +m0: Maybe<&2, E.X>, +cm: E.X, +lim: R, +boundary: Set(), w: Watched, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def tidy(+os: Map<&2, L.Origin>, m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +m0: Maybe<&2, E.X>, +cm: E.X, +lim: R, +boundary: Set(), w: Watched, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match m:
     case Some{fail}:
       Fail{fail}
     case None{}:
-      discharged(checks(r.c(lim), r.e(lim), boundary, r.v(run), opening.run(cfg, m0), r.s(run), w), r.s(run), cm, cap)
+      discharged(os, checks(r.c(lim), r.e(lim), boundary, r.v(run), opening.run(cfg, m0), r.s(run), w), r.s(run), cm, cap)
 
-def main.run.from(+max: U32, +cm: E.X, +boundary: Set(), +lim: R, +mx: E.X, +m0: Maybe<&2, E.X>, w: Watched, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def main.run.from(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +boundary: Set(), +lim: R, +mx: E.X, +m0: Maybe<&2, E.X>, w: Watched, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   +cfg = {Cfg{MSize{}, r.z(lim), max} : Cfg}
   +run = eval(fuel(), cfg, JEval{E.remove.checks(mx), E.XZero{}})
-  tidy(fold.aborted(r.v(run)), run, cfg, m0, cm, lim, boundary, w, cap)
+  tidy(os, fold.aborted(r.v(run)), run, cfg, m0, cm, lim, boundary, w, cap)
 
 # The session's opening call, main on 0, which sizing runs only when the
 # session also guards main: otherwise main is proven only if the main run
@@ -1300,13 +1306,13 @@ def opening.of(unguarded: Bool, +x: E.X) -> Maybe<&2, E.X>:
     case False{}:
       Some{E.app(x, E.XZero{})}
 
-def main.run(+max: U32, +cm: E.X, +boundary: Set(), +lim: R, +x: E.X, g: Maybe<&2, E.X>, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def main.run(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +boundary: Set(), +lim: R, +x: E.X, g: Maybe<&2, E.X>, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match cap:
     case True{}:
-      main.run.from(max, cm, boundary, lim, E.app(x, initial.input(fuel(), Set.to_list(r.p(lim)), in.st(Set.to_list(r.p(lim)), ""))),
+      main.run.from(os, max, cm, boundary, lim, E.app(x, initial.input(fuel(), Set.to_list(r.p(lim)), in.st(Set.to_list(r.p(lim)), ""))),
                     opening.of(none(boundary), x), Watched{x, g}, cap)
     case False{}:
-      main.run.from(max, cm, boundary, lim, naked.envs(x), None{}, Watched{x, g}, cap)
+      main.run.from(os, max, cm, boundary, lim, naked.envs(x), None{}, Watched{x, g}, cap)
 
 def capped(+x: E.X, cap: Bool) -> E.X:
   match cap:
@@ -1323,19 +1329,20 @@ def guard.sem(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
     case Some{v}:
       Some{Sm.of.core(v)}
 
-# sizeTermM: size every recursion in x, cap it (apply it to the symbolic
+# sizeTermM: size every recursion in t, cap it (apply it to the symbolic
 # input) as main is, and give the sized program, at a budget of max
 # unrollings per site. boundary: the checks, by number, the session runs
 # before main; g: the guard that runs them, sized, if main has one.
-def size.at(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
+def size.at(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +t: T.C) -> Result<&2, &2, SizeFail, Sized>:
+  +x = E.of.term3(t)
   +cm = capped(x, cap)
-  main.run(max, cm, boundary,
+  main.run(E.origins(t), max, cm, boundary,
            eval(fuel(), Cfg{MLimits{}, Set.new(), max}, JEval{convert.is(cm), E.XZero{}}),
            x, guard.sem(g), cap)
 
 # A term no session guards.
-def size(+max: U32, +cap: Bool, +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
-  size.at(max, cap, Set.new(), None{}, x)
+def size(+max: U32, +cap: Bool, +t: T.C) -> Result<&2, &2, SizeFail, Sized>:
+  size.at(max, cap, Set.new(), None{}, t)
 
 # The core of a sized guard, if it sized.
 def guard.core(r: Result<&2, &2, SizeFail, Sized>) -> Maybe<&2, Co.V>:
@@ -1344,17 +1351,17 @@ def guard.core(r: Result<&2, &2, SizeFail, Sized>) -> Maybe<&2, Co.V>:
       None{}
     case Done{s}:
       match s:
-        case Sized{counts, expr, checks}:
+        case Sized{counts, expr, checks, plain}:
           Some{expr}
 
 # Main sized as the compiler sizes it, its guard g (if it has one) sized
 # first: the tools' and tests' way to the program the compiler runs.
-def size.guarded(+max: U32, +boundary: Set(), g: Maybe<&2, T.C>, +x: E.X) -> Result<&2, &2, SizeFail, Sized>:
+def size.guarded(+max: U32, +boundary: Set(), g: Maybe<&2, T.C>, +x: T.C) -> Result<&2, &2, SizeFail, Sized>:
   match g:
     case None{}:
       size.at(max, True{}, boundary, None{}, x)
     case Some{t}:
-      size.at(max, True{}, boundary, guard.core(size(max, True{}, E.of.term3(t))), x)
+      size.at(max, True{}, boundary, guard.core(size(max, True{}, t)), x)
 
 # Failures, as the command reports them
 # -------------------------------------

@@ -150,11 +150,25 @@ def check.le(a: Check, b: Check) -> Bool:
         case Check{sb, lb}:
           U32.is_le(sa, sb)
 
+# A refinement check's row; an abort (a check that always fails, since
+# master) has none.
+def check.if(yes: Bool, +site: U32, +cloc: L.Loc, acc: List<&2, Check>) -> List<&2, Check>:
+  match yes:
+    case True{}:
+      Check{site, cloc} <> acc
+    case False{}:
+      acc
+
+def refinement.check(o: L.Origin, +site: U32, acc: List<&2, Check>) -> List<&2, Check>:
+  match o:
+    case L.Origin{k, +cloc}:
+      check.if(L.kind.is.refine(k), site, cloc, acc)
+
 # Every refinement check in the program.
 def checks(t: T.C, acc: List<&2, Check>) -> List<&2, Check>:
   match t:
-    case T.CCheck{a, cloc, site, x, y}:
-      checks(y, checks(x, Check{site, cloc} <> acc))
+    case T.CCheck{a, o, site, x, y}:
+      checks(y, checks(x, refinement.check(o, site, acc)))
     case T.CPair{a, x, y}:
       checks(y, checks(x, acc))
     case T.CSetEnv{a, x}:
@@ -419,16 +433,31 @@ def found(info: Result<&2, &2, String, Lv.Info>) -> Bool:
 # for the program and what it proved of its checks, with what the erasures
 # rest on (gc: the guard's checks, if main has a guard), then the
 # structural reading of its source.
-def report(+counts: List<&2, E.TS>, +run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>, +cs: Sz.Checks, gc: Maybe<&2, Sz.Checks>) -> String:
+def section.ic(ic: Bool, +run: T.C, +cs: Sz.Checks, gc: Maybe<&2, Sz.Checks>) -> List<&2, String>:
+  match ic:
+    case True{}:
+      List.concat(&2, String, [checking(run, cs), erasures(cs, gc), [""]])
+    case False{}:
+      []
+
+# The static report (renderStaticReport). With ic, the port's own section
+# follows the budget: what the IC run (`--ic`) checks and erases.
+def report.of(+ic: Bool, +counts: List<&2, E.TS>, +run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>, +cs: Sz.Checks, gc: Maybe<&2, Sz.Checks>) -> String:
   unlines(List.concat(&2, String, [
     ["static report: what the compiler knows without running the program", ""],
     sizing(counts, run, budget),
     [""],
-    checking(run, cs),
-    erasures(cs, gc),
-    [""],
+    section.ic(ic, run, cs, gc),
     structural(info),
     closing(found(info))]))
+
+# master's static report.
+def report(+counts: List<&2, E.TS>, +run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>, +cs: Sz.Checks, gc: Maybe<&2, Sz.Checks>) -> String:
+  report.of(False{}, counts, run, budget, info, cs, gc)
+
+# With what the IC run checks and erases (`--ic --certificate`).
+def report.ic(+counts: List<&2, E.TS>, +run: T.C, +budget: U32, +info: Result<&2, &2, String, Lv.Info>, +cs: Sz.Checks, gc: Maybe<&2, Sz.Checks>) -> String:
+  report.of(True{}, counts, run, budget, info, cs, gc)
 
 # The static report of a program run unsized (--fast): no counts, so no
 # lists to set beside each other (staticReport Nothing Nothing).
