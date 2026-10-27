@@ -15,11 +15,11 @@ fail=0
 
 build() {
   echo "== build telomare"
-  bend bend/Main.bend -o "$B/telomare" || { echo "BUILD FAILED"; fail=1; return; }
+  bend bend/Native.bend -o "$B/telomare" || { echo "BUILD FAILED"; fail=1; return; }
 }
 
 tests() {
-  for t in lexical front size sem eal ic fast telc ${EXTRA_TESTS:-}; do
+  for t in lexical front size sem eal ic fast telc native ${EXTRA_TESTS:-}; do
     echo "== test $t"
     bend bend/tests/$t.bend -o "$B/test-$t" || { echo "BUILD FAILED $t"; fail=1; continue; }
     "$B/test-$t" > "$S/logs/test-$t.out" 2>&1
