@@ -204,6 +204,16 @@
   kernel (`packages.bendtt`) is built with Lean 4.34 from a new `lean` input
   (Bend's nixpkgs has Lean 4.30, which cannot build it), and `nix develop`
   sets `BENDTT` to it.
+* The Bend `telomare` follows master (merged at `9e7a58d1`): a refined lambda
+  parameter `\(x : T)` is a bare refinement, checked statically; a misplaced
+  pattern annotation is an error; `case` lowers over the scrutinee's spine
+  with the builtins declared in one place; a missing definition is reported
+  where it is used; and imports are looked up beside the program, then in
+  the working directory. The goldens are master's output. With master's
+  `Bool` refinements in the Prelude, sizing no longer proves tic-tac-toe's
+  guard and main for every input, so its main keeps its aborts (the game
+  `1 4 2 5 3` takes 6,166,768 interactions) and the erasure checker no
+  longer runs on it.
 
 ## 0.1.0.0 -- YYYY-mm-dd
 
