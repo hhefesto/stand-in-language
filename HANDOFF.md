@@ -15,6 +15,9 @@ proof (branch `sizing-proof`) is merged in: its notes are
 `bend/SIZING-PROOF.md`, its summary is under P7 ("Since the sizing
 proof"), and its open items are in section 8.
 
+**Updated 2026-10-27, later.** The user asked for a lower-level IC runtime
+(P8, at the end of section 4): its first step, the IC's loop in C, is in.
+
 **Updated 2026-10-27.** telomare/master (`9e7a58d1`, 27 commits past
 `2ae49e0a`) is merged into `bend` (`a68b9850`), at the user's request
 ("bring master changes into bend first"), and the oracle is now master's
@@ -91,8 +94,9 @@ nix flake check                 # telomare, bend-check, bend-tests, goldens: min
 Other remotes on the old machine: `sfultong` (sfultong/stand-in-language),
 `junkicide`, `private` (hhefesto/telomare-private), `delfos` (a LAN host).
 
-To build the port: `bend bend/Main.bend -o /tmp/bin/telomare`. It takes about
-65 s and peaks at 3–5 GB.
+To build the port: `bend bend/Native.bend -o /tmp/bin/telomare` (the
+command with the IC's loop in C, P8; `bend/Main.bend` builds the same
+command on IC.bend's loop). It takes about 90 s and peaks at 3–5 GB.
 
 To build the oracle, i.e. haskell-final's `telomare`:
 ```sh
@@ -1427,6 +1431,78 @@ so say so in the README line.
 - `tests/ic.bend:375` ("Non-exhaustive patterns in case") still fires;
 - counts re-recorded with the reason.
 
+### P8. A lower-level runtime: C, then x86-64 and the GPU (2026-10-27)
+
+The user (2026-10-27), on the suggestion to build "a lower-level IC runtime
+for Telomare ... all in x86 assembly": "Lets take into consideration that I
+like bend and how bend runs. I want x86 assembly, but I also want it to be
+a first term citizen run over GPU. Similar to how bend is able to run in CPU
+or GPU." Then "Start this work", and, once master was in, "then we should
+start to work on the low level runtime".
+
+The shape chosen (Bend's own): one description of the net and its rules,
+with every back end generated from or checked against it, rather than a
+hand-written assembly runtime beside a separate GPU one. IC.bend is that
+description and stays the meaning; the faster loops must leave its net
+word for word.
+
+**N1, done: the IC's loop in C.**
+- `bend/effs/ic.c` (with `ic.js`) is `nt.reduce`, a Bend foreign effect
+  (`bend guide effects`): IC.bend's `reduce` on the same Array<U32> net,
+  eight words per agent, the same free list, the same LIFO pair stack,
+  every rule but the stuck-making ones written as IC.bend has them. It
+  stops at the first pair it leaves to Bend (a rule that makes a stuck
+  value, whose message is a Bend String in Ctl's cold part; an applied
+  `--fast` step, whose unroll is counted there; a pair with no rule), and
+  `bend/Native.bend`'s loop fires that pair with IC.bend's `fire`, then
+  calls the C again. Growing the net is done in C, as IC.bend's `grow`.
+  The JS side fires nothing and hands every pair back.
+- A def with a foreign body fails the proof gate ("N defs rely on unsafe or
+  foreign code"), so Everything.bend must not import it. Main.bend's
+  command takes its runner as a template (`~rt: Ss.Runner()`, Session's
+  `start.by`/`answer.by`): `Main.main` passes `Ss.run.pure` (IC.run) and
+  stays checked; `Native.main` passes `Native.run`. The flake's `telomare`
+  and gate.sh's build are `bend bend/Native.bend`.
+- `bend/tests/native.bend`: closed terms (abort, stuck, fuel, omega) and
+  the tc, simpleplus and tictactoe sessions run both ways leave the same
+  nets word for word (agents up to the bump, the control words), with the
+  same results and interactions. The goldens (38) and the corpus (15/15)
+  pass on the C build.
+- Speed (Ryzen 7 3700X), from `--compile`d programs: the tictactoe game
+  `1 4 2 5 3` 1.54 → 0.65 s; arith.tel (5.3 M interactions) 1.09 → 0.34 s.
+  The C fires about 50 M interactions/s; a profile of the tictactoe run puts
+  the C at about a fifth of the time and the rest in Bend's runtime
+  (`WL_FID_EXIT` 20%, `term_drop` 14%): reading the .telc, the templates,
+  readback, and a new 2^21-word net per guard run (`Ss.answered`).
+
+**What makes the rest possible.** IC.bend's rules each consume the pair they
+fire, so the interaction count does not depend on the order pairs fire in
+(IC.bend's header) — unlike haskell-final's runtime, whose held calls
+could be dropped unfired. That is the property a parallel runtime needs.
+Two things are not local and need design first: guided copying
+(`region`, dup-closure) walks a whole region of the net in one rule, and
+the free list and label counter are global.
+
+**Next, in order (not started):**
+- N2: profile the C (perf) and the Bend left around it; move what costs
+  (net reuse for the guard, readback) before touching assembly.
+- N3: x86-64 assembly where the profile says the C loop is the cost: the
+  dispatch and the hot rules (split-pair, setenv-pair, apply-ref
+  instantiation, dup copying), from the same rule table, checked by
+  tests/native.bend.
+- N4: many cores, HVM2-style: per-thread pair stacks, atomic linking,
+  per-thread free lists and label ranges; counts stay exact, the net's
+  words then need not be IC.bend's (the test would compare readback and
+  counts instead).
+- N5: the GPU, from the same C. Bend's own GPU targets are CUDA and Metal
+  only. olimpo's GPU is an AMD RX 580 (Polaris, gfx803): no CUDA, and
+  ROCm no longer supports it; Vulkan compute (RADV) runs on it, with
+  64-bit integers (checked 2026-10-27), and OpenCL through Mesa's rusticl
+  should (untried). **Open, for the user:** which GPU path (CUDA as Bend does, on an
+  NVIDIA machine; Vulkan or OpenCL for this AMD card; both). The net's
+  shape suits a GPU best for many independent nets at once (one session
+  per work-group), less for one turn's mostly sequential net.
+
 ## 5. Reference: what the research found
 
 Gathered 2026-10-01 by reading `haskell-final` and `bend/`, so the next
@@ -1965,7 +2041,7 @@ The alignment steps that were done:
     `nix/bend.nix`.
 - The pre-commit hook runs `nix run .#bend -- bend/Everything.bend
   --check-only`.
-- By hand: `bend bend/Main.bend -o /tmp/bin/telomare` (~65 s), then
+- By hand: `bend bend/Native.bend -o /tmp/bin/telomare` (~90 s), then
   `test/golden/run.sh /tmp/bin check 'GLOB'`. Modes: `record` (writes
   `expected/`, only with the oracle), `record-port` (writes `port/`) and
   `check`.
