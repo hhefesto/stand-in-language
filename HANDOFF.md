@@ -236,12 +236,53 @@ language and compiler changes to Bend and re-records the oracle:
 
 `test/golden/expected/` and the corpus's `NAME.hs-certificate`,
 `NAME.hs-ic` and `NAME.hs-run` are master's output (built from
-`9e7a58d1`). Pinned counts now: tc_ultra_minimal 146, simpleplus `3 4`
+`9e7a58d1`; re-recorded from `98de497c` after the second merge, below).
+Pinned counts then: tc_ultra_minimal 146, simpleplus `3 4`
 44,175, tictactoe `1 4 2 5 3` 6,166,768, Rational 93,471. `gate.sh all`
 passes: tests, 38 goldens, corpus 15/15 meters and certificates, proofs and
 `--verdict`. Spot checks against master (`/tmp/bx/ct`, `/tmp/bx/et`): case
 near-misses, nested case, partial builtins, edge programs all print the
 same, but for the two EAL differences in section 7.
+
+### Merging master again (2026-10-27, `98de497c`)
+
+`3e72bc00` merges Sam's two commits after `9e7a58d1`: `2a43f8a0` (an
+abort carries its origin, `abort` a builtin) and `98de497c` (Abort and
+Aborted one node). The port follows both: `Loc.AbortKind`/`Origin`;
+`SCheck`/`TCheck` carry a kind and `CCheck` an origin; `Syntax.abort.term`
+is master's `abortTerm` (the `abort` builtin, the case, lambda-pattern and
+validator aborts); `trace` is a builtin (the identity); `Co.VAbort{o, m}`
+is the one abort node; `E.check.of` and `E.bottom` build master's
+`refinementCheckB` and chain bottom, writing master's `AbortB o m` as the
+abort applied to its message (`E.abort.with`), which `E.core` reads back
+as the one node, with the origin from the program's checks (`E.origins`,
+so `Sz.size` takes the Term3). Sem, the checker and the laws keep reading
+an abort as haskell-final's function; on the shapes a program holds the
+two readings agree, and PROOF.bend checks unchanged. The IC compiles
+`VAbort` to an aborted agent (payload: the origin's number, `Prog.origins`)
+over its message; the abort-function agent and its rules are gone, in C
+too. `.telc` stores origins: versions 6 and 7. Sizing on master's check
+shape gives master's new bounds (natudt 122 to 133) with no change to
+Size.bend's evaluator. Pinned counts: tc_ultra_minimal 146, simpleplus `3
+4` 44,344, tictactoe `1 4 2 5 3` 6,180,262, Rational 85,217.
+
+### Master's runtimes (2026-10-27, the user's "on par with master")
+
+A plain run and `--meter` are master's reference evaluator
+(`bend/Reference.bend`, Eval.Meter's environment machine, its
+continuation a list), on master's program: `Sz.Sized.plain`, every check
+and chain bottom in it, node for node master's CompiledExpr (simpleplus
+`3 4` takes 48,741 steps and builds 14,169 nodes on both, tictactoe
+1,416,308 and 386,193, tc_ultra_minimal 409 and 142). `--fast` is master's
+Fast (`bend/Fast.bend`, checks kept), its counts master's (simpleplus `3 4`:
+2,699 applications, 171 gates, 110 unrolls). `--ic` is the port's net.
+`.telc` stores the plain program after the layouts, which a plain run of
+it evaluates. `--certificate` is master's report; `--ic --certificate`
+adds the checks and erasures. The session guard no longer decides an
+outcome: a line it refuses runs master's program (`Ss.Prog.full`), so
+`ic-guard`'s empty line gives "got a line", as on master. The goldens
+need port records only for `*.ic-meter`, `*.compile` (the artifact's
+bytes) and `*.ic-certificate`.
 
 **A finding to keep:** `bend/dev/corpus/ratarith.tel` (Rational arithmetic)
 dies of fuel under both haskell-final `--ic` and the port:
@@ -1937,6 +1978,18 @@ The alignment steps that were done:
 
 ## 7. Differences by design (port vs haskell-final output)
 
+**Since the 2026-10-27 parity work** (section 3, "Master's runtimes"):
+a plain run, `--meter` (steps and nodes built), `--fast` (applications,
+gates, unrolls, its fuel and errors), `--certificate`, `trace`, abort
+origins, and a guard-refused line are master's, and the bullets below on
+them are history. What is still the port's own: `--ic`'s counts and
+meter format (`port/*.ic-meter`), the artifact's bytes (`port/*.compile`;
+the stored node count is master's), `--ic --certificate`'s extra section
+(`port/*.ic-certificate`), EAL (haskell-final's, not master's rework),
+the REPL, the LSP and `--draw-net`'s error (master's optparse prints
+`Invalid option`), the command line's other errors, and ASCII-only
+identifiers.
+
 - `Lexical`: identifier classes are ASCII; Haskell's are Unicode. Every
   program in the repo is ASCII.
 - `--meter` prints the interaction count, not haskell-final's storage
@@ -1970,9 +2023,10 @@ The alignment steps that were done:
   error (stuck): …`. `--fast --ic` and `--fuel` without `--fast` are
   refused with the port's usage errors (exit 2), where haskell-final's
   optparse printed its own (exit 1).
-- `trace` is not a builtin (P2): a program using it fails with "missing
-  definition", where haskell-final treated it as the identity. No program
-  in the repo or the corpus uses it.
+- `trace` is a builtin again, as on master (98de497c's merge undid P2 for
+  parity): it is the identity at desugaring, where master keeps it to
+  resolution, so a `#` over a term holding `trace` hashes as if it were
+  not there. No program in the repo or the corpus uses it.
 - EAL certifies the running term (P3), so a program that fails
   certification can fail differently: a failure inside a let-bound
   function's body reads `a function body this program depends on failed
