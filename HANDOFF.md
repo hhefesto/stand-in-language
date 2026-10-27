@@ -242,11 +242,6 @@ expected to change that (section 4).
 - P7.1–P7.4 were pushed (`16dbe49`, 2026-10-06).
 - P7.5: the user chose (b), and of its forms "the session runs main's
   input refinements" (2026-10-06). Done; see P7. Not pushed.
-- Sam was asked "How happy are we with Abort?" and pointed to DESIGN §10
-  (2026-10-08), the section P7 was planned from. Two follow-ups were put
-  to him; see "After P7.5" under P7. The first was answered yes
-  (2026-10-08) and is done: P7.6, `e64b80a`. Not pushed. The second is
-  pending.
 - The user set the branches' roles (2026-10-08). bend-port is the Bend
   version that keeps up with master's behaviour. The proof that sizing's
   erasures are sound was done on branch `sizing-proof` and is merged here
@@ -1309,7 +1304,7 @@ convention, made a rule.
   guarded, main alone and the guard. `icmeter` runs the guard; `phases`
   times main alone.
 
-**P7.5 Decision point, for the user (and Sam).** What remains are runtime
+**P7.5 Decision point, for the user.** What remains are runtime
 checks. In the goldens that is input validation: simpleplus's `invalid
 input` and tictactoe's input refinements. The options:
 - (a) Keep `Abort` as the residual runtime check (part 2), with its
@@ -1333,17 +1328,6 @@ input` and tictactoe's input refinements. The options:
   as `nonex`'s `case`, unproven bottoms). The guard is the candidate for
   §10's "principled argument for a residual runtime abort", but it keeps
   Abort: its checks are ordinary checks.
-
-Asked of Sam (2026-10-08):
-1. Trust the certificate and erase the bottoms whenever sizing succeeds?
-   **Yes** (2026-10-08): P7.6 below.
-2. Pending. Is the goal Abort gone from the core and the IC entirely? If
-   yes, a step of its own (P8), planned once Sam confirms, since it
-   changes the language:
-   - the guard returns validator verdicts as data, and the session renders
-     `user abort:` from them;
-   - a check that can reach main's result becomes a compile error;
-   - Abort leaves Core, the IC and EAL.
 
 **Done: P7.6, trust the certificate (2026-10-08), `e64b80a`.**
 - `Sz.discharged`: when `proven`, main keeps `(reaching \ boundary) ∪
@@ -1905,8 +1889,6 @@ The alignment steps that were done:
   programs like tictactoe must lose their aborts. (The `bend-proof` check,
   `--verdict` with BendTT's kernel built from the `lean` input, is in
   `nix flake check` since 2026-10-22.)
-- Sam's second question after P7.5 (Abort out of the core and the IC
-  entirely, P8) is still pending.
 - Appendix A analogues, kept for byte-identical output:
   - `__case_*` helper names, with the pruner keeping
     `and`/`listEqual`/`foldl`/`abort` by name (`Desugar.bend`,
