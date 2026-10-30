@@ -16,6 +16,8 @@ fail=0
 build() {
   echo "== build telomare"
   bend bend/Native.bend -o "$B/telomare" || { echo "BUILD FAILED"; fail=1; return; }
+  echo "== build telomare-repl"
+  bend bend/Repl.bend -o "$B/telomare-repl" || { echo "BUILD FAILED repl"; fail=1; return; }
 }
 
 tests() {
