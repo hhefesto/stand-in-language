@@ -21,7 +21,7 @@ build() {
 }
 
 tests() {
-  for t in lexical front size sem eal ic fast telc native ${EXTRA_TESTS:-}; do
+  for t in lexical front size sem eal ealm ic fast telc native ${EXTRA_TESTS:-}; do
     echo "== test $t"
     bend bend/tests/$t.bend -o "$B/test-$t" || { echo "BUILD FAILED $t"; fail=1; continue; }
     "$B/test-$t" > "$S/logs/test-$t.out" 2>&1
