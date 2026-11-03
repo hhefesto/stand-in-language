@@ -464,6 +464,8 @@ def usage(l: Lf.L, +path: String, acc: Map<&2, Use>) -> Map<&2, Use>:
       usage(b, "", usage(a, "", acc))
     case Lf.LSetEnv{loc, x}:
       usage(x, "", acc)
+    case Lf.LAborted{loc, o, m}:
+      usage(m, "", acc)
     case _:
       acc
 
@@ -528,6 +530,8 @@ def to.a(l: Lf.L, +ranks: Map<&2, U32>) -> A:
       ACheck{loc, to.a(c, ranks)}
     case Lf.LRef{loc, h}:
       ARef{loc, Pair.snd(Map<&2, U32>, U32, Map.get(U32, missing(), ranks, h))}
+    case Lf.LAborted{loc, o, m}:
+      ASetEnv{loc, APair{loc, AAbort{loc}, to.a(m, ranks)}}
 
 def ranks.go(ks: List<&2, String>, +i: U32, acc: Map<&2, U32>) -> Map<&2, U32>:
   match ks:

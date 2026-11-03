@@ -2,7 +2,9 @@ import Base
 import ./Core.bend as Co
 import ./Loc.bend as L
 import ./Lift.bend as Lf
-import ./EAL.bend as EAL
+import ./EALm.bend as EM
+import ./Term.bend as T
+import ./Expr.bend as E
 import ./IC.bend as IC
 import ./Meter.bend as Mt
 
@@ -192,9 +194,29 @@ def outcome(h: How, r: IC.RB) -> Outcome:
     case IC.RBOk{+x}:
       value(fired(x), x)
 
-# EAL's capture layouts for the sized program (ealCaptureLayouts).
-def layouts(expr: Co.V) -> Map<&2, Lf.Shape>:
-  EAL.layouts(Lf.defer.lift(Lf.of.expr(expr)))
+# EAL's capture layouts for a sized program, inferred over it
+# (ealCaptureLayouts of inferEALCompiled).
+def layouts(+expr: Co.V) -> Map<&2, Lf.Shape>:
+  EM.lr.layouts(EM.lr.of(False{}, Lf.defer.lift.expr(expr)))
+
+# The capture layouts compiling gives a sized program (certifiedProgramFrom),
+# read off master's sized program (plain: Size's Sized.plain, every check
+# and chain bottom in it): derived from the faithful certificate of the
+# program it was sized from (run, sized with counts), since plain is that
+# program under the sizing substitution, else inferred over plain. The
+# session runs Sized.expr, plain with what sizing discharged erased: its
+# bodies that plain shares (by hash) run under these layouts, the erased
+# ones under none. (Deriving over expr itself never matches once a check
+# is erased, and inferring over a sized program is what the faithful
+# certificate exists to avoid: natudt's ran out of 10G.)
+def layouts.from(+run: T.C, +counts: List<&2, E.TS>, +plain: Co.V) -> Map<&2, Lf.Shape>:
+  EM.lr.layouts(EM.certified.program(Lf.defer.lift(run), counts, plain))
+
+# programPlan of certifiedProgramFrom: those layouts, or, when the sized
+# main does not certify, the refusal (renderRefusal) the IC runtime gives
+# instead of a session.
+def plan.from(+run: T.C, +counts: List<&2, E.TS>, +plain: Co.V) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
+  EM.lr.plan(EM.certified.program(Lf.defer.lift(run), counts, plain))
 
 # prepareEntry: the sized program prepared for runs under EAL's capture
 # layouts for it, so closures are copied as EAL planned.
@@ -225,10 +247,11 @@ def full.if(g: Maybe<&2, Co.V>, +full: Co.V) -> Maybe<&2, Co.V>:
     case Some{x}:
       Some{full}
 
-# What the session runs, from main's sized program and the guard's, each
-# prepared under its capture layouts, and master's program.
-def session(+main: Co.V, +g: Maybe<&2, Co.V>, +full: Co.V) -> Prog:
-  Prog{prepared(main), guard.prepared(g), full.if(g, full)}
+# What the session runs, from main's sized program (under the layouts
+# compiling gave it) and the guard's, each prepared under its capture
+# layouts, and master's program.
+def session(+main: Co.V, +ls: Map<&2, Lf.Shape>, +g: Maybe<&2, Co.V>, +full: Co.V) -> Prog:
+  Prog{IC.prepare(main, ls), guard.prepared(g), full.if(g, full)}
 
 # The session (evalSessionCore)
 # -----------------------------

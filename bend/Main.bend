@@ -654,8 +654,8 @@ def guard.stored(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Tc.Guard>:
 # The sized program as an artifact: haskell-final's `--ic --compile`, less
 # the IC certificate, and with the session's guard (version 5) if main has
 # input refinements.
-def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, +g: Maybe<&2, Sz.Sized>, plain: Co.V) -> Tc.Telc:
-  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks, guard.checks(g)), budget(), Ss.layouts(expr), plain, guard.stored(g))
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, +g: Maybe<&2, Sz.Sized>, +plain: Co.V) -> Tc.Telc:
+  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks, guard.checks(g)), budget(), Ss.layouts.from(run, counts, plain), plain, guard.stored(g))
 
 def prefix(n: Nat, s: String) -> String:
   match n:
@@ -683,15 +683,25 @@ def written(+path: String, t: Tc.Telc) -> IO(Unit):
         wrote(path, Tc.nodes(plain), hash, r)
 
 # What the session runs: main, and its guard if it has one, each prepared.
-def session.of(+expr: Co.V, g: Maybe<&2, Sz.Sized>, +plain: Co.V) -> Ss.Prog:
-  Ss.session(expr, guard.expr(g), plain)
+def session.of(+expr: Co.V, +ls: Map<&2, Lf.Shape>, g: Maybe<&2, Sz.Sized>, +plain: Co.V) -> Ss.Prog:
+  Ss.session(expr, ls, guard.expr(g), plain)
+
+# withICPlan: a session on the net only under the layouts compiling gave
+# main; a main that does not certify after sizing is refused, as master's
+# `die`s with the refusal.
+def admitted(~rt: Ss.Runner(), r: Result<&2, &2, String, Map<&2, Lf.Shape>>, +expr: Co.V, g: Maybe<&2, Sz.Sized>, +plain: Co.V, +meter: Bool) -> IO(Unit):
+  match r:
+    case Fail{why}:
+      IO.die(Unit, 1, why)
+    case Done{+ls}:
+      play(~rt, session.of(expr, ls, g, plain), Sized{}, meter)
 
 # A run on the reference evaluator, as master runs one, or with `--ic` on
 # the net, the port's program and its guard.
-def played(~rt: Ss.Runner(), ic: Bool, +expr: Co.V, g: Maybe<&2, Sz.Sized>, +plain: Co.V, +meter: Bool) -> IO(Unit):
+def played(~rt: Ss.Runner(), ic: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, g: Maybe<&2, Sz.Sized>, +plain: Co.V, +meter: Bool) -> IO(Unit):
   match ic:
     case True{}:
-      play(~rt, session.of(expr, g, plain), Sized{}, meter)
+      admitted(~rt, Ss.plan.from(run, counts, plain), expr, g, plain, meter)
     case False{}:
       ref.play(plain, meter)
 
@@ -710,9 +720,9 @@ def acted(~rt: Ss.Runner(), ic: Bool, r: Result<&2, &2, Failure, Compiled>, act:
             case Sz.Sized{+counts, +expr, +checks, +pl}:
               match act:
                 case Play{}:
-                  played(~rt, ic, expr, g, pl, False{})
+                  played(~rt, ic, run, counts, expr, g, pl, False{})
                 case Meter{}:
-                  played(~rt, ic, expr, g, pl, True{})
+                  played(~rt, ic, run, counts, expr, g, pl, True{})
                 case Report{}:
                   IO.write(Ct.report.of(ic, counts, run, budget(), Lv.info(mods, entry), checks, guard.checks(g)))
                 case Compile{}:

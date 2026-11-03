@@ -140,14 +140,22 @@ def guard.of(guided: Bool, m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
     case Some{t}:
       guard.sized(guided, Sz.size(65536, True{}, t))
 
-def sized(guided: Bool, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+# Main prepared under the layouts compiling gives it (certifiedProgramFrom).
+def prepared.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, +pl: Co.V) -> IC.Prog:
+  match guided:
+    case True{}:
+      IC.prepare(expr, Ss.layouts.from(run, counts, pl))
+    case False{}:
+      IC.prepare(expr, Map.new(&2, Lf.Shape))
+
+def sized(guided: Bool, +run: T.C, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, pl}:
-          Ss.replay(Ss.Prog{prepared(guided, expr), g, Some{pl}}, Ss.Sized{}, lines)
+        case Sz.Sized{+counts, +expr, checks, +pl}:
+          Ss.replay(Ss.Prog{prepared.main(guided, run, counts, expr, pl), g, Some{pl}}, Ss.Sized{}, lines)
 
 def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -155,8 +163,8 @@ def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&
       Ss.Replay{[e], Ss.cost.none()}
     case Done{p}:
       match p:
-        case Fr.Program{run, +g, +boundary}:
-          sized(guided, guard.of(guided, g), Sz.size.guarded(65536, boundary, g, run), lines)
+        case Fr.Program{+run, +g, +boundary}:
+          sized(guided, run, guard.of(guided, g), Sz.size.guarded(65536, boundary, g, run), lines)
 
 # A session as the command runs it: main's input refinements run first, by
 # the guard, and both are guided by EAL.
@@ -237,7 +245,7 @@ def ran(x: IC.Code) -> IC.Code:
 # One body: the usage the IC wires it by, and EAL's for the code it runs.
 def agrees(+body: IC.Code) -> Bool:
   String.eq(ic.uses(Map.to_list(&2, U32, IC.usage(body, "", Map.new(&2, U32)))),
-            eal.uses(Map.to_list(&2, EAL.Use, EAL.usage(IC.lifted(Map.new(&2, String), ran(body)), "", Map.new(&2, EAL.Use)))))
+            eal.uses(Map.to_list(&2, EAL.Use, EAL.usage(IC.lifted(Map.new(&2, String), Map.new(&2, Lc.Origin), ran(body)), "", Map.new(&2, EAL.Use)))))
 
 def all.agree(srcs: List<&2, IC.Src>) -> Bool:
   match srcs:
@@ -450,10 +458,10 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, arithmetic(), "11111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 13445),
+      costs(prelude, case.nonexhaustive(), 13458),
       costs(prelude, pattern.lambda(), 2702),
-      costs(prelude, rational(), 85217),
-      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 632)])))
+      costs(prelude, rational(), 78846),
+      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 635)])))
     IO.print(verdict("ic-guard", all([
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", [""])),
         "got a line|start|"),
@@ -463,10 +471,10 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       146)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      44344)))
+      44390)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      6180262)))
+      5454169)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

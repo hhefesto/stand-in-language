@@ -26,6 +26,7 @@ type L is Data:
   LUnsized{+loc: Lc.Loc, +tok: U32}
   LCheck{+loc: Lc.Loc, +o: Lc.Origin, +tc: L, +c: L}
   LRef{+loc: Lc.Loc, +h: String}
+  LAborted{+loc: Lc.Loc, +o: Lc.Origin, +m: L}
 
 # A lifted body and the first index it was seen with.
 type Body is Data:
@@ -92,6 +93,8 @@ def show.go(l: L, acc: String) -> String:
         ++ show.go(tc, "\", \"" ++ show.go(c, "\")\"" ++ acc))
     case LRef{loc, h}:
       "Fix \"Term3LDeferRef \"" ++ h ++ acc
+    case LAborted{loc, o, m}:
+      "Fix (AbortF (" ++ Lc.origin.show(o) ++ ") (" ++ show.go(m, "))" ++ acc)
 
 def show(l: L) -> String:
   show.go(l, "")
@@ -179,6 +182,46 @@ def lifted(r: L & Map<&2, Body>) -> Lifted:
 
 def defer.lift(t: T.C) -> Lifted:
   lifted(lift(t)(Map.new(&2, Body)))
+
+# A sized program lifted (deferLift . compiled2Term3): every node at one
+# generated location, and an abort master's node (Term3LA), its origin in
+# the hash.
+def lift.expr(v: Co.V, +loc: Lc.Loc) -> D(L):
+  match v:
+    case Co.VZero{}:
+      D.pure(L, LZero{loc})
+    case Co.VPair{a, b}:
+      do D<L>:
+        a2 : L <- lift.expr(a, loc)
+        b2 : L <- lift.expr(b, loc)
+        return LPair{loc, a2, b2}
+    case Co.VEnv{}:
+      D.pure(L, LEnv{loc})
+    case Co.VSetEnv{a}:
+      do D<L>:
+        x2 : L <- lift.expr(a, loc)
+        return LSetEnv{loc, x2}
+    case Co.VDefer{fi, a}:
+      do D<L>:
+        x2 : L <- lift.expr(a, loc)
+        add(loc, fi, x2)
+    case Co.VGate{}:
+      D.pure(L, LGate{loc})
+    case Co.VLeft{a}:
+      do D<L>:
+        x2 : L <- lift.expr(a, loc)
+        return LLeft{loc, x2}
+    case Co.VRight{a}:
+      do D<L>:
+        x2 : L <- lift.expr(a, loc)
+        return LRight{loc, x2}
+    case Co.VAbort{o, m}:
+      do D<L>:
+        m2 : L <- lift.expr(m, loc)
+        return LAborted{loc, o, m2}
+
+def defer.lift.expr(v: Co.V) -> Lifted:
+  lifted(lift.expr(v, Lc.Gen{"compiled2Term3"})(Map.new(&2, Body)))
 
 # compiled2Term3: a sized program as Term3, every node at one generated
 # location. An abort reads as haskell-final's, Abort applied to its

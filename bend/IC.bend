@@ -2066,39 +2066,45 @@ def lifted.ite(s: Lf.L, l: Lf.L, r: Lf.L) -> Lf.L:
 # A collected body as EAL lifts it (Lift), each template reference its
 # code's hash and each if with its branches as written. Locations do not
 # reach the hash.
-def lifted(+hs: Map<&2, String>, x: Code) -> Lf.L:
+def lifted(+hs: Map<&2, String>, +os: Map<&2, Lc.Origin>, x: Code) -> Lf.L:
   match x:
     case CdZero{}:
       Lf.LZero{Lc.Unknown{}}
     case CdPair{a, b}:
-      Lf.LPair{Lc.Unknown{}, lifted(hs, a), lifted(hs, b)}
+      Lf.LPair{Lc.Unknown{}, lifted(hs, os, a), lifted(hs, os, b)}
     case CdEnv{}:
       Lf.LEnv{Lc.Unknown{}}
     case CdSetEnv{a}:
-      Lf.LSetEnv{Lc.Unknown{}, lifted(hs, a)}
+      Lf.LSetEnv{Lc.Unknown{}, lifted(hs, os, a)}
     case CdGate{}:
       Lf.LGate{Lc.Unknown{}}
     case CdLeft{a}:
-      Lf.LLeft{Lc.Unknown{}, lifted(hs, a)}
+      Lf.LLeft{Lc.Unknown{}, lifted(hs, os, a)}
     case CdRight{a}:
-      Lf.LRight{Lc.Unknown{}, lifted(hs, a)}
+      Lf.LRight{Lc.Unknown{}, lifted(hs, os, a)}
     case CdRef{tid, fi}:
       Lf.LRef{Lc.Unknown{}, Pair.snd(Map<&2, String>, String, Map.get(String, "", hs, U32.show(tid)))}
-    case CdAbort{o, m}:
-      Lf.LSetEnv{Lc.Unknown{}, Lf.LPair{Lc.Unknown{}, Lf.LAbort{Lc.Unknown{}}, lifted(hs, m)}}
+    case CdAbort{+o, m}:
+      Lf.LAborted{Lc.Unknown{}, Pair.snd(Map<&2, Lc.Origin>, Lc.Origin, Map.get(Lc.Origin, Lc.unknown.origin(), os, U32.show(o))), lifted(hs, os, m)}
     case CdIte{s, l, r, el, er, cap}:
-      lifted.ite(lifted(hs, s), lifted(hs, l), lifted(hs, r))
+      lifted.ite(lifted(hs, os, s), lifted(hs, os, l), lifted(hs, os, r))
 
 # A body's code hash (tplHash, hashLiftedBody).
-def code.of(+hs: Map<&2, String>, x: Code) -> String:
-  Lf.hash(lifted(hs, x))
+def code.of(+hs: Map<&2, String>, +os: Map<&2, Lc.Origin>, x: Code) -> String:
+  Lf.hash(lifted(hs, os, x))
+
+# The origins numbered so far, by number.
+def org.all(org: Org) -> Map<&2, Lc.Origin>:
+  match org:
+    case Org{n, nums, all}:
+      all
 
 def c.named(+next: U32, +fi: U32, +body: Code, orig: Co.V, srcs: List<&2, Src>, seen: Map<&2, U32>, hs: Maybe<&2, Map<&2, String>>, +org: Org) -> Code & Coll:
   match hs:
     case None{}:
       (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, ""} <> srcs, seen, None{}, org})
     case Some{+m}:
-      +code = code.of(m, body)
+      +code = code.of(m, org.all(org), body)
       (CdRef{next, fi}, Coll{(next + 1 : U32), Src{next, fi, body, orig, code} <> srcs, seen,
                             Some{Map.set(&2, String, m, U32.show(next), code)}, org})
 
@@ -2342,7 +2348,7 @@ def collect(x: Co.V) -> C(Code):
         return CdAbort{n, m2}
 
 def selector(+tid: U32, +fi: U32, +body: Code, orig: Co.V) -> Src:
-  Src{tid, fi, body, orig, code.of(Map.new(&2, String), body)}
+  Src{tid, fi, body, orig, code.of(Map.new(&2, String), Map.new(&2, Lc.Origin), body)}
 
 # The gate's selectors and the identity abort gives: templates 0, 1, 2.
 def selectors() -> List<&2, Src>:
@@ -2579,11 +2585,6 @@ def depth.of(+n: U32) -> Nat:
 
 def scratch() -> Net:
   Net{Array.new(U32, 16n, 0), Array.new(U32, 2n, 0), Ctl{0, cold.none(0), 1, 0, 0, 0, 0, 8192}}
-
-def org.all(org: Org) -> Map<&2, Lc.Origin>:
-  match org:
-    case Org{n, nums, all}:
-      all
 
 def prepared.with(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>, os: Map<&2, Lc.Origin>) -> Prog:
   +ws = tpls(srcs, (CS{scratch(), Map.new(&2, List<&2, U32>)}, []), [])

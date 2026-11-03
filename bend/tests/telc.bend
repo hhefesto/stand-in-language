@@ -100,10 +100,10 @@ def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, g: Maybe<&2, Tc.Gu
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{+counts, +expr, checks, pl}:
+        case Sz.Sized{+counts, +expr, checks, +pl}:
           +ms = mods(Fr.all(srcs))
           Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks, gc), 65536,
-                     Ss.layouts(expr), pl, g)}
+                     Ss.layouts.from(run, counts, pl), pl, g)}
 
 def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, Fr.Program>) -> Maybe<&2, Tc.Telc>:
   match r:
@@ -247,14 +247,14 @@ def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
     case Some{t}:
       guard.sized.expr(Sz.size(65536, True{}, t))
 
-def source.sized(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def source.sized(+run: T.C, g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks, +pl}:
-          Ss.replay(Ss.session(expr, g, pl), Ss.Sized{}, lines)
+        case Sz.Sized{+counts, +expr, checks, +pl}:
+          Ss.replay(Ss.session(expr, Ss.layouts.from(run, counts, pl), g, pl), Ss.Sized{}, lines)
 
 def source.run(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -262,8 +262,8 @@ def source.run(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -
       Ss.Replay{[e], Ss.cost.none()}
     case Done{p}:
       match p:
-        case Fr.Program{run, +g, +boundary}:
-          source.sized(guard.expr(g), Sz.size.guarded(65536, boundary, g, run), lines)
+        case Fr.Program{+run, +g, +boundary}:
+          source.sized(run, guard.expr(g), Sz.size.guarded(65536, boundary, g, run), lines)
 
 # What a decoded program shows, and what it spends, as its source does.
 def runs.alike(+srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:

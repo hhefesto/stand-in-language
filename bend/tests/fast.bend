@@ -91,14 +91,14 @@ def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
     case Some{t}:
       sized.expr(Sz.size(65536, True{}, t))
 
-def sized.of(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def sized.of(+run: T.C, g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks, +pl}:
-          Ss.replay(Ss.session(expr, g, pl), Ss.Sized{}, lines)
+        case Sz.Sized{+counts, +expr, checks, +pl}:
+          Ss.replay(Ss.session(expr, Ss.layouts.from(run, counts, pl), g, pl), Ss.Sized{}, lines)
 
 def sized.compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -106,8 +106,8 @@ def sized.compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String
       Ss.Replay{[e], Ss.cost.none()}
     case Done{p}:
       match p:
-        case Fr.Program{run, +g, +boundary}:
-          sized.of(guard.expr(g), Sz.size.guarded(65536, boundary, g, run), lines)
+        case Fr.Program{+run, +g, +boundary}:
+          sized.of(run, guard.expr(g), Sz.size.guarded(65536, boundary, g, run), lines)
 
 # The same session sized, as the command runs it.
 def sized(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
