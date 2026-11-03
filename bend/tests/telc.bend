@@ -52,30 +52,30 @@ def mods(m: Fr.Mods) -> List<&2, Rs.Mod>:
     case Fr.Mods{ms, errs}:
       ms
 
-def guard.sized.expr(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Co.V>:
+def guard.sized.prog(+t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, IC.Prog>:
   match r:
     case Fail{f}:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, pl}:
-          Some{expr}
+        case Sz.Sized{+counts, +expr, checks, +pl}:
+          Some{Ss.guard.from(t, counts, expr, pl)}
 
-def guard.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Tc.Guard>:
+def guard.sized(+t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Tc.Guard>:
   match r:
     case Fail{f}:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks, pl}:
-          Some{Tc.guard.of(expr, Ss.layouts(expr))}
+        case Sz.Sized{+counts, +expr, checks, +pl}:
+          Some{Tc.guard.of(expr, Ss.layouts.from(t, counts, pl))}
 
 def guard.stored(m: Maybe<&2, T.C>) -> Maybe<&2, Tc.Guard>:
   match m:
     case None{}:
       None{}
-    case Some{t}:
-      guard.sized(Sz.size(65536, True{}, t))
+    case Some{+t}:
+      guard.sized(t, Sz.size(65536, True{}, t))
 
 # The guard's checks, for the report.
 def guard.checks.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Sz.Checks>:
@@ -229,7 +229,7 @@ def run.of(m: Maybe<&2, Tc.Telc>, lines: List<&2, String>) -> Ss.Replay:
     case Some{t}:
       match t:
         case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, guard}:
-          Ss.replay(Ss.Prog{stored(expr, layouts), stored.guard(guard), Some{plain}}, Ss.Sized{}, lines)
+          Ss.replay(Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), stored.guard(guard), plain), Ss.Sized{}, lines)
 
 def replay.text(r: Ss.Replay) -> String:
   match r:
@@ -240,14 +240,14 @@ def replay.text(r: Ss.Replay) -> String:
         case Nil{}:
           "nothing"
 
-def guard.expr(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
+def guard.prog(m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
   match m:
     case None{}:
       None{}
-    case Some{t}:
-      guard.sized.expr(Sz.size(65536, True{}, t))
+    case Some{+t}:
+      guard.sized.prog(t, Sz.size(65536, True{}, t))
 
-def source.sized(+run: T.C, g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def source.sized(+run: T.C, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
@@ -263,7 +263,7 @@ def source.run(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -
     case Done{p}:
       match p:
         case Fr.Program{+run, +g, +boundary}:
-          source.sized(run, guard.expr(g), Sz.size.guarded(65536, boundary, g, run), lines)
+          source.sized(run, guard.prog(g), Sz.size.guarded(65536, boundary, g, run), lines)
 
 # What a decoded program shows, and what it spends, as its source does.
 def runs.alike(+srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:

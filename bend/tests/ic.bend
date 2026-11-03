@@ -117,36 +117,33 @@ def all(bs: List<&2, Bool>) -> Bool:
 # Sessions
 # --------
 
-def prepared(guided: Bool, +expr: Co.V) -> IC.Prog:
+# Main, and the guard, prepared under the layouts compiling gives it
+# (certifiedProgramFrom).
+def layouts.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +pl: Co.V) -> Map<&2, Lf.Shape>:
   match guided:
     case True{}:
-      Ss.prepared(expr)
+      Ss.layouts.from(run, counts, pl)
     case False{}:
-      IC.prepare(expr, Map.new(&2, Lf.Shape))
+      Map.new(&2, Lf.Shape)
 
-def guard.sized(guided: Bool, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, IC.Prog>:
+def prepared.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, +pl: Co.V) -> IC.Prog:
+  IC.prepare(expr, layouts.main(guided, run, counts, pl))
+
+def guard.sized(guided: Bool, +t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, IC.Prog>:
   match r:
     case Fail{f}:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks, pl}:
-          Some{prepared(guided, expr)}
+        case Sz.Sized{+counts, +expr, checks, +pl}:
+          Some{prepared.main(guided, t, counts, expr, pl)}
 
 def guard.of(guided: Bool, m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
   match m:
     case None{}:
       None{}
-    case Some{t}:
-      guard.sized(guided, Sz.size(65536, True{}, t))
-
-# Main prepared under the layouts compiling gives it (certifiedProgramFrom).
-def prepared.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, +pl: Co.V) -> IC.Prog:
-  match guided:
-    case True{}:
-      IC.prepare(expr, Ss.layouts.from(run, counts, pl))
-    case False{}:
-      IC.prepare(expr, Map.new(&2, Lf.Shape))
+    case Some{+t}:
+      guard.sized(guided, t, Sz.size(65536, True{}, t))
 
 def sized(guided: Bool, +run: T.C, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -155,7 +152,7 @@ def sized(guided: Bool, +run: T.C, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.S
     case Done{s}:
       match s:
         case Sz.Sized{+counts, +expr, checks, +pl}:
-          Ss.replay(Ss.Prog{prepared.main(guided, run, counts, expr, pl), g, Some{pl}}, Ss.Sized{}, lines)
+          Ss.replay(Ss.session(expr, layouts.main(guided, run, counts, pl), g, pl), Ss.Sized{}, lines)
 
 def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
   match r:

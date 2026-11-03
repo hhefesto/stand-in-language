@@ -18,14 +18,15 @@ import ./Loc.bend as L
 import ./Reference.bend as Rf
 import ./Fast.bend as Fs
 
-# The `telomare` command (haskell-final's app/Main.hs runSized):
+# The `telomare` command (master's app/Main.hs):
 #
 #   telomare FILE.tel                 run the program (the reference evaluator)
 #   telomare FILE.tel --ic            run it on the interaction-net runtime
 #   telomare FILE.tel --meter         run it, then report what the run cost
 #   telomare FILE.tel --certificate   report what is known without running it
 #   telomare FILE.tel --fast [--fuel N]   run it unsized, each iteration
-#                                     capped at N interactions (0: no cap)
+#                                     capped at N applications and
+#                                     unrollings (0: no cap)
 #   telomare FILE.tel --compile [-o FILE.telc]   compile it once
 #   telomare FILE.telc [--meter | --certificate]   run or report that
 #
@@ -35,13 +36,18 @@ import ./Fast.bend as Fs
 # built, as master counts them, or with `--ic` the net's interactions. A
 # plain run evaluates master's program (Bend/Reference.bend, every check in
 # it); `--ic` runs the port's (sizing's erasures made, the session's guard
-# before main). `--ic --certificate` is the static report. `--fast` skips sizing
-# and runs on the IC too (C4), every recursion unbounded: nothing proves it
-# terminates, so fuel caps each iteration, and its meter adds each
-# recursion site's unrolls. `--compile` writes haskell-final's version 4
-# artifact (Telc.bend), less its IC certificate; `--ic --compile` is the
-# same. haskell-final's --draw-net is not ported. The goldens in
-# test/golden check the command (`test/golden/run.sh BIN_DIR check`).
+# before main, master's program answering a line the guard refuses), under
+# the capture layouts master's EAL gives after sizing (EALm.bend); a main
+# with none is refused, as master's withICPlan refuses it. `--ic
+# --certificate` is the static report and the port's checks section.
+# `--fast` skips sizing and runs master's Fast (Fast.bend), every recursion
+# unbounded: nothing proves it terminates, so fuel caps each iteration, and
+# its meter counts applications, gates and each recursion site's unrolls.
+# `--compile` writes haskell-final's version 4 artifact (Telc.bend), less
+# its IC certificate; `--ic --compile` is the same. The command line is
+# read as master's optparse parser reads it, errors included (`--draw-net`
+# is an invalid option there too). The goldens in test/golden check the command
+# (`test/golden/run.sh BIN_DIR check`).
 
 # What to do with the program.
 type Act is Data:
@@ -49,16 +55,6 @@ type Act is Data:
   Meter{}
   Report{}
   Compile{}
-
-type Arg is Data:
-  AFile{+path: String}
-  AIc{}
-  AFast{}
-  AFuel{}
-  AOut{}
-  AAct{+act: Act, +flag: String}
-  AOld{+flag: String}
-  AUnknown{+flag: String}
 
 # --fuel's cap: not given, the next argument, or given.
 type Fuel is Data:
@@ -78,135 +74,39 @@ type Out is Data:
 type Cmd is Data:
   Cmd{+act: Act, +flag: String, +ic: Bool, +fast: Bool, +fuel: Fuel, +out: Out, +file: Maybe<&2, String>}
   Bad{+msg: String}
+  Help{}
 
 def usage() -> String:
   "usage: telomare FILE.tel [--ic | --fast [--fuel N]] [--meter | --certificate | --compile [-o FILE]]"
 
 # The command line
 # ----------------
+#
+# As master's optparse-applicative parser reads it (app/Main.hs's
+# telomareOpts): TELOMARE-FILE, then in any order one action
+# (`--compile [-o FILE]`, `--certificate` or `--meter`) and one runtime
+# (`--fast [--fuel N]` or `--ic`); `-h` or `--help` shows the help. Its
+# errors are optparse's, the usage after them, exit 1.
 
-# haskell-final's options that the port leaves out.
-def old.flags() -> List<&2, String>:
-  ["--draw-net", "--draw-limit"]
+def usage.block() -> String:
+  "Usage: telomare TELOMARE-FILE \n                [--compile [-o|--output FILE] | --certificate | --meter] \n                [--fast [--fuel N] | --ic]\n\n  A simple but robust virtual machine"
 
-def arg.old(+s: String, old: Bool) -> Arg:
-  match old:
-    case True{}:
-      AOld{s}
-    case False{}:
-      AUnknown{s}
-
-def arg.meter(+s: String, meter: Bool) -> Arg:
-  match meter:
-    case True{}:
-      AAct{Meter{}, s}
-    case False{}:
-      arg.old(s, List.contains(~String, ~String.eq, old.flags(), s))
-
-def arg.report(+s: String, report: Bool) -> Arg:
-  match report:
-    case True{}:
-      AAct{Report{}, s}
-    case False{}:
-      arg.meter(s, String.eq(s, "--meter"))
-
-def arg.compile(+s: String, compile: Bool) -> Arg:
-  match compile:
-    case True{}:
-      AAct{Compile{}, s}
-    case False{}:
-      arg.report(s, String.eq(s, "--certificate"))
-
-def arg.out(+s: String, out: Bool) -> Arg:
-  match out:
-    case True{}:
-      AOut{}
-    case False{}:
-      arg.compile(s, String.eq(s, "--compile"))
-
-def arg.fuel(+s: String, fuel: Bool) -> Arg:
-  match fuel:
-    case True{}:
-      AFuel{}
-    case False{}:
-      arg.out(s, String.eq(s, "-o") || String.eq(s, "--output"))
-
-def arg.fast(+s: String, fast: Bool) -> Arg:
-  match fast:
-    case True{}:
-      AFast{}
-    case False{}:
-      arg.fuel(s, String.eq(s, "--fuel"))
-
-def arg.ic(+s: String, ic: Bool) -> Arg:
-  match ic:
-    case True{}:
-      AIc{}
-    case False{}:
-      arg.fast(s, String.eq(s, "--fast"))
-
-def arg.if(+s: String, flag: Bool) -> Arg:
-  match flag:
-    case True{}:
-      arg.ic(s, String.eq(s, "--ic"))
-    case False{}:
-      AFile{s}
-
-def arg(+s: String) -> Arg:
-  arg.if(s, String.starts_with(s, "-"))
-
-def with.file(c: Cmd, +path: String) -> Cmd:
-  match c:
-    case Cmd{act, flag, ic, fast, fuel, out, file}:
-      match file:
-        case None{}:
-          Cmd{act, flag, ic, fast, fuel, out, Some{path}}
-        case Some{f}:
-          Bad{"telomare: one program at a time\n" ++ usage()}
-    case Bad{m}:
-      Bad{m}
-
-def act.set(+first: String, +a: Act, +flag: String, +ic: Bool, +fast: Bool, +fuel: Fuel, +out: Out, +file: Maybe<&2, String>, none: Bool) -> Cmd:
-  match none:
-    case True{}:
-      Cmd{a, flag, ic, fast, fuel, out, file}
-    case False{}:
-      Bad{"telomare: " ++ first ++ " and " ++ flag ++ " are separate actions; give one\n" ++ usage()}
-
-def with.act(c: Cmd, +a: Act, +flag: String) -> Cmd:
-  match c:
-    case Cmd{act, +first, +ic, +fast, +fuel, +out, +file}:
-      act.set(first, a, flag, ic, fast, fuel, out, file, String.is_empty(first))
-    case Bad{m}:
-      Bad{m}
-
-def with.ic(c: Cmd) -> Cmd:
-  match c:
-    case Cmd{act, flag, ic, fast, fuel, out, file}:
-      Cmd{act, flag, True{}, fast, fuel, out, file}
-    case Bad{m}:
-      Bad{m}
-
-def with.fast(c: Cmd) -> Cmd:
-  match c:
-    case Cmd{act, flag, ic, fast, fuel, out, file}:
-      Cmd{act, flag, ic, True{}, fuel, out, file}
-    case Bad{m}:
-      Bad{m}
-
-def with.fuel(c: Cmd, f: Fuel) -> Cmd:
-  match c:
-    case Cmd{act, flag, ic, fast, fuel, out, file}:
-      Cmd{act, flag, ic, fast, f, out, file}
-    case Bad{m}:
-      Bad{m}
-
-def with.out(c: Cmd, o: Out) -> Cmd:
-  match c:
-    case Cmd{act, flag, ic, fast, fuel, out, file}:
-      Cmd{act, flag, ic, fast, fuel, o, file}
-    case Bad{m}:
-      Bad{m}
+def help.text() -> String:
+  usage.block() ++ "\n\nAvailable options:\n"
+    ++ "  --compile                Size the program once and write it to a .telc file,\n"
+    ++ "                           which later runs can use directly\n"
+    ++ "  -o,--output FILE         Where to write the compiled program\n"
+    ++ "  --certificate            Report each recursion site's inferred iteration count\n"
+    ++ "                           and nesting level, then exit\n"
+    ++ "  --meter                  Run the program, then report what the run cost\n"
+    ++ "  --fast                   Run without sizing: starts immediately, but nothing\n"
+    ++ "                           proves the program terminates\n"
+    ++ "  --fuel N                 Cap on applications and unrollings per iteration\n"
+    ++ "                           under --fast (default 16777216; 0 for no cap)\n"
+    ++ "  --ic                     Run on the interaction-combinator runtime, gated on\n"
+    ++ "                           the program's EAL certificate and guided by its\n"
+    ++ "                           capture layouts\n"
+    ++ "  -h,--help                Show this help text"
 
 # The number s writes in decimal, n so far (ok: every character a digit).
 def digits(s: String, ok: Bool, +n: U32) -> Maybe<&2, U32>:
@@ -224,13 +124,6 @@ def digits(s: String, ok: Bool, +n: U32) -> Maybe<&2, U32>:
         case False{}:
           None{}
 
-def fuel.of(c: Cmd, m: Maybe<&2, U32>) -> Cmd:
-  match m:
-    case Some{n}:
-      with.fuel(c, FuelOf{n})
-    case None{}:
-      Bad{"telomare: --fuel takes a number of interactions\n" ++ usage()}
-
 def number(s: String) -> Maybe<&2, U32>:
   match s:
     case SNil{}:
@@ -238,83 +131,361 @@ def number(s: String) -> Maybe<&2, U32>:
     case SCon{c, rest}:
       digits(SCon{c, rest}, True{}, 0)
 
-# The argument after --fuel is its cap.
-def fuel.arg(c: Cmd, a: Arg) -> Cmd:
+# The action so far: none; --compile's (given: --compile came, not only
+# -o), its output if -o came; --certificate; --meter.
+type Ac is Data:
+  AcNone{}
+  AcCompile{+given: Bool, +out: Maybe<&2, String>}
+  AcCert{}
+  AcMeter{}
+
+# The runtime so far: none; --fast's (given: --fast came, not only
+# --fuel), its fuel if --fuel came; --ic.
+type Mo is Data:
+  MoNone{}
+  MoFast{+given: Bool, +fuel: Maybe<&2, U32>}
+  MoIc{}
+
+# An option whose value is the next argument: -o (by the name written) or
+# --fuel.
+type Wa is Data:
+  WaNone{}
+  WaOut{+name: String}
+  WaFuel{}
+
+# The arguments so far (plain: after `--`, each one positional), or the
+# first thing wrong, or help asked for.
+type Pa is Data:
+  Pa{+file: Maybe<&2, String>, +ac: Ac, +mo: Mo, +wa: Wa, +plain: Bool}
+  PaErr{+msg: String}
+  PaHelp{}
+
+# What an argument is, decided once.
+type Ka is Data:
+  KDash{}
+  KHelp{}
+  KCompile{}
+  KOut{+name: String, +v: Maybe<&2, String>}
+  KCert{}
+  KMeter{}
+  KFast{}
+  KFuel{+v: Maybe<&2, String>}
+  KIc{}
+  KBad{}
+  KPos{}
+
+def ka.of(+s: String) -> Ka:
+  Bool.pick(Ka, String.eq(s, "--"), KDash{},
+  Bool.pick(Ka, String.eq(s, "-h") || String.eq(s, "--help"), KHelp{},
+  Bool.pick(Ka, String.eq(s, "--compile"), KCompile{},
+  Bool.pick(Ka, String.eq(s, "-o"), KOut{"-o", None{}},
+  Bool.pick(Ka, String.eq(s, "--output"), KOut{"--output", None{}},
+  Bool.pick(Ka, String.starts_with(s, "--output="), KOut{"--output", Some{String.drop(s, 9n)}},
+  Bool.pick(Ka, String.starts_with(s, "-o") && Bool.not(String.starts_with(s, "--")), KOut{"-o", Some{String.drop(s, 2n)}},
+  Bool.pick(Ka, String.eq(s, "--certificate"), KCert{},
+  Bool.pick(Ka, String.eq(s, "--meter"), KMeter{},
+  Bool.pick(Ka, String.eq(s, "--fast"), KFast{},
+  Bool.pick(Ka, String.eq(s, "--fuel"), KFuel{None{}},
+  Bool.pick(Ka, String.starts_with(s, "--fuel="), KFuel{Some{String.drop(s, 7n)}},
+  Bool.pick(Ka, String.eq(s, "--ic"), KIc{},
+  Bool.pick(Ka, String.starts_with(s, "-"), KBad{}, KPos{}))))))))))))))
+
+def invalid(+x: String) -> Pa:
+  PaErr{"Invalid option `" ++ x ++ "'"}
+
+def ac.compile(a: Ac) -> Maybe<&2, Ac>:
   match a:
-    case AFile{s}:
-      fuel.of(c, number(s))
+    case AcNone{}:
+      Some{AcCompile{True{}, None{}}}
+    case AcCompile{given, o}:
+      match given:
+        case True{}:
+          None{}
+        case False{}:
+          Some{AcCompile{True{}, o}}
     case _:
-      Bad{"telomare: --fuel takes a number of interactions\n" ++ usage()}
+      None{}
 
-# The argument after -o is the file --compile writes.
-def out.arg(c: Cmd, a: Arg) -> Cmd:
+def ac.only(a: Ac, b: Ac) -> Maybe<&2, Ac>:
   match a:
-    case AFile{s}:
-      with.out(c, OutTo{s})
+    case AcNone{}:
+      Some{b}
     case _:
-      Bad{"telomare: -o takes the name of the file to write\n" ++ usage()}
+      None{}
 
-def with.arg.at(c: Cmd, a: Arg) -> Cmd:
+# -o opens --compile's branch, if no other action came and -o did not.
+def ac.out.open(a: Ac) -> Maybe<&2, Ac>:
   match a:
-    case AFile{+path}:
-      with.file(c, path)
-    case AIc{}:
-      with.ic(c)
-    case AFast{}:
-      with.fast(c)
-    case AFuel{}:
-      with.fuel(c, FuelNext{})
-    case AOut{}:
-      with.out(c, OutNext{})
-    case AAct{act, flag}:
-      with.act(c, act, flag)
-    case AOld{flag}:
-      Bad{"telomare: " ++ flag ++ " is not in the Bend port; haskell-final has it"}
-    case AUnknown{flag}:
-      Bad{"telomare: unknown option " ++ flag ++ "\n" ++ usage()}
-
-# What the next argument is for: anything, --fuel's cap, or -o's file.
-type Next is Data:
-  Free{}
-  ForFuel{}
-  ForOut{}
-
-def next.out(o: Out) -> Next:
-  match o:
-    case OutNext{}:
-      ForOut{}
+    case AcNone{}:
+      Some{AcCompile{False{}, None{}}}
+    case AcCompile{given, o}:
+      match o:
+        case None{}:
+          Some{AcCompile{given, None{}}}
+        case Some{p}:
+          None{}
     case _:
-      Free{}
+      None{}
 
-def next.of(c: Cmd) -> Next:
-  match c:
-    case Cmd{act, flag, ic, fast, fuel, out, file}:
-      match fuel:
-        case FuelNext{}:
-          ForFuel{}
-        case _:
-          next.out(out)
-    case Bad{m}:
-      Free{}
+def ac.out(a: Ac, +p: String) -> Ac:
+  match a:
+    case AcCompile{given, o}:
+      AcCompile{given, Some{p}}
+    case other:
+      other
 
-def with.arg.for(n: Next, c: Cmd, a: Arg) -> Cmd:
-  match n:
-    case Free{}:
-      with.arg.at(c, a)
-    case ForFuel{}:
-      fuel.arg(c, a)
-    case ForOut{}:
-      out.arg(c, a)
+def mo.fast(m: Mo) -> Maybe<&2, Mo>:
+  match m:
+    case MoNone{}:
+      Some{MoFast{True{}, None{}}}
+    case MoFast{given, f}:
+      match given:
+        case True{}:
+          None{}
+        case False{}:
+          Some{MoFast{True{}, f}}
+    case MoIc{}:
+      None{}
 
-def with.arg(+c: Cmd, a: Arg) -> Cmd:
-  with.arg.for(next.of(c), c, a)
+def mo.ic(m: Mo) -> Maybe<&2, Mo>:
+  match m:
+    case MoNone{}:
+      Some{MoIc{}}
+    case _:
+      None{}
 
-def args.go(xs: List<String>, c: Cmd) -> Cmd:
+def mo.fuel.open(m: Mo) -> Maybe<&2, Mo>:
+  match m:
+    case MoNone{}:
+      Some{MoFast{False{}, None{}}}
+    case MoFast{given, f}:
+      match f:
+        case None{}:
+          Some{MoFast{given, None{}}}
+        case Some{n}:
+          None{}
+    case MoIc{}:
+      None{}
+
+def mo.fuel(m: Mo, +n: U32) -> Mo:
+  match m:
+    case MoFast{given, f}:
+      MoFast{given, Some{n}}
+    case other:
+      other
+
+def pa.fuel(m: Maybe<&2, U32>, +file: Maybe<&2, String>, +ac: Ac, +mo: Mo, plain: Bool, +x: String) -> Pa:
+  match m:
+    case Some{n}:
+      Pa{file, ac, mo.fuel(mo, n), WaNone{}, plain}
+    case None{}:
+      PaErr{"option --fuel: cannot parse value `" ++ x ++ "'"}
+
+def pa.pos(file: Maybe<&2, String>, +ac: Ac, +mo: Mo, plain: Bool, +x: String) -> Pa:
+  match file:
+    case None{}:
+      Pa{Some{x}, ac, mo, WaNone{}, plain}
+    case Some{f}:
+      Bool.pick(Pa, String.starts_with(x, "-"), invalid(x), PaErr{"Invalid argument `" ++ x ++ "'"})
+
+def pa.ac(m: Maybe<&2, Ac>, +file: Maybe<&2, String>, +mo: Mo, +x: String) -> Pa:
+  match m:
+    case Some{a}:
+      Pa{file, a, mo, WaNone{}, False{}}
+    case None{}:
+      invalid(x)
+
+def pa.mo(m: Maybe<&2, Mo>, +file: Maybe<&2, String>, +ac: Ac, +x: String) -> Pa:
+  match m:
+    case Some{n}:
+      Pa{file, ac, n, WaNone{}, False{}}
+    case None{}:
+      invalid(x)
+
+def pa.out(m: Maybe<&2, Ac>, +n: String, v: Maybe<&2, String>, +file: Maybe<&2, String>, +mo: Mo, +x: String) -> Pa:
+  match m:
+    case Some{a}:
+      match v:
+        case Some{p}:
+          Pa{file, ac.out(a, p), mo, WaNone{}, False{}}
+        case None{}:
+          Pa{file, a, mo, WaOut{n}, False{}}
+    case None{}:
+      invalid(x)
+
+def pa.fuel.opt(m: Maybe<&2, Mo>, v: Maybe<&2, String>, +file: Maybe<&2, String>, +ac: Ac, +x: String) -> Pa:
+  match m:
+    case Some{o}:
+      match v:
+        case Some{+p}:
+          pa.fuel(number(p), file, ac, o, False{}, p)
+        case None{}:
+          Pa{file, ac, o, WaFuel{}, False{}}
+    case None{}:
+      invalid(x)
+
+def pa.ka(k: Ka, +file: Maybe<&2, String>, +ac: Ac, +mo: Mo, +x: String) -> Pa:
+  match k:
+    case KDash{}:
+      Pa{file, ac, mo, WaNone{}, True{}}
+    case KHelp{}:
+      PaHelp{}
+    case KCompile{}:
+      pa.ac(ac.compile(ac), file, mo, x)
+    case KOut{n, v}:
+      pa.out(ac.out.open(ac), n, v, file, mo, x)
+    case KCert{}:
+      pa.ac(ac.only(ac, AcCert{}), file, mo, x)
+    case KMeter{}:
+      pa.ac(ac.only(ac, AcMeter{}), file, mo, x)
+    case KFast{}:
+      pa.mo(mo.fast(mo), file, ac, x)
+    case KFuel{v}:
+      pa.fuel.opt(mo.fuel.open(mo), v, file, ac, x)
+    case KIc{}:
+      pa.mo(mo.ic(mo), file, ac, x)
+    case KBad{}:
+      invalid(x)
+    case KPos{}:
+      pa.pos(file, ac, mo, False{}, x)
+
+def pa.arg(plain: Bool, +file: Maybe<&2, String>, +ac: Ac, +mo: Mo, +x: String) -> Pa:
+  match plain:
+    case True{}:
+      pa.pos(file, ac, mo, True{}, x)
+    case False{}:
+      pa.ka(ka.of(x), file, ac, mo, x)
+
+def pa.want(wa: Wa, plain: Bool, +file: Maybe<&2, String>, +ac: Ac, +mo: Mo, +x: String) -> Pa:
+  match wa:
+    case WaOut{n}:
+      Pa{file, ac.out(ac, x), mo, WaNone{}, plain}
+    case WaFuel{}:
+      pa.fuel(number(x), file, ac, mo, plain, x)
+    case WaNone{}:
+      pa.arg(plain, file, ac, mo, x)
+
+def pa.step(p: Pa, +x: String) -> Pa:
+  match p:
+    case Pa{+file, +ac, +mo, wa, plain}:
+      pa.want(wa, plain, file, ac, mo, x)
+    case PaErr{m}:
+      PaErr{m}
+    case PaHelp{}:
+      PaHelp{}
+
+def pa.go(xs: List<String>, p: Pa) -> Pa:
   match xs:
     case Nil{}:
-      c
-    case Con{x, rest}:
-      args.go(rest, with.arg(c, arg(x)))
+      p
+    case Con{+x, rest}:
+      pa.go(rest, pa.step(p, x))
+
+# What is missing at the end, as optparse lists it.
+def miss.file(m: Maybe<&2, String>) -> List<&2, String>:
+  match m:
+    case None{}:
+      ["TELOMARE-FILE"]
+    case Some{f}:
+      []
+
+def miss.ac(a: Ac) -> List<&2, String>:
+  match a:
+    case AcCompile{given, o}:
+      match given:
+        case True{}:
+          []
+        case False{}:
+          ["--compile"]
+    case _:
+      []
+
+def miss.mo(m: Mo) -> List<&2, String>:
+  match m:
+    case MoFast{given, f}:
+      match given:
+        case True{}:
+          []
+        case False{}:
+          ["--fast"]
+    case _:
+      []
+
+def act.of(a: Ac) -> Act:
+  match a:
+    case AcNone{}:
+      Play{}
+    case AcCompile{g, o}:
+      Compile{}
+    case AcCert{}:
+      Report{}
+    case AcMeter{}:
+      Meter{}
+
+def out.of(a: Ac) -> Out:
+  match a:
+    case AcCompile{g, o}:
+      match o:
+        case Some{p}:
+          OutTo{p}
+        case None{}:
+          NoOut{}
+    case _:
+      NoOut{}
+
+def is.ic(m: Mo) -> Bool:
+  match m:
+    case MoIc{}:
+      True{}
+    case _:
+      False{}
+
+def is.fast(m: Mo) -> Bool:
+  match m:
+    case MoFast{g, f}:
+      True{}
+    case _:
+      False{}
+
+# --fuel N's cap (master's toCap gives 0 as no cap, as FuelOf{0} is).
+def fuel.from(m: Mo) -> Fuel:
+  match m:
+    case MoFast{g, f}:
+      match f:
+        case Some{n}:
+          FuelOf{n}
+        case None{}:
+          NoFuel{}
+    case _:
+      NoFuel{}
+
+def pa.missing(ms: List<&2, String>, +file: Maybe<&2, String>, +ac: Ac, +mo: Mo) -> Cmd:
+  match ms:
+    case Nil{}:
+      Cmd{act.of(ac), "", is.ic(mo), is.fast(mo), fuel.from(mo), out.of(ac), file}
+    case Con{m, rest}:
+      Bad{"Missing: " ++ String.join(Con{m, rest}, " ")}
+
+def pa.wanted(wa: Wa, +file: Maybe<&2, String>, +ac: Ac, +mo: Mo) -> Cmd:
+  match wa:
+    case WaOut{n}:
+      Bad{"The option `" ++ n ++ "` expects an argument."}
+    case WaFuel{}:
+      Bad{"The option `--fuel` expects an argument."}
+    case WaNone{}:
+      pa.missing(List.append(&2, String, miss.file(file), List.append(&2, String, miss.ac(ac), miss.mo(mo))), file, ac, mo)
+
+def pa.end(p: Pa) -> Cmd:
+  match p:
+    case Pa{+file, +ac, +mo, wa, plain}:
+      pa.wanted(wa, file, ac, mo)
+    case PaErr{m}:
+      Bad{m}
+    case PaHelp{}:
+      Help{}
+
+def args.go(xs: List<String>) -> Cmd:
+  pa.end(pa.go(xs, Pa{None{}, AcNone{}, MoNone{}, WaNone{}, False{}}))
 
 # The module a path names (takeBaseName): its last component, less the
 # extension.
@@ -533,21 +704,26 @@ def failed(f: Failure) -> String:
     case Unrunnable{form}:
       "telomare: --fast left " ++ form ++ " in the program (a bug)"
 
+# The session's guard: its Term3 as written (run, for its layouts'
+# derivation, as main's) and sized.
+type Guard is Data:
+  Guard{+run: T.C, +sized: Sz.Sized}
+
 # The program compiled: main's Term3 as run (for locating its recursion
-# sites), main sized, and the session's guard sized, if main has input
+# sites), main sized, and the session's guard, if main has input
 # refinements.
 type Compiled is Data:
-  Compiled{+run: T.C, +sized: Sz.Sized, +guard: Maybe<&2, Sz.Sized>}
+  Compiled{+run: T.C, +sized: Sz.Sized, +guard: Maybe<&2, Guard>}
 
-def guard.sized(+g: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
+def guard.sized(+g: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Maybe<&2, Guard>>:
   match r:
     case Fail{f}:
       Fail{Unsizable{f, g}}
     case Done{gs}:
-      Done{Some{gs}}
+      Done{Some{Guard{g, gs}}}
 
 # The guard is certified and sized as main is: it runs on the IC too.
-def guard.certified(+g: T.C, c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
+def guard.certified(+g: T.C, c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, Maybe<&2, Guard>>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
@@ -555,7 +731,7 @@ def guard.certified(+g: T.C, c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, Ma
       guard.sized(g, Sz.size(budget(), True{}, g))
 
 # The session's guard, compiled, if main has input refinements.
-def guard.compiled(g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
+def guard.compiled(g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Maybe<&2, Guard>>:
   match g:
     case None{}:
       Done{None{}}
@@ -564,7 +740,7 @@ def guard.compiled(g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Si
 
 # Main sized, and its guard; a failure to size main is reported before the
 # guard's.
-def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, g: Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>) -> Result<&2, &2, Failure, Compiled>:
+def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, g: Result<&2, &2, Failure, Maybe<&2, Guard>>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{f}:
       Fail{Unsizable{f, run}}
@@ -575,33 +751,39 @@ def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, g: Result<&2, &2,
         case Done{gs}:
           Done{Compiled{run, s, gs}}
 
-def guard.expr(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Co.V>:
+def guard.expr(g: Maybe<&2, Guard>) -> Maybe<&2, Co.V>:
   match g:
     case None{}:
       None{}
-    case Some{s}:
-      match s:
-        case Sz.Sized{counts, expr, checks, pl}:
-          Some{expr}
+    case Some{x}:
+      match x:
+        case Guard{run, s}:
+          match s:
+            case Sz.Sized{counts, expr, checks, pl}:
+              Some{expr}
 
 # The guard's checks, for the report.
-def guard.checks(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Sz.Checks>:
+def guard.checks(g: Maybe<&2, Guard>) -> Maybe<&2, Sz.Checks>:
   match g:
     case None{}:
       None{}
-    case Some{s}:
-      match s:
-        case Sz.Sized{counts, expr, checks, pl}:
-          Some{checks}
+    case Some{x}:
+      match x:
+        case Guard{run, s}:
+          match s:
+            case Sz.Sized{counts, expr, checks, pl}:
+              Some{checks}
 
 # Main is sized after its guard is, since the erasure checker runs main
-# only on the inputs the guard passes (SIZING-PROOF.md §4).
-def guarded(+run: T.C, +boundary: Set(), g: Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>) -> Result<&2, &2, Failure, Compiled>:
+# only on the inputs the guard passes (SIZING-PROOF.md §4). check: whether
+# the erasure checker runs (not for a plain run, which runs main with
+# every check).
+def guarded(+run: T.C, +boundary: Set(), g: Result<&2, &2, Failure, Maybe<&2, Guard>>, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
   match g:
     case Fail{e}:
-      sized(run, Sz.size.at(budget(), True{}, boundary, None{}, run), Fail{e})
+      sized(run, Sz.size.at.checked(budget(), True{}, boundary, None{}, run, check), Fail{e})
     case Done{+gs}:
-      sized(run, Sz.size.at(budget(), True{}, boundary, guard.expr(gs), run), Done{gs})
+      sized(run, Sz.size.at.checked(budget(), True{}, boundary, guard.expr(gs), run, check), Done{gs})
 
 # certifyMain gates the program before its sizing does (Driver's
 # compileMainReporting), whatever the action. It certifies the term that is
@@ -610,25 +792,41 @@ def guarded(+run: T.C, +boundary: Set(), g: Result<&2, &2, Failure, Maybe<&2, Sz
 # sizing after it, never side by side: EAL forks over the bodies, and run
 # alongside sizing the two would split the lanes and starve those forks.
 # So the guard is compiled, certified and sized, before main is sized.
-def certified(+run: T.C, g: Maybe<&2, T.C>, +boundary: Set(), c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, Compiled>:
+def certified(+run: T.C, g: Maybe<&2, T.C>, +boundary: Set(), c: Maybe<&2, EM.Err>, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
     case None{}:
-      guarded(run, boundary, guard.compiled(g))
+      guarded(run, boundary, guard.compiled(g), check)
 
-def resolved(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Result<&2, &2, Failure, Compiled>:
+def resolved(r: Result<&2, &2, Fr.Err, Fr.Program>, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{e}:
       Fail{Refused{e}}
     case Done{p}:
       match p:
         case Fr.Program{+run, g, +boundary}:
-          certified(run, g, boundary, EM.certify(Lf.defer.lift(run)))
+          certified(run, g, boundary, EM.certify(Lf.defer.lift(run)), check)
 
-# The parsed modules compiled: resolved, certified, sized.
-def compile(m: Fr.Mods, +entry: String) -> Result<&2, &2, Failure, Compiled>:
-  resolved(Fr.program(m, entry))
+# The parsed modules compiled: resolved, certified, sized (the erasure
+# checker run when check says so).
+def compile(m: Fr.Mods, +entry: String, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
+  resolved(Fr.program(m, entry), check)
+
+# Whether an action uses the erasures: a run on the net, the report, the
+# artifact; a plain run or its meter does not.
+def checks.erasures(ic: Bool, act: Act) -> Bool:
+  match ic:
+    case True{}:
+      True{}
+    case False{}:
+      match act:
+        case Play{}:
+          False{}
+        case Meter{}:
+          False{}
+        case _:
+          True{}
 
 # Compiling (--compile)
 # ---------------------
@@ -642,19 +840,21 @@ def out.path(o: Out, +file: String) -> String:
     case _:
       Bool.pick(String, String.ends_with(file, ".tel"), file ++ "c", file ++ ".telc")
 
-def guard.stored(g: Maybe<&2, Sz.Sized>) -> Maybe<&2, Tc.Guard>:
+def guard.stored(g: Maybe<&2, Guard>) -> Maybe<&2, Tc.Guard>:
   match g:
     case None{}:
       None{}
-    case Some{s}:
-      match s:
-        case Sz.Sized{counts, +expr, checks, pl}:
-          Some{Tc.guard.of(expr, Ss.layouts(expr))}
+    case Some{x}:
+      match x:
+        case Guard{+run, s}:
+          match s:
+            case Sz.Sized{+counts, +expr, checks, +pl}:
+              Some{Tc.guard.of(expr, Ss.layouts.from(run, counts, pl))}
 
 # The sized program as an artifact: haskell-final's `--ic --compile`, less
 # the IC certificate, and with the session's guard (version 5) if main has
 # input refinements.
-def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, +g: Maybe<&2, Sz.Sized>, +plain: Co.V) -> Tc.Telc:
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, +g: Maybe<&2, Guard>, +plain: Co.V) -> Tc.Telc:
   Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks, guard.checks(g)), budget(), Ss.layouts.from(run, counts, plain), plain, guard.stored(g))
 
 def prefix(n: Nat, s: String) -> String:
@@ -682,14 +882,26 @@ def written(+path: String, t: Tc.Telc) -> IO(Unit):
         r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, guard}))
         wrote(path, Tc.nodes(plain), hash, r)
 
+# The guard prepared under the layouts its derivation gives (Ss.guard.from).
+def guard.prog(g: Maybe<&2, Guard>) -> Maybe<&2, IC.Prog>:
+  match g:
+    case None{}:
+      None{}
+    case Some{x}:
+      match x:
+        case Guard{+run, s}:
+          match s:
+            case Sz.Sized{+counts, +expr, checks, +pl}:
+              Some{Ss.guard.from(run, counts, expr, pl)}
+
 # What the session runs: main, and its guard if it has one, each prepared.
-def session.of(+expr: Co.V, +ls: Map<&2, Lf.Shape>, g: Maybe<&2, Sz.Sized>, +plain: Co.V) -> Ss.Prog:
-  Ss.session(expr, ls, guard.expr(g), plain)
+def session.of(+expr: Co.V, +ls: Map<&2, Lf.Shape>, g: Maybe<&2, Guard>, +plain: Co.V) -> Ss.Prog:
+  Ss.session(expr, ls, guard.prog(g), plain)
 
 # withICPlan: a session on the net only under the layouts compiling gave
 # main; a main that does not certify after sizing is refused, as master's
 # `die`s with the refusal.
-def admitted(~rt: Ss.Runner(), r: Result<&2, &2, String, Map<&2, Lf.Shape>>, +expr: Co.V, g: Maybe<&2, Sz.Sized>, +plain: Co.V, +meter: Bool) -> IO(Unit):
+def admitted(~rt: Ss.Runner(), r: Result<&2, &2, String, Map<&2, Lf.Shape>>, +expr: Co.V, g: Maybe<&2, Guard>, +plain: Co.V, +meter: Bool) -> IO(Unit):
   match r:
     case Fail{why}:
       IO.die(Unit, 1, why)
@@ -698,7 +910,7 @@ def admitted(~rt: Ss.Runner(), r: Result<&2, &2, String, Map<&2, Lf.Shape>>, +ex
 
 # A run on the reference evaluator, as master runs one, or with `--ic` on
 # the net, the port's program and its guard.
-def played(~rt: Ss.Runner(), ic: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, g: Maybe<&2, Sz.Sized>, +plain: Co.V, +meter: Bool) -> IO(Unit):
+def played(~rt: Ss.Runner(), ic: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, g: Maybe<&2, Guard>, +plain: Co.V, +meter: Bool) -> IO(Unit):
   match ic:
     case True{}:
       admitted(~rt, Ss.plan.from(run, counts, plain), expr, g, plain, meter)
@@ -980,7 +1192,7 @@ def telc.play(~rt: Ss.Runner(), ic: Bool, t: Tc.Telc, +meter: Bool) -> IO(Unit):
     case True{}:
       match t:
         case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, guard}:
-          play(~rt, Ss.Prog{stored(expr, layouts), stored.guard(guard), Some{plain}}, Sized{}, meter)
+          play(~rt, Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), stored.guard(guard), plain), Sized{}, meter)
     case False{}:
       match t:
         case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, +plain, guard}:
@@ -1032,12 +1244,12 @@ def telc.run(~rt: Ss.Runner(), act: Act, ic: Bool, fast: Bool, +path: String) ->
 
 # The modules parsed and expanded once, for both the compiler and the
 # static report.
-def parsed(~rt: Ss.Runner(), act: Act, ic: Bool, h: Ss.How, +entry: String, +path: String, srcs: List<&2, Fr.Src>, m: Fr.Mods) -> IO(Unit):
+def parsed(~rt: Ss.Runner(), +act: Act, +ic: Bool, h: Ss.How, +entry: String, +path: String, srcs: List<&2, Fr.Src>, m: Fr.Mods) -> IO(Unit):
   match h:
     case Ss.Sized{}:
       match m:
         case Fr.Mods{+mods, errs}:
-          acted(~rt, ic, compile(Fr.Mods{mods, errs}, entry), act, mods, entry, srcs, path)
+          acted(~rt, ic, compile(Fr.Mods{mods, errs}, entry, checks.erasures(ic, act)), act, mods, entry, srcs, path)
     case Ss.Fast{fuel}:
       fast.parsed(~rt, act, fuel, entry, m)
 
@@ -1138,15 +1350,17 @@ def command(~rt: Ss.Runner(), c: Cmd) -> IO(Unit):
     case Cmd{+act, flag, ic, fast, fuel, +out, file}:
       command.out(~rt, out.bad(act, out), act, ic, fast, fuel, out, file)
     case Bad{msg}:
-      IO.die(Unit, 2, msg)
+      IO.die(Unit, 1, msg ++ "\n\n" ++ usage.block())
+    case Help{}:
+      IO.print(help.text())
 
 # The command line, program name first (IO.args keeps argv[0]).
 def args(~rt: Ss.Runner(), xs: List<String>) -> IO(Unit):
   match xs:
     case self <> rest:
-      command(~rt, args.go(rest, Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}}))
+      command(~rt, args.go(rest))
     case _:
-      command(~rt, Cmd{Play{}, "", False{}, False{}, NoFuel{}, NoOut{}, None{}})
+      command(~rt, args.go([]))
 
 def app(~rt: Ss.Runner()) -> IO(Unit):
   do IO<Unit>:

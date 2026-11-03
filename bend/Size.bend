@@ -71,6 +71,14 @@ type SizeFail is Data:
   Internal{+msg: String}
   Leftover{+form: String}
 
+# Whether the erasures sizing proved are sound (SIZING-PROOF.md
+# §4): Unproven, when sizing proved nothing to erase; Checked, the erasure
+# checker's verdict on main's witness, and the runs it had left. Only a
+# Proven verdict erases: the theorem in PROOF.bend covers exactly that.
+type Erasure is Data:
+  Unproven{}
+  Checked{+seen: Ck.Seen}
+
 # What sizing proved of the refinement checks, by number (DESIGN §10).
 # validating: the checks the input restrictions came from, which the main
 # run therefore assumed passed; boundary: main's input refinements, which
@@ -85,18 +93,13 @@ type SizeFail is Data:
 type Checks is Data:
   Checks{+validating: Set(), +boundary: Set(), +reaching: Set(), +opening: Set(), +proven: Bool, +erasure: Erasure}
 
-# Whether the erasures sizing proved are sound (SIZING-PROOF.md
-# §4): Unproven, when sizing proved nothing to erase; Checked, the erasure
-# checker's verdict on main's witness, and the runs it had left. Only a
-# Proven verdict erases: the theorem in PROOF.bend covers exactly that.
-type Erasure is Data:
-  Unproven{}
-  Checked{+seen: Ck.Seen}
-
 # Main as sizing received it, and its guard as the session runs it (as Sem
-# reads it, None if it has none): what the erasure checker runs.
+# reads it, None if it has none): what the erasure checker runs; and
+# whether to run it (a plain run, on the reference evaluator, runs main
+# with every check, so it needs no erasure: the checker's runs are most of
+# a small program's sizing, simpleplus's 6 s of 7.7).
 type Watched is Data:
-  Watched{+x: E.X, +g: Maybe<&2, E.X>}
+  Watched{+x: E.X, +g: Maybe<&2, E.X>, +check: Bool}
 
 # The sized program, as the runnable core, the counts that sized it, and
 # what sizing proved of its checks.
@@ -402,6 +405,9 @@ def filter.at(nt: Maybe<&2, String>, left: Bool, +n: String, +a: E.X, +b: E.X) -
     case None{}:
       E.XEither{None{}, a, b}
 
+def fuel() -> Nat:
+  U32.to_nat(4294967295)
+
 # Keep one side of the superpositions a choice at n decides (filterLeft,
 # filterRight). The left side goes where the superposition's position is at
 # or below n, the right side where n is at or below it, as Haskell has it.
@@ -418,9 +424,6 @@ def filter(+fuel: Nat, +n: String, +left: Bool, e: E.X) -> E.X:
           E.XPair{filter(f, n, left, a), filter(f, n, left, b)}
         case other:
           other
-
-def fuel() -> Nat:
-  U32.to_nat(4294967295)
 
 def filter.side(n: Maybe<&2, String>, sel: Bool, +left: Bool, e: E.X) -> E.X:
   match n:
@@ -1122,6 +1125,13 @@ def check.work() -> Nat:
 def check.depth() -> Nat:
   U32.to_nat(100000)
 
+def erasure.run(check: Bool, +left: Set(), +counts: List<&2, E.TS>, +x: E.X, g: Maybe<&2, E.X>) -> Erasure:
+  match check:
+    case True{}:
+      Checked{Ck.check(check.depth(), Sm.fuel(), Sm.Pol{Sm.Watch{}, Ck.erasable(x, left)}, Ck.witness(counts, x), g, check.work())}
+    case False{}:
+      Unproven{}
+
 # The erasure checker on main's witness, watching the sites sizing would
 # erase (every check not in left, and every chain's bottom), when sizing
 # proved main.
@@ -1131,8 +1141,8 @@ def erasure.of(proven: Bool, +left: Set(), +counts: List<&2, E.TS>, w: Watched) 
       Unproven{}
     case True{}:
       match w:
-        case Watched{+x, g}:
-          Checked{Ck.check(check.depth(), Sm.fuel(), Sm.Pol{Sm.Watch{}, Ck.erasable(x, left)}, Ck.witness(counts, x), g, check.work())}
+        case Watched{+x, g, check}:
+          erasure.run(check, left, counts, x, g)
 
 # Whether the checker proved the erasures: then, and only then, they are made.
 def erased(e: Erasure) -> Bool:
@@ -1306,13 +1316,13 @@ def opening.of(unguarded: Bool, +x: E.X) -> Maybe<&2, E.X>:
     case False{}:
       Some{E.app(x, E.XZero{})}
 
-def main.run(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +boundary: Set(), +lim: R, +x: E.X, g: Maybe<&2, E.X>, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def main.run(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +boundary: Set(), +lim: R, +x: E.X, g: Maybe<&2, E.X>, +cap: Bool, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
   match cap:
     case True{}:
       main.run.from(os, max, cm, boundary, lim, E.app(x, initial.input(fuel(), Set.to_list(r.p(lim)), in.st(Set.to_list(r.p(lim)), ""))),
-                    opening.of(none(boundary), x), Watched{x, g}, cap)
+                    opening.of(none(boundary), x), Watched{x, g, check}, cap)
     case False{}:
-      main.run.from(os, max, cm, boundary, lim, naked.envs(x), None{}, Watched{x, g}, cap)
+      main.run.from(os, max, cm, boundary, lim, naked.envs(x), None{}, Watched{x, g, check}, cap)
 
 def capped(+x: E.X, cap: Bool) -> E.X:
   match cap:
@@ -1333,12 +1343,17 @@ def guard.sem(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
 # input) as main is, and give the sized program, at a budget of max
 # unrollings per site. boundary: the checks, by number, the session runs
 # before main; g: the guard that runs them, sized, if main has one.
-def size.at(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +t: T.C) -> Result<&2, &2, SizeFail, Sized>:
+# size.at, the erasure checker run when check says so (otherwise nothing
+# is erased: expr is plain).
+def size.at.checked(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +t: T.C, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
   +x = E.of.term3(t)
   +cm = capped(x, cap)
   main.run(E.origins(t), max, cm, boundary,
            eval(fuel(), Cfg{MLimits{}, Set.new(), max}, JEval{convert.is(cm), E.XZero{}}),
-           x, guard.sem(g), cap)
+           x, guard.sem(g), cap, check)
+
+def size.at(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +t: T.C) -> Result<&2, &2, SizeFail, Sized>:
+  size.at.checked(max, cap, boundary, g, t, True{})
 
 # A term no session guards.
 def size(+max: U32, +cap: Bool, +t: T.C) -> Result<&2, &2, SizeFail, Sized>:

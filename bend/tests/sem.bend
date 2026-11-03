@@ -176,7 +176,7 @@ def shown(r: Ss.Replay) -> List<&2, String>:
       s
 
 def ic.replay(+main: Co.V, g: Maybe<&2, Co.V>, +full: Co.V, lines: List<&2, String>) -> List<&2, String>:
-  shown(Ss.replay(Ss.Prog{ic.prog(main), ic.guard(g), Some{full}}, Ss.Sized{}, lines))
+  shown(Ss.replay(Ss.Prog{ic.prog(main), ic.guard(g), Some{ic.prog(full)}}, Ss.Sized{}, lines))
 
 def sem.guard(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
   match g:
