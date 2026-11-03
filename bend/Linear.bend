@@ -58,14 +58,15 @@ type TR is Data:
 # The dual simplex's state: the tableau's rows (by the component's row
 # number), each row's basic column (none() for a row not in it), the rows
 # with an entry in each column (a superset), the rows whose right-hand
-# side is negative (sorted), the reduced costs; and, read only, the
+# side is negative (sorted), the reduced costs (by column, slacks too:
+# zero for none); and, read only, the
 # component's rows over its columns, which rows wait, the rows that
 # mention each structural column, and each column's weight; the last
 # point and the new one, the suspect rows, each structural column's basic
 # row plus one, the objective at the last deletion, and the equations
 # blamed if it failed.
 type T is Type:
-  T{tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>,
+  T{tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>,
     lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>,
     mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>}
 
@@ -649,7 +650,7 @@ def occ.add.got(+v: U32, +i: U32, r: Array<List<&2, U32>> & List<&2, U32>) -> Ar
 
 # i at the front of v's rows.
 def occ.add(+v: U32, +i: U32, occ: Array<List<&2, U32>>) -> Array<List<&2, U32>>:
-  occ.add.got(v, i, Array.get(List<&2, U32>, occ, v))
+  occ.add.got(v, i, Array.swap(List<&2, U32>, occ, v, []))
 
 def occ.push(vs: List<&2, U32>, +i: U32, occ: Array<List<&2, U32>>) -> Array<List<&2, U32>>:
   match vs:
@@ -1240,12 +1241,12 @@ def comp.lists(of: List<&2, Sigma<&2, &2, U32, _ => U32>>, cs: Array<List<&2, U3
     case Con{ic, rest}:
       match ic:
         case (+i, +c):
-          comp.lists(rest, comp.add.got(i, c, Array.get(List<&2, U32>, cs, c)))
+          comp.lists(rest, comp.add.got(i, c, Array.swap(List<&2, U32>, cs, c, [])))
 
 # The tableau's fields
 # --------------------
 
-def t.tr.got(basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<TR> & TR) -> T & TR:
+def t.tr.got(basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<TR> & TR) -> T & TR:
   (tr, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1265,7 +1266,7 @@ def t.tr.set(t: T, +i: U32, x: TR) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{Array.set(TR, tr, i, x), basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}
 
-def t.basis.got(tr: Array<TR>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
+def t.basis.got(tr: Array<TR>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
   (basis, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1279,7 +1280,7 @@ def t.basis.set(t: T, +i: U32, x: U32) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, Array.set(U32, basis, i, x), cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}
 
-def t.cols.got(tr: Array<TR>, basis: Array<U32>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<List<&2, U32>> & List<&2, U32>) -> T & List<&2, U32>:
+def t.cols.got(tr: Array<TR>, basis: Array<U32>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<List<&2, U32>> & List<&2, U32>) -> T & List<&2, U32>:
   (cols, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1309,17 +1310,24 @@ def t.neg.set(t: T, x: List<&2, U32>) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, x, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}
 
-def t.obj(t: T) -> T & List<&2, Cf>:
-  match t:
-    case T{tr, basis, cols, neg, +obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
-      (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, obj)
+def t.ob.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<Q.Q> & Q.Q) -> T & Q.Q:
+  (obj, x) = r
+  (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
-def t.obj.set(t: T, x: List<&2, Cf>) -> T:
+# Column i's reduced cost (zero for none): the costs are an array over
+# every column, so a pivot reads and writes only its row's columns
+# (master's IntMap merge shares the rest), not a list of them all.
+def t.ob(t: T, +i: U32) -> T & Q.Q:
   match t:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
-      T{tr, basis, cols, neg, x, lr, wait, wat, wc, pt, np, mark, roc, last, fail}
+      t.ob.got(tr, basis, cols, neg, lr, wait, wat, wc, pt, np, mark, roc, last, fail, Array.get(Q.Q, obj, i))
 
-def t.lr.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<Row> & Row) -> T & Row:
+def t.ob.set(t: T, +i: U32, x: Q.Q) -> T:
+  match t:
+    case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
+      T{tr, basis, cols, neg, Array.set(Q.Q, obj, i, x), lr, wait, wat, wc, pt, np, mark, roc, last, fail}
+
+def t.lr.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<Row> & Row) -> T & Row:
   (lr, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1333,7 +1341,7 @@ def t.lr.set(t: T, +i: U32, x: Row) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, neg, obj, Array.set(Row, lr, i, x), wait, wat, wc, pt, np, mark, roc, last, fail}
 
-def t.wait.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
+def t.wait.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
   (wait, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1347,7 +1355,7 @@ def t.wait.set(t: T, +i: U32, x: U32) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, neg, obj, lr, Array.set(U32, wait, i, x), wat, wc, pt, np, mark, roc, last, fail}
 
-def t.wat.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<List<&2, U32>> & List<&2, U32>) -> T & List<&2, U32>:
+def t.wat.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<List<&2, U32>> & List<&2, U32>) -> T & List<&2, U32>:
   (wat, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1356,12 +1364,18 @@ def t.wat(t: T, +i: U32) -> T & List<&2, U32>:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       t.wat.got(tr, basis, cols, neg, obj, lr, wait, wc, pt, np, mark, roc, last, fail, Array.get(List<&2, U32>, wat, i))
 
+# Column i's waiting rows, moved out ([] left in their place): no copy.
+def t.wat.take(t: T, +i: U32) -> T & List<&2, U32>:
+  match t:
+    case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
+      t.wat.got(tr, basis, cols, neg, obj, lr, wait, wc, pt, np, mark, roc, last, fail, Array.swap(List<&2, U32>, wat, i, []))
+
 def t.wat.set(t: T, +i: U32, x: List<&2, U32>) -> T:
   match t:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, neg, obj, lr, wait, Array.set(List<&2, U32>, wat, i, x), wc, pt, np, mark, roc, last, fail}
 
-def t.wc.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
+def t.wc.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
   (wc, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1375,7 +1389,7 @@ def t.wc.set(t: T, +i: U32, x: U32) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, neg, obj, lr, wait, wat, Array.set(U32, wc, i, x), pt, np, mark, roc, last, fail}
 
-def t.pt.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<Q.Q> & Q.Q) -> T & Q.Q:
+def t.pt.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, np: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<Q.Q> & Q.Q) -> T & Q.Q:
   (pt, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1389,7 +1403,7 @@ def t.pt.set(t: T, +i: U32, x: Q.Q) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, neg, obj, lr, wait, wat, wc, Array.set(Q.Q, pt, i, x), np, mark, roc, last, fail}
 
-def t.np.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<Q.Q> & Q.Q) -> T & Q.Q:
+def t.np.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, mark: Array<U32>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<Q.Q> & Q.Q) -> T & Q.Q:
   (np, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1403,7 +1417,7 @@ def t.np.set(t: T, +i: U32, x: Q.Q) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, Array.set(Q.Q, np, i, x), mark, roc, last, fail}
 
-def t.mark.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
+def t.mark.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, roc: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
   (mark, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1417,7 +1431,7 @@ def t.mark.set(t: T, +i: U32, x: U32) -> T:
     case T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}:
       T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, Array.set(U32, mark, i, x), roc, last, fail}
 
-def t.roc.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: List<&2, Cf>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
+def t.roc.got(tr: Array<TR>, basis: Array<U32>, cols: Array<List<&2, U32>>, neg: List<&2, U32>, obj: Array<Q.Q>, lr: Array<Row>, wait: Array<U32>, wat: Array<List<&2, U32>>, wc: Array<U32>, pt: Array<Q.Q>, np: Array<Q.Q>, mark: Array<U32>, last: Q.Q, fail: Maybe<&2, List<&2, U32>>, r: Array<U32> & U32) -> T & U32:
   (roc, x) = r
   (T{tr, basis, cols, neg, obj, lr, wait, wat, wc, pt, np, mark, roc, last, fail}, x)
 
@@ -1534,21 +1548,49 @@ def aff.go(js: List<&2, U32>, +r: U32, +c: U32, q: T & List<&2, U32>) -> T & Lis
       (t, acc) = q
       aff.go(rest, r, c, aff.skip(U32.is_eq(j, r), c, j, acc, t))
 
-def pv.row.at(+j: U32, +c: U32, +prow: List<&2, Cf>, +pb: Q.Q, q: T & TR) -> T:
+# The affected rows whose right-hand side is now negative, and those
+# whose is not, last first: the negative rows are updated once per pivot
+# (as master's IntSet folds them), not rebuilt for each row.
+type Ng is Data:
+  Ng{+ins: List<&2, U32>, +out: List<&2, U32>}
+
+def ng.put(isneg: Bool, +j: U32, ng: Ng) -> Ng:
+  match isneg:
+    case True{}:
+      match ng:
+        case Ng{+ins, +out}:
+          Ng{j <> ins, out}
+    case False{}:
+      match ng:
+        case Ng{+ins, +out}:
+          Ng{ins, j <> out}
+
+def ng.set(+ins: List<&2, U32>, +out: List<&2, U32>, q: T & List<&2, U32>) -> T:
+  (t, +l) = q
+  t.neg.set(t, u.union(u.diff(l, out), ins))
+
+def ng.apply(q: T & Ng) -> T:
+  (t, ng) = q
+  match ng:
+    case Ng{+ins, +out}:
+      ng.set(List.reverse(&2, U32, ins), List.reverse(&2, U32, out), t.neg(t))
+
+def pv.row.at(+j: U32, +c: U32, +prow: List<&2, Cf>, +pb: Q.Q, ng: Ng, q: T & TR) -> T & Ng:
   (t, x) = q
   match x:
     case TR{+row, +b}:
       +a = cf.at(row, c)
       +b2 = Q.sub.mul(b, a, pb)
-      pv.neg(j, Q.is.neg(b2), t.tr.set(t, j, TR{cf.sub(row, a, prow), b2}))
+      (t.tr.set(t, j, TR{cf.sub(row, a, prow), b2}), ng.put(Q.is.neg(b2), j, ng))
 
-# Each affected row less its entry times the pivot row.
-def pv.rows(js: List<&2, U32>, +c: U32, +prow: List<&2, Cf>, +pb: Q.Q, t: T) -> T:
+# Each affected row (ascending) less its entry times the pivot row.
+def pv.rows(js: List<&2, U32>, +c: U32, +prow: List<&2, Cf>, +pb: Q.Q, q: T & Ng) -> T & Ng:
   match js:
     case Nil{}:
-      t
+      q
     case Con{+j, rest}:
-      pv.rows(rest, c, prow, pb, pv.row.at(j, c, prow, pb, t.tr.take(t, j)))
+      (t, ng) = q
+      pv.rows(rest, c, prow, pb, pv.row.at(j, c, prow, pb, ng, t.tr.take(t, j)))
 
 # A column's rows are a superset in no order, with repeats: a row joins
 # at the front, a deleted row stays (aff.go skips rows out of the
@@ -1572,16 +1614,28 @@ def cols.go(ks: List<&2, U32>, +c: U32, +aff: List<&2, U32>, t: T) -> T:
     case Con{+k, rest}:
       cols.go(rest, c, aff, cols.skip(U32.is_eq(k, c), k, aff, t))
 
-def obj.upd(m: Maybe<&2, Q.Q>, +prow: List<&2, Cf>, +obj: List<&2, Cf>) -> List<&2, Cf>:
-  match m:
-    case None{}:
-      obj
-    case Some{a}:
-      cf.sub(obj, a, prow)
+def ob.upd(+k: U32, +a: Q.Q, +v: Q.Q, q: T & Q.Q) -> T:
+  (t, +x) = q
+  t.ob.set(t, k, Q.sub.mul(x, a, v))
 
-def pv.obj(+c: U32, +prow: List<&2, Cf>, q: T & List<&2, Cf>) -> T:
-  (t, +obj) = q
-  t.obj.set(t, obj.upd(cf.get(obj, c), prow, obj))
+# The costs less a times the pivot row, over its columns.
+def ob.sub(+a: Q.Q, prow: List<&2, Cf>, t: T) -> T:
+  match prow:
+    case Nil{}:
+      t
+    case Con{+x, rest}:
+      ob.sub(a, rest, ob.upd(cf.v(x), a, cf.a(x), t.ob(t, cf.v(x))))
+
+def pv.ob.if(zero: Bool, +a: Q.Q, +prow: List<&2, Cf>, t: T) -> T:
+  match zero:
+    case True{}:
+      t
+    case False{}:
+      ob.sub(a, prow, t)
+
+def pv.obj(+prow: List<&2, Cf>, q: T & Q.Q) -> T:
+  (t, +a) = q
+  pv.ob.if(Q.is.zero(a), a, prow, t)
 
 # The affected rows are rewritten, every column of the pivot row takes
 # them in its index (column c holds row r alone), and row r becomes the
@@ -1589,8 +1643,8 @@ def pv.obj(+c: U32, +prow: List<&2, Cf>, q: T & List<&2, Cf>) -> T:
 def pv.done(+r: U32, +c: U32, +prow: List<&2, Cf>, +pb: Q.Q, q: T & List<&2, U32>) -> T:
   (t, affd) = q
   +aff = List.reverse(&2, U32, affd)
-  pv.obj(c, prow, t.obj(t.basis.set(pv.neg(r, Q.is.neg(pb), t.tr.set(cols.go(cf.keys(prow), c, aff,
-    t.cols.set(pv.rows(aff, c, prow, pb, t), c, [r])), r, TR{prow, pb})), r, c)))
+  pv.obj(prow, t.ob(t.basis.set(pv.neg(r, Q.is.neg(pb), t.tr.set(cols.go(cf.keys(prow), c, aff,
+    t.cols.set(ng.apply(pv.rows(aff, c, prow, pb, (t, Ng{[], []}))), c, [r])), r, TR{prow, pb})), r, c), c))
 
 # A sorted list without repeats, x <> xr where same says x repeats the
 # last one kept.
@@ -1698,61 +1752,26 @@ def en.at(m: Maybe<&2, En>, +ratio: Q.Q, +j: U32) -> Maybe<&2, En>:
         case En{+r, c}:
           en.keep(Q.is.lt(ratio, r), ratio, j, e)
 
-def en.consider(neg: Bool, +j: U32, +a: Q.Q, +cost: Q.Q, best: Maybe<&2, En>) -> Maybe<&2, En>:
+def en.got(+j: U32, +a: Q.Q, best: Maybe<&2, En>, q: T & Q.Q) -> T & Maybe<&2, En>:
+  (t, +cost) = q
+  (t, en.at(best, Q.div(cost, Q.neg(a)), j))
+
+def en.if(neg: Bool, +j: U32, +a: Q.Q, best: Maybe<&2, En>, t: T) -> T & Maybe<&2, En>:
   match neg:
     case True{}:
-      en.at(best, Q.div(cost, Q.neg(a)), j)
+      en.got(j, a, best, t.ob(t, j))
     case False{}:
-      best
+      (t, best)
 
-# The rest of the leaving row past the reduced costs (each costs zero).
-def en.rest(xs: List<&2, Cf>, best: Maybe<&2, En>) -> Maybe<&2, En>:
+# Over the leaving row's negative entries, in column order, each with
+# its reduced cost.
+def en.go(xs: List<&2, Cf>, q: T & Maybe<&2, En>) -> T & Maybe<&2, En>:
   match xs:
     case Nil{}:
-      best
-    case Con{+x, xr}:
-      en.rest(xr, en.consider(Q.is.neg(cf.a(x)), cf.v(x), cf.a(x), Q.zero(), best))
-
-# The row x <> xr against the costs o <> os, c their heads' order.
-def en.on(fuel: Nat, c: Cmp, +x: Cf, xr: List<&2, Cf>, +o: Cf, os: List<&2, Cf>, best: Maybe<&2, En>) -> Maybe<&2, En>:
-  match fuel:
-    case 0n:
-      best
-    case 1n+f:
-      match c:
-        case LT{}:
-          match xr:
-            case Nil{}:
-              en.consider(Q.is.neg(cf.a(x)), cf.v(x), cf.a(x), Q.zero(), best)
-            case Con{+x2, xr2}:
-              en.on(f, U32.cmp(cf.v(x2), cf.v(o)), x2, xr2, o, os, en.consider(Q.is.neg(cf.a(x)), cf.v(x), cf.a(x), Q.zero(), best))
-        case EQ{}:
-          match xr:
-            case Nil{}:
-              en.consider(Q.is.neg(cf.a(x)), cf.v(x), cf.a(x), cf.a(o), best)
-            case Con{+x2, xr2}:
-              match os:
-                case Nil{}:
-                  en.rest(Con{x2, xr2}, en.consider(Q.is.neg(cf.a(x)), cf.v(x), cf.a(x), cf.a(o), best))
-                case Con{+o2, os2}:
-                  en.on(f, U32.cmp(cf.v(x2), cf.v(o2)), x2, xr2, o2, os2, en.consider(Q.is.neg(cf.a(x)), cf.v(x), cf.a(x), cf.a(o), best))
-        case GT{}:
-          match os:
-            case Nil{}:
-              en.rest(Con{x, xr}, best)
-            case Con{+o2, os2}:
-              en.on(f, U32.cmp(cf.v(x), cf.v(o2)), x, xr, o2, os2, best)
-
-def en.top(row: List<&2, Cf>, obj: List<&2, Cf>) -> Maybe<&2, En>:
-  match row:
-    case Nil{}:
-      None{}
-    case Con{+x, xr}:
-      match obj:
-        case Nil{}:
-          en.rest(Con{x, xr}, None{})
-        case Con{+o, os}:
-          en.on(big(), U32.cmp(cf.v(x), cf.v(o)), x, xr, o, os, None{})
+      q
+    case Con{+x, rest}:
+      (t, best) = q
+      en.go(rest, en.if(Q.is.neg(cf.a(x)), cf.v(x), cf.a(x), best, t))
 
 # What the dual simplex does next: stop (feasible), fail (the leaving row
 # has no negative entry: these equations cannot hold together), or pivot,
@@ -1784,15 +1803,15 @@ def dc.en(+r: U32, +deg: U32, m: Maybe<&2, En>, t: T) -> T & Mv:
         case En{+ratio, +c}:
           (t, MvPivot{r, c, dc.deg(Q.is.zero(ratio), deg)})
 
-def dc.obj(+r: U32, +deg: U32, +cs: List<&2, Cf>, q: T & List<&2, Cf>) -> T & Mv:
-  (t, +obj) = q
-  dc.en(r, deg, en.top(cs, obj), t)
+def dc.en.got(+r: U32, +deg: U32, q: T & Maybe<&2, En>) -> T & Mv:
+  (t, m) = q
+  dc.en(r, deg, m, t)
 
 def dc.row(+r: U32, +deg: U32, q: T & TR) -> T & Mv:
   (t, x) = q
   match x:
     case TR{+cs, +b}:
-      dc.obj(r, deg, cs, t.obj(t.tr.set(t, r, TR{cs, b})))
+      dc.en.got(r, deg, en.go(cs, (t.tr.set(t, r, TR{cs, b}), None{})))
 
 def dc.lv(+deg: U32, q: T & Maybe<&2, Lv>) -> T & Mv:
   (t, m) = q
@@ -2335,7 +2354,7 @@ def wat.add(cs: List<&2, U32>, +i: U32, t: T) -> T:
     case Nil{}:
       t
     case Con{+c, rest}:
-      wat.add(rest, i, wat.add.got(i, c, t.wat(t, c)))
+      wat.add(rest, i, wat.add.got(i, c, t.wat.take(t, c)))
 
 def act.row(+i: U32, +nc: U32, q: T & Row) -> T:
   (t, x) = q
@@ -2353,12 +2372,22 @@ def act.go(n: Nat, +nc: U32, t: T) -> T:
       +i = U32.from_nat(j)
       act.go(j, nc, act.row(i, nc, t.lr(t, i)))
 
+# The weights as the costs of the slack basis.
+def ob.fill(xs: List<&2, Cf>, a: Array<Q.Q>) -> Array<Q.Q>:
+  match xs:
+    case Nil{}:
+      a
+    case Con{x, rest}:
+      match x:
+        case Cf{+v, +w}:
+          ob.fill(rest, Array.set(Q.Q, a, v, w))
+
 def tab.new(+nc: U32, +m: U32, lr: Array<Row>, wt: Wt) -> T:
   match wt:
     case Wt{wc, obj}:
       act.go(U32.to_nat(m), nc,
         T{Array.new(TR, depth.of(m), TR{[], Q.zero()}), Array.new(U32, depth.of(m), none()),
-          Array.new(List<&2, U32>, depth.of((nc + m : U32)), []), [], List.reverse(&2, Cf, obj), lr,
+          Array.new(List<&2, U32>, depth.of((nc + m : U32)), []), [], ob.fill(obj, Array.new(Q.Q, depth.of((nc + m : U32)), Q.zero())), lr,
           Array.new(U32, depth.of(m), 0), Array.new(List<&2, U32>, depth.of(nc), []), wc,
           Array.new(Q.Q, depth.of(nc), Q.zero()), Array.new(Q.Q, depth.of(nc), Q.zero()),
           Array.new(U32, depth.of(m), 0), Array.new(U32, depth.of(nc), 0), Q.neg(Q.one()), None{}})
