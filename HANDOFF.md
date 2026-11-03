@@ -1544,6 +1544,240 @@ the free list and label counter are global.
   shape suits a GPU best for many independent nets at once (one session
   per work-group), less for one turn's mostly sequential net.
 
+### P9. Master's EAL (2026-10-30)
+
+The user (2026-10-30, after 25 Oct's "half the cpus on telomare"): get the
+Bend version on par with master first, then design the low-level runtime
+from Bend's side. What the port still lacks from master is its EAL
+(`src/Telomare/EAL.hs`, 1,364 lines at haskell-final, 2,794 at
+`98de497c`: `88acbdb4` … `9e7a58d1`, PR #157), the REPL's `:t`, and the
+LSP. EAL is the big one, and the one the compile gate runs.
+
+What master's EAL is, against the port's (haskell-final's):
+- every DeferRef occurrence instantiates its body once, from a per-body
+  template, and the tag carries the instance's interface (env, result,
+  doors); dispatch only unifies, so there is no depth cap, polyvariance
+  cap or variable budget;
+- an interface cycle is rejected as self-application (`selfReferential`);
+  an abort's value is bottom (`AbortedT`);
+- the box discipline is faithful EAL: cumulative node depths, boxes
+  through applications, projections and gate switches, data leaves,
+  doors for duplicated captures;
+- the constraints are solved exactly: presolve (zeros, lone summands,
+  cycles, lower bounds), then sparse elimination and a dual simplex over
+  the rationals, minimizing total leaf depth (`EALUnsatisfiable`);
+- per-body passes run only when main fails; then let specialization
+  (narrow, shallow, deep) retries before refusing;
+- post-sizing guidance comes from a size-independent certificate of the
+  unsized program (`inferEALFaithful`, `deriveSizedGuidance`), with
+  `inferEALCompiled` as the fallback.
+
+Plan, each step checked against an oracle built from `98de497c`
+(`/tmp/bx/master98d`, `app/EalOracle.hs`, not in the repo: per program,
+master's verdict, levels, bangs and per-body guidance before sizing,
+faithful and after sizing):
+1. `bend/Rat.bend`: exact rationals over Bend's native Nat (48 bits).
+2. `bend/Linear.bend`: `solveLinear` (elimination, components, the dual
+   simplex; master's primal two-phase simplex is unreachable there, since
+   elimination leaves no equality with a variable).
+3. EAL.bend rewritten to master's: the walk, templates, dispatch,
+   presolve, the solve, the drivers.
+4. Let specialization; the faithful certificate and the derived guidance.
+5. tests/eal.bend to master's EALTests; README and section 7 updated.
+
+**Status (2026-10-30, uncommitted):** steps 1 and 2 are written.
+`bend/Rat.bend` (signed fractions in lowest terms over Nat) and
+`bend/Linear.bend` (`Linear.solve`: rows from the equations, sparse
+elimination in master's candidate order, components by first row, the
+dual simplex with its lazy rows, deletions, Dantzig/Bland pricing, back
+substitution, scaling) check, and give master's answer, values or the
+blamed equations, on 600 random systems (`/tmp/bx/lin`: `gen.py`, master's
+`solveLinear` through `app/LinOracle.hs` in `/tmp/bx/master98d`, 300
+small and 300 with up to 60 variables and 90 equations).
+
+A differential fuzzer runs beside it (`/tmp/bx/fz`: `gen.py` writes random
+Prelude expressions as programs, `one.sh` runs master's `telomare` and the
+port in five modes and logs where they differ). First findings, 600
+programs: master's sizing crashes on `take`/`drop` (`getInputLimits eval,
+unexpected` or `sizeTermM unhandled case`, a Haskell exception with a
+stack trace) where the port reports cleanly; and `--fast` refusals by the
+port's EAL ("applied value is pair, not code") on programs master's EAL
+certifies, which step 3 should close.
+
+**Step 3 under way (2026-10-30, uncommitted): `bend/EALm.bend`**, master's
+EAL written fresh beside the port's `EAL.bend` (which stays the gate until
+EALm passes the oracle). It is generated: the sources are
+`bend/dev/ealm/p1.bend` (types, words, rendering) and `p2..p8.bdo`, and
+`bend/dev/ealm/gen.sh` writes `bend/EALm.bend` from them (`acc.py`: the
+state record's accessors; `bdo.py`: binds, below; `topo.py`: orders defs so
+each follows the defs it calls). Done and checking (`--check-only`): the
+state (one counter for bangs, type variables and tag classes, as
+`esNextVar`; arrays that double), union-find over bangs and tags with path
+compression, classes and `mergeClasses`, pairs, the unifier as one work
+list (`unifyTauAt`'s cases in its order, `bindTVar` with `occurs`,
+`unionTags`, `unifyTagInfo`, `resolveCapT`, `selfReferential`,
+`deepShowTau`), `envUsageL`, `contractionSites`, `frameContext`,
+`envOccurrence`, `pairOf` with doors, the walk as a machine of tasks and
+frames (`viewNode`, `intrinsic`, `pairChild`, `chainLink`,
+`instantiateBody`, `captureTemplate`, `instantiateTemplate`), and dispatch
+(`resolveApplies`, `codeInfosOfCaptures`, `dispatchTag`), `presolve`
+(p9: the four steps; `cycleStep`'s `stronglyConnComp` as two iterative
+dfs passes in containers-0.7's exact order, checked equal to Data.Graph
+on 400 random graphs, `bend/dev/ealm/test/scc-gen.py`), `solveConstraints`
+(live numbers renumbered densely in ascending order into `Linear.solve`,
+leaf-path weights, the check of every equation), and (p10) `walkTop`,
+`virtualMainApply` and `goMain`'s result (top bang, defers, leaf depths,
+body levels, `groundCaptureShapes`, main's shape).
+
+**The main pass matches master on 1456 of 1456 programs** (2026-10-30):
+the 1400 fuzz programs plus 56 hand-written ones (`test/corpus.txt`), 35
+of which master's main pass refuses; same top bang, max level, main
+shape, defer bangs, and every body's env bang, level and capture layout,
+and on refusals the same message (type variable numbers included). The
+oracle is `test/EalmOracle.hs` (an `ealm-oracle` executable added to a
+scratch master 98de497c checkout: master's `runMain` alone, no
+fallbacks); the Bend side `test/main-pass.bend` (build it with `-o`; it
+reads `p1.rs` and `Prelude.tel` from its cwd); `test/par.py` runs both
+over a corpus in parallel. 277 of the 1456 differ only in body hashes:
+the port's lifted hash of some Prelude bodies (in `gcd`, `dMod`, `dDiv`
+programs: FunctionIndex 119-121, 146-157, 172-183) is not master's,
+while every EAL number agrees (`test/nohash.py` compares modulo hashes).
+That is a Lift/Resolve parity gap of its own. Traced (2026-10-31, with
+a show oracle printing master's `show (forgetL body)` per body,
+/tmp/bx/master98d/app/ShowOracle.hs, against Lift.show): only the
+locations inside an `AbortOrigin` reach the hashed text, and the port's
+parser gives an application a point span (`L.at`, Parse.bend app.start)
+where megaparsec's `captureSourceSpan` over `parseApplied` gives the
+whole application, up to where the last token's `sc` stops (spaces,
+tabs and comments, not a newline). `abort "Undefined"` in Prelude's
+dDiv (line 85) is 85:21-85:38 in master, 85:21-85:21 in the port, and
+every body reaching dDiv inherits the difference. The fix is a token
+end (`sc`'s stop) from the lexer and the span at app.done; case
+aborts (`caseLoc`) likely want the same. It shows in a refusal that
+names a body by hash (DependencyFailed). Fixed 2026-11-02 (`0cf4a8b0`):
+Parse.bend's `app.done` stretches the application's span to the next
+token's `ws` (where the same-line space consumer stopped) and
+`case.done` the case's to the next token's start; `eal-lift-udt` now
+expects master's digest (`c39805f1…`, from `test/HashOracle.hs`).
+
+Then (p11-p13, same day): `summarizeBody` per body behind `withDeps` (a
+memoized machine over the reference DAG, short-circuiting as the lazy
+Haskell does), `specializeLets` (a CEK-style machine: control stack of
+term/body tasks and continuations, value stack; paths as "L"/"R" strings
+so string order is the list order), the narrowed/shallow/deep fallbacks
+(`errorBodies`, `reach`, `pointedAt`), `inferEALLifted`'s main verdict
+(`lifted.main`) and `certifyMain` (`certify.main.full`, with
+`allDataShape`). **All 35 programs master's main pass refuses match**:
+master's `pre` verdict, its result and `certifyMain` (33 certify through
+a fallback, one refuses as a failed dependency, one as data through and
+through). The spec oracle `test/SpecOracle.hs` prints master's
+specialization (sizes 134/21/20 shallow and 185/72/22 deep on the first
+of them, equal to the port's). `test/certify.bend` is the harness.
+
+A performance lesson: presolve's `cycleStep` blame note ("[cycle ms
+through touching]") lists every live equation touching the cycle; built
+eagerly per equation it is quadratic (a specialized program of 95K
+equations took >300s; master builds it lazily and almost never shows
+it). Now a placeholder (\1 n \2) stands in the blame, the notes are
+kept in the state (`cn`, built in one pass per round), and they are
+expanded only when an error is returned (`err.expand` in `rm.err`).
+The same program's fallbacks now take ~17s (master ~7s).
+
+EALm is the gate since 2026-10-31 (Main.bend imports it as `EM` at the
+`certify` sites: compile, --fast, the guard; Session.bend keeps the old
+`EAL.layouts` for the IC, and swapping those in changes the goldens' IC
+step counts, so it waits). Goldens with it: 54/54. The 65 programs the
+old gate refused under --fast give master's output.
+
+Its speed on tictactoe (main pass certifies, no fallback): `--compile`
+took 65s (old gate 4s, master 25s), of which 61s in `Ln.solve` (perf on
+the `bend -o` binary: `perf record -e cpu-clock`; symbols are
+`WL_FID_<MODULE>_<DEF>`). The system: 21707 rows over 21324 variables,
+15781 eliminated, fill-in 55K -> 214K entries, one 14237-row component
+for the dual simplex. Fixed in Linear.bend (each change checked equal to
+the old Linear on /tmp/bx/lin's 600 systems, 249 of them failing, blame
+lists included), now 11s:
+- no blame on the success path: a substituted row kept `fj ++ from`
+  (1.2M equation numbers in all); now `solve` runs without blame and
+  redoes a failing system with it (`solve.re`);
+- no copies: `Array.get` of a row or a list copies it, `Array.swap`
+  moves it (`e.row.take`, `t.tr.take`, `t.cols.take`); lengths, equality
+  flags and per-variable counts sit in arrays beside the rows;
+- the sorted-list merges compared heads by passing the tails to a
+  helper (`u.heads(xr, ...)`), a copy of the tail per step: quadratic.
+  They carry the heads now (`u.union.on`, `cf.sub.on`, `en.on`, ...);
+- a variable's rows and a column's rows are unordered supersets (join at
+  the front, leave lazily; the counts are exact, readers skip stale
+  rows, the pivot column is sorted and made unique when read): pick takes
+  the shortest row, lowest number on a tie, which is the old order's
+  choice;
+- `cf.sub3` substitutes and reports the cancelled and new variables in
+  one pass.
+
+The corpus's `arith.tel` is beyond master's EAL (found 2026-11-02, when
+the first full gate with EALm was killed at 12G on it; with the old gate
+it took 2s). `dFactorial` makes main's pass refuse (code vs data at
+Prelude:112:19), the narrowing finds nothing to substitute, and the
+shallow specialization multiplies the system: with one rational check
+beside the factorial (`b (dEqual (dFactorial 5) 120), b (rEq (rPlus ...)
+1 1)`), 31,620 variables and 9,561 sum equations become 2,209,473 and
+738,636 (master's walk: 14s, 2.2G; its whole verdict 35s). With all
+eighteen checks master's `certifyMain` is killed at 5G, and master's
+plain `telomare arith.tel` at 8G after 41s, so there is no oracle answer
+to match. The port's systems are master's to the variable where both
+finish (the rPlus check's main walk: 25,097 variables, 7,896 equations;
+the factorial's shallow walk: 116,770 and 39,867), but it holds about
+2.3KB per variable to master's 1KB and is killed at 6G on the two-check
+program. So the corpus
+split it: `arith.tel` keeps the other seventeen checks (main's pass
+certifies them: master 6s, the port 9.9s and 660M with the IC run) and
+`fact.tel` has the factorial alone (shallow, 94 bodies: master 1.6s, the
+port 4.1s); their references are master98d's (`telomare P.tel` and
+`--certificate`, with the status line). The port's memory per variable
+is the thing to work on if a bigger program needs the shallow reading.
+`bend/dev/ealm/test/fbtime.bend` times the phases (main, the narrowing's
+index, shallow/deep with their passes, and the walk alone with its
+counts), one line per phase. Run it under `stdbuf -o0`: a run the OOM
+killer stops loses its buffered output, and the phases before the one
+that died look as if they had died too.
+
+**Committed 2026-11-02** (local, unpushed), after a full gate on the
+tree (`GATE OK`: goldens 54/54, corpus meters and certificates same on
+16, proofs open none): `b9589adf` Rat and Linear, `09cc2d14` EALm as
+the gate, `0cf4a8b0` the application and case spans, `f0af40ba` the
+REPL's `:t` (master's `renderEALVerdict`; equal to master's on 28
+expressions), and fixups of the dev commit (the corpus split,
+`bend/dev/ealm`) and of this file. `bend/dev/ealm/test/` also keeps
+the scratch oracles' sources (`*Oracle.hs`: add them to a checkout of
+master `98de497c` under `app/` and apply `master98d-cabal.patch`, which
+declares them as executables), `lin/gen*.py` (the Linear systems) and
+`fz/` (the differential fuzzer: `one.sh` expects master's binary at
+`/tmp/bx/oracle98/telomare`), since `/tmp/bx` does not survive a
+reboot.
+
+Next: `inferEALFaithful` (`faithfulProgram`, uniform chains,
+`located`), `deriveSizedGuidance` and the IC layouts (Session.bend's
+`EAL.layouts`), and the per-body guidance (usage, speculatable). Then
+step 5: tests/eal.bend to master's EALTests (390 lines, 34 groups at
+`98de497c`; the port's has 14), the README and section 7.
+
+Bend 2 rules learned writing it (each cost a failed check):
+- a match or a tuple destructure takes only a def's parameter, or a field
+  of an enclosing match; a call's tuple result needs a def of its own (so
+  `bdo.py`: `(s: S, +x: U32) <- call(...)` makes the rest of the block a
+  continuation def taking the live variables and the result);
+- parameters are scrutinized left to right: after one is matched, an
+  earlier one (or an earlier match's field) cannot be;
+- a let before a match of a parameter is refused;
+- a def is used only below it, and recursion is direct only: a loop whose
+  body needs a bind is a machine (`loop(fuel, step(...))` with the step a
+  non-recursive def returning the next state as data);
+- a self-call must shrink its first changing argument (put the list or
+  the fuel first);
+- `+x: T = Con{...}` needs its annotation (an unannotated constructor let
+  cannot be inferred), and `+` lets only for Data;
+- `Bool.pick` is strict: never put recursive calls in both branches.
+
 ## 5. Reference: what the research found
 
 Gathered 2026-10-01 by reading `haskell-final` and `bend/`, so the next
