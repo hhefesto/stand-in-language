@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gate.sh [build|tests|goldens|corpus|proofs|all]...: the handoff's
+# gate.sh [build|tests|goldens|lsp|corpus|proofs|all]...: the handoff's
 # verifying checks by hand, as P1-P7 ran them, and the proofs. Binaries go
 # to $GATE/bin and logs to $GATE/logs; GATE defaults to /tmp/telomare-gate.
 # Run from anywhere in the repo, inside `nix develop`. `nix flake check` is
@@ -18,6 +18,8 @@ build() {
   bend bend/Native.bend -o "$B/telomare" || { echo "BUILD FAILED"; fail=1; return; }
   echo "== build telomare-repl"
   bend bend/Repl.bend -o "$B/telomare-repl" || { echo "BUILD FAILED repl"; fail=1; return; }
+  echo "== build telomare-lsp"
+  bend bend/Lsp.bend -o "$B/telomare-lsp" || { echo "BUILD FAILED lsp"; fail=1; return; }
 }
 
 tests() {
@@ -41,6 +43,14 @@ goldens() {
   bash test/golden/run.sh "$B" check $pats > "$S/logs/goldens.out" 2>&1
   tail -3 "$S/logs/goldens.out"
   grep -q FAIL "$S/logs/goldens.out" && { grep FAIL "$S/logs/goldens.out"; fail=1; }
+}
+
+# The language server's sessions against master's answers (test/lsp).
+lsp() {
+  echo "== lsp"
+  bash test/lsp/run.sh "$B" check > "$S/logs/lsp.out" 2>&1
+  tail -1 "$S/logs/lsp.out"
+  grep -q FAIL "$S/logs/lsp.out" && { grep FAIL "$S/logs/lsp.out"; fail=1; }
 }
 
 corpus() {
@@ -117,9 +127,10 @@ for s in "${steps[@]}"; do
     build) build ;;
     tests) tests ;;
     goldens) goldens ;;
+    lsp) lsp ;;
     corpus) corpus ;;
     proofs) proofs ;;
-    all) build; tests; goldens; corpus; proofs ;;
+    all) build; tests; goldens; lsp; corpus; proofs ;;
   esac
 done
 [ $fail -eq 0 ] && echo "GATE OK" || echo "GATE FAILED"
