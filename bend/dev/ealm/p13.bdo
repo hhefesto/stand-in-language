@@ -260,10 +260,28 @@ def ni.sr(r: SR, +rk: Map<&2, U32>, +reach: List<&2, Map<&2, Bool>>) -> NI:
       NI{rk, reach, defs, reads}
 
 # A specialized program's main pass.
-def sr.main(r: SR) -> Result<&2, &2, Err, MR>:
+def sr.main(r: SR, +uni: Bool) -> Result<&2, &2, Err, MR>:
   match r:
     case SR{+bodies, +origin, +main, +defs, +reads}:
-      pg.main(pg.of(Lf.Lifted{bodies, main}), False{})
+      pg.main(pg.of(Lf.Lifted{bodies, main}), uni)
+
+# The failure to narrow by (located). A uniform chain types its links as
+# one, so a conflict a shared definition causes can surface first inside
+# code every chain reaches, which points at every definition; the
+# per-link reading of the same program blames the definition itself.
+def lc.pick(r: Result<&2, &2, Err, MR>, +e: Err) -> Err:
+  match r:
+    case Fail{+e2}:
+      e2
+    case Done{+m}:
+      e
+
+def located(uni: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +e: Err) -> Err:
+  match uni:
+    case True{}:
+      lc.pick(pg.main(pg.of(Lf.Lifted{bodies, main}), False{}), e)
+    case False{}:
+      e
 
 def sr.changed(r: SR) -> Bool:
   match r:
@@ -317,16 +335,16 @@ def res.some.o(r: Result<&2, &2, Err, MR>, +origin: Map<&2, String>) -> Maybe<&2
       None{}
 
 # specialized deep: substitute everything, if anything changed.
-def specialized.at(changed: Bool, +r: SR) -> Maybe<&2, MR>:
+def specialized.at(changed: Bool, +r: SR, +uni: Bool) -> Maybe<&2, MR>:
   match changed:
     case True{}:
-      res.some.o(sr.main(r), sr.origin(r))
+      res.some.o(sr.main(r, uni), sr.origin(r))
     case False{}:
       None{}
 
-def specialized(+deep: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+def specialized(+deep: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
   +r: SR = specialize(None{}, deep, bodies, main)
-  specialized.at(sr.changed(r), r)
+  specialized.at(sr.changed(r), r, uni)
 
 # narrowed: substitute only what failures point at, adding to it until
 # the program certifies or nothing is left to add.
@@ -334,80 +352,86 @@ type NF is Data:
   NfGo{+allowed: Map<&2, Bool>, +e: Err}
   NfDone{+r: Maybe<&2, MR>}
 
-def nf.run(r: Result<&2, &2, Err, MR>, +allowed: Map<&2, Bool>, +origin: Map<&2, String>) -> NF:
+def nf.run(r: Result<&2, &2, Err, MR>, +allowed: Map<&2, Bool>, +origin: Map<&2, String>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> NF:
   match r:
     case Done{+m}:
       NfDone{Some{mr.origin(m, origin)}}
     case Fail{+e}:
-      NfGo{allowed, e}
+      NfGo{allowed, located(uni, bodies, main, e)}
 
-def nf.at(none: Bool, +allowed: Map<&2, Bool>, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> NF:
+def nf.at(none: Bool, +allowed: Map<&2, Bool>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> NF:
   match none:
     case True{}:
       NfDone{None{}}
     case False{}:
-      nf.sr(specialize(Some{allowed}, True{}, bodies, main), allowed)
+      nf.sr(specialize(Some{allowed}, True{}, bodies, main), allowed, uni)
 
-def nf.sr(+r: SR, +allowed: Map<&2, Bool>) -> NF:
-  nf.run(sr.main(r), allowed, sr.origin(r))
+def nf.sr(r: SR, +allowed: Map<&2, Bool>, +uni: Bool) -> NF:
+  match r:
+    case SR{+bodies, +origin, +main, +defs, +reads}:
+      nf.run(pg.main(pg.of(Lf.Lifted{bodies, main}), uni), allowed, origin, bodies, main, uni)
 
-def nf.step(+ni: NI, +allowed: Map<&2, Bool>, +e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> NF:
+def nf.step(+ni: NI, +allowed: Map<&2, Bool>, +e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> NF:
   +new: Map<&2, Bool> = set.minus(pointed.at(ni, error.bodies(e)), allowed)
-  nf.at(set.empty(new), set.union(allowed, new), bodies, main)
+  nf.at(set.empty(new), set.union(allowed, new), bodies, main, uni)
 
-def nf.loop(fuel: Nat, +n: NF, +ni: NI, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+def nf.loop(fuel: Nat, +n: NF, +ni: NI, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
   match fuel:
     case 0n:
       None{}
     case 1n+f:
       match n:
         case NfGo{+allowed, +e}:
-          nf.loop(f, nf.step(ni, allowed, e, bodies, main), ni, bodies, main)
+          nf.loop(f, nf.step(ni, allowed, e, bodies, main, uni), ni, bodies, main, uni)
         case NfDone{+r}:
           r
 
-def narrowed(+e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: PG) -> Maybe<&2, MR>:
-  nf.loop(big(), NfGo{Map.new(&2, Bool), e}, ni.of(bodies, main, p), bodies, main)
+def narrowed(+e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: PG, +uni: Bool) -> Maybe<&2, MR>:
+  nf.loop(big(), NfGo{Map.new(&2, Bool), located(uni, bodies, main, e)}, ni.of(bodies, main, p), bodies, main, uni)
 
 # narrowed <|> specialized False <|> specialized True
-def fb.two(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+def fb.two(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
   match m:
     case Some{+x}:
       Some{x}
     case None{}:
-      specialized(True{}, bodies, main)
+      specialized(True{}, bodies, main, uni)
 
-def fb.one(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+def fb.one(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
   match m:
     case Some{+x}:
       Some{x}
     case None{}:
-      fb.two(specialized(False{}, bodies, main), bodies, main)
+      fb.two(specialized(False{}, bodies, main, uni), bodies, main, uni)
 
-def fallback(+e: Err, t: Lf.Lifted, +p: PG) -> Maybe<&2, MR>:
+def fallback(+e: Err, t: Lf.Lifted, +p: PG, +uni: Bool) -> Maybe<&2, MR>:
   match t:
     case Lf.Lifted{+bodies, +main}:
-      fb.one(narrowed(e, bodies, main, p), bodies, main)
+      fb.one(narrowed(e, bodies, main, p, uni), bodies, main, uni)
 
-# ealLiftedMain of inferEALLifted: main's pass, else a fallback's, else
-# main's failure behind its dependencies'.
-def lm.fb(m: Maybe<&2, MR>, +p: PG, +e: Err) -> Result<&2, &2, Err, MR>:
+# ealLiftedMain of inferEALLiftedWith: main's pass, else a fallback's,
+# else main's failure behind its dependencies'. uni: sized recursion
+# chains typed uniformly (esUniformChains).
+def lm.fb(m: Maybe<&2, MR>, +p: PG, +e: Err, +uni: Bool) -> Result<&2, &2, Err, MR>:
   match m:
     case Some{+x}:
       Done{x}
     case None{}:
-      Fail{with.deps(p, False{}, e)}
+      Fail{with.deps(p, uni, e)}
 
-def lm.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG) -> Result<&2, &2, Err, MR>:
+def lm.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG, +uni: Bool) -> Result<&2, &2, Err, MR>:
   match r:
     case Done{+m}:
       Done{m}
     case Fail{+e}:
-      lm.fb(fallback(e, t, p), p, e)
+      lm.fb(fallback(e, t, p, uni), p, e, uni)
+
+def lifted.with(+uni: Bool, +t: Lf.Lifted) -> Result<&2, &2, Err, MR>:
+  +p: PG = pg.of(t)
+  lm.at(pg.main(p, uni), t, p, uni)
 
 def lifted.main(+t: Lf.Lifted) -> Result<&2, &2, Err, MR>:
-  +p: PG = pg.of(t)
-  lm.at(pg.main(p, False{}), t, p)
+  lifted.with(False{}, t)
 
 # certifyMain
 def cmain.at(r: Result<&2, &2, Err, MR>) -> Maybe<&2, Err>:

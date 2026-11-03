@@ -123,11 +123,11 @@ def wt.benv(w: WT) -> U32:
 # walkTop: walk, dispatch, (the virtual application,) presolve.
 def walk.top(s: S, +vmain: Bool, +what: String, +term: A) -> S & WT:
   (s: S, +unit: U32) <- fresh(s)
-  (s: S, +c0: Bool) <- constrain(s, unit, CLevel{1, blame(gen("EAL unit"), "the unit box count")})
+  (s: S, +c0: Bool) <- constrain(s, unit, CLevel{1, bm(gen("EAL unit"), 0)})
   (s: S, +benv: U32) <- fresh(s)
   (s: S, +tenv: U32) <- fresh.tau(s)
   (s: S, +ctx: Ctx) <- frame.context(s, unit, 0, what, benv, tenv, term)
-  (s: S, +rb: U32) <- forced.zero(s, blame(gen("EAL root"), "the program's root sits at depth zero"))
+  (s: S, +rb: U32) <- forced.zero(s, bm(gen("EAL root"), 1))
   (s: S, +r: R) <- walk.view(s, ctx, rb, term)
   +res: Sg = r.sg(r)
   (presolve(vm.at(vmain, resolve.applies(s), res)), WT{benv, tenv, res})

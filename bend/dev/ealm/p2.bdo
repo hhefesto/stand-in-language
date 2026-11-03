@@ -467,8 +467,8 @@ def forced.zero(s: S, +bl: Blame) -> S & U32:
   (constrain_(s, b, CZero{bl}), b)
 
 # plainSigma
-def plain(s: S, +loc: Lc.Loc, +what: String, +t: U32) -> S & Sg:
-  (s: S, +b: U32) <- forced.zero(s, blame(loc, what))
+def plain(s: S, +loc: Lc.Loc, +what: U32, +t: U32) -> S & Sg:
+  (s: S, +b: U32) <- forced.zero(s, bm(loc, what))
   (s, Sg{b, t})
 
 # addSumEq

@@ -1,0 +1,847 @@
+# Guidance (CodeGuidance), the faithful certificate (inferEALFaithful),
+# and the sized program's guidance derived from it (deriveSizedGuidance,
+# certifiedProgramFrom)
+# --------------------------
+
+# CodeGuidance: the body's first index, its env uses (envUsageL), its env's
+# solved bang (the max over its instances), its max box level, whether no
+# unsized recursion is in it or in a body it references (speculatable), and
+# the shape of the capture its closures carry, when known.
+type G is Data:
+  G{+fi: U32, +usage: List<&2, Use>, +bang: U32, +max: U32, +spec: Bool, +layout: Maybe<&2, Lf.Shape>}
+
+# EALLiftedResult: every body's guidance (ealGuidance's Right entries),
+# the bodies that fail (its Left entries, in hash order), and main's
+# verdict. Under a certified main every body has guidance and none fails;
+# under a refusal the per-body verdicts are computed only where they are
+# read (lr.full: certifiedProgramFrom's, which renderRefusal reports and an
+# artifact keeps), the faithful certificate's refusal carrying none.
+type LR is Data:
+  LR{+guide: Map<&2, G>, +fails: List<&2, Fl>, +main: Result<&2, &2, Err, MR>}
+
+# A body that does not certify, by its hash.
+type Fl is Data:
+  Fl{+h: String, +e: Err}
+
+def g.none() -> G:
+  G{0, [], 0, 0, True{}, None{}}
+
+# Map.findWithDefault 0 fi over (index, value) pairs.
+def kv.find(xs: List<&2, KV>, +fi: U32, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{x, rest}:
+      match x:
+        case KV{+k, +v}:
+          kv.find(rest, fi, Bool.pick(U32, U32.is_eq(k, fi), v, acc))
+
+def sh.find(r: Map<&2, Lf.Shape> & Bool, +h: String) -> Maybe<&2, Lf.Shape>:
+  (m, +known) = r
+  Bool.pick(Maybe<&2, Lf.Shape>, known, Some{Pair.snd(Map<&2, Lf.Shape>, Lf.Shape, Map.get(Lf.Shape, Lf.CapOther{}, m, h))}, None{})
+
+# unsizedIn
+# ---------
+
+# Whether a term holds an unsized recursion itself.
+def l.uns(t: Lf.L) -> Bool:
+  match t:
+    case Lf.LUnsized{loc, tok}:
+      True{}
+    case Lf.LPair{loc, a, b}:
+      Bool.or(l.uns(a), l.uns(b))
+    case Lf.LSetEnv{loc, x}:
+      l.uns(x)
+    case Lf.LLeft{loc, x}:
+      l.uns(x)
+    case Lf.LRight{loc, x}:
+      l.uns(x)
+    case Lf.LCheck{loc, o, tc, c}:
+      Bool.or(l.uns(tc), l.uns(c))
+    case other:
+      False{}
+
+def lb.own(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>) -> List<&2, Bool>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          match b:
+            case Lf.Body{+fi, +body}:
+              l.uns(body) <> lb.own(rest)
+
+def lb.terms(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>) -> List<&2, Lf.L>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          match b:
+            case Lf.Body{+fi, +body}:
+              body <> lb.terms(rest)
+
+def bl.got(m: Maybe<&2, Bool>) -> Bool:
+  match m:
+    case Some{+x}:
+      x
+    case None{}:
+      False{}
+
+def bl.at(+xs: List<&2, Bool>, +i: U32) -> Bool:
+  bl.got(List.get(&2, Bool, xs, U32.to_nat(i)))
+
+# Every body's unsizedIn, by rank, as a machine over the DAG: 0 unknown,
+# 1 free of unsized recursion, 2 not.
+type UQ is Type:
+  UqGo{a: Array<U32>, +st: List<&2, RF>}
+  UqEnd{a: Array<U32>}
+
+def uq.or(q: Array<U32> & U32, +b: Bool) -> Array<U32> & Bool:
+  (a, +v) = q
+  (a, Bool.or(b, U32.is_eq(v, 2)))
+
+def uq.any(xs: List<&2, U32>, q: Array<U32> & Bool) -> Array<U32> & Bool:
+  match xs:
+    case Nil{}:
+      q
+    case Con{+x, rest}:
+      (a, +b) = q
+      uq.any(rest, uq.or(Array.get(U32, a, x), b))
+
+def uq.done(q: Array<U32> & Bool, +r: U32, +rest: List<&2, RF>) -> UQ:
+  (a, +b) = q
+  UqGo{Array.set(U32, a, r, Bool.pick(U32, b, 2, 1)), rest}
+
+def uq.dep(seen: Bool, a: Array<U32>, +p: PG, +r: U32, +x: U32, +xs: List<&2, U32>, +rest: List<&2, RF>) -> UQ:
+  match seen:
+    case True{}:
+      UqGo{a, RF{r, xs} <> rest}
+    case False{}:
+      UqGo{a, RF{x, pg.refs.at(p, x)} <> RF{r, x <> xs} <> rest}
+
+def uq.look(q: Array<U32> & U32, +p: PG, +r: U32, +x: U32, +xs: List<&2, U32>, +rest: List<&2, RF>) -> UQ:
+  (a, +m) = q
+  uq.dep(Bool.not(U32.is_eq(m, 0)), a, p, r, x, xs, rest)
+
+def uq.frame(f: RF, a: Array<U32>, +p: PG, +own: List<&2, Bool>, +rest: List<&2, RF>) -> UQ:
+  match f:
+    case RF{+r, +ds}:
+      match ds:
+        case Nil{}:
+          uq.done(uq.any(pg.refs.at(p, r), (a, bl.at(own, r))), r, rest)
+        case Con{+x, +xs}:
+          uq.look(Array.get(U32, a, x), p, r, x, xs, rest)
+
+def uq.step(st: List<&2, RF>, a: Array<U32>, +p: PG, +own: List<&2, Bool>) -> UQ:
+  match st:
+    case Nil{}:
+      UqEnd{a}
+    case Con{+f, +rest}:
+      uq.frame(f, a, p, own, rest)
+
+def uq.fin(q: UQ) -> Array<U32>:
+  match q:
+    case UqGo{a, +st}:
+      a
+    case UqEnd{a}:
+      a
+
+def uq.loop(fuel: Nat, q: UQ, +p: PG, +own: List<&2, Bool>) -> Array<U32>:
+  match fuel:
+    case 0n:
+      uq.fin(q)
+    case 1n+f:
+      match q:
+        case UqGo{a, +st}:
+          uq.loop(f, uq.step(st, a, p, own), p, own)
+        case UqEnd{a}:
+          a
+
+def ul.add(q: Array<U32> & U32, +acc: List<&2, Bool>) -> Array<U32> & List<&2, Bool>:
+  (a, +v) = q
+  (a, U32.is_eq(v, 2) <> acc)
+
+def ul.go(n: Nat, +i: U32, q: Array<U32> & List<&2, Bool>) -> Array<U32> & List<&2, Bool>:
+  match n:
+    case 0n:
+      q
+    case 1n+k:
+      (a, +acc) = q
+      ul.go(k, (i + 1 : U32), ul.add(Array.get(U32, a, i), acc))
+
+def ul.fin(q: Array<U32> & List<&2, Bool>) -> List<&2, Bool>:
+  (a, +acc) = q
+  List.reverse(&2, Bool, acc)
+
+# unsizedIn of every body of a program, by rank.
+def unsized.in(t: Lf.Lifted) -> List<&2, Bool>:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      +p: PG = pg.of(Lf.Lifted{bodies, main})
+      +own: List<&2, Bool> = lb.own(Map.to_list(&2, Lf.Body, bodies))
+      ul.fin(ul.go(U32.to_nat(pg.n(p)), 0, (uq.loop(big(), UqGo{Array.new(U32, Ln.depth.of(pg.n(p)), 0), rq.seed(U32.to_nat(pg.n(p)), 0, p)}, p, own), [])))
+
+# The guidance of a certified program
+# -----------------------------------
+
+def bl.head(xs: List<&2, Bool>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{+x, rest}:
+      x
+
+def bl.tail(xs: List<&2, Bool>) -> List<&2, Bool>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, +rest}:
+      rest
+
+# syntacticGuidance, with a certified run's bangs, levels and layouts
+# (inferEALLiftedWith's `certified`).
+def g.of(+h: String, b: Lf.Body, +uns: Bool, +m: MR) -> G:
+  match b:
+    case Lf.Body{+fi, +body}:
+      match m:
+        case MR{+top, +defers, +max, +shape, +shapes, +levels}:
+          G{fi, usage(to.a(body, Map.new(&2, U32)), [], []), kv.find(defers, fi, 0), kv.find(levels, fi, 0), Bool.not(uns), sh.find(Map.has(&2, Lf.Shape, shapes, h), h)}
+
+def guide.go(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +m: MR, +acc: Map<&2, G>) -> Map<&2, G>:
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          guide.go(rest, bl.tail(uns), m, Map.set(&2, G, acc, h, g.of(h, b, bl.head(uns), m)))
+
+def guide.ok(+t: Lf.Lifted, +m: MR) -> Map<&2, G>:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      guide.go(Map.to_list(&2, Lf.Body, bodies), unsized.in(Lf.Lifted{bodies, main}), m, Map.new(&2, G))
+
+def lr.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted) -> LR:
+  match r:
+    case Done{+m}:
+      LR{guide.ok(t, m), [], Done{m}}
+    case Fail{+e}:
+      LR{Map.new(&2, G), [], Fail{e}}
+
+# inferEALLiftedWith uni, with the guidance.
+def lr.of(+uni: Bool, +t: Lf.Lifted) -> LR:
+  lr.at(lifted.with(uni, t), t)
+
+# The sizing substitution (faithfulProgram, liftedChain, refinementCheckL)
+# -----------------------------------------------------------------
+
+def core.got(r: Result<&2, &2, String, Co.V>) -> Co.V:
+  match r:
+    case Done{+v}:
+      v
+    case Fail{+e}:
+      Co.VZero{}
+
+# A sized recursion chain of n links (sizedRecursionChain), lifted: its
+# value and its constant bodies (the link and the abort base).
+def chain.lifted(+tok: U32, +n: U32) -> Lf.L & Map<&2, Lf.Body>:
+  Lf.lift.expr(core.got(E.core(Map.new(&2, Lc.Origin), E.sized.chain(tok, n, False{}))), Lc.Gen{"compiled2Term3"})(Map.new(&2, Lf.Body))
+
+def chain.main(+tok: U32, +n: U32) -> Lf.L:
+  Pair.fst(Lf.L, Map<&2, Lf.Body>, chain.lifted(tok, n))
+
+# The check a refinement wrapper compiles to (refinementCheckB o 0 0),
+# lifted: `perform` applied to (0, 0), and perform's bodies.
+def check.lifted(+o: Lc.Origin) -> Lf.L & Map<&2, Lf.Body>:
+  Lf.lift.expr(core.got(E.core(Map.set(&2, Lc.Origin, Map.new(&2, Lc.Origin), "0", o), E.check.of(True{}, 0, E.XZero{}, E.XZero{}))), Lc.Gen{"compiled2Term3"})(Map.new(&2, Lf.Body))
+
+def ck.perform.of(l: Lf.L) -> Lf.L:
+  match l:
+    case Lf.LSetEnv{loc, x}:
+      match x:
+        case Lf.LPair{pl, a, b}:
+          a
+        case other:
+          other
+    case other:
+      other
+
+def check.perform(+o: Lc.Origin) -> Lf.L:
+  ck.perform.of(Pair.fst(Lf.L, Map<&2, Lf.Body>, check.lifted(o)))
+
+def ck.anno(l: Lf.L, +anno: Lc.Loc) -> Lf.L:
+  match l:
+    case Lf.LRef{loc, +h}:
+      Lf.LRef{anno, h}
+    case other:
+      other
+
+# refinementCheckL: the check around lifted operands, at the wrapper's
+# location.
+def check.l(+anno: Lc.Loc, perform: Lf.L, tc: Lf.L, c: Lf.L) -> Lf.L:
+  Lf.LSetEnv{anno, Lf.LPair{anno, ck.anno(perform, anno), Lf.LPair{anno, tc, c}}}
+
+# Every location of a term made one (`anno <$`).
+def relabel(l: Lf.L, +anno: Lc.Loc) -> Lf.L:
+  match l:
+    case Lf.LZero{loc}:
+      Lf.LZero{anno}
+    case Lf.LPair{loc, a, b}:
+      Lf.LPair{anno, relabel(a, anno), relabel(b, anno)}
+    case Lf.LEnv{loc}:
+      Lf.LEnv{anno}
+    case Lf.LSetEnv{loc, x}:
+      Lf.LSetEnv{anno, relabel(x, anno)}
+    case Lf.LGate{loc}:
+      Lf.LGate{anno}
+    case Lf.LLeft{loc, x}:
+      Lf.LLeft{anno, relabel(x, anno)}
+    case Lf.LRight{loc, x}:
+      Lf.LRight{anno, relabel(x, anno)}
+    case Lf.LAbort{loc}:
+      Lf.LAbort{anno}
+    case Lf.LUnsized{loc, +tok}:
+      Lf.LUnsized{anno, tok}
+    case Lf.LCheck{loc, +o, tc, c}:
+      Lf.LCheck{anno, o, relabel(tc, anno), relabel(c, anno)}
+    case Lf.LRef{loc, +h}:
+      Lf.LRef{anno, h}
+    case Lf.LAborted{loc, +o, m}:
+      Lf.LAborted{anno, o, relabel(m, anno)}
+
+# faithfulProgram's rewrite: each recursion hole a two-link chain (at the
+# hole's location), each refinement wrapper its check.
+def fa.rw(l: Lf.L) -> Lf.L:
+  match l:
+    case Lf.LPair{loc, a, b}:
+      Lf.LPair{loc, fa.rw(a), fa.rw(b)}
+    case Lf.LSetEnv{loc, x}:
+      Lf.LSetEnv{loc, fa.rw(x)}
+    case Lf.LLeft{loc, x}:
+      Lf.LLeft{loc, fa.rw(x)}
+    case Lf.LRight{loc, x}:
+      Lf.LRight{loc, fa.rw(x)}
+    case Lf.LUnsized{+loc, +tok}:
+      relabel(chain.main(tok, 2), loc)
+    case Lf.LCheck{+loc, +o, tc, c}:
+      check.l(loc, check.perform(o), fa.rw(tc), fa.rw(c))
+    case other:
+      other
+
+# The chains and checks a term needs bodies for.
+type Ex is Data:
+  ExTok{+tok: U32}
+  ExChk{+o: Lc.Origin}
+
+def fa.ex(l: Lf.L, +acc: List<&2, Ex>) -> List<&2, Ex>:
+  match l:
+    case Lf.LPair{loc, a, b}:
+      fa.ex(b, fa.ex(a, acc))
+    case Lf.LSetEnv{loc, x}:
+      fa.ex(x, acc)
+    case Lf.LLeft{loc, x}:
+      fa.ex(x, acc)
+    case Lf.LRight{loc, x}:
+      fa.ex(x, acc)
+    case Lf.LUnsized{loc, +tok}:
+      ExTok{tok} <> acc
+    case Lf.LCheck{loc, +o, tc, c}:
+      ExChk{o} <> fa.ex(c, fa.ex(tc, acc))
+    case other:
+      acc
+
+def fa.ex.bodies(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +acc: List<&2, Ex>) -> List<&2, Ex>:
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          match b:
+            case Lf.Body{+fi, +body}:
+              fa.ex.bodies(rest, fa.ex(body, acc))
+
+# A body joins under its key unless one is there (DeferMap's left-biased
+# union).
+def fa.keep.at(known: Bool, m: Map<&2, Lf.Body>, +h: String, +b: Lf.Body) -> Map<&2, Lf.Body>:
+  match known:
+    case True{}:
+      m
+    case False{}:
+      Map.set(&2, Lf.Body, m, h, b)
+
+def fa.keep(r: Map<&2, Lf.Body> & Bool, +h: String, +b: Lf.Body) -> Map<&2, Lf.Body>:
+  (m, +known) = r
+  fa.keep.at(known, m, h, b)
+
+def fa.join(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +m: Map<&2, Lf.Body>) -> Map<&2, Lf.Body>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          fa.join(rest, fa.keep(Map.has(&2, Lf.Body, m, h), h, b))
+
+def ex.bodies(x: Ex) -> Map<&2, Lf.Body>:
+  match x:
+    case ExTok{+tok}:
+      Pair.snd(Lf.L, Map<&2, Lf.Body>, chain.lifted(tok, 2))
+    case ExChk{+o}:
+      Pair.snd(Lf.L, Map<&2, Lf.Body>, check.lifted(o))
+
+def fa.extras(xs: List<&2, Ex>, +m: Map<&2, Lf.Body>) -> Map<&2, Lf.Body>:
+  match xs:
+    case Nil{}:
+      m
+    case Con{+x, rest}:
+      fa.extras(rest, fa.join(Map.to_list(&2, Lf.Body, ex.bodies(x)), m))
+
+def fa.bodies(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +m: Map<&2, Lf.Body>) -> Map<&2, Lf.Body>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          match b:
+            case Lf.Body{+fi, +body}:
+              fa.bodies(rest, Map.set(&2, Lf.Body, m, h, Lf.Body{fi, fa.rw(body)}))
+
+# faithfulProgram: the sizing substitution with two-link chains. Bodies
+# keep their keys; the chain and check bodies join under theirs.
+def faithful(t: Lf.Lifted) -> Lf.Lifted:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      Lf.Lifted{fa.extras(fa.ex.bodies(Map.to_list(&2, Lf.Body, bodies), fa.ex(main, [])), fa.bodies(Map.to_list(&2, Lf.Body, bodies), Map.new(&2, Lf.Body))), fa.rw(main)}
+
+# inferEALFaithful, over the lifted unsized program.
+def faithful.lr(+t: Lf.Lifted) -> LR:
+  lr.of(True{}, faithful(t))
+
+# deriveSizedGuidance
+# -------------------
+
+# A term's image under the sizing substitution: references to their
+# bodies' images, holes to chains of their links, wrappers to checks.
+def im.rw(l: Lf.L, +imgs: Map<&2, String>, +counts: List<&2, E.TS>) -> Lf.L:
+  match l:
+    case Lf.LRef{+loc, +h}:
+      Lf.LRef{loc, Pair.snd(Map<&2, String>, String, Map.get(String, h, imgs, h))}
+    case Lf.LPair{loc, a, b}:
+      Lf.LPair{loc, im.rw(a, imgs, counts), im.rw(b, imgs, counts)}
+    case Lf.LSetEnv{loc, x}:
+      Lf.LSetEnv{loc, im.rw(x, imgs, counts)}
+    case Lf.LLeft{loc, x}:
+      Lf.LLeft{loc, im.rw(x, imgs, counts)}
+    case Lf.LRight{loc, x}:
+      Lf.LRight{loc, im.rw(x, imgs, counts)}
+    case Lf.LUnsized{loc, +tok}:
+      chain.main(tok, E.count.of(counts, tok))
+    case Lf.LCheck{+loc, +o, tc, c}:
+      check.l(loc, check.perform(o), im.rw(tc, imgs, counts), im.rw(c, imgs, counts))
+    case other:
+      other
+
+# Every body's image's hash, by the body's, as a machine over the DAG (a
+# body's references first).
+type IQ is Type:
+  IqGo{d: Array<U32>, +imgs: Map<&2, String>, +st: List<&2, RF>}
+  IqEnd{+imgs: Map<&2, String>}
+
+def iq.dep(seen: Bool, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +r: U32, +x: U32, +xs: List<&2, U32>, +rest: List<&2, RF>) -> IQ:
+  match seen:
+    case True{}:
+      IqGo{d, imgs, RF{r, xs} <> rest}
+    case False{}:
+      IqGo{d, imgs, RF{x, pg.refs.at(p, x)} <> RF{r, x <> xs} <> rest}
+
+def iq.look(q: Array<U32> & U32, +imgs: Map<&2, String>, +p: PG, +r: U32, +x: U32, +xs: List<&2, U32>, +rest: List<&2, RF>) -> IQ:
+  (d, +m) = q
+  iq.dep(U32.is_eq(m, 1), d, imgs, p, r, x, xs, rest)
+
+def st.got(m: Maybe<&2, String>) -> String:
+  match m:
+    case Some{+x}:
+      x
+    case None{}:
+      ""
+
+def lt.got(m: Maybe<&2, Lf.L>) -> Lf.L:
+  match m:
+    case Some{+x}:
+      x
+    case None{}:
+      Lf.LZero{Lc.Unknown{}}
+
+def im.put(+h: String, +body: Lf.L, +imgs: Map<&2, String>, +counts: List<&2, E.TS>) -> Map<&2, String>:
+  Map.set(&2, String, imgs, h, Lf.hash(im.rw(body, imgs, counts)))
+
+def iq.frame(f: RF, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: List<&2, E.TS>, +rest: List<&2, RF>) -> IQ:
+  match f:
+    case RF{+r, +ds}:
+      match ds:
+        case Nil{}:
+          IqGo{Array.set(U32, d, r, 1), im.put(st.got(List.get(&2, String, hs, U32.to_nat(r))), lt.got(List.get(&2, Lf.L, ts, U32.to_nat(r))), imgs, counts), rest}
+        case Con{+x, +xs}:
+          iq.look(Array.get(U32, d, x), imgs, p, r, x, xs, rest)
+
+def iq.step(st: List<&2, RF>, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: List<&2, E.TS>) -> IQ:
+  match st:
+    case Nil{}:
+      IqEnd{imgs}
+    case Con{+f, +rest}:
+      iq.frame(f, d, imgs, p, hs, ts, counts, rest)
+
+def iq.fin(q: IQ) -> Map<&2, String>:
+  match q:
+    case IqGo{d, +imgs, +st}:
+      imgs
+    case IqEnd{+imgs}:
+      imgs
+
+def iq.loop(fuel: Nat, q: IQ, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: List<&2, E.TS>) -> Map<&2, String>:
+  match fuel:
+    case 0n:
+      iq.fin(q)
+    case 1n+f:
+      match q:
+        case IqGo{d, +imgs, +st}:
+          iq.loop(f, iq.step(st, d, imgs, p, hs, ts, counts), p, hs, ts, counts)
+        case IqEnd{+imgs}:
+          imgs
+
+# images: each unsized body's image's hash.
+def images(t: Lf.Lifted, +counts: List<&2, E.TS>) -> Map<&2, String>:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      +p: PG = pg.of(Lf.Lifted{bodies, main})
+      +n: U32 = pg.n(p)
+      iq.loop(big(), IqGo{Array.new(U32, Ln.depth.of(n), 0), Map.new(&2, String), rq.seed(U32.to_nat(n), 0, p)}, p, Map.keys(&2, Lf.Body, bodies), lb.terms(Map.to_list(&2, Lf.Body, bodies)), counts)
+
+# preimages: the unsized bodies whose image each sized body is.
+def pre.add(r: Map<&2, List<&2, String>> & List<&2, String>, +h2: String, +h: String) -> Map<&2, List<&2, String>>:
+  (m, +old) = r
+  Map.set(&2, List<&2, String>, m, h2, h <> old)
+
+def preimages(kvs: List<&2, Sigma<&2, &2, String, _ => String>>, +m: Map<&2, List<&2, String>>) -> Map<&2, List<&2, String>>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +h2):
+          preimages(rest, pre.add(Map.get(List<&2, String>, [], m, h2), h2, h))
+
+def dv.all(hs: List<&2, String>, +cert: Map<&2, G>) -> Bool:
+  match hs:
+    case Nil{}:
+      True{}
+    case Con{+h, rest}:
+      Bool.and(Pair.snd(Map<&2, G>, Bool, Map.has(&2, G, cert, h)), dv.all(rest, cert))
+
+def dv.gs(hs: List<&2, String>, +cert: Map<&2, G>) -> List<&2, G>:
+  match hs:
+    case Nil{}:
+      []
+    case Con{+h, rest}:
+      Pair.snd(Map<&2, G>, G, Map.get(G, g.none(), cert, h)) <> dv.gs(rest, cert)
+
+def gs.bang(xs: List<&2, G>, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{g, rest}:
+      match g:
+        case G{+fi, +usage, +bang, +max, +spec, +layout}:
+          gs.bang(rest, u.max(acc, bang))
+
+def gs.max(xs: List<&2, G>, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{g, rest}:
+      match g:
+        case G{+fi, +usage, +bang, +max, +spec, +layout}:
+          gs.max(rest, u.max(acc, max))
+
+def ly.meet(a: Maybe<&2, Lf.Shape>, b: Maybe<&2, Lf.Shape>) -> Maybe<&2, Lf.Shape>:
+  match a:
+    case None{}:
+      b
+    case Some{+x}:
+      match b:
+        case None{}:
+          Some{x}
+        case Some{+y}:
+          Some{meet(x, y)}
+
+# foldr1 meetShape over the layouts there are.
+def gs.layout(xs: List<&2, G>) -> Maybe<&2, Lf.Shape>:
+  match xs:
+    case Nil{}:
+      None{}
+    case Con{g, rest}:
+      match g:
+        case G{+fi, +usage, +bang, +max, +spec, +layout}:
+          ly.meet(layout, gs.layout(rest))
+
+# A sized body's guidance: its own usage and speculatability, its
+# preimages' bangs, levels and layouts.
+def dv.one(b: Lf.Body, +uns: Bool, +ps: List<&2, G>) -> G:
+  match b:
+    case Lf.Body{+fi, +body}:
+      G{fi, usage(to.a(body, Map.new(&2, U32)), [], []), gs.bang(ps, 0), gs.max(ps, 0), Bool.not(uns), gs.layout(ps)}
+
+def dv.at(ok: Bool, +h2: String, +b: Lf.Body, +uns: Bool, +hs: List<&2, String>, +cert: Map<&2, G>, +acc: Map<&2, G>) -> Result<&2, &2, String, Map<&2, G>>:
+  match ok:
+    case True{}:
+      Done{Map.set(&2, G, acc, h2, dv.one(b, uns, dv.gs(hs, cert)))}
+    case False{}:
+      Fail{"no certified preimage for sized body " ++ Co.fi.show(lb.fi(b))}
+
+def lb.fi(b: Lf.Body) -> U32:
+  match b:
+    case Lf.Body{+fi, +body}:
+      fi
+
+def dv.hs(+pre: Map<&2, List<&2, String>>, +h2: String) -> List<&2, String>:
+  Pair.snd(Map<&2, List<&2, String>>, List<&2, String>, Map.get(List<&2, String>, [h2], pre, h2))
+
+def dv.go(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +pre: Map<&2, List<&2, String>>, +cert: Map<&2, G>, r: Result<&2, &2, String, Map<&2, G>>) -> Result<&2, &2, String, Map<&2, G>>:
+  match kvs:
+    case Nil{}:
+      r
+    case Con{kv, rest}:
+      match kv:
+        case (+h2, +b):
+          match r:
+            case Fail{+e}:
+              Fail{e}
+            case Done{+acc}:
+              dv.go(rest, bl.tail(uns), pre, cert, dv.at(dv.all(dv.hs(pre, h2), cert), h2, b, bl.head(uns), dv.hs(pre, h2), cert, acc))
+
+# The image of main must be the sized main, which, bodies being keyed by
+# content, makes every sized body the image of some.
+def dv.main(same: Bool, +pre: Map<&2, List<&2, String>>, +cert: Map<&2, G>, +post: Lf.Lifted) -> Result<&2, &2, String, Map<&2, G>>:
+  match same:
+    case False{}:
+      Fail{"the sized program is not the sizing substitution of the certified one"}
+    case True{}:
+      match post:
+        case Lf.Lifted{+bodies, +main}:
+          dv.go(Map.to_list(&2, Lf.Body, bodies), unsized.in(Lf.Lifted{bodies, main}), pre, cert, Done{Map.new(&2, G)})
+
+def dv.lr(r: Result<&2, &2, String, Map<&2, G>>, +m: MR) -> Result<&2, &2, String, LR>:
+  match r:
+    case Done{+g}:
+      Done{LR{g, [], Done{m}}}
+    case Fail{+e}:
+      Fail{e}
+
+def lf.main(t: Lf.Lifted) -> Lf.L:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      main
+
+def dv.cert(+counts: List<&2, E.TS>, +pre: Lf.Lifted, +cert: Map<&2, G>, +m: MR, +post: Lf.Lifted) -> Result<&2, &2, String, LR>:
+  +imgs: Map<&2, String> = images(pre, counts)
+  dv.lr(dv.main(String.eq(Lf.show(im.rw(lf.main(pre), imgs, counts)), Lf.show(lf.main(post))), preimages(Map.to_list(&2, String, imgs), Map.new(&2, List<&2, String>)), cert, post), m)
+
+# deriveSizedGuidance links unsized cert sized: Fail when the certificate
+# is a refusal, or the sized program is not the unsized one's image.
+def derive(+counts: List<&2, E.TS>, +pre: Lf.Lifted, cert: LR, +post: Lf.Lifted) -> Result<&2, &2, String, LR>:
+  match cert:
+    case LR{+guide, +fails, +main}:
+      match main:
+        case Fail{+e}:
+          Fail{render(e)}
+        case Done{+m}:
+          dv.cert(counts, pre, guide, m, post)
+
+# certifiedProgramFrom: the sized program's guidance and verdict, derived
+# from the faithful certificate of the unsized program (pre) when that
+# covers it, else inferred over the sized program (inferEALCompiled).
+def cp.pick(r: Result<&2, &2, String, LR>, +post: Lf.Lifted) -> LR:
+  match r:
+    case Done{+x}:
+      x
+    case Fail{+why}:
+      lr.full(False{}, post)
+
+def certified.program(+pre: Lf.Lifted, +counts: List<&2, E.TS>, +sized: Co.V) -> LR:
+  +post: Lf.Lifted = Lf.defer.lift.expr(sized)
+  cp.pick(derive(counts, pre, faithful.lr(pre), post), post)
+
+# ealCaptureLayouts of a result.
+def lr.layouts.go(kvs: List<&2, Sigma<&2, &2, String, _ => G>>, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +g):
+          match g:
+            case G{+fi, +usage, +bang, +max, +spec, +layout}:
+              match layout:
+                case None{}:
+                  lr.layouts.go(rest, m)
+                case Some{+s}:
+                  lr.layouts.go(rest, Map.set(&2, Lf.Shape, m, h, s))
+
+def lr.layouts(r: LR) -> Map<&2, Lf.Shape>:
+  match r:
+    case LR{+guide, +fails, +main}:
+      lr.layouts.go(Map.to_list(&2, G, guide), Map.new(&2, Lf.Shape))
+
+# bodyResults (inferEALLiftedWith, under a main no reading certifies)
+# ------------------------------------------------------------------
+
+# Every body's verdict under withDeps, as the verdict machine leaves them
+# with every body a root: v[r] 1 or 2, v[n + 3 + r] the dependency it
+# failed at plus one (0: its own summary failed).
+def br.frames(rs: List<&2, List<&2, U32>>, +i: U32) -> List<&2, VF>:
+  match rs:
+    case Nil{}:
+      []
+    case Con{+ds, rest}:
+      VF{i, ds} <> br.frames(rest, (i + 1 : U32))
+
+def br.v(+p: PG, +uni: Bool) -> Array<U32>:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      vq.loop(big(), VqGo{Array.new(U32, Ln.depth.of((n + n + 3 : U32)), 0), br.frames(refs, 0)}, p, uni)
+
+# syntacticGuidance: a body's index, env uses and speculatability, with
+# bang and level 0 and no layout.
+def g.syn(b: Lf.Body, +uns: Bool) -> G:
+  match b:
+    case Lf.Body{+fi, +body}:
+      G{fi, usage(to.a(body, Map.new(&2, U32)), [], []), 0, 0, Bool.not(uns), None{}}
+
+def br.own(m: Maybe<&2, Err>) -> Err:
+  match m:
+    case Some{+e}:
+      e
+    case None{}:
+      Internal{"a failing body's summary found no error"}
+
+def br.err(own: Bool, +p: PG, +uni: Bool, +i: U32, +d: U32) -> Err:
+  match own:
+    case True{}:
+      br.own(summary(p, uni, i))
+    case False{}:
+      DependencyFailed{bd.hash(pg.bd(p, (d - 1 : U32)))}
+
+# The bodies in hash order (rank order), each read off the verdicts.
+type BS is Type:
+  BsGo{v: Array<U32>, +kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>}
+  BsEnd{+guide: Map<&2, G>, +fails: List<&2, Fl>}
+
+def bs.v2(q: Array<U32> & U32, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +h: String) -> BS:
+  (v, +d) = q
+  BsGo{v, rest, bl.tail(uns), (i + 1 : U32), guide, Fl{h, br.err(U32.is_eq(d, 0), p, uni, i, d)} <> fails}
+
+def bs.one(ok: Bool, v: Array<U32>, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +h: String, +b: Lf.Body) -> BS:
+  match ok:
+    case True{}:
+      BsGo{v, rest, bl.tail(uns), (i + 1 : U32), Map.set(&2, G, guide, h, g.syn(b, bl.head(uns))), fails}
+    case False{}:
+      bs.v2(Array.get(U32, v, (pg.n(p) + 3 + i : U32)), rest, uns, i, guide, fails, p, uni, h)
+
+def bs.v1(q: Array<U32> & U32, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +h: String, +b: Lf.Body) -> BS:
+  (v, +m) = q
+  bs.one(U32.is_eq(m, 1), v, rest, uns, i, guide, fails, p, uni, h, b)
+
+def bs.step(v: Array<U32>, +kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool) -> BS:
+  match kvs:
+    case Nil{}:
+      BsEnd{guide, fails}
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          bs.v1(Array.get(U32, v, i), rest, uns, i, guide, fails, p, uni, h, b)
+
+def bs.loop(fuel: Nat, s: BS, +p: PG, +uni: Bool) -> BS:
+  match fuel:
+    case 0n:
+      s
+    case 1n+f:
+      match s:
+        case BsGo{v, +kvs, +uns, +i, +guide, +fails}:
+          bs.loop(f, bs.step(v, kvs, uns, i, guide, fails, p, uni), p, uni)
+        case BsEnd{+guide, +fails}:
+          BsEnd{guide, fails}
+
+def bs.lr(s: BS, +e: Err) -> LR:
+  match s:
+    case BsEnd{+guide, +fails}:
+      LR{guide, List.reverse(&2, Fl, fails), Fail{e}}
+    case BsGo{v, +kvs, +uns, +i, +guide, +fails}:
+      LR{guide, List.reverse(&2, Fl, fails), Fail{e}}
+
+def br.lr(v: Array<U32>, +t: Lf.Lifted, +p: PG, +uni: Bool, +e: Err) -> LR:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      bs.lr(bs.loop(big(), BsGo{v, Map.to_list(&2, Lf.Body, bodies), unsized.in(Lf.Lifted{bodies, main}), 0, Map.new(&2, G), []}, p, uni), e)
+
+def lr.full.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG, +uni: Bool) -> LR:
+  match r:
+    case Done{+m}:
+      LR{guide.ok(t, m), [], Done{m}}
+    case Fail{+e}:
+      br.lr(br.v(p, uni), t, p, uni, e)
+
+# inferEALLiftedWith uni, with the guidance, and with the bodies' verdicts
+# when main fails.
+def lr.full(+uni: Bool, +t: Lf.Lifted) -> LR:
+  +p: PG = pg.of(t)
+  lr.full.at(lm.at(pg.main(p, uni), t, p, uni), t, p, uni)
+
+# renderRefusal: why the IC runtime runs no session of a program, its
+# verdict and the bodies that fail on their own (all failing ones when
+# each fails through a dependency).
+def fl.own(xs: List<&2, Fl>) -> List<&2, Fl>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+x, rest}:
+      match x:
+        case Fl{+h, +e}:
+          match e:
+            case DependencyFailed{+d}:
+              fl.own(rest)
+            case other:
+              Fl{h, other} <> fl.own(rest)
+
+def fl.roots(own: List<&2, Fl>, +all: List<&2, Fl>) -> List<&2, Fl>:
+  match own:
+    case Nil{}:
+      all
+    case Con{+x, +rest}:
+      x <> rest
+
+def fl.lines(xs: List<&2, Fl>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{+x, rest}:
+      match x:
+        case Fl{+h, +e}:
+          "  body " ++ String.take(h, 12n) ++ ": " ++ render(e) ++ "\n" ++ fl.lines(rest)
+
+def refusal(+e: Err, +fails: List<&2, Fl>) -> String:
+  "the IC runtime requires an EAL certificate; this program does not certify: " ++ render(e) ++ "\n" ++ fl.lines(fl.roots(fl.own(fails), fails))
+
+# programPlan: the capture layouts a session runs under, or the refusal.
+def lr.plan(r: LR) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
+  match r:
+    case LR{+guide, +fails, +main}:
+      match main:
+        case Done{+m}:
+          Done{lr.layouts(LR{guide, fails, Done{m}})}
+        case Fail{+e}:
+          Fail{refusal(e, fails)}

@@ -54,6 +54,8 @@ def l.loc(t: Lf.L) -> Lc.Loc:
       loc
     case Lf.LRef{+loc, +h}:
       loc
+    case Lf.LAborted{+loc, +o, +m}:
+      loc
 
 def is.l(+c: U32) -> Bool:
   U32.is_eq(c, 76)

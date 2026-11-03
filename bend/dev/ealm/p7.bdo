@@ -72,7 +72,7 @@ def vw.d.at(root: Bool, s: S, +par: U32, +w: U32, +loc: Lc.Loc) -> S & U32:
       (s, w)
     case False{}:
       (s: S, +d: U32) <- fresh(s)
-      (add.eq(s, blame(loc, "box depth = the parent's depth + this edge's boxes"), [(par - 1 : U32), w], d), d)
+      (add.eq(s, bm(loc, 12), [(par - 1 : U32), w], d), d)
 
 # viewNodeWith's first half: the edge's boxes and the node's depth.
 def vw.depth(s: S, p: Pa, +w: U32, +loc: Lc.Loc) -> S & U32:
@@ -146,7 +146,7 @@ def wm.lr(m: Maybe<&2, List<&2, U32>>, +left: Bool, s: S, +c: Ctx, +p: Pa, +loc:
 def wm.intr(t: A, s: S, +c: Ctx, +p: Pa, st: List<&2, Fr>) -> WM:
   match t:
     case AZero{+loc}:
-      ret.k(plain(leaf(s, c, p), loc, "Zero is an unboxed value", ty.data()), st)
+      ret.k(plain(leaf(s, c, p), loc, 21, ty.data()), st)
     case APair{+loc, +a, +b}:
       (s: S, +u: Bool) <- s.uni(s)
       wm.pair.u(u, s, c, p, loc, a, b, st)
@@ -160,7 +160,7 @@ def wm.intr(t: A, s: S, +c: Ctx, +p: Pa, st: List<&2, Fr>) -> WM:
       WmGo{s, TView{c, p, x}, FSetEnv{loc} <> st}
     case AGate{+loc}:
       (s: S, +ct: U32) <- builtin.code(leaf(s, c, p), tag.gate())
-      ret.k(plain(s, loc, "gate is an unboxed value", ct), st)
+      ret.k(plain(s, loc, 18, ct), st)
     case ALeft{+loc, +x}:
       wm.lr(env.path(x), True{}, s, c, p, loc, x, st)
     case ARight{+loc, +x}:
@@ -219,7 +219,7 @@ def wm.inst.at(m: Mt, s: S, +unit: U32, +base: U32, +r: U32, st: List<&2, Fr>) -
 # instantiateBody
 def wm.inst(s: S, +unit: U32, +p: Pa, +r: U32, st: List<&2, Fr>) -> WM:
   (s: S, +base: U32) <- fresh(s)
-  (s: S, m: Mt) <- s.tm(add.eq(s, Blame{gen("instance base"), "an occurrence's global depth = its frame's base + its depth", 0},
+  (s: S, m: Mt) <- s.tm(add.eq(s, Blame{gen("instance base"), WMsg{16}, 0},
     [pa.base(p), pa.d(p)], base), r)
   wm.inst.at(m, s, unit, base, r, st)
 
@@ -242,7 +242,7 @@ def wm.frame(fr: Fr, s: S, +v: R, st: List<&2, Fr>) -> WM:
   match fr:
     case FView{+loc, +w, +d}:
       (s: S, +vv: U32) <- fresh(s)
-      WmGo{add.eq(s, blame(loc, "view bangs = edge boxes + intrinsic bangs"), [w, sg.b(r.sg(v))], vv),
+      WmGo{add.eq(s, bm(loc, 13), [w, sg.b(r.sg(v))], vv),
         TRet{RView{Sg{vv, sg.t(r.sg(v))}, d}}, st}
     case FPairA{+c, +p, +loc, +b}:
       WmGo{s, TChild{c, p, b}, FPairB{loc, r.sg(v)} <> st}
@@ -256,7 +256,7 @@ def wm.frame(fr: Fr, s: S, +v: R, st: List<&2, Fr>) -> WM:
       ret.k(bottom(s), st)
     case FRef{+loc, +r}:
       (s: S, +ct: U32) <- fresh.code(s, [TE{r, None{}, Some{r.if(v)}}])
-      ret.k(plain(s, loc, "code constant is an unboxed value", ct), st)
+      ret.k(plain(s, loc, 19, ct), st)
     case FCap{+r, +fi, +z, +frame0, +benv, +tenv, +doorl}:
       (s: S, +ifc: If) <- cap.finish(s, r, fi, z, frame0, benv, tenv, doorl, r.sg(v))
       WmGo{s, TRet{RIf{ifc}}, st}
@@ -270,7 +270,7 @@ def wm.frame(fr: Fr, s: S, +v: R, st: List<&2, Fr>) -> WM:
     case FChT{+loc, +bloc, +sa, +w2, +d2, +sprev, +plink}:
       (s: S, +s1: Sg) <- pair.of(s, bloc, sprev, r.sg(v))
       (s: S, +vv: U32) <- fresh(s)
-      (s: S, +s2: Sg) <- pair.of(add.eq(s, blame(bloc, "view bangs = edge boxes + intrinsic bangs"), [w2, sg.b(s1)], vv),
+      (s: S, +s2: Sg) <- pair.of(add.eq(s, bm(bloc, 13), [w2, sg.b(s1)], vv),
         loc, sa, Sg{vv, sg.t(s1)})
       ret(wm.cht(plink, s, loc, s2, sprev), s2, st)
 

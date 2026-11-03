@@ -4,6 +4,7 @@ import ./Loc.bend as Lc
 import ./Core.bend as Co
 import ./Lift.bend as Lf
 import ./Linear.bend as Ln
+import ./Expr.bend as E
 
 # Elementary Affine Logic certification, master's Telomare.EAL (98de497c):
 # box levels for a defer-lifted program as linear constraints over the
@@ -35,7 +36,25 @@ import ./Linear.bend as Ln
 # A Blame: where, why, and the body (its index plus one, 0 for none) whose
 # walk made it.
 type Blame is Data:
-  Blame{+loc: Lc.Loc, +why: String, +fr: U32}
+  Blame{+loc: Lc.Loc, +why: Why, +fr: U32}
+
+# A blame's reason, rendered only when an error shows it (renderBlame): a
+# message by number (why.msg), a text, a duplicated capture's path, or a
+# presolve step's derivation of another blame (derivedBlame), which reads
+# "what: reason". Equations carry blames by the hundred thousand, and
+# presolve derives them every round, so none is a string until shown.
+type Why is Data:
+  WMsg{+k: U32}
+  WText{+s: String}
+  WDup{+what: String, +path: List<&2, U32>}
+  WDer{+d: Wd, +base: Why}
+
+# A derivation's "what": a step's name (der.msg) and the equation it read
+# (eq.note) or the cycle note it names (cn.ph), or a text.
+type Wd is Data:
+  WdEq{+k: U32, +lhs: List<&2, U32>, +rhs: U32}
+  WdCyc{+k: U32, +id: U32}
+  WdTxt{+s: String}
 
 type Err is Data:
   TypeMismatch{+loc: Lc.Loc, +msg: String}
@@ -215,7 +234,74 @@ def gen(+why: String) -> Lc.Loc:
   Lc.Gen{why}
 
 def blame(+loc: Lc.Loc, +why: String) -> Blame:
-  Blame{loc, why, 0}
+  Blame{loc, WText{why}, 0}
+
+def bm(+loc: Lc.Loc, +k: U32) -> Blame:
+  Blame{loc, WMsg{k}, 0}
+
+def why.msg(+k: U32) -> String:
+  match k:
+    case 0:
+      "the unit box count"
+    case 1:
+      "the program's root sits at depth zero"
+    case 2:
+      "a duplicated capture's bang = door + what the body opens"
+    case 3:
+      "at most one door per duplicated capture"
+    case 4:
+      "env occurrence depth = the bangs this body opens"
+    case 5:
+      "variable occurrence is locally unboxed"
+    case 6:
+      "a door needs the closure's own box"
+    case 7:
+      "boxes entered = boxes on the applied pair + on the function"
+    case 8:
+      "operand boxes = applied pair boxes + its own"
+    case 9:
+      "operand boxes = boxes entered + boxes the callee sees"
+    case 10:
+      "result boxes = boxes entered + the callee's result boxes"
+    case 11:
+      "projected component boxes = pair boxes + its own"
+    case 12:
+      "box depth = the parent's depth + this edge's boxes"
+    case 13:
+      "view bangs = edge boxes + intrinsic bangs"
+    case 14:
+      "taken branch boxes = branch pair boxes + its own"
+    case 15:
+      "an equation the solver named is missing"
+    case 16:
+      "an occurrence's global depth = its frame's base + its depth"
+    case 17:
+      "pair constructor is locally unboxed"
+    case 18:
+      "gate is an unboxed value"
+    case 19:
+      "code constant is an unboxed value"
+    case 20:
+      "gate switch function is locally unboxed"
+    case 21:
+      "Zero is an unboxed value"
+    case _:
+      ""
+
+def der.msg(+k: U32) -> String:
+  match k:
+    case 0:
+      "summand of an unboxed total"
+    case 1:
+      "all summands unboxed"
+    case 2:
+      "sum of summand lower bounds"
+    case 3:
+      "total equal to two of its own summands"
+    case 4:
+      "summand beside one equal to the total"
+    case _:
+      ""
 
 # Lists of words
 # --------------
@@ -320,6 +406,8 @@ def to.a(l: Lf.L, +rk: Map<&2, U32>) -> A:
       ACheck{loc, to.a(c, rk)}
     case Lf.LRef{loc, h}:
       ARef{loc, Pair.snd(Map<&2, U32>, U32, Map.get(U32, none(), rk, h))}
+    case Lf.LAborted{loc, o, m}:
+      AAbort{loc, to.a(m, rk)}
 
 def a.loc(t: A) -> Lc.Loc:
   match t:
@@ -395,7 +483,7 @@ def render.at(m: Maybe<&2, String>) -> String:
 def blame.render(b: Blame) -> String:
   match b:
     case Blame{loc, why, fr}:
-      why ++ render.at(Lc.render_compact(loc))
+      why.text(why) ++ render.at(Lc.render_compact(loc))
 
 def blames.render(bs: List<&2, Blame>) -> String:
   match bs:

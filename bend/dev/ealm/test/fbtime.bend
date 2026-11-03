@@ -4,10 +4,14 @@ import /home/hhefesto/src/telomare/bend/Front.bend as Fr
 import /home/hhefesto/src/telomare/bend/Term.bend as T
 import /home/hhefesto/src/telomare/bend/Lift.bend as Lf
 
-# fbtime MODULE [main|ni|shallow|deep]...: the phases of EALm's
+# fbtime MODULE [main|ni|shallow|deep|...]...: the phases of EALm's
 # certification of MODULE (beside Prelude.tel in the working directory),
 # each timed: main's pass, the narrowing's index (deep specialization of
 # everything), and the shallow and deep specializations with their passes.
+# The f phases do the same on the faithful program with uniform chains
+# (inferEALFaithful): fwalk, fmain, fnarrow, fshallow, fdeep, fshwalk,
+# fdpwalk, and faithful (the whole verdict). Master's cert-oracle
+# (CertOracle.hs) has fwalk, fmain, fshwalk and fdpwalk to compare.
 
 def ms(+t0: Nat, +t1: Nat) -> String:
   U32.show(U32.from_nat((t1 - t0 : Nat))) ++ " ms"
@@ -64,15 +68,53 @@ def ws(r: E.S & E.WT) -> String:
   (s, +w) = r
   ws.k1(E.s.nv(s))
 
-def walk.pg(p: E.PG) -> String:
+def walk.pg.u(p: E.PG, +uni: Bool) -> String:
   match p:
     case E.PG{+bds, +refs, +n, +main, +mrefs}:
-      ws(E.walk.top(E.pg.state(E.PG{bds, refs, n, main, mrefs}, False{}), True{}, "program input", main))
+      ws(E.walk.top(E.pg.state(E.PG{bds, refs, n, main, mrefs}, uni), True{}, "program input", main))
+
+def walk.pg(p: E.PG) -> String:
+  walk.pg.u(p, False{})
 
 def walk.sr(r: E.SR) -> String:
   match r:
     case E.SR{+bodies, +origin, +main, +defs, +reads}:
       walk.pg(E.pg.of(Lf.Lifted{bodies, main}))
+
+def walk.sr.u(r: E.SR, +uni: Bool) -> String:
+  match r:
+    case E.SR{+bodies, +origin, +main, +defs, +reads}:
+      walk.pg.u(E.pg.of(Lf.Lifted{bodies, main}), uni)
+
+def fb.verdict(m: Maybe<&2, E.MR>) -> String:
+  match m:
+    case None{}:
+      "none"
+    case Some{+x}:
+      "certifies"
+
+def f.narrow.at(r: Result<&2, &2, E.Err, E.MR>, +t: Lf.Lifted, +p: E.PG) -> String:
+  match r:
+    case Done{+m}:
+      "main certifies"
+    case Fail{+e}:
+      match t:
+        case Lf.Lifted{+bodies, +main}:
+          fb.verdict(E.narrowed(e, bodies, main, p, True{}))
+
+def f.narrow(+t: Lf.Lifted) -> String:
+  +p: E.PG = E.pg.of(t)
+  f.narrow.at(E.pg.main(p, True{}), t, p)
+
+def f.spec(+deep: Bool, t: Lf.Lifted) -> String:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      fb.verdict(E.specialized(deep, bodies, main, True{}))
+
+def f.swalk(+deep: Bool, t: Lf.Lifted) -> String:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      walk.sr.u(E.specialize(None{}, deep, bodies, main), True{})
 
 def ni.size(n: E.NI) -> U32:
   match n:
@@ -85,7 +127,7 @@ def stamp(+what: String, +t0: Nat) -> IO(Unit):
     IO.print(what ++ " " ++ ms(t0, t1))
 
 def spec.pass(+r: E.SR, +t1: Nat) -> IO(Unit):
-  stamp("  pass " ++ verdict.top(E.sr.main(r)), t1)
+  stamp("  pass " ++ verdict.top(E.sr.main(r, False{})), t1)
 
 def spec.done(+r: E.SR, +n: U32, +what: String, +t0: Nat) -> IO(Unit):
   do IO<Unit>:
@@ -110,6 +152,22 @@ def phase.at(+what: String, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +t0: Nat) ->
       stamp("certify " ++ cert.show(E.certify(Lf.Lifted{bodies, main})), t0)
     case "walk":
       stamp("walk " ++ walk.pg(E.pg.of(Lf.Lifted{bodies, main})), t0)
+    case "fwalk":
+      stamp("faithful walk " ++ walk.pg.u(E.pg.of(E.faithful(Lf.Lifted{bodies, main})), True{}), t0)
+    case "fnarrow":
+      stamp("faithful narrow " ++ f.narrow(E.faithful(Lf.Lifted{bodies, main})), t0)
+    case "fshallow":
+      stamp("faithful shallow " ++ f.spec(False{}, E.faithful(Lf.Lifted{bodies, main})), t0)
+    case "fdeep":
+      stamp("faithful deep " ++ f.spec(True{}, E.faithful(Lf.Lifted{bodies, main})), t0)
+    case "fshwalk":
+      stamp("faithful shallow walk " ++ f.swalk(False{}, E.faithful(Lf.Lifted{bodies, main})), t0)
+    case "fdpwalk":
+      stamp("faithful deep walk " ++ f.swalk(True{}, E.faithful(Lf.Lifted{bodies, main})), t0)
+    case "fmain":
+      stamp("faithful main " ++ verdict(E.pg.main(E.pg.of(E.faithful(Lf.Lifted{bodies, main})), True{})), t0)
+    case "faithful":
+      stamp("faithful " ++ verdict(E.lifted.with(True{}, E.faithful(Lf.Lifted{bodies, main}))), t0)
     case "shwalk":
       stamp("shallow walk " ++ walk.sr(E.specialize(None{}, False{}, bodies, main)), t0)
     case "ni":
@@ -160,7 +218,7 @@ def args(xs: List<String>) -> IO(Unit):
         r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(entry)
         loaded(entry, rest, r)
     case _:
-      IO.print("usage: fbtime MODULE [main|ni|shallow|deep]...")
+      IO.print("usage: fbtime MODULE [main|ni|shallow|deep|fwalk|fmain|fnarrow|fshallow|fdeep|faithful]...")
 
 def main() -> IO(Unit):
   do IO<Unit>:

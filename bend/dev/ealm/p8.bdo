@@ -141,14 +141,14 @@ def dt.gatefn(s: S, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
   (s: S, +brb: U32) <- fresh(s)
   (s: S, +pt: U32) <- pair.new(s, sbe, sbt)
   (s: S, +re: U32) <- fresh(unify.sig(s, loc, env, Sg{brb, pt}))
-  (s: S, +rt: U32) <- fresh(unify.sig(add.eq(s, blame(loc, "taken branch boxes = branch pair boxes + its own"), [brb, sg.b(sbe)], re),
+  (s: S, +rt: U32) <- fresh(unify.sig(add.eq(s, bm(loc, 14), [brb, sg.b(sbe)], re),
     loc, res, Sg{re, sg.t(sbe)}))
-  unify.sig(add.eq(s, blame(loc, "taken branch boxes = branch pair boxes + its own"), [brb, sg.b(sbt)], rt), loc, res, Sg{rt, sg.t(sbt)})
+  unify.sig(add.eq(s, bm(loc, 14), [brb, sg.b(sbt)], rt), loc, res, Sg{rt, sg.t(sbt)})
 
 def dt.gate(s: S, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
   (s: S, +scrb: U32) <- fresh(s)
   (s: S, +gt: U32) <- builtin.code(unify.sig(s, loc, env, Sg{scrb, ty.data()}), tag.gatefn())
-  (s: S, +gfn: Sg) <- plain(s, loc, "gate switch function is locally unboxed", gt)
+  (s: S, +gfn: Sg) <- plain(s, loc, 20, gt)
   unify.sig(s, loc, res, gfn)
 
 def dt.code(x: If, s: S, +tag: U32, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:

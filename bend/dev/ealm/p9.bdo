@@ -21,18 +21,39 @@ def ints.show(xs: List<&2, U32>) -> String:
       "[" ++ U32.show(x) ++ ints.go(rest)
 
 # derivedBlame
-def bl.derive(+what: String, b: Blame) -> Blame:
+def bl.derive(+d: Wd, b: Blame) -> Blame:
   match b:
     case Blame{+loc, +why, +fr}:
-      Blame{loc, what ++ ": " ++ why, fr}
+      Blame{loc, WDer{d, why}, fr}
 
 def bl.why(b: Blame) -> String:
   match b:
     case Blame{+loc, +why, +fr}:
-      why
+      why.text(why)
 
 def eq.note(lhs: List<&2, U32>, +rhs: U32) -> String:
   " [eq " ++ ints.show(lhs) ++ " = " ++ U32.show(rhs) ++ "]"
+
+def wd.text(d: Wd) -> String:
+  match d:
+    case WdEq{+k, +lhs, +rhs}:
+      der.msg(k) ++ eq.note(lhs, rhs)
+    case WdCyc{+k, +id}:
+      der.msg(k) ++ cn.ph(id)
+    case WdTxt{+s}:
+      s
+
+# A reason as text, cycle notes still placeholders (bl.expand fills them).
+def why.text(w: Why) -> String:
+  match w:
+    case WMsg{+k}:
+      why.msg(k)
+    case WText{+s}:
+      s
+    case WDup{+what, +path}:
+      what ++ " path " ++ steps.show(path) ++ " duplicated"
+    case WDer{+d, +base}:
+      wd.text(d) ++ ": " ++ why.text(base)
 
 # Roots of a list, read-only (resolveEqs) or compressing (mapM findB).
 def ro.push(s: S, +acc: List<&2, U32>, +x: U32) -> S & List<&2, U32>:
@@ -163,9 +184,8 @@ def zs.eq(s: S, +acc: Bool, e: ER) -> S & Bool:
     case ER{+lhs, +rhs, +bl}:
       (s: S, +rz: Bool) <- zero.at(s, rhs)
       (s: S, +lz: Bool) <- za.go(lhs, (s, True{}))
-      +note: String = eq.note(lhs, rhs)
-      (s: S, +c1: Bool) <- zs.c1(rz, s, lhs, bl.derive("summand of an unboxed total" ++ note, bl))
-      (s: S, +c2: Bool) <- zs.c2(lz, s, rhs, bl.derive("all summands unboxed" ++ note, bl))
+      (s: S, +c1: Bool) <- zs.c1(rz, s, lhs, bl.derive(WdEq{0, lhs, rhs}, bl))
+      (s: S, +c2: Bool) <- zs.c2(lz, s, rhs, bl.derive(WdEq{1, lhs, rhs}, bl))
       (s, Bool.or(acc, Bool.or(c1, c2)))
 
 def zs.go(xs: List<&2, ER>, r: S & Bool) -> S & Bool:
@@ -240,7 +260,7 @@ def bs.eq(s: S, +acc: Bool, e: ER) -> S & Bool:
   match e:
     case ER{+lhs, +rhs, +bl}:
       (s: S, +n: U32) <- lbs.go(lhs, (s, 0))
-      bs.at(U32.is_lt(0, n), s, acc, rhs, n, bl.derive("sum of summand lower bounds" ++ eq.note(lhs, rhs), bl))
+      bs.at(U32.is_lt(0, n), s, acc, rhs, n, bl.derive(WdEq{2, lhs, rhs}, bl))
 
 def bs.go(xs: List<&2, ER>, r: S & Bool) -> S & Bool:
   match xs:
@@ -695,7 +715,7 @@ def cn.first(ps: List<&2, String>, +cs: List<&2, CN>) -> String:
 def bl.expand(b: Blame, +cs: List<&2, CN>) -> Blame:
   match b:
     case Blame{+loc, +why, +fr}:
-      Blame{loc, cn.expand(why, cs), fr}
+      Blame{loc, WText{cn.expand(why.text(why), cs)}, fr}
 
 def bls.expand(bs: List<&2, Blame>, +cs: List<&2, CN>) -> List<&2, Blame>:
   match bs:
@@ -736,12 +756,12 @@ def pt.go(xs: List<&2, U32>, +i: U32, r: GR & PT) -> GR & PT:
       (g, p) = r
       pt.go(rest, i, pt.push(g, i, p, x))
 
-def pl.pick(two: Bool, g: GR, +acc: List<&2, ZP>, +rhs: U32, +oth: List<&2, U32>, +bl: Blame, +note: String) -> GR & List<&2, ZP>:
+def pl.pick(two: Bool, g: GR, +acc: List<&2, ZP>, +rhs: U32, +oth: List<&2, U32>, +bl: Blame, +cid: U32) -> GR & List<&2, ZP>:
   match two:
     case True{}:
-      (g, ZP{[rhs], bl.derive("total equal to two of its own summands" ++ note, bl)} <> acc)
+      (g, ZP{[rhs], bl.derive(WdCyc{3, cid}, bl)} <> acc)
     case False{}:
-      (g, ZP{List.reverse(&2, U32, oth), bl.derive("summand beside one equal to the total" ++ note, bl)} <> acc)
+      (g, ZP{List.reverse(&2, U32, oth), bl.derive(WdCyc{4, cid}, bl)} <> acc)
 
 def pl.mem(p: PT, g: GR, +acc: List<&2, ZP>, +base: U32, +i: U32, +rhs: U32, +bl: Blame) -> GR & List<&2, ZP>:
   match p:
@@ -753,7 +773,7 @@ def pl.k(none: Bool, g: GR, +acc: List<&2, ZP>, +base: U32, +i: U32, +rhs: U32, 
     case True{}:
       (g, acc)
     case False{}:
-      pl.pick(two, g, acc, rhs, oth, bl, cn.ph(((base + i : U32) - 1 : U32)))
+      pl.pick(two, g, acc, rhs, oth, bl, ((base + i : U32) - 1 : U32))
 
 def pl.at(off: Bool, g: GR, +acc: List<&2, ZP>, +base: U32, +i: U32, +lhs: List<&2, U32>, +rhs: U32, +bl: Blame) -> GR & List<&2, ZP>:
   match off:
@@ -999,9 +1019,9 @@ def us.got(m: Maybe<&2, ER>) -> Blame:
     case Some{e}:
       match e:
         case ER{+lhs, +rhs, +bl}:
-          bl.derive("[eq " ++ ints.show(lhs) ++ " = " ++ U32.show(rhs) ++ "]", bl)
+          bl.derive(WdTxt{"[eq " ++ ints.show(lhs) ++ " = " ++ U32.show(rhs) ++ "]"}, bl)
     case None{}:
-      blame(gen("EAL"), "an equation the solver named is missing")
+      bm(gen("EAL"), 15)
 
 def us.blames(xs: List<&2, U32>, +live: List<&2, ER>) -> List<&2, Blame>:
   match xs:

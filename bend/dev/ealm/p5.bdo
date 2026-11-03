@@ -200,15 +200,15 @@ def fc.door(isr: Bool, s: S, +unit: U32, +path: List<&2, U32>, +uloc: Lc.Loc, +b
       (s: S, +door: U32) <- fresh(s)
       (s: S, +inner: U32) <- fresh(s)
       (s: S, +rest: U32) <- fresh(s)
-      (add.eq(add.eq(s, blame(uloc, "a duplicated capture's bang = door + what the body opens"), [door, inner], bq),
-        blame(uloc, "at most one door per duplicated capture"), [door, rest], unit), Door{path, door, inner} <> acc)
+      (add.eq(add.eq(s, bm(uloc, 2), [door, inner], bq),
+        bm(uloc, 3), [door, rest], unit), Door{path, door, inner} <> acc)
 
 def fc.k(ec: EC, s: S, +unit: U32, +what: String, +path: List<&2, U32>, +uloc: Lc.Loc, +acc: List<&2, Door>) -> S & List<&2, Door>:
   match ec:
     case EC{bangs, cur}:
       match cur:
         case Sg{+bq, ct}:
-          fc.door(starts.r(path), constrain_(s, bq, CLevel{1, blame(uloc, what ++ " path " ++ steps.show(path) ++ " duplicated")}),
+          fc.door(starts.r(path), constrain_(s, bq, CLevel{1, Blame{uloc, WDup{what, path}, 0}}),
             unit, path, uloc, bq, acc)
 
 def fc.step(s: S, +unit: U32, +what: String, +c0: Ctx, site: Site, +acc: List<&2, Door>) -> S & List<&2, Door>:
@@ -304,8 +304,8 @@ def eo.k(ec: EC, s: S, +c: Ctx, +p: Pa, +loc: Lc.Loc, +steps: List<&2, U32>) -> 
     case EC{+rb, cur}:
       match cur:
         case Sg{cb, +ct}:
-          (s: S, +b: U32) <- forced.zero(add.eq(s, blame(loc, "env occurrence depth = the bangs this body opens"),
-            opened(c, steps, List.reverse(&2, U32, rb)), pa.d(p)), blame(loc, "variable occurrence is locally unboxed"))
+          (s: S, +b: U32) <- forced.zero(add.eq(s, bm(loc, 4),
+            opened(c, steps, List.reverse(&2, U32, rb)), pa.d(p)), bm(loc, 5))
           (s, Sg{b, ct})
 
 # envOccurrence
@@ -330,7 +330,7 @@ def te.doors(es: List<&2, TE>) -> List<&2, U32>:
 
 def po.door(s: S, +loc: Lc.Loc, +bpkg: U32, +d: U32) -> S:
   (s: S, +slack: U32) <- fresh(s)
-  add.eq(s, blame(loc, "a door needs the closure's own box"), [d, slack], bpkg)
+  add.eq(s, bm(loc, 6), [d, slack], bpkg)
 
 def po.doors(ds: List<&2, U32>, s: S, +loc: Lc.Loc, +bpkg: U32) -> S:
   match ds:
@@ -346,7 +346,7 @@ def po.at(code: Bool, s: S, +loc: Lc.Loc, +sa: Sg, +sb: Sg, +w: U32) -> S & Sg:
   match code:
     case False{}:
       (s: S, +pt: U32) <- pair.new(s, sa, sb)
-      plain(s, loc, "pair constructor is locally unboxed", pt)
+      plain(s, loc, 17, pt)
     case True{}:
       (s: S, +p: U32) <- package.class(s, ty.of(w), sb)
       (s: S, infos: List<&2, TE>) <- captures.of(s, ty.of(w))
@@ -366,13 +366,13 @@ def set.env(s: S, +loc: Lc.Loc, +sx: Sg) -> S & Sg:
   (s: S, +fnb: U32) <- fresh(s)
   (s: S, +pairb: U32) <- fresh(s)
   (s: S, +k: U32) <- fresh(s)
-  (s: S, +pt: U32) <- pair.new(add.eq(s, blame(loc, "boxes entered = boxes on the applied pair + on the function"), [pairb, fnb], k),
+  (s: S, +pt: U32) <- pair.new(add.eq(s, bm(loc, 7), [pairb, fnb], k),
     Sg{fnb, fnt}, si)
   (s: S, +opb: U32) <- fresh(unify.sig(s, loc, sx, Sg{pairb, pt}))
-  (s: S, +ceb: U32) <- fresh(add.eq(s, blame(loc, "operand boxes = applied pair boxes + its own"), [pairb, sg.b(si)], opb))
-  (s: S, +so: Sg) <- fresh.sig(add.eq(s, blame(loc, "operand boxes = boxes entered + boxes the callee sees"), [k, ceb], opb))
+  (s: S, +ceb: U32) <- fresh(add.eq(s, bm(loc, 8), [pairb, sg.b(si)], opb))
+  (s: S, +so: Sg) <- fresh.sig(add.eq(s, bm(loc, 9), [k, ceb], opb))
   (s: S, +outb: U32) <- fresh(s)
-  (ap.new(add.eq(s, blame(loc, "result boxes = boxes entered + the callee's result boxes"), [k, sg.b(so)], outb),
+  (ap.new(add.eq(s, bm(loc, 10), [k, sg.b(so)], outb),
     Ap{fnt, Sg{ceb, sg.t(si)}, so, loc, []}), Sg{outb, sg.t(so)})
 
 # projection, from the projected value's sigma.
@@ -383,7 +383,7 @@ def proj(s: S, +loc: Lc.Loc, +left: Bool, +sx: Sg) -> S & Sg:
   (s: S, +pt: U32) <- pair.new(s, sl, sr)
   +c: Sg = Bool.pick(Sg, left, sl, sr)
   (s: S, +out: U32) <- fresh(unify.sig(s, loc, sx, Sg{pb, pt}))
-  (add.eq(s, blame(loc, "projected component boxes = pair boxes + its own"), [pb, sg.b(c)], out), Sg{out, sg.t(c)})
+  (add.eq(s, bm(loc, 11), [pb, sg.b(c)], out), Sg{out, sg.t(c)})
 
 def data.leaf(s: S) -> S & Sg:
   (s: S, +b: U32) <- fresh(s)

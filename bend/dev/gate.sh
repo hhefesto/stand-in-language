@@ -47,11 +47,20 @@ corpus() {
   echo "== corpus"
   cd "$R/bend/dev/corpus"
   local m=0 c=0
-  # The displays must equal the oracle's (master's --ic, P.hs-ic, or its
-  # plain run, P.hs-run, where its IC is too slow or runs dry), and the
+  # The displays must equal the oracle's (master's --ic, P.hs-ic), and the
   # whole output the port's record (P.port-ic-meter; CORPUS_RECORD=1
   # writes them). Interaction counts are the port's own (from P4 on).
-  for ref in *.hs-ic *.hs-run; do
+  # Where master's IC runs out of memory (P.hs-run alone: arith, ratarith,
+  # since the port certifies as master does, 2026-11-03), the plain run
+  # must equal master's, P.hs-run; fact has both (master's --ic refuses it).
+  for ref in *.hs-run; do
+    p=${ref%.hs-*}
+    o=$S/logs/corpus-$p.run
+    timeout 600 "$B/telomare" $p.tel < /dev/null > $o 2>&1
+    if ! diff -q $o $ref > /dev/null; then echo "RUN DIFF $p"; fail=1
+    else m=$((m+1)); fi
+  done
+  for ref in *.hs-ic; do
     p=${ref%.hs-*}
     o=$S/logs/corpus-$p.meter
     timeout 600 "$B/telomare" $p.tel --ic --meter < /dev/null > $o 2>&1
