@@ -372,12 +372,13 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
         "main = let g = {id, \\recur l -> \\accum -> recur (right l) accum, \\l -> \\accum -> accum} in g [1] 0")), "/ok"),
       String.ends_with(sized(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]")), "/ok"),
       sized.all(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]"))])))
-    # The digest of the term that runs. haskell-final's lifted hashes were
-    # checked equal on main2Term3's term, which the port no longer builds.
+    # The digest of the term that runs: master's (liftedBodyHash of
+    # deferLift's main, 98de497c), since an application's span reaches its
+    # end as megaparsec's captureSourceSpan does.
     IO.print(verdict("eal-lift-udt", String.eq(
       main.hash(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"rat",
         "import Prelude\nmain = \\input -> (if dEqual (left (right (rPlus (fromRational 1 2) (fromRational 1 2)))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
-      "439bec5fe5d4c22477ccbdab84430070c23ad8eb8e631241b9c71d074235d03a")))
+      "c39805f1ef2e0286ec97fb89f6aca8dd5b5cbf3395a2e9bc0832421129b4d81d")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "627da040c4dc4096affc8f8f3db1077d99218f4a09dfca65b05dc35eb3842b97")))

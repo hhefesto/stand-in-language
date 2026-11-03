@@ -284,9 +284,41 @@ def apps(args: List<&2, S.Parsed()>, +loc: L.Loc, acc: S.Parsed()) -> S.Parsed()
     case Con{a, rest}:
       apps(rest, loc, S.SApp{loc, acc, a})
 
+# A Loc that started at a point, stretched to p (captureSourceSpan's end).
+def span.end(+loc: L.Loc, +p: L.Pos) -> L.Loc:
+  match loc:
+    case L.Src{+file, +start, stop}:
+      L.Src{file, start, p}
+    case L.GenIn{+reason, +parent}:
+      L.GenIn{reason, parent}
+    case L.Gen{+reason}:
+      L.Gen{reason}
+    case L.Builtin{+name}:
+      L.Builtin{name}
+    case L.RuntimeLoc{}:
+      L.RuntimeLoc{}
+    case L.DecompiledLoc{}:
+      L.DecompiledLoc{}
+    case L.Unknown{}:
+      L.Unknown{}
+
+# Where the same-line space consumer stopped before t: its ws.
+def tok.ws(t: Lx.Tok) -> L.Pos:
+  match t:
+    case Lx.Tok{k, at, +ws, nl}:
+      ws
+
+# Where t starts: its at.
+def tok.at(t: Lx.Tok) -> L.Pos:
+  match t:
+    case Lx.Tok{k, +at, ws, nl}:
+      at
+
+# The application's Loc spans to where its last argument's trailing space
+# consumer stopped (parseApplied's captureSourceSpan), the next token's ws.
 def app.done(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
              head: S.Parsed(), args: List<&2, S.Parsed()>) -> PS:
-  got.term(toks, stack, apps(List.reverse(&2, S.Parsed(), args), loc, head))
+  got.term(toks, stack, apps(List.reverse(&2, S.Parsed(), args), span.end(loc, tok.ws(peek(toks))), head))
 
 def app.fallback(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, head: S.Parsed(),
                  after: List<&2, Lx.Tok>, fallback: Bool) -> PS:
@@ -582,9 +614,11 @@ def patparen.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.ParsedPat
     case _:
       bad(toks, stack, "\":\" or \",\"")
 
-def case.done(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
+# The case's Loc spans to the token after its alternatives (parseCase's
+# captureSourceSpan, whose last alternative ends with scn).
+def case.done(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
               scrut: S.Parsed(), alts: List<&2, S.ParsedAlt()>) -> PS:
-  got.term(toks, stack, S.SCase{loc, scrut, List.reverse(&2, S.ParsedAlt(), alts), Unit{}})
+  got.term(toks, stack, S.SCase{span.end(loc, tok.at(peek(toks))), scrut, List.reverse(&2, S.ParsedAlt(), alts), Unit{}})
 
 # A case alternative's pattern: its arrow, or (after the first) the end of
 # the alternatives, back where the pattern started.
