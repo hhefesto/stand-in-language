@@ -1,9 +1,12 @@
-# The maintainer's cache push. Scripts get a syntax check only: corepkgs'
+# The maintainer's cache push, and the language server's launcher. Scripts
+# get a syntax check only: corepkgs'
 # `writeShellApplication` refers to a `shellcheck-minimal` that the package set
 # does not define, so the default check phase cannot evaluate, and ShellCheck
 # itself came from the Haskell package set, which this flake no longer has.
 {
   pkgs,
+  telomare,
+  lspVersion,
   devShellNames,
   checkNames,
   appNames,
@@ -125,7 +128,22 @@ let
       printf 'Cachix push completed for cache %s\n' "$cache_name"
     '';
   };
+
+  # `telomare-lsp` reports the commit before HEAD's time as its version, by
+  # git, or else $TELOMARE_LSP_VERSION, which the flake knows (master's
+  # launcher): so hand it over, and put git (and `env`, `pwd`) on its PATH.
+  telomareLsp = mkScript {
+    name = "telomare-lsp";
+    runtimeInputs = [
+      pkgs.gitMinimal
+      pkgs.coreutils
+    ];
+    text = ''
+      export TELOMARE_LSP_VERSION="${lspVersion}"
+      exec "${telomare}/bin/telomare-lsp" "$@"
+    '';
+  };
 in
 {
-  inherit pushCachix;
+  inherit pushCachix telomareLsp;
 }

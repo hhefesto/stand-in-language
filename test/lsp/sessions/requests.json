@@ -1,0 +1,19 @@
+[
+{"send": {"id": 1, "jsonrpc": "2.0", "method": "initialize", "params": {"capabilities": {"general": {"positionEncodings": ["utf-32", "utf-16"]}, "textDocument": {"synchronization": {"dynamicRegistration": true}}, "workspace": {"configuration": true, "didChangeConfiguration": {"dynamicRegistration": true}}}, "processId": null, "rootUri": "file://@DIR@"}}},
+{"send": {"jsonrpc": "2.0", "method": "initialized", "params": {}}, "wait": 2},
+{"send": {"id": 2, "jsonrpc": "2.0", "method": "textDocument/hover", "params": {"position": {"character": 0, "line": 0}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 3, "jsonrpc": "2.0", "method": "textDocument/semanticTokens/full", "params": {"textDocument": {"uri": "file://@DIR@/none.tel"}}}},
+{"send": {"id": 4, "jsonrpc": "2.0", "method": "textDocument/definition", "params": {"position": {"character": 0, "line": 0}, "textDocument": {"uri": "file://@DIR@/none.tel"}}}},
+{"open": "simpleplus.tel", "wait": 3},
+{"send": {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 99}}},
+{"send": {"id": 5, "jsonrpc": "2.0", "method": "codeAction/resolve", "params": {"kind": "refactor.extract", "title": "x"}}},
+{"send": {"id": 6, "jsonrpc": "2.0", "method": "workspace/executeCommand", "params": {"arguments": ["file://@DIR@/simpleplus.tel", {"end": {"character": 21, "line": 9}, "start": {"character": 6, "line": 9}}, "left (1,2)"], "command": "telomare.partialEval"}}, "wait": 2},
+{"send": {"id": 7, "jsonrpc": "2.0", "method": "workspace/executeCommand", "params": {"arguments": ["file://@DIR@/simpleplus.tel", {"end": {"character": 21, "line": 9}, "start": {"character": 6, "line": 9}}, "\\x -> $48 left x"], "command": "telomare.partialEval"}}, "wait": 2},
+{"send": {"id": 8, "jsonrpc": "2.0", "method": "workspace/executeCommand", "params": {"arguments": ["file://@DIR@/simpleplus.tel", {"end": {"character": 21, "line": 9}, "start": {"character": 6, "line": 9}}, "dPlus 2 3"], "command": "telomare.partialEval"}}, "wait": 2},
+{"send": {"id": 9, "jsonrpc": "2.0", "method": "workspace/executeCommand", "params": {"arguments": ["file://@DIR@/simpleplus.tel", {"end": {"character": 21, "line": 9}, "start": {"character": 6, "line": 9}}, "x = 3\ny = x"], "command": "telomare.partialEval"}}, "wait": 2},
+{"send": {"id": 10, "jsonrpc": "2.0", "method": "workspace/executeCommand", "params": {"arguments": ["file://@DIR@/simpleplus.tel", {"end": {"character": 21, "line": 9}, "start": {"character": 6, "line": 9}}, ")"], "command": "telomare.partialEval"}}, "wait": 2},
+{"send": {"id": 11, "jsonrpc": "2.0", "method": "workspace/executeCommand", "params": {"arguments": [], "command": "nope"}}},
+{"send": {"id": 12, "jsonrpc": "2.0", "method": "textDocument/codeAction", "params": {"context": {"diagnostics": []}, "range": {"end": {"character": 10, "line": 4}, "start": {"character": 0, "line": 2}}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 13, "jsonrpc": "2.0", "method": "shutdown", "params": null}},
+{"send": {"jsonrpc": "2.0", "method": "exit", "params": null}, "wait": 1}
+]

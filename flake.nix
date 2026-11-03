@@ -41,10 +41,20 @@
       lean,
     }:
     let
+      # The checkout's time, which the language server reports as its version
+      # when git cannot tell it (master's flake does the same).
+      lspVersion =
+        if self ? lastModifiedDate then
+          let
+            t = self.lastModifiedDate;
+          in
+          "${builtins.substring 0 4 t}-${builtins.substring 4 2 t}-${builtins.substring 6 2 t}T${builtins.substring 8 2 t}:${builtins.substring 10 2 t}Z"
+        else
+          "unknown";
       project =
         pkgs:
         import ./nix {
-          inherit pkgs;
+          inherit pkgs lspVersion;
           src = ./.;
           bend = bend.packages.${pkgs.stdenv.hostPlatform.system}.default;
           leanPkgs = lean.legacyPackages.${pkgs.stdenv.hostPlatform.system};

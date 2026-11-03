@@ -33,7 +33,10 @@ import ./Reference.bend as Reference
 import ./Fast.bend as Fast
 import ./Telc.bend as Telc
 import ./Main.bend as Main
+import ./Partial.bend as Partial
 import ./Repl.bend as Repl
+import ./Json.bend as Json
+import ./Lsp.bend as Lsp
 import ./PROOF.bend as Proof
 
 # Every module of the port, and the proofs of LAWS.bend, so that

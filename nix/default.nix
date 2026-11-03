@@ -7,6 +7,7 @@
   src,
   bend,
   leanPkgs,
+  lspVersion ? "unknown",
 }:
 let
   project = import ./bend.nix {
@@ -22,7 +23,8 @@ let
     inherit (project) bendtt;
   };
   tools = import ./tools.nix {
-    inherit pkgs;
+    inherit pkgs lspVersion;
+    inherit (project) telomare;
     devShellNames = builtins.attrNames devShells;
     checkNames = builtins.attrNames checks;
     appNames = builtins.attrNames apps;
@@ -34,23 +36,30 @@ let
     default = telomare;
   };
 
+  # One app per executable under its own name, plus the short names (as
+  # master's flake has them: the Emacs mode runs `#lsp`).
   apps = {
     default = "${telomare}/bin/telomare";
     telomare = "${telomare}/bin/telomare";
+    repl = "${telomare}/bin/telomare-repl";
+    telomare-repl = "${telomare}/bin/telomare-repl";
+    lsp = "${tools.telomareLsp}/bin/telomare-lsp";
+    telomare-lsp = "${tools.telomareLsp}/bin/telomare-lsp";
     bend = "${bend}/bin/bend";
     push-cachix = "${tools.pushCachix}/bin/telomare-push-cachix";
   };
 
   # `nix flake check` builds the command, checks every Bend module (types,
   # termination, laws), re-checks the proofs with BendTT's kernel, runs the
-  # tests, each built to a native binary, and runs the command on the goldens
-  # it covers.
+  # tests, each built to a native binary, runs the command on the goldens
+  # it covers, and the language server on its sessions.
   checks = {
     inherit telomare;
     bend-check = project.check;
     bend-proof = project.proof;
     bend-tests = project.tests;
     goldens = project.goldens;
+    lsp = project.lsp;
     push-cachix = tools.pushCachix;
   };
 in

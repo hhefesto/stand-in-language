@@ -40,13 +40,24 @@ let
     ];
   };
 
+  # The language server's sessions (test/lsp) and the programs they open.
+  lspSrc = lib.fileset.toSource {
+    root = src;
+    fileset = lib.fileset.unions [
+      (src + "/test/lsp")
+      telFiles
+    ];
+  };
+
   # The golden cases the port covers: runs on IC (the plain runs too, whose
   # output is the same), compile errors, the static report (--certificate),
   # the meter (--ic --meter; its expectation is test/golden/port's), the
   # unsized runs (--fast; the meter's and the fuel's are port's too), and
   # compiled programs (--compile, whose artifact is port's, and the .telc
-  # run). The others need haskell-final's IC certificate (--ic --compile,
-  # --ic --certificate, .telc with --ic), or are --draw-net and the REPL.
+  # run), the REPL (`--expr` and its lines), and --draw-net (an invalid
+  # option, as the command line's errors are master's). The others need
+  # haskell-final's IC certificate (--ic --compile, --ic --certificate,
+  # .telc with --ic).
   goldenPatterns = [
     "*.run"
     "*.run-*"
@@ -66,6 +77,7 @@ let
     "*.compile"
     "*.telc-run"
     "*.telc-certificate"
+    "*.ic-draw-net"
     "repl.*"
   ];
 
@@ -220,12 +232,14 @@ let
     '';
 
   # The `telomare` command, compiled to a native binary: bend/Native.bend,
-  # which is bend/Main.bend's command with the IC's loop in C; and the REPL,
-  # `telomare-repl` (bend/Repl.bend).
+  # which is bend/Main.bend's command with the IC's loop in C; the REPL,
+  # `telomare-repl` (bend/Repl.bend); and the language server,
+  # `telomare-lsp` (bend/Lsp.bend).
   telomare = bendCommand "telomare" bendSrc ''
     mkdir -p $out/bin
     bend bend/Native.bend -o $out/bin/telomare
     bend bend/Repl.bend -o $out/bin/telomare-repl
+    bend bend/Lsp.bend -o $out/bin/telomare-lsp
   '';
 
   # BendTT's kernel, the Lean program `bend --verdict` re-checks proofs with
@@ -247,6 +261,14 @@ in
     cp -r ${goldenSrc}/. .
     chmod -R u+w .
     bash test/golden/run.sh ${telomare}/bin check ${lib.escapeShellArgs goldenPatterns}
+    touch $out
+  '';
+
+  # The language server against what master's answered (test/lsp).
+  lsp = pkgs.runCommand "lsp" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+    cp -r ${lspSrc}/. .
+    chmod -R u+w .
+    bash test/lsp/run.sh ${telomare}/bin check
     touch $out
   '';
 

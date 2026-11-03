@@ -1,0 +1,20 @@
+[
+{"send": {"id": 1, "jsonrpc": "2.0", "method": "initialize", "params": {"capabilities": {"textDocument": {"codeAction": {"resolveSupport": {"properties": ["edit"]}}, "semanticTokens": {"formats": ["relative"], "requests": {"full": true, "range": true}, "tokenModifiers": [], "tokenTypes": []}}}, "processId": null, "rootUri": "file://@DIR@"}}},
+{"send": {"jsonrpc": "2.0", "method": "initialized", "params": {}}},
+{"open": "simpleplus.tel", "wait": 3},
+{"send": {"id": 2, "jsonrpc": "2.0", "method": "textDocument/semanticTokens/full", "params": {"textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 3, "jsonrpc": "2.0", "method": "textDocument/semanticTokens/range", "params": {"range": {"end": {"character": 0, "line": 12}, "start": {"character": 0, "line": 9}}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 4, "jsonrpc": "2.0", "method": "textDocument/definition", "params": {"position": {"character": 35, "line": 11}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 5, "jsonrpc": "2.0", "method": "textDocument/definition", "params": {"position": {"character": 26, "line": 16}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 6, "jsonrpc": "2.0", "method": "textDocument/definition", "params": {"position": {"character": 28, "line": 14}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 7, "jsonrpc": "2.0", "method": "textDocument/references", "params": {"context": {"includeDeclaration": true}, "position": {"character": 1, "line": 9}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 8, "jsonrpc": "2.0", "method": "textDocument/references", "params": {"context": {"includeDeclaration": false}, "position": {"character": 21, "line": 14}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 9, "jsonrpc": "2.0", "method": "textDocument/codeAction", "params": {"context": {"diagnostics": []}, "range": {"end": {"character": 21, "line": 9}, "start": {"character": 6, "line": 9}}, "textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}},
+{"send": {"id": 10, "jsonrpc": "2.0", "method": "workspace/executeCommand", "params": {"arguments": [], "command": "telomare.version"}}},
+{"change": "bad.tel", "uri": "simpleplus.tel", "version": 2, "wait": 3},
+{"change": "undef.tel", "uri": "simpleplus.tel", "version": 3, "wait": 3},
+{"change": "import Nope\n\nmain = 1\n", "uri": "simpleplus.tel", "version": 4, "wait": 3},
+{"send": {"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {"textDocument": {"uri": "file://@DIR@/simpleplus.tel"}}}, "wait": 2},
+{"send": {"id": 11, "jsonrpc": "2.0", "method": "shutdown", "params": null}},
+{"send": {"jsonrpc": "2.0", "method": "exit", "params": null}, "wait": 1}
+]
