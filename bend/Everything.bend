@@ -23,6 +23,7 @@ import ./Lift.bend as Lift
 import ./EAL.bend as EAL
 import ./Rat.bend as Rat
 import ./Linear.bend as Linear
+import ./EALm.bend as EALm
 import ./IC.bend as IC
 import ./Session.bend as Session
 import ./Levels.bend as Levels

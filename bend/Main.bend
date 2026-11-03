@@ -7,7 +7,7 @@ import ./Term.bend as T
 import ./Front.bend as Fr
 import ./Size.bend as Sz
 import ./Lift.bend as Lf
-import ./EAL.bend as EAL
+import ./EALm.bend as EM
 import ./IC.bend as IC
 import ./Session.bend as Ss
 import ./Resolve.bend as Rs
@@ -516,7 +516,7 @@ def budget() -> U32:
 type Failure is Data:
   Unread{+msg: String}
   Refused{+e: Fr.Err}
-  Uncertified{+e: EAL.Err}
+  Uncertified{+e: EM.Err}
   Unsizable{+f: Sz.SizeFail, +run: T.C}
   Unrunnable{+form: String}
 
@@ -527,7 +527,7 @@ def failed(f: Failure) -> String:
     case Refused{e}:
       Fr.render(e)
     case Uncertified{e}:
-      EAL.render(e)
+      EM.render(e)
     case Unsizable{sf, run}:
       Sz.render(sf, run, budget())
     case Unrunnable{form}:
@@ -547,7 +547,7 @@ def guard.sized(+g: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2,
       Done{Some{gs}}
 
 # The guard is certified and sized as main is: it runs on the IC too.
-def guard.certified(+g: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
+def guard.certified(+g: T.C, c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Sized>>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
@@ -560,7 +560,7 @@ def guard.compiled(g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Maybe<&2, Sz.Si
     case None{}:
       Done{None{}}
     case Some{+t}:
-      guard.certified(t, EAL.certify(Lf.defer.lift(t)))
+      guard.certified(t, EM.certify(Lf.defer.lift(t)))
 
 # Main sized, and its guard; a failure to size main is reported before the
 # guard's.
@@ -610,7 +610,7 @@ def guarded(+run: T.C, +boundary: Set(), g: Result<&2, &2, Failure, Maybe<&2, Sz
 # sizing after it, never side by side: EAL forks over the bodies, and run
 # alongside sizing the two would split the lanes and starve those forks.
 # So the guard is compiled, certified and sized, before main is sized.
-def certified(+run: T.C, g: Maybe<&2, T.C>, +boundary: Set(), c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, Compiled>:
+def certified(+run: T.C, g: Maybe<&2, T.C>, +boundary: Set(), c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, Compiled>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
@@ -624,7 +624,7 @@ def resolved(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Result<&2, &2, Failure, C
     case Done{p}:
       match p:
         case Fr.Program{+run, g, +boundary}:
-          certified(run, g, boundary, EAL.certify(Lf.defer.lift(run)))
+          certified(run, g, boundary, EM.certify(Lf.defer.lift(run)))
 
 # The parsed modules compiled: resolved, certified, sized.
 def compile(m: Fr.Mods, +entry: String) -> Result<&2, &2, Failure, Compiled>:
@@ -728,7 +728,7 @@ def fast.fuel() -> U32:
 
 # The program to run unsized (compileFast): certified as ever, then, with
 # no sizing, its Term3 as Fast.bend runs it.
-def unbounded(+run: T.C, c: Maybe<&2, EAL.Err>) -> Result<&2, &2, Failure, T.C>:
+def unbounded(+run: T.C, c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, T.C>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
@@ -742,7 +742,7 @@ def fast.resolved(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Result<&2, &2, Failu
     case Done{p}:
       match p:
         case Fr.Program{+run, g, boundary}:
-          unbounded(run, EAL.certify(Lf.defer.lift(run)))
+          unbounded(run, EM.certify(Lf.defer.lift(run)))
 
 # runFastLoop: main on 0, then on each line read and the state the last
 # iteration left, while there is a line to read; a run that breaks says
