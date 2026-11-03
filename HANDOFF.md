@@ -1836,6 +1836,38 @@ EALTests on EAL.bend, which the guard and the counts still use.
 Next: the memory and time of the shallow reading (rat), the guard's
 layouts by the same derivation, then the README and section 7.
 
+**Bend 0ba4e5e (2026-11-03, the user: "update bend in telomare and
+ana").** flake.lock's `bend` moved from 09-29's 2.0.39 (`018751270e80`)
+to upstream's head `0ba4e5ec` (11-03, 315+ commits). One change broke
+the build: the C runtime's `io_eff` lost its third argument (`need`),
+so `bend/effs/ic.c` registers `nt.reduce` with two
+(`io_eff(CID(nt.reduce), nt_reduce_run)`; clang: "too many arguments").
+
+**The guard under master's layouts (2026-11-03).** The guard was the
+last user of the old inference (`Ss.layouts`, inferEALCompiled over its
+sized program). It now gets its layouts as main does: `Ss.guard.from`
+(its run, counts, sized and plain programs) through `layouts.from`, the
+derivation from its faithful certificate. Main.bend keeps the guard as
+`Guard{run, sized}` (`guard.prog`); the tests (telc, fast, ic) build
+sessions with `Ss.session`. Goldens' counts did not move (simpleplus
+`3 4` 44,390, tictactoe `1 4 2 5 3` 5,454,169, the test game 5,482,566).
+
+**A refused line hung (found and fixed 2026-11-03).** Since the session
+ran under master's layouts (075af0ef), a line the guard refuses was
+answered by master's program prepared on the spot with `Ss.prepared`:
+inferEALCompiled over the sized program, at the session boundary, on
+every refused line. On simpleplus that is cheap (its `9 a` golden
+passed); on tictactoe's `10` it ran for minutes (killed at 300 s;
+gate1102b's binary, before 075af0ef, answered in 8,915,326 interactions).
+Now `Ss.session` prepares master's program once, under main's layouts
+(the ones compiling gave master's sized program), and `Prog.full` holds
+the prepared program: `10` ends with master's reference message,
+`invalid input (from refinement check at tictactoe:68:30)`, in 8,790,010
+interactions, ~1 s from a `.telc`. Master's own `--ic` on `10` dies with
+`ICFuelExhausted 10000000` after about 100 s. The golden
+`tictactoe.ic-abort` (`10`, `--ic`) pins it: `expected/` is master's
+98de497c, `port/` the port's.
+
 Bend 2 rules learned writing it (each cost a failed check):
 - a match or a tuple destructure takes only a def's parameter, or a field
   of an enclosing match; a call's tuple result needs a def of its own (so
@@ -2291,13 +2323,16 @@ The alignment steps that were done:
 a plain run, `--meter` (steps and nodes built), `--fast` (applications,
 gates, unrolls, its fuel and errors), `--certificate`, `trace`, abort
 origins, and a guard-refused line are master's, and the bullets below on
-them are history. What is still the port's own: `--ic`'s counts and
+them are history. Since P9, EAL is master's too (`bend/EALm.bend`: the
+gate, the IC's layouts and the guard's, the REPL's `:t`, master's
+EALTests). What is still the port's own (2026-11-03): `--ic`'s counts and
 meter format (`port/*.ic-meter`), the artifact's bytes (`port/*.compile`;
 the stored node count is master's), `--ic --certificate`'s extra section
-(`port/*.ic-certificate`), EAL (haskell-final's, not master's rework),
-the REPL, the LSP and `--draw-net`'s error (master's optparse prints
-`Invalid option`), the command line's other errors, and ASCII-only
-identifiers.
+(`port/*.ic-certificate`), `--ic` on a line the guard refuses (master's
+reference message, where master's net can run out of fuel:
+`port/tictactoe.ic-abort`), ASCII-only identifiers, and the language server's text for a parse error (the
+port's parser's, as for the command; `test/lsp/port/*`, and the REPL's,
+`test/golden/port/repl.*`). Not ported: the REPL's line editing.
 
 - `Lexical`: identifier classes are ASCII; Haskell's are Unicode. Every
   program in the repo is ASCII.
@@ -2306,7 +2341,39 @@ identifiers.
   haskell-final's on all three goldens.
 - `--ic --certificate` (haskell-final's IC space certificate) is refused,
   exit 2. `--certificate` alone gives the static report.
-- `--draw-net`, the REPL and the LSP are not ported.
+- The command line is read as master's optparse-applicative parser reads
+  it (`Main.bend`'s `pa.*`, 2026-11-03): its errors (`Invalid option`,
+  `Invalid argument`, `Missing: ...`, an option's missing or unparsable
+  value) with the usage after them, exit 1, and `-h`/`--help`, are
+  master's byte for byte on 34 command lines tried; `--draw-net`, which
+  master dropped, is an invalid option as there (the `*.ic-draw-net`
+  goldens pass). The REPL's line editing (haskeline) is not ported.
+- A plain run and its `--meter` (the reference evaluator, on main with
+  every check) skip the erasure checker (`Sz.size.at.checked`, 2026-11-03):
+  only `--ic`, `--certificate` and `--compile` use what it proves.
+  simpleplus `3 4` went from 7.3 s to 1.4 s (master 1.5 s); the checker
+  was 6 s of it. Outputs are unchanged in all four modes.
+- The REPL (`bend/Repl.bend`, 2026-11-03) is master's `app/Repl.hs`: its
+  bindings are expanded terms (the Prelude's, then each assignment's and
+  loaded file's; a name keeps its first, as master's let does), an
+  expression runs under a let of those it reaches (`Rs.prune`), and `:d`,
+  `:p` (`bend/Partial.bend`, master's evalPartial over Machine's steps),
+  `:t`, `:l`, `:r` and `:{ ... :}` are master's. Its goldens
+  (`replin_` cases, `test/golden/expected/repl.*` from master's
+  98de497c) pass but for parse errors' words (`port/repl.load-error`,
+  `port/repl.parse-error`). A file `:l` cannot read ends the REPL, as
+  master's does, without haskeline's backtrace.
+- The language server (`bend/Lsp.bend`, `telomare-lsp`, 2026-11-03) is
+  master's `app/LSP.hs`: the same messages for its sessions in
+  `test/lsp/sessions`, recorded from master's server (`test/lsp/run.sh`,
+  the gate's `lsp` step and the flake's `lsp` check), but a parse error's
+  text, which is the port's parser's (`test/lsp/port/*`). It writes JSON
+  with keys sorted, as aeson does, so its bytes are master's too; it
+  reads a `file:` URI's path without decoding `%XX`, where master's
+  `uriToFilePath` decodes it; it answers in order, where master's
+  answers concurrently (`run.sh` records master step by step). Its JSON
+  is mugen's `bend/Json.bend` (`hhefesto/mugen` at `c3275ba`, by the same
+  author), with an aeson-ordered writer added.
 - Interaction counts are the port's own from P4 on: its IC runs only an
   `if`'s chosen branch, on the parts of the environment the branches use,
   where haskell-final's built both (`test/golden/port/*.ic-meter`). The
@@ -2384,7 +2451,8 @@ identifiers.
   nested in another in place (`refinementCheckStep`, `d6d5a309`); a port
   must keep master's bounds, which the 2026-10-27 draft did not.
 - Master's EAL rework (PR #157 and before) is ported as EALm (P9); left:
-  the shallow reading's memory, the guard's layouts, master's EALTests. (The `bend-proof` check,
+  the shallow reading's memory and time (rat: 416 s and 9.1G, master
+  115 s and 3.2G; arith's factorial beside a rational check). (The `bend-proof` check,
   `--verdict` with BendTT's kernel built from the `lean` input, is in
   `nix flake check` since 2026-10-22.)
 - Appendix A analogues, kept for byte-identical output:
