@@ -21,6 +21,8 @@ import ./Front.bend as Front
 import ./Sha256.bend as Sha256
 import ./Lift.bend as Lift
 import ./EAL.bend as EAL
+import ./Rat.bend as Rat
+import ./Linear.bend as Linear
 import ./IC.bend as IC
 import ./Session.bend as Session
 import ./Levels.bend as Levels
