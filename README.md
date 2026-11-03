@@ -23,10 +23,13 @@ commit that has it. The port has master's three runtimes: the reference
 evaluator behind a plain run and its `--meter` (`bend/Reference.bend`),
 the unsized Fast interpreter behind `--fast` (`bend/Fast.bend`), and the
 interaction-net runtime behind `--ic` (`bend/IC.bend`, its loop in C).
-Not yet ported: the REPL, the LSP, and master's EAL rework.
+It certifies with master's EAL (`bend/EALm.bend`, master's PR #157), and
+the interaction net runs under the capture layouts master's EAL gives
+after sizing. The REPL (`telomare-repl`) and the language server
+(`telomare-lsp`) are master's; the REPL has no line editing.
 
 The Bend `telomare` command is the flake's default app. It takes master's
-command line:
+command line, `--help` and the errors included:
 
 ```sh
 $ nix run . -- tictactoe.tel                 # the reference evaluator
@@ -38,8 +41,9 @@ $ nix run . -- tictactoe.tel --fast          # run it unsized
 
 As on master, the program must pass EAL certification before it is sized
 (a program that does not certify is refused with the reason, exit 1). A
-plain run, `--meter` and `--fast` print exactly what master prints, steps
-and nodes built and unroll tables included. `--ic` runs the port's own
+plain run, `--meter`, `--fast` and `--certificate` print exactly what
+master prints, steps and nodes built and unroll tables included, and so
+does `telomare-repl`'s `:t`. `--ic` runs the port's own
 program, where sizing's proven erasures are made and main's input
 refinements run at the session boundary (a line they refuse is answered
 by master's program, so the displays stay master's); its `--meter` counts
@@ -135,39 +139,25 @@ code, so its module names are haskell-final's.
 
 The port meets the commitments and follows the heuristic and the decisions:
 the bounds sizing infers and the cost of a run are both reported (C3); IC is
-the one runtime (C4); every stage hands the next a type without the previous
+the runtime the port is built around (C4; master's reference evaluator and
+Fast interpreter are ported too, so a plain run and `--fast` print what
+master's do); every stage hands the next a type without the previous
 stage's forms (H1, see [Compiler stages](#compiler-stages)); failures are one
 union with a case per stage (§9); a closure body is one template however
 often it occurs (§7), and a test pins that the IC's environment wiring and
 EAL's usage map agree on the code the IC runs (§7). It differs on purpose
 in these places:
 
-- `--meter` reports interactions only. haskell-final's IC also printed
-  "logical storage" counted on its own map-of-ports net, which the port
-  does not share and so cannot report honestly.
-- `--draw-net` is not ported.
+- `--ic --meter` reports interactions only. Master's IC also prints a
+  count per rule of its own net, and haskell-final's printed "logical
+  storage" counted on its map-of-ports net; the port shares neither, and
+  so cannot report them honestly.
 - `--compile` writes haskell-final's version 4 artifact with no IC
   certificate (the port has none to store), and `--ic --compile` writes the
   same. Its stored report has the checks section below, and a program whose
   session has a guard (below) is written as version 5: version 4 and then
   the guard, which haskell-final refuses by its version rather than run main
   unguarded. haskell-final's artifacts load in the port.
-- `--fast` runs on the IC (C4: one runtime), not on a second evaluator.
-  Sizing is skipped, and every recursion site becomes a closure that
-  rebuilds itself when applied, so each application unrolls one layer;
-  only the branch an `if` chooses runs. The displays are haskell-final's.
-  What it counts is the IC's: fuel and the meter are interactions, there
-  are no application or gate counts, and each unroll counts once
-  (haskell-final's Fast forced a recursion value at each projection, twice
-  per application, so its unroll counts are double). It runs unguided:
-  EAL's capture layouts are the sized program's.
-- EAL is haskell-final's, not master's reworked one (certification that
-  terminates by construction, exact dual simplex, shared definitions
-  copied into their uses, sizing extending the certificate). Every example
-  program certifies on both. One pinned program, `main = (if 0 then (\x ->
-  x) else $1) succ 0` (a gate joining arms of the same arity), certifies on
-  master and is refused here, and a refusal's message can number its tags
-  differently.
 - The IC runs only the branch an `if` chooses (DESIGN.md §11.3). The core
   keeps one conditional, the strict gate-switch, and sizing and EAL read
   it as before. The IC compiles each branch into a template of its own,
@@ -179,25 +169,24 @@ in these places:
   sound for the same reason the strict net is: the lazy net duplicates no
   more than the strict one does, each captured part going once to the
   chosen branch instead of fanning to both. Displays are unchanged;
-  interaction counts are not haskell-final's (the tic-tac-toe test game
-  takes 6.0 million instead of 15.2 million), and a program whose dead
-  branch never ends now finishes (`ratarith` in the parity corpus gives
-  what haskell-final's reference evaluator gives, where its IC ran out of
-  fuel).
+  interaction counts are not master's: the tic-tac-toe game `1 4 2 5 3`
+  takes 5,454,169 interactions on the port's net and 33,560,000 on
+  master's (haskell-final's took 15,168,230).
 - Main's input refinements are checked at the session boundary (DESIGN.md
   §11.10's convention, made a rule). These are the refined bindings of the
   `let` that `main = \input -> let ... in body` opens with. On each line it
   reads, the session runs them first, as a program of their own (the
   guard: main with its body replaced by the refined values), and calls main
-  only when they pass. A failing one ends the session with its abort, as
-  main would have. The opening call, main on 0, is not checked, since 0 is
-  no input. Two things differ from haskell-final, where a refinement fired
-  only when main used its value: one now fires on every line, even where
-  main would not have used it, and an invalid line costs only the guard
-  (tic-tac-toe's `10`: 1.0 million interactions instead of 7.6 million).
-  `--fast` runs the guard too. Displays of the example programs are
-  unchanged.
-- `--certificate` also says what sizing proved of each refinement check
+  only when they pass. A line they refuse is answered by master's program
+  (main with every check in it, under the same layouts), so the session
+  ends as master's reference evaluator ends it: tic-tac-toe's `10` with
+  `invalid input (from refinement check at tictactoe:68:30)`, in 8,790,010
+  interactions, where master's net runs out of its 10,000,000 of fuel
+  (`port/tictactoe.ic-abort`). The opening call, main on 0, is not
+  checked, since 0 is no input. The guard runs only with `--ic`; a plain
+  run and `--fast` run master's program. Displays of the example programs
+  are unchanged.
+- `--ic --certificate` also says what sizing proved of each refinement check
   (DESIGN.md §10's split, which haskell-final's report lacks): discharged,
   or left to run time because the session runs it at its boundary, because
   it validates input otherwise, because its abort reaches the result on
@@ -222,11 +211,11 @@ in these places:
   verdict makes erasing safe is proven (see [What is
   proven](#what-is-proven)). Where the checker cannot decide, because it
   finds an input that reaches one or because it spends its budget first,
-  every bottom and check stays a run-time abort, and `--certificate` says
-  so. simpleplus is proven: `3 4` takes 44,344 interactions (782,347 before
+  every bottom and check stays a run-time abort, and `--ic --certificate` says
+  so. simpleplus is proven: `3 4` takes 44,390 interactions (782,347 before
   the erasures, with the Prelude of then), nearly all of the difference
   being the check no longer run inside main. tic-tac-toe is not, and its
-  main keeps its aborts (the game `1 4 2 5 3` takes 6,180,262
+  main keeps its aborts (the game `1 4 2 5 3` takes 5,454,169
   interactions): since the Prelude refined `not`'s argument to `Bool`, that
   check validates the input inside tic-tac-toe's guard, as sizing reads it,
   so the guard and main are not proven for every input. Master reads a
@@ -239,10 +228,15 @@ in these places:
   16,384 runs simpleplus needs); this one gave up on it in about 7 s. A budget
   never makes an erasure unsafe: it only decides when the checker stops
   and leaves the aborts in.
-- Like haskell-final, the port certifies the sized program only for the
-  capture layouts that guide the IC; it does not refuse to run a program
-  whose sized form fails certification (DESIGN.md's `admitIC` is not in
-  master or haskell-final).
+- The IC runs under the capture layouts master's `--ic` uses: derived from
+  the certificate of the program before sizing (`inferEALFaithful`,
+  `deriveSizedGuidance`), else inferred over the sized program
+  (`certifiedProgramFrom`); a program for which neither certifies is
+  refused with master's message, exit 1, as master's `withICPlan` refuses
+  it. The port's own programs get theirs the same way: main runs master's
+  sized program with what sizing discharged erased, its bodies that master's
+  shares under master's layouts and the erased ones under none, and the
+  guard is certified, sized and laid out as a program of its own.
 
 Of DESIGN.md's open questions (§11), three are resolved: the certified
 term is the executed one (§11.4), the IC runs only an `if`'s chosen branch
@@ -361,6 +355,23 @@ recursion sites (iterations, over every input):
 
 sizing budget in force: 65536 unrollings
 
+recursion nesting (structural, approximate):
+  triple         function             levels
+  Prelude:25:17  Prelude.d2c          0, 1
+  Prelude:58:32  Prelude.foldr.fixed  0, 1
+
+maximum nesting depth: 2
+...
+```
+
+With `--ic`, the report has a section of the port's after the budget line,
+about the program the interaction net runs:
+
+```sh
+$ telomare test/programs/simpleplus.tel --ic --certificate
+...
+sizing budget in force: 65536 unrollings
+
 refinement checks: 3 discharged statically, 1 left to run time:
   Prelude:17:8      discharged
   Prelude:17:19     discharged
@@ -370,13 +381,6 @@ erasures in main: proven, by the erasure checker in 223976086 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
 erasures in the guard: none; every recursion bottom and check stays a run-time abort
   sizing did not prove the guard for every input
-
-recursion nesting (structural, approximate):
-  triple         function             levels
-  Prelude:25:17  Prelude.d2c          0, 1
-  Prelude:58:32  Prelude.foldr.fixed  0, 1
-
-maximum nesting depth: 2
 ...
 ```
 
@@ -390,7 +394,7 @@ index differently — a count is per instantiation, a nesting row is per `{test,
 recursion, last}` as written — so they do not line up row by row, and the
 report says so.
 
-The checks section splits the program's refinement checks as DESIGN.md §10
+The checks section (`--ic` only) splits the program's refinement checks as DESIGN.md §10
 asks. These are every `x : v = e` and every refined lambda parameter `\(x :
 v) -> e`, plus Prelude's `abort`, the one check that `case`, UDT validators
 and pattern lambdas call. A check is *discharged* when sizing proved that no
@@ -401,36 +405,40 @@ main's input, so the session runs it before main on each line it reads, and
 main runs without it.
 
 The two `erasures` lines say, for main and for its guard, whether the
-program that runs leaves out its recursion bottoms and discharged checks.
+program the interaction net runs leaves out its recursion bottoms and discharged checks.
 It does only when the erasure checker proved that no input reaches them
 (see [Design](#design)); otherwise the second line says why they stay.
 On `tictactoe.tel` it reads "sizing did not prove main for every input":
 one of its checks, on `not`'s argument, validates the input inside the
 guard, as sizing reads it (see [Design](#design)).
 
-`--meter` runs the program and reports what the run cost: the interactions
-the net performed over the whole session, on stderr once the session ends.
-That is a measurement of one run, not a prediction about the next:
+`--meter` runs the program and reports what the run cost, on stderr once
+the session ends. That is a measurement of one run, not a prediction about
+the next. A plain run counts the reference evaluator's steps and the term
+nodes it built, as master does; with `--ic`, the interactions the net
+performed over the whole session:
 
 ```sh
 $ printf '3 4\n' | telomare test/programs/simpleplus.tel --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 44344
+steps (measured): 48741
+nodes built (measured): 14169
+$ printf '3 4\n' | telomare test/programs/simpleplus.tel --ic --meter
+enter two digits separated by a space
+3 plus 4 is 7
+IC interactions: 44390
 ```
 
-The count is the port's own: its net runs only the branch an `if` chooses,
-where haskell-final's built both, and main runs without the input check the
-session ran before it, so it is far lower than haskell-final's `--ic
---meter` count (1517868 for this run, with the Prelude of then; see
-[Design](#design)). It is
-not a memory figure, deliberately. haskell-final's IC also
-printed the peaks of its net's "logical storage" (agents, port entries,
-pending pairs), but those counted its own representation of the net (a map of
-ports, stale entries included), which the port does not share, so it does
-not print them; no figure is reported that the port cannot measure honestly.
-(haskell-final's reference evaluator, which `--meter` without `--ic` used,
-counted steps and term nodes instead; it is not ported.)
+The interaction count is the port's own: its net runs only the branch an
+`if` chooses, where master's builds both, and main runs without the input
+check the session ran before it, so it is far lower than master's `--ic
+--meter` count (1,828,960 for this run; see [Design](#design)). It is not
+a memory figure, deliberately. Master's IC also prints a count per rule,
+and haskell-final's printed the peaks of its net's "logical storage"
+(agents, port entries, pending pairs); those count master's own
+representation of the net, which the port does not share, so it does not
+print them: no figure is reported that the port cannot measure honestly.
 
 When sizing fails, the error names the recursion, where it is, and which of the
 two failures it is — a budget that was too small, or an input that nothing
@@ -460,22 +468,27 @@ artifact is expected to outlive the checkout it came from.
 ## Running without sizing
 
 `--fast` skips sizing altogether and runs the recursion on demand, unrolling
-one layer per call instead of a count inferred in advance. It runs on the
-interaction net like everything else, plays `tictactoe.tel` identically, and
+one layer per call instead of a count inferred in advance. It runs on
+master's unsized interpreter (`Telomare.Fast`, ported as `bend/Fast.bend`),
+every refinement check in place, plays `tictactoe.tel` identically, and
 will even run programs the sizing pass rejects:
 
 ```sh
 $ printf '3 4\n' | telomare test/programs/simpleplus.tel --fast --meter
 enter two digits separated by a space
 3 plus 4 is 7
-IC interactions: 744959
-recursion unrolls (measured):     55 across 4 sites
+function applications (measured): 2,699
+gate selections (measured):       171
+recursion unrolls (measured):     110 across 4 sites
 
   site   source            function          unrolls
-  #1     Prelude:62:23     Prelude.foldr     24
-  #0     Prelude:44:18     Prelude.dMinus    20
-  #2     simpleplus:12:42  simpleplus.doAdd  6
-  #3     simpleplus:12:28  simpleplus.doAdd  5
+  #1     Prelude:62:23     Prelude.foldr     48
+  #0     Prelude:44:18     Prelude.dMinus    40
+  #2     simpleplus:12:42  simpleplus.doAdd  12
+  #3     simpleplus:12:28  simpleplus.doAdd  10
+
+Unrolls are totals over the run, not depths, so they are not the same
+measurement as --certificate's per-instantiation iteration counts.
 ```
 
 Per-site unrolls are only available this way: sizing compiles each site into a
@@ -485,23 +498,49 @@ the same measurement as the certificate's per-instantiation counts.
 
 What `--fast` gives up is the thing sizing is for: **nothing proves the program
 terminates**. A recursion that would not have sized runs until a fuel cap stops
-it (default 16777216 interactions per iteration of `main`, `--fuel N` to change
-it, `--fuel 0` to lift it). That is why it is a flag and why sizing remains the
+it (default 16777216 applications and unrollings per iteration of `main`,
+`--fuel N` to change it, `--fuel 0` to lift it). That is why it is a flag and why sizing remains the
 default. `--fast --certificate` prints the static report with no counts.
 
 ## Telomare REPL
 
-haskell-final ships `telomare-repl` (`result/bin/telomare-repl`, run beside
-`Prelude.tel`). The Bend port brings it back on the IC runtime, after the
-`telomare` command.
+`telomare-repl` (`bend/Repl.bend`, master's `app/Repl.hs`; run it beside
+`Prelude.tel`) reads lines. `name = expression` binds name (a name keeps
+its first binding, as in master's); an expression is compiled under the
+bindings (the Prelude's, then the assignments' and loaded files') as a
+unit test is (sized with no cap, its aborts made inert), run on the
+reference evaluator, and its value printed as master's does.
+`telomare-repl --expr EXPR` evaluates one expression and exits. The
+commands are master's:
+
+| Command | What it does |
+| --- | --- |
+| `:d EXPR` | the expression alone, compiled, as master's prettyPrint shows it |
+| `:p EXPR` | the same, partially evaluated (`bend/Partial.bend`, master's `evalPartial`) |
+| `:t EXPR` | EAL's verdict on the expression alone |
+| `:l FILE` | FILE's definitions join the bindings |
+| `:r` | the bindings become the loaded files' alone, read again |
+| `:{` ... `:}` | the lines between, as one |
+| `:q` | quit |
+
+```sh
+$ nix build                # telomare, telomare-repl and telomare-lsp
+$ ./result/bin/telomare-repl --expr 'dPlus 2 3'
+5
+```
+
+A parse error is the port's parser's text, as on the command line
+(`test/golden/port/repl.*`). Haskeline's line editing and history are not
+ported.
 
 ## Editor Support (LSP)
 
-haskell-final ships a language server (`telomare-lsp`); the Emacs major mode
-under [`emacs-telomare-mode/`](emacs-telomare-mode/), with variants for
-Spacemacs, Doom, and vanilla Emacs, is still here. The flake has no `lsp` app
-until the port brings the server back, so the setup below needs a
-haskell-final checkout for now.
+The language server is `telomare-lsp` (`bend/Lsp.bend`, a port of master's
+`app/LSP.hs`), the flake's `lsp` app; the Emacs major mode under
+[`emacs-telomare-mode/`](emacs-telomare-mode/), with variants for Spacemacs,
+Doom, and vanilla Emacs, starts it. It gives master's answers on the
+sessions in `test/lsp` (`test/lsp/run.sh`), but for the text of a parse
+error, which is the port's parser's, as on the command line.
 
 ### LSP capabilities
 
@@ -690,27 +729,25 @@ name is the generated validator. This classification is not parser behavior.
 
 ## Compiler stages
 
-The port follows haskell-final's stages, bottom-up, under `bend/`. Each stage
-is checked against the haskell-final tests it can answer and against the
-goldens in `test/golden/`.
+The port follows master's stages, bottom-up, under `bend/`. Each stage
+is checked against the Haskell tests it can answer (master's EALTests are
+`bend/tests/ealm.bend`) and against the goldens in `test/golden/`.
 
-| Stage | haskell-final modules | Status |
+| Stage | Haskell modules | Status |
 | --- | --- | --- |
 | Lexical facts | `Telomare.Lexical` | ported: `bend/Lexical.bend` |
 | Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend` |
 | Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
 | Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend`, handing on `bend/Core.bend`'s CompiledExpr |
-| Certify | `Telomare.EAL`, the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,EAL}.bend` (the verdict and the capture layouts; the per-Defer bangs and levels of the REPL's `:t` are not) |
+| Certify | `Telomare.EAL` (master's, PR #157), the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,Rat,Linear,EALm}.bend` (the verdict, the fallbacks, the certificate after sizing and the capture layouts it gives, the REPL's `:t`; `bend/EAL.bend` is haskell-final's, kept for its tests) |
 | IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying guided by the EAL capture layouts |
-| Drive | `Telomare.Driver`, the `telomare` command | ported for running programs, `--meter` and `--fast`: `bend/{Session,Meter,Main}.bend` |
+| Evaluate | `Telomare.Eval.Reference`, `Telomare.Eval.Meter`, `Telomare.Fast` | ported: `bend/{Reference,Fast}.bend` |
+| Drive | `Telomare.Driver`, the `telomare` command | ported: `bend/{Session,Meter,Main,Native}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
 | Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 4, written with no IC certificate; version 5 with a session guard) |
-| REPL and LSP | `app/Repl.hs`, `app/LSP.hs` | not ported |
-
-Not ported: `Telomare.Eval.Reference`, `Telomare.Eval.Meter` and the
-evaluator of `Telomare.Fast` (`--fast` runs on the IC; its unbounded
-recursion is `Expr.limit`).
+| REPL | `app/Repl.hs` | ported: `bend/{Repl,Partial}.bend` (no line editing) |
+| LSP | `app/LSP.hs` | ported: `bend/{Json,Lsp}.bend` |
 
 Each stage hands the next a type in which the previous stage's forms cannot
 be written (DESIGN.md's H1): the surface term `Syntax.Surf` is indexed by
@@ -740,9 +777,10 @@ The code in this project is licensed under the Apache License 2.0. For more info
 
 ## IC logical storage (haskell-final)
 
-This section describes haskell-final. The port's `--meter` reports the
-interaction count alone, and `--ic --certificate`, `--compile` and
-`--draw-net` are not ported.
+This section describes haskell-final. The port's `--ic --meter` reports the
+interaction count alone, its `--ic --certificate` is the static report with
+the checks section (see [Resource reporting](#resource-reporting)), its
+`--compile` stores no IC certificate, and master has dropped `--draw-net`.
 
 `--ic` runs a sized source program or `.telc` artifact on the interaction-net
 runtime (`Telomare.IC`) instead of the reference evaluator. The rules and
