@@ -1,0 +1,521 @@
+
+# Failure
+# -------
+
+def fail.at(m: Maybe<&2, Err>, s: S, e: Err) -> S:
+  match m:
+    case Some{x}:
+      s.err.set(s, Some{x})
+    case None{}:
+      s.err.set(s, Some{e})
+
+# Keep the first failure.
+def fail(s: S, e: Err) -> S:
+  (s: S, m: Maybe<&2, Err>) <- s.err.swap(s, None{})
+  fail.at(m, s, e)
+
+def failed.at(m: Maybe<&2, Err>) -> Bool:
+  match m:
+    case Some{x}:
+      True{}
+    case None{}:
+      False{}
+
+def failed(s: S) -> S & Bool:
+  (s: S, m: Maybe<&2, Err>) <- s.err(s)
+  (s, failed.at(m))
+
+# Variables
+# ---------
+
+def grow(s: S) -> S:
+  match s:
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, +vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
+      S{ANode{tb, Array.new(U32, vd, 0)}, ANode{bp, Array.new(U32, vd, 0)}, ANode{ci, Array.new(CI, vd, CUnr{})},
+        ANode{tp, Array.new(U32, vd, 0)}, ANode{ts, Array.new(List<&2, TE>, vd, [])}, pr, ap, tm, bd, nv,
+        (vd + 1n : Nat), np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+
+def fresh.at(full: Bool, s: S, +i: U32) -> S & U32:
+  match full:
+    case True{}:
+      (s.nv.set(grow(s), (i + 1 : U32)), i)
+    case False{}:
+      (s.nv.set(s, (i + 1 : U32)), i)
+
+# freshInt
+def fresh(s: S) -> S & U32:
+  (s: S, +i: U32) <- s.nv(s)
+  (s: S, +vd: Nat) <- s.vd(s)
+  fresh.at(U32.is_ge(i, U32.shln(1, vd)), s, i)
+
+def fresh.tau(s: S) -> S & U32:
+  (s: S, +i: U32) <- fresh(s)
+  (s, ty.var(i))
+
+# freshSigma: the bang, then the type.
+def fresh.sig(s: S) -> S & Sg:
+  (s: S, +b: U32) <- fresh(s)
+  (s: S, +t: U32) <- fresh.tau(s)
+  (s, Sg{b, t})
+
+# Pairs
+# -----
+
+type PS is Data:
+  PS{+a: Sg, +b: Sg}
+
+def pr.grow(s: S) -> S:
+  match s:
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, +pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
+      S{tb, bp, ci, tp, ts, ANode{pr, Array.new(U32, pd, 0)}, ap, tm, bd, nv, vd, np, (pd + 1n : Nat), na, ad,
+        eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+
+def pair.write(s: S, +p: U32, a: Sg, b: Sg) -> S & U32:
+  match a:
+    case Sg{+ab, +at}:
+      match b:
+        case Sg{+bb, +bt}:
+          +w: U32 = (p * 4 : U32)
+          (s.np.set(s.pr.set(s.pr.set(s.pr.set(s.pr.set(s, w, ab), (w + 1 : U32), at), (w + 2 : U32), bb),
+            (w + 3 : U32), bt), (p + 1 : U32)), ty.pair(p))
+
+def pair.put(full: Bool, s: S, +p: U32, a: Sg, b: Sg) -> S & U32:
+  match full:
+    case True{}:
+      pair.write(pr.grow(s), p, a, b)
+    case False{}:
+      pair.write(s, p, a, b)
+
+# A new pair type of two sigmas.
+def pair.new(s: S, a: Sg, b: Sg) -> S & U32:
+  (s: S, +p: U32) <- s.np(s)
+  (s: S, +pd: Nat) <- s.pd(s)
+  pair.put(U32.is_gt(((p + 1 : U32) * 4 : U32), U32.shln(1, pd)), s, p, a, b)
+
+# The sigmas of a pair type.
+def pair.get(s: S, +t: U32) -> S & PS:
+  +w: U32 = (ty.of(t) * 4 : U32)
+  (s: S, +ab: U32) <- s.pr(s, w)
+  (s: S, +at: U32) <- s.pr(s, (w + 1 : U32))
+  (s: S, +bb: U32) <- s.pr(s, (w + 2 : U32))
+  (s: S, +bt: U32) <- s.pr(s, (w + 3 : U32))
+  (s, PS{Sg{ab, at}, Sg{bb, bt}})
+
+def is.var(+t: U32) -> Bool:
+  U32.is_eq((t .&. 7 : U32), 1)
+
+type WkN is Type:
+  WkMore{s: S, +t: U32}
+  WkStop{s: S, +t: U32}
+
+def walk.var(var: Bool, s: S, +b: U32) -> WkN:
+  match var:
+    case True{}:
+      WkMore{s, b}
+    case False{}:
+      WkStop{s, b}
+
+def walk.at(unbound: Bool, s: S, +t: U32, +b: U32) -> WkN:
+  match unbound:
+    case True{}:
+      WkStop{s, t}
+    case False{}:
+      walk.var(is.var(b), s, b)
+
+def walk.step(s: S, +t: U32) -> WkN:
+  (s: S, +b: U32) <- s.tb(s, ty.of(t))
+  walk.at(U32.is_eq(b, 0), s, t, b)
+
+def walk.fin(n: WkN) -> S & U32:
+  match n:
+    case WkMore{s, +t}:
+      (s, t)
+    case WkStop{s, +t}:
+      (s, t)
+
+def walk.loop(fuel: Nat, n: WkN) -> S & U32:
+  match fuel:
+    case 0n:
+      walk.fin(n)
+    case 1n+f:
+      match n:
+        case WkMore{s, +t}:
+          walk.loop(f, walk.step(s, t))
+        case WkStop{s, +t}:
+          (s, t)
+
+# walkTau
+def walk(s: S, +t: U32) -> S & U32:
+  walk.loop(big(), walk.var(is.var(t), s, t))
+
+# Union-find over bangs
+# ---------------------
+
+type BFN is Type:
+  BFMore{s: S, +j: U32}
+  BFStop{s: S, +r: U32}
+
+def bf.at(root: Bool, s: S, +j: U32, +p: U32) -> BFN:
+  match root:
+    case True{}:
+      BFStop{s, j}
+    case False{}:
+      BFMore{s, (p - 1 : U32)}
+
+def bf.step(s: S, +j: U32) -> BFN:
+  (s: S, +p: U32) <- s.bp(s, j)
+  bf.at(U32.is_eq(p, 0), s, j, p)
+
+def bf.fin(n: BFN) -> S & U32:
+  match n:
+    case BFMore{s, +j}:
+      (s, j)
+    case BFStop{s, +r}:
+      (s, r)
+
+def bf.loop(fuel: Nat, n: BFN) -> S & U32:
+  match fuel:
+    case 0n:
+      bf.fin(n)
+    case 1n+f:
+      match n:
+        case BFMore{s, +j}:
+          bf.loop(f, bf.step(s, j))
+        case BFStop{s, +r}:
+          (s, r)
+
+type BFP is Type:
+  BFPMore{s: S, +j: U32}
+  BFPStop{s: S}
+
+def bf.pat(stop: Bool, s: S, +j: U32, +r: U32, +p: U32) -> BFP:
+  match stop:
+    case True{}:
+      BFPStop{s}
+    case False{}:
+      BFPMore{s.bp.set(s, j, (r + 1 : U32)), (p - 1 : U32)}
+
+def bf.pstep(s: S, +j: U32, +r: U32) -> BFP:
+  (s: S, +p: U32) <- s.bp(s, j)
+  bf.pat(Bool.or(U32.is_eq(p, 0), U32.is_eq(p, (r + 1 : U32))), s, j, r, p)
+
+def bf.pfin(n: BFP) -> S:
+  match n:
+    case BFPMore{s, +j}:
+      s
+    case BFPStop{s}:
+      s
+
+def bf.ploop(fuel: Nat, n: BFP, +r: U32) -> S:
+  match fuel:
+    case 0n:
+      bf.pfin(n)
+    case 1n+f:
+      match n:
+        case BFPMore{s, +j}:
+          bf.ploop(f, bf.pstep(s, j, r), r)
+        case BFPStop{s}:
+          s
+
+# The root, without compression.
+def root.b(s: S, +b: U32) -> S & U32:
+  bf.loop(big(), bf.step(s, b))
+
+# The root, with path compression.
+def find.b(s: S, +b: U32) -> S & U32:
+  (s: S, +r: U32) <- root.b(s, b)
+  (bf.ploop(big(), bf.pstep(s, b, r), r), r)
+
+def bl.in(+fr: U32, b: Blame) -> Blame:
+  match b:
+    case Blame{+loc, +why, +bf}:
+      Blame{loc, why, Bool.pick(U32, U32.is_eq(bf, 0), fr, bf)}
+
+# inFrame, on a class's blame.
+def ci.in(+fr: U32, c: CI) -> CI:
+  match c:
+    case CUnr{}:
+      CUnr{}
+    case CZero{bl}:
+      CZero{bl.in(fr, bl)}
+    case CLevel{n, bl}:
+      CLevel{n, bl.in(fr, bl)}
+
+def ci.zero(c: CI) -> Bool:
+  match c:
+    case CZero{bl}:
+      True{}
+    case other:
+      False{}
+
+def ci.lb(c: CI) -> U32:
+  match c:
+    case CLevel{+n, bl}:
+      n
+    case other:
+      0
+
+def lvl.raise(up: Bool, s: S, +r: U32, +n: U32, +bl: Blame) -> S & Bool:
+  match up:
+    case True{}:
+      (s.ci.set(s, r, CLevel{n, bl}), True{})
+    case False{}:
+      (s, False{})
+
+def constrain.k(c: CI, +nc: CI, s: S, +r: U32) -> S & Bool:
+  match c:
+    case CUnr{}:
+      match nc:
+        case CUnr{}:
+          (s, False{})
+        case other:
+          (s.ci.set(s, r, other), True{})
+    case CZero{+z}:
+      match nc:
+        case CLevel{n, +l}:
+          (fail(s, BoxConflict{l, z}), False{})
+        case other:
+          (s, False{})
+    case CLevel{+la, +l}:
+      match nc:
+        case CZero{+z}:
+          (fail(s, BoxConflict{l, z}), False{})
+        case CLevel{+lb, +bl}:
+          lvl.raise(U32.is_lt(la, lb), s, r, lb, bl)
+        case CUnr{}:
+          (s, False{})
+
+# constrainB: whether the class changed.
+def constrain(s: S, +b: U32, nc: CI) -> S & Bool:
+  (s: S, +fr: U32) <- s.frame(s)
+  (s: S, +r: U32) <- find.b(s, b)
+  (s: S, +c: CI) <- s.ci(s, r)
+  constrain.k(c, ci.in(fr, nc), s, r)
+
+def constrain_(s: S, +b: U32, nc: CI) -> S:
+  Pair.fst(S, Bool, constrain(s, b, nc))
+
+def union.b.put(s: S, +ra: U32, +rb: U32, +m: CI) -> S:
+  s.ci.set(s.ci.set(s.bp.set(s, ra, (rb + 1 : U32)), rb, m), ra, CUnr{})
+
+# mergeClasses, then the merge.
+def union.b.k(ia: CI, +ib: CI, s: S, +ra: U32, +rb: U32) -> S:
+  match ia:
+    case CUnr{}:
+      union.b.put(s, ra, rb, ib)
+    case CZero{+z}:
+      match ib:
+        case CLevel{n, +l}:
+          fail(s, BoxConflict{l, z})
+        case other:
+          union.b.put(s, ra, rb, CZero{z})
+    case CLevel{+la, +l}:
+      match ib:
+        case CZero{+z}:
+          fail(s, BoxConflict{l, z})
+        case CLevel{+lb, +l2}:
+          union.b.put(s, ra, rb, Bool.pick(CI, U32.is_ge(la, lb), CLevel{la, l}, CLevel{lb, l2}))
+        case CUnr{}:
+          union.b.put(s, ra, rb, CLevel{la, l})
+
+def union.b.at(same: Bool, s: S, +ra: U32, +rb: U32) -> S:
+  match same:
+    case True{}:
+      s
+    case False{}:
+      (s: S, +ia: CI) <- s.ci(s, ra)
+      (s: S, +ib: CI) <- s.ci(s, rb)
+      union.b.k(ia, ib, s, ra, rb)
+
+# unionB
+def union.b(s: S, +a: U32, +b: U32) -> S:
+  (s: S, +ra: U32) <- find.b(s, a)
+  (s: S, +rb: U32) <- find.b(s, b)
+  union.b.at(U32.is_eq(ra, rb), s, ra, rb)
+
+def union.bs(xs: List<&2, U32>, ys: List<&2, U32>, s: S) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{+x, xr}:
+      match ys:
+        case Nil{}:
+          s
+        case Con{+y, yr}:
+          union.bs(xr, yr, union.b(s, x, y))
+
+# Union-find over tag classes
+# ---------------------------
+
+type TFN is Type:
+  TFMore{s: S, +j: U32}
+  TFStop{s: S, +r: U32}
+
+def tf.at(root: Bool, s: S, +j: U32, +p: U32) -> TFN:
+  match root:
+    case True{}:
+      TFStop{s, j}
+    case False{}:
+      TFMore{s, (p - 1 : U32)}
+
+def tf.step(s: S, +j: U32) -> TFN:
+  (s: S, +p: U32) <- s.tp(s, j)
+  tf.at(U32.is_eq(p, 0), s, j, p)
+
+def tf.fin(n: TFN) -> S & U32:
+  match n:
+    case TFMore{s, +j}:
+      (s, j)
+    case TFStop{s, +r}:
+      (s, r)
+
+def tf.loop(fuel: Nat, n: TFN) -> S & U32:
+  match fuel:
+    case 0n:
+      tf.fin(n)
+    case 1n+f:
+      match n:
+        case TFMore{s, +j}:
+          tf.loop(f, tf.step(s, j))
+        case TFStop{s, +r}:
+          (s, r)
+
+type TFP is Type:
+  TFPMore{s: S, +j: U32}
+  TFPStop{s: S}
+
+def tf.pat(stop: Bool, s: S, +j: U32, +r: U32, +p: U32) -> TFP:
+  match stop:
+    case True{}:
+      TFPStop{s}
+    case False{}:
+      TFPMore{s.tp.set(s, j, (r + 1 : U32)), (p - 1 : U32)}
+
+def tf.pstep(s: S, +j: U32, +r: U32) -> TFP:
+  (s: S, +p: U32) <- s.tp(s, j)
+  tf.pat(Bool.or(U32.is_eq(p, 0), U32.is_eq(p, (r + 1 : U32))), s, j, r, p)
+
+def tf.pfin(n: TFP) -> S:
+  match n:
+    case TFPMore{s, +j}:
+      s
+    case TFPStop{s}:
+      s
+
+def tf.ploop(fuel: Nat, n: TFP, +r: U32) -> S:
+  match fuel:
+    case 0n:
+      tf.pfin(n)
+    case 1n+f:
+      match n:
+        case TFPMore{s, +j}:
+          tf.ploop(f, tf.pstep(s, j, r), r)
+        case TFPStop{s}:
+          s
+
+# The root, without compression.
+def root.t(s: S, +b: U32) -> S & U32:
+  tf.loop(big(), tf.step(s, b))
+
+# The root, with path compression.
+def find.t(s: S, +b: U32) -> S & U32:
+  (s: S, +r: U32) <- root.t(s, b)
+  (tf.ploop(big(), tf.pstep(s, b, r), r), r)
+
+# capturesOf: a class's tags with their records.
+def captures.of(s: S, +i: U32) -> S & List<&2, TE>:
+  (s: S, +r: U32) <- find.t(s, i)
+  s.ts(s, r)
+
+def te.tags(xs: List<&2, TE>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, rest}:
+      match x:
+        case TE{+tag, cap, ifc}:
+          tag <> te.tags(rest)
+
+def te.with.cap(xs: List<&2, TE>, +c: Sg) -> List<&2, TE>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, rest}:
+      match x:
+        case TE{+tag, cap, +ifc}:
+          TE{tag, Some{c}, ifc} <> te.with.cap(rest, c)
+
+# freshCode: a fresh code class holding these tags.
+def fresh.code(s: S, +tags: List<&2, TE>) -> S & U32:
+  (s: S, +i: U32) <- fresh(s)
+  (s.ts.set(s, i, tags), ty.code(i))
+
+def builtin.code(s: S, +tag: U32) -> S & U32:
+  fresh.code(s, [TE{tag, None{}, None{}}])
+
+# packageClass: the tags of class i, each now carrying this capture.
+def package.class(s: S, +i: U32, +c: Sg) -> S & U32:
+  (s: S, infos: List<&2, TE>) <- captures.of(s, i)
+  (s: S, +p: U32) <- fresh(s)
+  (s.ts.set(s, p, te.with.cap(infos, c)), p)
+
+# Constraints and records
+# -----------------------
+
+def forced.zero(s: S, +bl: Blame) -> S & U32:
+  (s: S, +b: U32) <- fresh(s)
+  (constrain_(s, b, CZero{bl}), b)
+
+# plainSigma
+def plain(s: S, +loc: Lc.Loc, +what: String, +t: U32) -> S & Sg:
+  (s: S, +b: U32) <- forced.zero(s, blame(loc, what))
+  (s, Sg{b, t})
+
+# addSumEq
+def add.eq(s: S, +bl: Blame, +lhs: List<&2, U32>, +rhs: U32) -> S:
+  (s: S, +fr: U32) <- s.frame(s)
+  (s: S, old: List<&2, SumEq>) <- s.eqs.swap(s, [])
+  (s: S, +n: U32) <- s.neq(s)
+  s.neq.set(s.eqs.set(s, SumEq{lhs, rhs, bl.in(fr, bl)} <> old), (n + 1 : U32))
+
+def rec.leaf(s: S, +fr: U32, +base: U32, +d: U32) -> S:
+  (s: S, old: List<&2, Lp>) <- s.lfs.swap(s, [])
+  (s: S, +n: U32) <- s.nlf(s)
+  s.nlf.set(s.lfs.set(s, Lp{fr, base, d} <> old), (n + 1 : U32))
+
+# recordDefer
+def rec.defer(s: S, +fi: U32, +b: U32) -> S:
+  (s: S, old: List<&2, Df>) <- s.dfs.swap(s, [])
+  (s: S, +n: U32) <- s.ndf(s)
+  s.ndf.set(s.dfs.set(s, Df{fi, b} <> old), (n + 1 : U32))
+
+def ap.none() -> Ap:
+  Ap{0, Sg{0, 0}, Sg{0, 0}, Lc.Unknown{}, []}
+
+def ap.grow(s: S) -> S:
+  match s:
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, +ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
+      S{tb, bp, ci, tp, ts, pr, ANode{ap, Array.new(Ap, ad, ap.none())}, tm, bd, nv, vd, np, pd, na, (ad + 1n : Nat),
+        eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+
+def ap.put(full: Bool, s: S, +n: U32, +a: Ap) -> S:
+  match full:
+    case True{}:
+      s.na.set(s.ap.set(ap.grow(s), n, a), (n + 1 : U32))
+    case False{}:
+      s.na.set(s.ap.set(s, n, a), (n + 1 : U32))
+
+# Register an apply site under the next number.
+def ap.new(s: S, +a: Ap) -> S:
+  (s: S, +n: U32) <- s.na(s)
+  (s: S, +ad: Nat) <- s.ad(s)
+  ap.put(U32.is_ge(n, U32.shln(1, ad)), s, n, a)
+
+# The state
+# ---------
+
+def st.new(bd: Array<Bd>, +nb: U32, +uni: Bool) -> S:
+  +d = Ln.depth.of(nb)
+  S{Array.new(U32, 10n, 0), Array.new(U32, 10n, 0), Array.new(CI, 10n, CUnr{}), Array.new(U32, 10n, 0),
+    Array.new(List<&2, TE>, 10n, []), Array.new(U32, 10n, 0), Array.new(Ap, 6n, ap.none()), Array.new(Mt, d, MtNone{}),
+    bd, 0, 10n, 0, 10n, 0, 6n, [], 0, [], 0, [], 0, 0, uni, None{}, [], 0}

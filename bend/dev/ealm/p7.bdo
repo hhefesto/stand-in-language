@@ -1,0 +1,328 @@
+
+# The walk (viewNode, intrinsic, instantiateBody)
+# --------
+#
+# One machine runs the walk: a task (view a node, type it intrinsically,
+# view a pair's component, instantiate a body, or return a value) and a
+# stack of frames, each the rest of a Haskell do block waiting for the
+# value of the task below it.
+
+type R is Data:
+  RSg{+sg: Sg}
+  RView{+sg: Sg, +d: U32}
+  RIf{+ifc: If}
+
+type Task is Data:
+  TView{+c: Ctx, +p: Pa, +t: A}
+  TIntr{+c: Ctx, +p: Pa, +t: A}
+  TChild{+c: Ctx, +p: Pa, +t: A}
+  TInst{+unit: U32, +p: Pa, +r: U32}
+  TRet{+v: R}
+
+type Fr is Data:
+  FView{+loc: Lc.Loc, +w: U32, +d: U32}
+  FPairA{+c: Ctx, +p: Pa, +loc: Lc.Loc, +b: A}
+  FPairB{+loc: Lc.Loc, +sa: Sg}
+  FSetEnv{+loc: Lc.Loc}
+  FProj{+loc: Lc.Loc, +left: Bool}
+  FAbort{}
+  FRef{+loc: Lc.Loc, +r: U32}
+  FCap{+r: U32, +fi: U32, +z: Snap, +frame0: U32, +benv: U32, +tenv: U32, +doorl: List<&2, U32>}
+  FChA{+c: Ctx, +p: Pa, +loc: Lc.Loc, +bloc: Lc.Loc, +prev: A, +trb: A, +plink: Bool, +dlink: U32}
+  FChP{+c: Ctx, +ip: Pa, +loc: Lc.Loc, +bloc: Lc.Loc, +trb: A, +plink: Bool, +dlink: U32, +sa: Sg, +w2: U32, +d2: U32}
+  FChT{+loc: Lc.Loc, +bloc: Lc.Loc, +sa: Sg, +w2: U32, +d2: U32, +sprev: Sg, +plink: Bool}
+
+type WM is Type:
+  WmGo{s: S, task: Task, st: List<&2, Fr>}
+  WmEnd{s: S, v: R}
+
+def r.sg(v: R) -> Sg:
+  match v:
+    case RSg{+sg}:
+      sg
+    case RView{+sg, d}:
+      sg
+    case RIf{ifc}:
+      Sg{0, ty.data()}
+
+def r.d(v: R) -> U32:
+  match v:
+    case RView{sg, +d}:
+      d
+    case other:
+      0
+
+def r.if(v: R) -> If:
+  match v:
+    case RIf{+ifc}:
+      ifc
+    case other:
+      If{Sg{0, ty.data()}, Sg{0, ty.data()}, []}
+
+def ret(s: S, +sg: Sg, st: List<&2, Fr>) -> WM:
+  WmGo{s, TRet{RSg{sg}}, st}
+
+def ret.k(r: S & Sg, st: List<&2, Fr>) -> WM:
+  (s, +sg) = r
+  WmGo{s, TRet{RSg{sg}}, st}
+
+def vw.d.at(root: Bool, s: S, +par: U32, +w: U32, +loc: Lc.Loc) -> S & U32:
+  match root:
+    case True{}:
+      (s, w)
+    case False{}:
+      (s: S, +d: U32) <- fresh(s)
+      (add.eq(s, blame(loc, "box depth = the parent's depth + this edge's boxes"), [(par - 1 : U32), w], d), d)
+
+# viewNodeWith's first half: the edge's boxes and the node's depth.
+def vw.depth(s: S, p: Pa, +w: U32, +loc: Lc.Loc) -> S & U32:
+  match p:
+    case Pa{+par, base}:
+      vw.d.at(U32.is_eq(par, 0), s, par, w, loc)
+
+def link.code(s: S, a: A) -> S & Bool:
+  match a:
+    case ARef{loc, +r}:
+      (s: S, b: Bd) <- s.bd(s, r)
+      (s, bd.link(b))
+    case other:
+      (s, False{})
+
+def bd.link(b: Bd) -> Bool:
+  match b:
+    case Bd{h, fi, +link, t}:
+      link
+
+# Whether a chain's previous approximant is itself a link.
+def prev.link(s: S, prev: A) -> S & Bool:
+  match prev:
+    case APair{l, pa, pb}:
+      match pb:
+        case APair{l2, x, y}:
+          link.code(s, pa)
+        case other:
+          (s, False{})
+    case other:
+      (s, False{})
+
+def wm.chain(islink: Bool, s: S, +c: Ctx, +p: Pa, +loc: Lc.Loc, +a: A, +b: A, st: List<&2, Fr>) -> WM:
+  match islink:
+    case False{}:
+      WmGo{s, TChild{c, p, a}, FPairA{c, p, loc, b} <> st}
+    case True{}:
+      wm.chain.b(b, s, c, p, loc, a, st)
+
+def wm.chain.b(b: A, s: S, +c: Ctx, +p: Pa, +loc: Lc.Loc, +a: A, st: List<&2, Fr>) -> WM:
+  match b:
+    case APair{+bloc, +prev, +trb}:
+      (s: S, +pl: Bool) <- prev.link(s, prev)
+      WmGo{s, TChild{c, p, a}, FChA{c, p, loc, bloc, prev, trb, pl, pa.d(p)} <> st}
+    case other:
+      WmGo{s, TChild{c, p, a}, FPairA{c, p, loc, other} <> st}
+
+def wm.pair.b(b: A) -> Bool:
+  match b:
+    case APair{l, x, y}:
+      True{}
+    case other:
+      False{}
+
+def wm.pair.u(uni: Bool, s: S, +c: Ctx, +p: Pa, +loc: Lc.Loc, +a: A, +b: A, st: List<&2, Fr>) -> WM:
+  match uni:
+    case False{}:
+      WmGo{s, TChild{c, p, a}, FPairA{c, p, loc, b} <> st}
+    case True{}:
+      (s: S, +isl: Bool) <- link.code(s, a)
+      wm.chain(Bool.and(isl, wm.pair.b(b)), s, c, p, loc, a, b, st)
+
+def wm.lr(m: Maybe<&2, List<&2, U32>>, +left: Bool, s: S, +c: Ctx, +p: Pa, +loc: Lc.Loc, +x: A, st: List<&2, Fr>) -> WM:
+  match m:
+    case Some{+steps}:
+      ret.k(env.occ(s, c, p, loc, List.append(&2, U32, steps, [Bool.pick(U32, left, 0, 1)])), st)
+    case None{}:
+      WmGo{s, TView{c, p, x}, FProj{loc, left} <> st}
+
+# intrinsic
+def wm.intr(t: A, s: S, +c: Ctx, +p: Pa, st: List<&2, Fr>) -> WM:
+  match t:
+    case AZero{+loc}:
+      ret.k(plain(leaf(s, c, p), loc, "Zero is an unboxed value", ty.data()), st)
+    case APair{+loc, +a, +b}:
+      (s: S, +u: Bool) <- s.uni(s)
+      wm.pair.u(u, s, c, p, loc, a, b, st)
+    case AEnv{+loc}:
+      ret.k(env.occ(s, c, p, loc, []), st)
+    case AUns{+loc}:
+      ret.k(env.occ(s, c, p, loc, []), st)
+    case ARef{+loc, +r}:
+      WmGo{leaf(s, c, p), TInst{ctx.unit(c), p, r}, FRef{loc, r} <> st}
+    case ASetEnv{+loc, +x}:
+      WmGo{s, TView{c, p, x}, FSetEnv{loc} <> st}
+    case AGate{+loc}:
+      (s: S, +ct: U32) <- builtin.code(leaf(s, c, p), tag.gate())
+      ret.k(plain(s, loc, "gate is an unboxed value", ct), st)
+    case ALeft{+loc, +x}:
+      wm.lr(env.path(x), True{}, s, c, p, loc, x, st)
+    case ARight{+loc, +x}:
+      wm.lr(env.path(x), False{}, s, c, p, loc, x, st)
+    case AAbort{+loc, +m}:
+      WmGo{s, TView{c, p, m}, FAbort{} <> st}
+    case ABot{+loc}:
+      ret.k(bottom(s), st)
+    case ACheck{+loc, +x}:
+      WmGo{s, TIntr{c, p, x}, st}
+
+# viewNode's first half
+def wm.view(s: S, +c: Ctx, +p: Pa, +t: A, st: List<&2, Fr>) -> WM:
+  (s: S, +w: U32) <- fresh(s)
+  (s: S, +d: U32) <- vw.depth(s, p, w, a.loc(t))
+  WmGo{s, TIntr{c, Pa{(d + 1 : U32), pa.base(p)}, t}, FView{a.loc(t), w, d} <> st}
+
+def wm.lit(t: A, s: S, st: List<&2, Fr>) -> WM:
+  match t:
+    case APair{loc, a, b}:
+      (s: S, +l: Sg) <- data.leaf(s)
+      (s: S, +rr: Sg) <- data.leaf(s)
+      (s: S, +pt: U32) <- pair.new(s, l, rr)
+      (s: S, +b2: U32) <- fresh(s)
+      ret(s, Sg{b2, pt}, st)
+    case other:
+      ret.k(data.leaf(s), st)
+
+# pairChild: a closed data tree is one leaf.
+def wm.child(lit: Bool, s: S, +c: Ctx, +p: Pa, +t: A, st: List<&2, Fr>) -> WM:
+  match lit:
+    case False{}:
+      WmGo{s, TView{c, p, t}, st}
+    case True{}:
+      wm.lit(t, leaf(s, c, p), st)
+
+def wm.cap(b: Bd, s: S, +unit: U32, +base: U32, +r: U32, st: List<&2, Fr>) -> WM:
+  match b:
+    case Bd{h, +fi, link, +body}:
+      (s: S, +z: Snap) <- snap(s)
+      (s: S, +benv: U32) <- fresh(s)
+      (s: S, +tenv: U32) <- fresh.tau(s)
+      (s: S, +frame0: U32) <- s.frame(s)
+      (s: S, +c: Ctx) <- frame.context(s.frame.set(s, (fi + 1 : U32)), unit, (fi + 1 : U32), "env of " ++ Co.fi.show(fi), benv, tenv, body)
+      WmGo{rec.defer(s, fi, benv), TView{c, Pa{0, base}, body}, FCap{r, fi, z, frame0, benv, tenv, ctx.doorl(c)} <> st}
+
+def wm.inst.at(m: Mt, s: S, +unit: U32, +base: U32, +r: U32, st: List<&2, Fr>) -> WM:
+  match m:
+    case MtSome{t}:
+      (s: S, +ifc: If) <- tm.inst(s, base, t)
+      WmGo{s, TRet{RIf{ifc}}, st}
+    case MtNone{}:
+      (s: S, b: Bd) <- s.bd(s, r)
+      wm.cap(b, s, unit, base, r, st)
+
+# instantiateBody
+def wm.inst(s: S, +unit: U32, +p: Pa, +r: U32, st: List<&2, Fr>) -> WM:
+  (s: S, +base: U32) <- fresh(s)
+  (s: S, m: Mt) <- s.tm(add.eq(s, Blame{gen("instance base"), "an occurrence's global depth = its frame's base + its depth", 0},
+    [pa.base(p), pa.d(p)], base), r)
+  wm.inst.at(m, s, unit, base, r, st)
+
+def wm.chp(plink: Bool, s: S, +dprev: U32, +dlink: U32) -> S:
+  match plink:
+    case True{}:
+      union.b(s, dprev, dlink)
+    case False{}:
+      s
+
+def wm.cht(plink: Bool, s: S, +loc: Lc.Loc, +a: Sg, +b: Sg) -> S:
+  match plink:
+    case True{}:
+      unify.sig(s, loc, a, b)
+    case False{}:
+      s
+
+# A frame meeting the value of the task below it.
+def wm.frame(fr: Fr, s: S, +v: R, st: List<&2, Fr>) -> WM:
+  match fr:
+    case FView{+loc, +w, +d}:
+      (s: S, +vv: U32) <- fresh(s)
+      WmGo{add.eq(s, blame(loc, "view bangs = edge boxes + intrinsic bangs"), [w, sg.b(r.sg(v))], vv),
+        TRet{RView{Sg{vv, sg.t(r.sg(v))}, d}}, st}
+    case FPairA{+c, +p, +loc, +b}:
+      WmGo{s, TChild{c, p, b}, FPairB{loc, r.sg(v)} <> st}
+    case FPairB{+loc, +sa}:
+      ret.k(pair.of(s, loc, sa, r.sg(v)), st)
+    case FSetEnv{+loc}:
+      ret.k(set.env(s, loc, r.sg(v)), st)
+    case FProj{+loc, +left}:
+      ret.k(proj(s, loc, left, r.sg(v)), st)
+    case FAbort{}:
+      ret.k(bottom(s), st)
+    case FRef{+loc, +r}:
+      (s: S, +ct: U32) <- fresh.code(s, [TE{r, None{}, Some{r.if(v)}}])
+      ret.k(plain(s, loc, "code constant is an unboxed value", ct), st)
+    case FCap{+r, +fi, +z, +frame0, +benv, +tenv, +doorl}:
+      (s: S, +ifc: If) <- cap.finish(s, r, fi, z, frame0, benv, tenv, doorl, r.sg(v))
+      WmGo{s, TRet{RIf{ifc}}, st}
+    case FChA{+c, +p, +loc, +bloc, +prev, +trb, +plink, +dlink}:
+      (s: S, +w2: U32) <- fresh(s)
+      (s: S, +d2: U32) <- vw.depth(s, p, w2, bloc)
+      WmGo{s, TView{c, Pa{(d2 + 1 : U32), pa.base(p)}, prev},
+        FChP{c, Pa{(d2 + 1 : U32), pa.base(p)}, loc, bloc, trb, plink, dlink, r.sg(v), w2, d2} <> st}
+    case FChP{+c, +ip, +loc, +bloc, +trb, +plink, +dlink, +sa, +w2, +d2}:
+      WmGo{wm.chp(plink, s, r.d(v), dlink), TChild{c, ip, trb}, FChT{loc, bloc, sa, w2, d2, r.sg(v), plink} <> st}
+    case FChT{+loc, +bloc, +sa, +w2, +d2, +sprev, +plink}:
+      (s: S, +s1: Sg) <- pair.of(s, bloc, sprev, r.sg(v))
+      (s: S, +vv: U32) <- fresh(s)
+      (s: S, +s2: Sg) <- pair.of(add.eq(s, blame(bloc, "view bangs = edge boxes + intrinsic bangs"), [w2, sg.b(s1)], vv),
+        loc, sa, Sg{vv, sg.t(s1)})
+      ret(wm.cht(plink, s, loc, s2, sprev), s2, st)
+
+def wm.ret(st: List<&2, Fr>, s: S, +v: R) -> WM:
+  match st:
+    case Nil{}:
+      WmEnd{s, v}
+    case Con{fr, rest}:
+      wm.frame(fr, s, v, rest)
+
+def wm.task(task: Task, s: S, st: List<&2, Fr>) -> WM:
+  match task:
+    case TRet{+v}:
+      wm.ret(st, s, v)
+    case TView{+c, +p, +t}:
+      wm.view(s, c, p, t, st)
+    case TIntr{+c, +p, +t}:
+      wm.intr(t, s, c, p, st)
+    case TChild{+c, +p, +t}:
+      wm.child(data.lit(t), s, c, p, t, st)
+    case TInst{+unit, +p, +r}:
+      wm.inst(s, unit, p, r, st)
+
+def wm.step.at(bad: Bool, s: S, task: Task, st: List<&2, Fr>) -> WM:
+  match bad:
+    case True{}:
+      WmEnd{s, RSg{Sg{0, ty.data()}}}
+    case False{}:
+      wm.task(task, s, st)
+
+def wm.step(s: S, task: Task, st: List<&2, Fr>) -> WM:
+  (s: S, +bad: Bool) <- failed(s)
+  wm.step.at(bad, s, task, st)
+
+def wm.fin(n: WM) -> S & R:
+  match n:
+    case WmGo{s, task, st}:
+      (fail(s, Internal{"the walk ran out of fuel"}), RSg{Sg{0, ty.data()}})
+    case WmEnd{s, v}:
+      (s, v)
+
+def wm.loop(fuel: Nat, n: WM) -> S & R:
+  match fuel:
+    case 0n:
+      wm.fin(n)
+    case 1n+f:
+      match n:
+        case WmGo{s, task, st}:
+          wm.loop(f, wm.step(s, task, st))
+        case WmEnd{s, v}:
+          (s, v)
+
+# viewNode at a frame root, to the end of the walk: the node's sigma.
+def walk.view(s: S, +c: Ctx, +base: U32, +t: A) -> S & R:
+  wm.loop(big(), wm.step(s, TView{c, Pa{0, base}, t}, []))

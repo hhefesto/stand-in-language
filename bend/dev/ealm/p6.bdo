@@ -1,0 +1,382 @@
+
+# Templates (BodyTemplate)
+# ---------
+
+# The counters a template's deltas start from.
+type Snap is Data:
+  Snap{+v0: U32, +p0: U32, +a0: U32, +eq0: U32, +lf0: U32, +df0: U32}
+
+def snap(s: S) -> S & Snap:
+  (s: S, +v0: U32) <- s.nv(s)
+  (s: S, +p0: U32) <- s.np(s)
+  (s: S, +a0: U32) <- s.na(s)
+  (s: S, +eq0: U32) <- s.neq(s)
+  (s: S, +lf0: U32) <- s.nlf(s)
+  (s: S, +df0: U32) <- s.ndf(s)
+  (s, Snap{v0, p0, a0, eq0, lf0, df0})
+
+def keep.kv(nz: Bool, +k: U32, +v: U32, +acc: List<&2, KV>) -> List<&2, KV>:
+  match nz:
+    case True{}:
+      KV{k, v} <> acc
+    case False{}:
+      acc
+
+def keep.kc(c: CI, +k: U32, +acc: List<&2, KC>) -> List<&2, KC>:
+  match c:
+    case CUnr{}:
+      acc
+    case other:
+      KC{k, other} <> acc
+
+def keep.kt(es: List<&2, TE>, +k: U32, +acc: List<&2, KT>) -> List<&2, KT>:
+  match es:
+    case Nil{}:
+      acc
+    case Con{e, rest}:
+      KT{k, Con{e, rest}} <> acc
+
+def nxt(+i: U32, +last: U32) -> U32:
+  Bool.pick(U32, U32.is_ge(i, last), i, (i + 1 : U32))
+
+def rd.tb(n: Nat, r: S & U32, +i: U32, +last: U32, +acc: List<&2, KV>) -> S & List<&2, KV>:
+  match n:
+    case 0n:
+      (s, x) = r
+      (s, acc)
+    case 1n+k:
+      (s, +x) = r
+      rd.tb(k, s.tb(s, nxt(i, last)), nxt(i, last), last, keep.kv(U32.is_ne(x, 0), i, x, acc))
+
+def rd.bp(n: Nat, r: S & U32, +i: U32, +last: U32, +acc: List<&2, KV>) -> S & List<&2, KV>:
+  match n:
+    case 0n:
+      (s, x) = r
+      (s, acc)
+    case 1n+k:
+      (s, +x) = r
+      rd.bp(k, s.bp(s, nxt(i, last)), nxt(i, last), last, keep.kv(U32.is_ne(x, 0), i, x, acc))
+
+def rd.tp(n: Nat, r: S & U32, +i: U32, +last: U32, +acc: List<&2, KV>) -> S & List<&2, KV>:
+  match n:
+    case 0n:
+      (s, x) = r
+      (s, acc)
+    case 1n+k:
+      (s, +x) = r
+      rd.tp(k, s.tp(s, nxt(i, last)), nxt(i, last), last, keep.kv(U32.is_ne(x, 0), i, x, acc))
+
+def rd.ci(n: Nat, r: S & CI, +i: U32, +last: U32, +acc: List<&2, KC>) -> S & List<&2, KC>:
+  match n:
+    case 0n:
+      (s, x) = r
+      (s, acc)
+    case 1n+k:
+      (s, x) = r
+      rd.ci(k, s.ci(s, nxt(i, last)), nxt(i, last), last, keep.kc(x, i, acc))
+
+def rd.ts(n: Nat, r: S & List<&2, TE>, +i: U32, +last: U32, +acc: List<&2, KT>) -> S & List<&2, KT>:
+  match n:
+    case 0n:
+      (s, x) = r
+      (s, acc)
+    case 1n+k:
+      (s, x) = r
+      rd.ts(k, s.ts(s, nxt(i, last)), nxt(i, last), last, keep.kt(x, i, acc))
+
+def rd.pr(n: Nat, r: S & U32, +i: U32, +last: U32, +acc: List<&2, KV>) -> S & List<&2, KV>:
+  match n:
+    case 0n:
+      (s, x) = r
+      (s, acc)
+    case 1n+k:
+      (s, +x) = r
+      rd.pr(k, s.pr(s, nxt(i, last)), nxt(i, last), last, KV{i, x} <> acc)
+
+def rd.ap(n: Nat, r: S & Ap, +i: U32, +last: U32, +acc: List<&2, Ap>) -> S & List<&2, Ap>:
+  match n:
+    case 0n:
+      (s, x) = r
+      (s, List.reverse(&2, Ap, acc))
+    case 1n+k:
+      (s, +x) = r
+      rd.ap(k, s.ap(s, nxt(i, last)), nxt(i, last), last, x <> acc)
+
+def take.eq(n: Nat, xs: List<&2, SumEq>) -> List<&2, SumEq>:
+  match n:
+    case 0n:
+      []
+    case 1n+k:
+      match xs:
+        case Nil{}:
+          []
+        case Con{x, rest}:
+          x <> take.eq(k, rest)
+
+def take.df(n: Nat, xs: List<&2, Df>) -> List<&2, Df>:
+  match n:
+    case 0n:
+      []
+    case 1n+k:
+      match xs:
+        case Nil{}:
+          []
+        case Con{x, rest}:
+          x <> take.df(k, rest)
+
+# Leaves without their base, as (body, depth).
+def take.lf(n: Nat, xs: List<&2, Lp>) -> List<&2, KV>:
+  match n:
+    case 0n:
+      []
+    case 1n+k:
+      match xs:
+        case Nil{}:
+          []
+        case Con{x, rest}:
+          match x:
+            case Lp{+fr, base, +d}:
+              KV{fr, d} <> take.lf(k, rest)
+
+def span(+a: U32, +b: U32) -> Nat:
+  U32.to_nat(Bool.pick(U32, U32.is_gt(b, a), (b - a : U32), 0))
+
+def at.or0(+i: U32, +n: U32) -> U32:
+  Bool.pick(U32, U32.is_lt(i, n), i, 0)
+
+# captureTemplate's end: the walk's deltas as the body's template.
+def cap.finish(s: S, +r: U32, +fi: U32, +z: Snap, +frame0: U32, +benv: U32, +tenv: U32, +doorl: List<&2, U32>, +sbody: Sg) -> S & If:
+  match z:
+    case Snap{+v0, +p0, +a0, +eq0, +lf0, +df0}:
+      (s: S, +nv: U32) <- s.nv(s.frame.set(s, frame0))
+      (s: S, +np: U32) <- s.np(s)
+      (s: S, +na: U32) <- s.na(s)
+      (s: S, +neq: U32) <- s.neq(s)
+      (s: S, +nlf: U32) <- s.nlf(s)
+      (s: S, +ndf: U32) <- s.ndf(s)
+      (s: S, +eqs: List<&2, SumEq>) <- s.eqs(s)
+      (s: S, +lfs: List<&2, Lp>) <- s.lfs(s)
+      (s: S, +dfs: List<&2, Df>) <- s.dfs(s)
+      (s: S, +bp: List<&2, KV>) <- rd.bp(span(v0, nv), s.bp(s, at.or0(v0, nv)), v0, (nv - 1 : U32), [])
+      (s: S, +ci: List<&2, KC>) <- rd.ci(span(v0, nv), s.ci(s, at.or0(v0, nv)), v0, (nv - 1 : U32), [])
+      (s: S, +tb: List<&2, KV>) <- rd.tb(span(v0, nv), s.tb(s, at.or0(v0, nv)), v0, (nv - 1 : U32), [])
+      (s: S, +tp: List<&2, KV>) <- rd.tp(span(v0, nv), s.tp(s, at.or0(v0, nv)), v0, (nv - 1 : U32), [])
+      (s: S, +ts: List<&2, KT>) <- rd.ts(span(v0, nv), s.ts(s, at.or0(v0, nv)), v0, (nv - 1 : U32), [])
+      (s: S, +pr: List<&2, KV>) <- rd.pr(span((p0 * 4 : U32), (np * 4 : U32)), s.pr(s, at.or0((p0 * 4 : U32), (np * 4 : U32))),
+        (p0 * 4 : U32), ((np * 4 : U32) - 1 : U32), [])
+      (s: S, +aps: List<&2, Ap>) <- rd.ap(span(a0, na), s.ap(s, at.or0(a0, na)), a0, (na - 1 : U32), [])
+      (s.tm.set(s, r, MtSome{Tm{fi, v0, (nv - v0 : U32), p0, (np - p0 : U32), bp, ci, tb, tp, ts, pr, take.eq(span(eq0, neq), eqs),
+        take.lf(span(lf0, nlf), lfs), aps, take.df(span(df0, ndf), dfs), benv, tenv, sbody, doorl}}), If{Sg{benv, tenv}, sbody, doorl})
+
+# The shift of an instance: its variables' and pairs' offsets from the
+# template's.
+type Sh is Data:
+  Sh{+v0: U32, +sh: U32, +p0: U32, +psh: U32}
+
+def sh.v(+i: U32, z: Sh) -> U32:
+  match z:
+    case Sh{+v0, +sh, p0, psh}:
+      Bool.pick(U32, U32.is_ge(i, v0), (i + sh : U32), i)
+
+def sh.p(+p: U32, z: Sh) -> U32:
+  match z:
+    case Sh{v0, sh, +p0, +psh}:
+      Bool.pick(U32, U32.is_ge(p, p0), (p + psh : U32), p)
+
+def sh.psh(z: Sh) -> U32:
+  match z:
+    case Sh{v0, sh, p0, +psh}:
+      psh
+
+def sh.t(+t: U32, +z: Sh) -> U32:
+  +k: U32 = (t .&. 7 : U32)
+  +pay: U32 = (t >> 3n : U32)
+  ((Bool.pick(U32, Bool.and(U32.is_ge(k, 1), U32.is_le(k, 3)), sh.v(pay, z),
+    Bool.pick(U32, U32.is_eq(k, 4), sh.p(pay, z), pay)) << 3n : U32) + k : U32)
+
+def sh.par(+w: U32, +z: Sh) -> U32:
+  Bool.pick(U32, U32.is_eq(w, 0), 0, (sh.v((w - 1 : U32), z) + 1 : U32))
+
+def sh.sg(x: Sg, +z: Sh) -> Sg:
+  match x:
+    case Sg{+b, +t}:
+      Sg{sh.v(b, z), sh.t(t, z)}
+
+def sh.vs(xs: List<&2, U32>, +z: Sh) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+x, rest}:
+      sh.v(x, z) <> sh.vs(rest, z)
+
+def sh.if(x: If, +z: Sh) -> If:
+  match x:
+    case If{env, res, doors}:
+      If{sh.sg(env, z), sh.sg(res, z), sh.vs(doors, z)}
+
+def sh.mcap(m: Maybe<&2, Sg>, +z: Sh) -> Maybe<&2, Sg>:
+  match m:
+    case Some{x}:
+      Some{sh.sg(x, z)}
+    case None{}:
+      None{}
+
+def sh.mif(m: Maybe<&2, If>, +z: Sh) -> Maybe<&2, If>:
+  match m:
+    case Some{x}:
+      Some{sh.if(x, z)}
+    case None{}:
+      None{}
+
+def sh.tes(xs: List<&2, TE>, +z: Sh) -> List<&2, TE>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, rest}:
+      match x:
+        case TE{+tag, cap, ifc}:
+          TE{tag, sh.mcap(cap, z), sh.mif(ifc, z)} <> sh.tes(rest, z)
+
+def sh.eqs(xs: List<&2, SumEq>, +z: Sh, +tail: List<&2, SumEq>) -> List<&2, SumEq>:
+  match xs:
+    case Nil{}:
+      tail
+    case Con{x, rest}:
+      match x:
+        case SumEq{lhs, +rhs, +bl}:
+          SumEq{sh.vs(lhs, z), sh.v(rhs, z), bl} <> sh.eqs(rest, z, tail)
+
+def sh.lfs(xs: List<&2, KV>, +nb: U32, +z: Sh, +tail: List<&2, Lp>) -> List<&2, Lp>:
+  match xs:
+    case Nil{}:
+      tail
+    case Con{x, rest}:
+      match x:
+        case KV{+fr, +d}:
+          Lp{fr, nb, sh.v(d, z)} <> sh.lfs(rest, nb, z, tail)
+
+def sh.dfs(xs: List<&2, Df>, +z: Sh, +tail: List<&2, Df>) -> List<&2, Df>:
+  match xs:
+    case Nil{}:
+      tail
+    case Con{x, rest}:
+      match x:
+        case Df{+fi, +b}:
+          Df{fi, sh.v(b, z)} <> sh.dfs(rest, z, tail)
+
+def w.bp(xs: List<&2, KV>, s: S, +z: Sh) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      match x:
+        case KV{+k, +v}:
+          w.bp(rest, s.bp.set(s, sh.v(k, z), sh.par(v, z)), z)
+
+def w.tp(xs: List<&2, KV>, s: S, +z: Sh) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      match x:
+        case KV{+k, +v}:
+          w.tp(rest, s.tp.set(s, sh.v(k, z), sh.par(v, z)), z)
+
+def w.tb(xs: List<&2, KV>, s: S, +z: Sh) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      match x:
+        case KV{+k, +v}:
+          w.tb(rest, s.tb.set(s, sh.v(k, z), sh.t(v, z)), z)
+
+def w.ci(xs: List<&2, KC>, s: S, +z: Sh) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      match x:
+        case KC{+k, +c}:
+          w.ci(rest, s.ci.set(s, sh.v(k, z), c), z)
+
+def w.ts(xs: List<&2, KT>, s: S, +z: Sh) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      match x:
+        case KT{+k, es}:
+          w.ts(rest, s.ts.set(s, sh.v(k, z), sh.tes(es, z)), z)
+
+def w.pr(xs: List<&2, KV>, s: S, +z: Sh) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      match x:
+        case KV{+k, +v}:
+          w.pr(rest, s.pr.set(s, (k + (sh.psh(z) * 4 : U32) : U32),
+            Bool.pick(U32, U32.is_eq((k .&. 1 : U32), 0), sh.v(v, z), sh.t(v, z))), z)
+
+def sh.ap(a: Ap, +z: Sh) -> Ap:
+  match a:
+    case Ap{+fn, env, res, +loc, done}:
+      Ap{sh.t(fn, z), sh.sg(env, z), sh.sg(res, z), loc, []}
+
+def w.aps(xs: List<&2, Ap>, s: S, +z: Sh) -> S:
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      w.aps(rest, ap.new(s, sh.ap(x, z)), z)
+
+def grow.n(n: Nat, s: S) -> S:
+  match n:
+    case 0n:
+      s
+    case 1n+k:
+      grow.n(k, grow(s))
+
+def pr.grow.n(n: Nat, s: S) -> S:
+  match n:
+    case 0n:
+      s
+    case 1n+k:
+      pr.grow.n(k, pr.grow(s))
+
+# The doublings an array of depth d needs to hold n.
+def doublings(+d: Nat, +n: U32) -> Nat:
+  +t: U32 = U32.from_nat(Ln.depth.of(n))
+  +v: U32 = U32.from_nat(d)
+  U32.to_nat(Bool.pick(U32, U32.is_gt(t, v), (t - v : U32), 0))
+
+def room.v(s: S, +need: U32) -> S:
+  (s: S, +vd: Nat) <- s.vd(s)
+  grow.n(doublings(vd, need), s)
+
+def room.p(s: S, +need: U32) -> S:
+  (s: S, +pd: Nat) <- s.pd(s)
+  pr.grow.n(doublings(pd, need), s)
+
+def u.count(xs: List<&2, SumEq>) -> U32:
+  U32.from_nat(List.length(&2, SumEq, xs))
+
+# instantiateTemplate: an offset copy of the template's block, its deltas
+# appended, the occurrence's base spliced into its leaves.
+def tm.inst(s: S, +nb: U32, t: Tm) -> S & If:
+  match t:
+    case Tm{fi, +v0, +size, +p0, +psz, bp, ci, tb, tp, ts, pr, +eqs, +lfs, aps, +dfs, +eb, +et, +res, +doors}:
+      (s: S, +base: U32) <- s.nv(s)
+      (s: S, +np0: U32) <- s.np(s)
+      +z: Sh = Sh{v0, (base - v0 : U32), p0, (np0 - p0 : U32)}
+      s1 = room.p(room.v(s, (base + size : U32)), ((np0 + psz : U32) * 4 : U32))
+      s2 = s.np.set(s.nv.set(s1, (base + size : U32)), (np0 + psz : U32))
+      s3 = w.aps(aps, w.pr(pr, w.ts(ts, w.tp(tp, w.tb(tb, w.ci(ci, w.bp(bp, s2, z), z), z), z), z), z), z)
+      (s: S, oe: List<&2, SumEq>) <- s.eqs.swap(s3, [])
+      (s: S, +ne: U32) <- s.neq(s.eqs.set(s, sh.eqs(eqs, z, oe)))
+      (s: S, ol: List<&2, Lp>) <- s.lfs.swap(s.neq.set(s, (ne + u.count(eqs) : U32)), [])
+      (s: S, +nl: U32) <- s.nlf(s.lfs.set(s, sh.lfs(lfs, nb, z, ol)))
+      (s: S, od: List<&2, Df>) <- s.dfs.swap(s.nlf.set(s, (nl + U32.from_nat(List.length(&2, KV, lfs)) : U32)), [])
+      (s: S, +nd: U32) <- s.ndf(s.dfs.set(s, sh.dfs(dfs, z, od)))
+      (s.ndf.set(s, (nd + U32.from_nat(List.length(&2, Df, dfs)) : U32)), If{Sg{sh.v(eb, z), sh.t(et, z)}, sh.sg(res, z), sh.vs(doors, z)})

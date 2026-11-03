@@ -1,0 +1,487 @@
+# The program
+# -----------
+
+def rk.go(ks: List<&2, String>, +i: U32, acc: Map<&2, U32>) -> Map<&2, U32>:
+  match ks:
+    case Nil{}:
+      acc
+    case Con{k, rest}:
+      rk.go(rest, (i + 1 : U32), Map.set(&2, U32, acc, k, i))
+
+# Each body's rank: its place in hash order.
+def ranks(+bodies: Map<&2, Lf.Body>) -> Map<&2, U32>:
+  rk.go(Map.keys(&2, Lf.Body, bodies), 0, Map.new(&2, U32))
+
+def bd.dummy() -> Bd:
+  Bd{"", 0, False{}, AZero{Lc.Unknown{}}}
+
+# A chain link: the body Telomare.Machine numbers unsizedStepMrfb (-8).
+def bd.put(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +rk: Map<&2, U32>, +i: U32, a: Array<Bd>) -> Array<Bd>:
+  match kvs:
+    case Nil{}:
+      a
+    case Con{kv, rest}:
+      match kv:
+        case (+h, b):
+          match b:
+            case Lf.Body{+fi, +body}:
+              bd.put(rest, rk, (i + 1 : U32), Array.set(Bd, a, i, Bd{h, fi, U32.is_eq(fi, 4294967288), to.a(body, rk)}))
+
+# The state over a lifted program's bodies, and its main term.
+def prog.state(t: Lf.Lifted, +uni: Bool) -> S & A:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      +rk: Map<&2, U32> = ranks(bodies)
+      +n: U32 = U32.from_nat(Map.size(&2, Lf.Body, bodies))
+      (st.new(bd.put(Map.to_list(&2, Lf.Body, bodies), rk, 0, Array.new(Bd, Ln.depth.of(n), bd.dummy())), n, uni), to.a(main, rk))
+
+# walkTop
+# -------
+
+def r.sg(r: R) -> Sg:
+  match r:
+    case RSg{+sg}:
+      sg
+    case RView{+sg, +d}:
+      sg
+    case RIf{+ifc}:
+      Sg{0, ty.data()}
+
+def vm.reg(s: S, +w: U32, +env: Sg) -> S:
+  (s: S, +so: Sg) <- fresh.sig(s)
+  ap.new(s, Ap{w, env, so, gen("virtual application of main to input"), []})
+
+def vm.bare(s: S, +w: U32) -> S:
+  (s: S, +ib: U32) <- fresh(s)
+  vm.reg(s, w, Sg{ib, ty.data()})
+
+def vm.wrap(s: S, +w: U32, +cap: Sg) -> S:
+  (s: S, +ib: U32) <- fresh(s)
+  (s: S, +eb: U32) <- fresh(s)
+  (s: S, +pt: U32) <- pair.new(s, Sg{ib, ty.data()}, cap)
+  vm.reg(s, w, Sg{eb, pt})
+
+def vm.code(k: K, s: S, +w: U32, +cap: Sg) -> S:
+  match k:
+    case KCode{}:
+      vm.wrap(s, w, cap)
+    case KCap{}:
+      vm.wrap(s, w, cap)
+    case other:
+      s
+
+def vm.pair(ps: PS, s: S) -> S:
+  match ps:
+    case PS{+a: Sg, +cap: Sg}:
+      vm.walk(s, sg.t(a), cap)
+
+def vm.walk(s: S, +at: U32, +cap: Sg) -> S:
+  (s: S, +w: U32) <- walk(s, at)
+  vm.code(kind(w), s, w, cap)
+
+def vm.kind(k: K, s: S, +w: U32) -> S:
+  match k:
+    case KPair{}:
+      (s: S, +ps: PS) <- pair.get(s, w)
+      vm.pair(ps, s)
+    case KCode{}:
+      vm.bare(s, w)
+    case KCap{}:
+      vm.bare(s, w)
+    case other:
+      s
+
+# virtualMainApply: one application of the program's value to its input,
+# registered against its resolved shape.
+def virtual.main(s: S, +sg: Sg) -> S:
+  match sg:
+    case Sg{+b, +t}:
+      (s: S, +w: U32) <- walk(s, t)
+      vm.kind(kind(w), s, w)
+
+def vm.at(go: Bool, s: S, +sg: Sg) -> S:
+  match go:
+    case True{}:
+      resolve.applies(virtual.main(s, sg))
+    case False{}:
+      s
+
+# The walk's interface: the env's bang and type, and the result.
+type WT is Data:
+  WT{+benv: U32, +tenv: U32, +res: Sg}
+
+def wt.res(w: WT) -> Sg:
+  match w:
+    case WT{+benv, +tenv, +res}:
+      res
+
+def wt.benv(w: WT) -> U32:
+  match w:
+    case WT{+benv, +tenv, +res}:
+      benv
+
+# walkTop: walk, dispatch, (the virtual application,) presolve.
+def walk.top(s: S, +vmain: Bool, +what: String, +term: A) -> S & WT:
+  (s: S, +unit: U32) <- fresh(s)
+  (s: S, +c0: Bool) <- constrain(s, unit, CLevel{1, blame(gen("EAL unit"), "the unit box count")})
+  (s: S, +benv: U32) <- fresh(s)
+  (s: S, +tenv: U32) <- fresh.tau(s)
+  (s: S, +ctx: Ctx) <- frame.context(s, unit, 0, what, benv, tenv, term)
+  (s: S, +rb: U32) <- forced.zero(s, blame(gen("EAL root"), "the program's root sits at depth zero"))
+  (s: S, +r: R) <- walk.view(s, ctx, rb, term)
+  +res: Sg = r.sg(r)
+  (presolve(vm.at(vmain, resolve.applies(s), res)), WT{benv, tenv, res})
+
+# The result (goMain)
+# ----------
+
+# Values of roots: the state and the solved values.
+type VS is Type:
+  VS{s: S, a: Array<U32>}
+
+def vs.got(s: S, p: Array<U32> & U32) -> VS & U32:
+  (a, +x) = p
+  (VS{s, a}, x)
+
+def vs.val(v: VS, +b: U32) -> VS & U32:
+  match v:
+    case VS{s, a}:
+      (s: S, +r: U32) <- find.b(s, b)
+      vs.got(s, Array.get(U32, a, r))
+
+def u.max(+a: U32, +b: U32) -> U32:
+  Bool.pick(U32, U32.is_lt(a, b), b, a)
+
+# A map keyed by FunctionIndex in its (signed) order: the key is the index
+# offset by 2^31, in ten decimal digits.
+def fi.key(+fi: U32) -> String:
+  +d: String = U32.show((fi + 2147483648 : U32))
+  String.drop("0000000000" ++ d, String.length(d))
+
+def fm.at(known: Bool, m: Map<&2, KV>, +k: String, +fi: U32, +x: U32) -> Map<&2, KV>:
+  match known:
+    case True{}:
+      fm.got(Map.get(KV, KV{fi, 0}, m, k), k, fi, x)
+    case False{}:
+      Map.set(&2, KV, m, k, KV{fi, x})
+
+def fm.got(r: Map<&2, KV> & KV, +k: String, +fi: U32, +x: U32) -> Map<&2, KV>:
+  (m, +old) = r
+  match old:
+    case KV{+ok, +ov}:
+      Map.set(&2, KV, m, k, KV{fi, u.max(ov, x)})
+
+def fm.has(r: Map<&2, KV> & Bool, +k: String, +fi: U32, +x: U32) -> Map<&2, KV>:
+  (m, +known) = r
+  fm.at(known, m, k, fi, x)
+
+# Map.fromListWith max, one entry.
+def fm.max(m: Map<&2, KV>, +fi: U32, +x: U32) -> Map<&2, KV>:
+  +k: String = fi.key(fi)
+  fm.has(Map.has(&2, KV, m, k), k, fi, x)
+
+def kv.vals(xs: List<&2, Sigma<&2, &2, String, _ => KV>>) -> List<&2, KV>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          v <> kv.vals(rest)
+
+def fm.list(m: Map<&2, KV>) -> List<&2, KV>:
+  kv.vals(Map.to_list(&2, KV, m))
+
+# The defers' bangs.
+def df.val(v: VS, m: Map<&2, KV>, d: Df) -> VS & Map<&2, KV>:
+  match d:
+    case Df{+fi, +b}:
+      (v: VS, +x: U32) <- vs.val(v, b)
+      (v, fm.max(m, fi, x))
+
+def df.vals(xs: List<&2, Df>, r: VS & Map<&2, KV>) -> VS & Map<&2, KV>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{d, rest}:
+      (v, m) = r
+      df.vals(rest, df.val(v, m, d))
+
+# Leaves: the deepest (leafDepths), and each body's deepest
+# (bodyLeafDepths).
+type LD is Type:
+  LD{v: VS, +mx: U32, m: Map<&2, KV>}
+
+def ld.lvl(main: Bool, m: Map<&2, KV>, +fr: U32, +x: U32) -> Map<&2, KV>:
+  match main:
+    case True{}:
+      m
+    case False{}:
+      fm.max(m, (fr - 1 : U32), x)
+
+def ld.leaf(l: LD, p: Lp) -> LD:
+  match l:
+    case LD{v, +mx, m}:
+      match p:
+        case Lp{+fr, +base, +d}:
+          (v: VS, +x1: U32) <- vs.val(v, base)
+          (v: VS, +x2: U32) <- vs.val(v, d)
+          LD{v, u.max(mx, (x1 + x2 : U32)), ld.lvl(U32.is_eq(fr, 0), m, fr, x2)}
+
+def ld.go(xs: List<&2, Lp>, l: LD) -> LD:
+  match xs:
+    case Nil{}:
+      l
+    case Con{p, rest}:
+      ld.go(rest, ld.leaf(l, p))
+
+# shapeOfSigma, as a machine over the type's pairs.
+type SJ is Data:
+  SjTau{+t: U32}
+  SjWalked{+k: K, +w: U32}
+  SjPair{}
+
+type SQ is Type:
+  SqGo{s: S, +js: List<&2, SJ>, +vs: List<&2, Lf.Shape>}
+  SqEnd{s: S, +v: Lf.Shape}
+
+def sh.join(vs: List<&2, Lf.Shape>) -> List<&2, Lf.Shape>:
+  match vs:
+    case Con{+b, r1}:
+      match r1:
+        case Con{+a, +r2}:
+          Lf.CapPair{a, b} <> r2
+        case Nil{}:
+          [b]
+    case Nil{}:
+      []
+
+def sh.pair(s: S, +w: U32, +js: List<&2, SJ>, +vs: List<&2, Lf.Shape>) -> SQ:
+  (s: S, +ps: PS) <- pair.get(s, w)
+  sh.pair.at(ps, s, js, vs)
+
+def sh.pair.at(ps: PS, s: S, +js: List<&2, SJ>, +vs: List<&2, Lf.Shape>) -> SQ:
+  match ps:
+    case PS{+a, +b}:
+      SqGo{s, SjTau{sg.t(a)} <> SjTau{sg.t(b)} <> SjPair{} <> js, vs}
+
+def sh.tau(s: S, +t: U32, +js: List<&2, SJ>, +vs: List<&2, Lf.Shape>) -> SQ:
+  (s: S, +w: U32) <- walk(s, t)
+  SqGo{s, SjWalked{kind(w), w} <> js, vs}
+
+def sh.step(j: SJ, s: S, +js: List<&2, SJ>, +vs: List<&2, Lf.Shape>) -> SQ:
+  match j:
+    case SjTau{+t}:
+      sh.tau(s, t, js, vs)
+    case SjWalked{k, +w}:
+      match k:
+        case KData{}:
+          SqGo{s, js, Lf.CapData{} <> vs}
+        case KPair{}:
+          sh.pair(s, w, js, vs)
+        case KCode{}:
+          SqGo{s, js, Lf.CapCode{} <> vs}
+        case other:
+          SqGo{s, js, Lf.CapOther{} <> vs}
+    case SjPair{}:
+      SqGo{s, js, sh.join(vs)}
+
+def sh.top(vs: List<&2, Lf.Shape>, s: S) -> SQ:
+  match vs:
+    case Con{+v, rest}:
+      SqEnd{s, v}
+    case Nil{}:
+      SqEnd{s, Lf.CapOther{}}
+
+def sh.next(js: List<&2, SJ>, s: S, +vs: List<&2, Lf.Shape>) -> SQ:
+  match js:
+    case Con{j, rest}:
+      sh.step(j, s, rest, vs)
+    case Nil{}:
+      sh.top(vs, s)
+
+def sh.fin(q: SQ) -> S & Lf.Shape:
+  match q:
+    case SqGo{s, +js, +vs}:
+      (s, Lf.CapOther{})
+    case SqEnd{s, +v}:
+      (s, v)
+
+def sh.loop(fuel: Nat, q: SQ) -> S & Lf.Shape:
+  match fuel:
+    case 0n:
+      sh.fin(q)
+    case 1n+f:
+      match q:
+        case SqGo{s, +js, +vs}:
+          sh.loop(f, sh.next(js, s, vs))
+        case SqEnd{s, +v}:
+          (s, v)
+
+def shape.of(s: S, +t: U32) -> S & Lf.Shape:
+  sh.loop(big(), SqGo{s, [SjTau{t}], []})
+
+# meetShape
+def all.data(s: Lf.Shape) -> Bool:
+  match s:
+    case Lf.CapData{}:
+      True{}
+    case Lf.CapPair{+a, +b}:
+      Bool.and(all.data(a), all.data(b))
+    case other:
+      False{}
+
+def meet.flat(data: Bool) -> Lf.Shape:
+  match data:
+    case True{}:
+      Lf.CapData{}
+    case False{}:
+      Lf.CapOther{}
+
+def meet(a: Lf.Shape, b: Lf.Shape) -> Lf.Shape:
+  match a b:
+    case Lf.CapPair{a1, a2} Lf.CapPair{b1, b2}:
+      Lf.CapPair{meet(a1, b1), meet(a2, b2)}
+    case Lf.CapCode{} Lf.CapCode{}:
+      Lf.CapCode{}
+    case +x +y:
+      meet.flat(Bool.and(all.data(x), all.data(y)))
+
+def sm.got(r: Map<&2, Lf.Shape> & Lf.Shape, +h: String, +x: Lf.Shape) -> Map<&2, Lf.Shape>:
+  (m, +old) = r
+  Map.set(&2, Lf.Shape, m, h, meet(x, old))
+
+def sm.at(known: Bool, m: Map<&2, Lf.Shape>, +h: String, +x: Lf.Shape) -> Map<&2, Lf.Shape>:
+  match known:
+    case True{}:
+      sm.got(Map.get(Lf.Shape, Lf.CapOther{}, m, h), h, x)
+    case False{}:
+      Map.set(&2, Lf.Shape, m, h, x)
+
+def sm.has(r: Map<&2, Lf.Shape> & Bool, +h: String, +x: Lf.Shape) -> Map<&2, Lf.Shape>:
+  (m, +known) = r
+  sm.at(known, m, h, x)
+
+# One capture's shape, met into its hash's.
+def gs.add(s: S, +m: Map<&2, Lf.Shape>, +tag: U32, +ct: U32) -> S & Map<&2, Lf.Shape>:
+  (s: S, +b: Bd) <- s.bd(s, tag)
+  (s: S, +x: Lf.Shape) <- shape.of(s, ct)
+  +h: String = bd.h(b)
+  (s, sm.has(Map.has(&2, Lf.Shape, m, h), h, x))
+
+def gs.cap(code: Bool, s: S, +m: Map<&2, Lf.Shape>, +tag: U32, +cap: Maybe<&2, Sg>) -> S & Map<&2, Lf.Shape>:
+  match code:
+    case True{}:
+      match cap:
+        case Some{+c}:
+          gs.add(s, m, tag, sg.t(c))
+        case None{}:
+          (s, m)
+    case False{}:
+      (s, m)
+
+def gs.te(s: S, +m: Map<&2, Lf.Shape>, e: TE) -> S & Map<&2, Lf.Shape>:
+  match e:
+    case TE{+tag, +cap, +ifc}:
+      gs.cap(U32.is_lt(tag, tag.gate()), s, m, tag, cap)
+
+def gs.tes(xs: List<&2, TE>, r: S & Map<&2, Lf.Shape>) -> S & Map<&2, Lf.Shape>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (s, m) = r
+      gs.tes(rest, gs.te(s, m, e))
+
+def gs.one(s: S, +m: Map<&2, Lf.Shape>, +i: U32) -> S & Map<&2, Lf.Shape>:
+  (s: S, +ts: List<&2, TE>) <- s.ts(s, i)
+  gs.tes(ts, (s, m))
+
+def gs.go(n: Nat, +i: U32, r: S & Map<&2, Lf.Shape>) -> S & Map<&2, Lf.Shape>:
+  match n:
+    case 0n:
+      r
+    case 1n+k:
+      (s, m) = r
+      gs.go(k, (i + 1 : U32), gs.one(s, m, i))
+
+# groundCaptureShapes: every package class's captures, met per hash.
+def ground.shapes(s: S) -> S & Map<&2, Lf.Shape>:
+  (s: S, +nv: U32) <- s.nv(s)
+  gs.go(U32.to_nat(nv), 0, (s, Map.new(&2, Lf.Shape)))
+
+# A certified main pass (EALResult, the capture layouts, the bodies'
+# levels).
+type MR is Data:
+  MR{+top: U32, +defers: List<&2, KV>, +max: U32, +shape: Lf.Shape, +shapes: Map<&2, Lf.Shape>, +levels: List<&2, KV>}
+
+def gm.ld(l: LD, +top: U32, +defers: List<&2, KV>, +res: Sg) -> S & MR:
+  match l:
+    case LD{v, +mx, m}:
+      match v:
+        case VS{s, a}:
+          (s: S, +shapes: Map<&2, Lf.Shape>) <- ground.shapes(s)
+          (s: S, +ms: Lf.Shape) <- shape.of(s, sg.t(res))
+          (s, MR{top, defers, mx, ms, shapes, fm.list(m)})
+
+def gm.dfs(v: VS, +top: U32, +lfs: List<&2, Lp>, +res: Sg, +dfs: List<&2, Df>) -> S & MR:
+  (v: VS, +dm: Map<&2, KV>) <- df.vals(dfs, (v, Map.new(&2, KV)))
+  gm.ld(ld.go(lfs, LD{v, 0, Map.new(&2, KV)}), top, fm.list(dm), res)
+
+def gm.vals(s: S, a: Array<U32>, +w: WT) -> S & MR:
+  (s: S, +dfs: List<&2, Df>) <- s.dfs(s)
+  (s: S, +lfs: List<&2, Lp>) <- s.lfs(s)
+  (v: VS, +top: U32) <- vs.val(VS{s, a}, wt.benv(w))
+  gm.dfs(v, top, lfs, wt.res(w), dfs)
+
+def mr.none() -> MR:
+  MR{0, [], 0, Lf.CapOther{}, Map.new(&2, Lf.Shape), []}
+
+def gm.solved(bad: Bool, s: S, a: Array<U32>, +w: WT) -> S & MR:
+  match bad:
+    case True{}:
+      (s, mr.none())
+    case False{}:
+      gm.vals(s, a, w)
+
+def gm.solve(s: S, +w: WT) -> S & MR:
+  (s: S, a: Array<U32>) <- solve.cs(s)
+  (s: S, +bad: Bool) <- failed(s)
+  gm.solved(bad, s, a, w)
+
+def gm.walked(bad: Bool, s: S, +w: WT) -> S & MR:
+  match bad:
+    case True{}:
+      (s, mr.none())
+    case False{}:
+      gm.solve(s, w)
+
+# goMain: analyzeTopWith True "program input", then the result.
+def go.main(s: S, +term: A) -> S & MR:
+  (s: S, +w: WT) <- walk.top(s, True{}, "program input", term)
+  (s: S, +bad: Bool) <- failed(s)
+  gm.walked(bad, s, w)
+
+# runMain over a lifted program: its result, or the first error.
+def run.main(t: Lf.Lifted, +uni: Bool) -> Result<&2, &2, Err, MR>:
+  rm.got(rm.state(prog.state(t, uni)))
+
+def rm.state(p: S & A) -> S & MR:
+  (s, +term) = p
+  go.main(s, term)
+
+def rm.got(r: S & MR) -> Result<&2, &2, Err, MR>:
+  (s, +m) = r
+  rm.err(s, m)
+
+def rm.err(s: S, +m: MR) -> Result<&2, &2, Err, MR>:
+  (s: S, +e: Maybe<&2, Err>) <- s.err(s)
+  (s: S, +cs: List<&2, CN>) <- s.cn(s)
+  rm.pick(e, m, cs)
+
+def rm.pick(e: Maybe<&2, Err>, +m: MR, +cs: List<&2, CN>) -> Result<&2, &2, Err, MR>:
+  match e:
+    case Some{+x}:
+      Fail{err.expand(x, cs)}
+    case None{}:
+      Done{m}

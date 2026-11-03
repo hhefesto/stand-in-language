@@ -1,0 +1,1123 @@
+# Constraint solving (presolve, solveConstraints)
+# -------------------
+
+# A sum equation over class roots (EqR).
+type ER is Data:
+  ER{+lhs: List<&2, U32>, +rhs: U32, +bl: Blame}
+
+# show :: [Int] -> String
+def ints.go(xs: List<&2, U32>) -> String:
+  match xs:
+    case Nil{}:
+      "]"
+    case Con{+x, rest}:
+      "," ++ U32.show(x) ++ ints.go(rest)
+
+def ints.show(xs: List<&2, U32>) -> String:
+  match xs:
+    case Nil{}:
+      "[]"
+    case Con{+x, rest}:
+      "[" ++ U32.show(x) ++ ints.go(rest)
+
+# derivedBlame
+def bl.derive(+what: String, b: Blame) -> Blame:
+  match b:
+    case Blame{+loc, +why, +fr}:
+      Blame{loc, what ++ ": " ++ why, fr}
+
+def bl.why(b: Blame) -> String:
+  match b:
+    case Blame{+loc, +why, +fr}:
+      why
+
+def eq.note(lhs: List<&2, U32>, +rhs: U32) -> String:
+  " [eq " ++ ints.show(lhs) ++ " = " ++ U32.show(rhs) ++ "]"
+
+# Roots of a list, read-only (resolveEqs) or compressing (mapM findB).
+def ro.push(s: S, +acc: List<&2, U32>, +x: U32) -> S & List<&2, U32>:
+  (s: S, +y: U32) <- root.b(s, x)
+  (s, y <> acc)
+
+def ro.go(xs: List<&2, U32>, r: S & List<&2, U32>) -> S & List<&2, U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, acc) = r
+      ro.go(rest, ro.push(s, acc, x))
+
+def ro.list(s: S, +xs: List<&2, U32>) -> S & List<&2, U32>:
+  (s: S, +ys: List<&2, U32>) <- ro.go(xs, (s, []))
+  (s, List.reverse(&2, U32, ys))
+
+def fb.push(s: S, +acc: List<&2, U32>, +x: U32) -> S & List<&2, U32>:
+  (s: S, +y: U32) <- find.b(s, x)
+  (s, y <> acc)
+
+def fb.go(xs: List<&2, U32>, r: S & List<&2, U32>) -> S & List<&2, U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, acc) = r
+      fb.go(rest, fb.push(s, acc, x))
+
+def fb.list(s: S, +xs: List<&2, U32>) -> S & List<&2, U32>:
+  (s: S, +ys: List<&2, U32>) <- fb.go(xs, (s, []))
+  (s, List.reverse(&2, U32, ys))
+
+# resolveEqs: every equation over the roots, newest first.
+def er.push(s: S, +acc: List<&2, ER>, e: SumEq) -> S & List<&2, ER>:
+  match e:
+    case SumEq{+lhs, +rhs, +bl}:
+      (s: S, +ls: List<&2, U32>) <- ro.list(s, lhs)
+      (s: S, +rr: U32) <- root.b(s, rhs)
+      (s, ER{ls, rr, bl} <> acc)
+
+def er.go(xs: List<&2, SumEq>, r: S & List<&2, ER>) -> S & List<&2, ER>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (s, acc) = r
+      er.go(rest, er.push(s, acc, e))
+
+def resolve.eqs(s: S) -> S & List<&2, ER>:
+  (s: S, +eqs: List<&2, SumEq>) <- s.eqs(s)
+  (s: S, +rs: List<&2, ER>) <- er.go(eqs, (s, []))
+  (s, List.reverse(&2, ER, rs))
+
+# classInfo of a number as it stands (a merged-away root reads as
+# unrestricted, as its entry is deleted).
+def zero.at(s: S, +r: U32) -> S & Bool:
+  (s: S, +c: CI) <- s.ci(s, r)
+  (s, ci.zero(c))
+
+def lb.at(s: S, +r: U32) -> S & U32:
+  (s: S, +c: CI) <- s.ci(s, r)
+  (s, ci.lb(c))
+
+def za.push(s: S, +b: Bool, +x: U32) -> S & Bool:
+  (s: S, +z: Bool) <- zero.at(s, x)
+  (s, Bool.and(b, z))
+
+def za.go(xs: List<&2, U32>, r: S & Bool) -> S & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, b) = r
+      za.go(rest, za.push(s, b, x))
+
+# Force every number of a list to zero, with one blame: whether any class
+# changed.
+def cz.push(s: S, +a: Bool, +x: U32, +bl: Blame) -> S & Bool:
+  (s: S, +c: Bool) <- constrain(s, x, CZero{bl})
+  (s, Bool.or(a, c))
+
+def cz.go(xs: List<&2, U32>, +bl: Blame, r: S & Bool) -> S & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, a) = r
+      cz.go(rest, bl, cz.push(s, a, x, bl))
+
+# The non-zero members of a list, in order.
+def nz.push(s: S, +acc: List<&2, U32>, +x: U32) -> S & List<&2, U32>:
+  (s: S, +z: Bool) <- zero.at(s, x)
+  (s, Bool.pick(List<&2, U32>, z, acc, x <> acc))
+
+def nz.go(xs: List<&2, U32>, r: S & List<&2, U32>) -> S & List<&2, U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, acc) = r
+      nz.go(rest, nz.push(s, acc, x))
+
+def nz.list(s: S, +xs: List<&2, U32>) -> S & List<&2, U32>:
+  (s: S, +ys: List<&2, U32>) <- nz.go(xs, (s, []))
+  (s, List.reverse(&2, U32, ys))
+
+# zeroStep
+# --------
+
+def zs.c1(z: Bool, s: S, +xs: List<&2, U32>, +bl: Blame) -> S & Bool:
+  match z:
+    case True{}:
+      cz.go(xs, bl, (s, False{}))
+    case False{}:
+      (s, False{})
+
+def zs.c2(z: Bool, s: S, +r: U32, +bl: Blame) -> S & Bool:
+  match z:
+    case True{}:
+      constrain(s, r, CZero{bl})
+    case False{}:
+      (s, False{})
+
+def zs.eq(s: S, +acc: Bool, e: ER) -> S & Bool:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (s: S, +rz: Bool) <- zero.at(s, rhs)
+      (s: S, +lz: Bool) <- za.go(lhs, (s, True{}))
+      +note: String = eq.note(lhs, rhs)
+      (s: S, +c1: Bool) <- zs.c1(rz, s, lhs, bl.derive("summand of an unboxed total" ++ note, bl))
+      (s: S, +c2: Bool) <- zs.c2(lz, s, rhs, bl.derive("all summands unboxed" ++ note, bl))
+      (s, Bool.or(acc, Bool.or(c1, c2)))
+
+def zs.go(xs: List<&2, ER>, r: S & Bool) -> S & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (s, a) = r
+      zs.go(rest, zs.eq(s, a, e))
+
+# equalityStep
+# ------------
+
+def es.merge(same: Bool, s: S, +acc: Bool, +l: U32, +r: U32) -> S & Bool:
+  match same:
+    case True{}:
+      (s, acc)
+    case False{}:
+      (union.b(s, l, r), True{})
+
+def es.lone(bx: List<&2, U32>, s: S, +acc: Bool, +r: U32) -> S & Bool:
+  match bx:
+    case Nil{}:
+      (s, acc)
+    case Con{+l, rest}:
+      match rest:
+        case Nil{}:
+          es.merge(U32.is_eq(l, r), s, acc, l, r)
+        case Con{+y, t}:
+          (s, acc)
+
+def es.eq(s: S, +acc: Bool, e: ER) -> S & Bool:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (s: S, +r2: U32) <- find.b(s, rhs)
+      (s: S, +ls: List<&2, U32>) <- fb.list(s, lhs)
+      (s: S, +bx: List<&2, U32>) <- nz.list(s, ls)
+      es.lone(bx, s, acc, r2)
+
+def es.go(xs: List<&2, ER>, r: S & Bool) -> S & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (s, a) = r
+      es.go(rest, es.eq(s, a, e))
+
+# boundStep
+# ---------
+
+def lbs.push(s: S, +a: U32, +x: U32) -> S & U32:
+  (s: S, +b: U32) <- lb.at(s, x)
+  (s, (a + b : U32))
+
+def lbs.go(xs: List<&2, U32>, r: S & U32) -> S & U32:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, a) = r
+      lbs.go(rest, lbs.push(s, a, x))
+
+def bs.at(pos: Bool, s: S, +acc: Bool, +r: U32, +n: U32, +bl: Blame) -> S & Bool:
+  match pos:
+    case True{}:
+      (s: S, +c: Bool) <- constrain(s, r, CLevel{n, bl})
+      (s, Bool.or(acc, c))
+    case False{}:
+      (s, acc)
+
+def bs.eq(s: S, +acc: Bool, e: ER) -> S & Bool:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (s: S, +n: U32) <- lbs.go(lhs, (s, 0))
+      bs.at(U32.is_lt(0, n), s, acc, rhs, n, bl.derive("sum of summand lower bounds" ++ eq.note(lhs, rhs), bl))
+
+def bs.go(xs: List<&2, ER>, r: S & Bool) -> S & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (s, a) = r
+      bs.go(rest, bs.eq(s, a, e))
+
+# The live equations: unboxed totals dropped, unboxed summands filtered.
+def lv.keep(z: Bool, s: S, +acc: List<&2, ER>, +lhs: List<&2, U32>, +rhs: U32, +bl: Blame) -> S & List<&2, ER>:
+  match z:
+    case True{}:
+      (s, acc)
+    case False{}:
+      (s: S, +ls: List<&2, U32>) <- nz.list(s, lhs)
+      (s, ER{ls, rhs, bl} <> acc)
+
+def lv.push(s: S, +acc: List<&2, ER>, e: ER) -> S & List<&2, ER>:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (s: S, +z: Bool) <- zero.at(s, rhs)
+      lv.keep(z, s, acc, lhs, rhs, bl)
+
+def lv.go(xs: List<&2, ER>, r: S & List<&2, ER>) -> S & List<&2, ER>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (s, acc) = r
+      lv.go(rest, lv.push(s, acc, e))
+
+def live.of(s: S, +xs: List<&2, ER>) -> S & List<&2, ER>:
+  (s: S, +ys: List<&2, ER>) <- lv.go(xs, (s, []))
+  (s, List.reverse(&2, ER, ys))
+
+# cycleStep: Data.Graph.stronglyConnComp, in its order
+# ---------
+
+# A dfs frame: a vertex and its successors still to visit.
+type DFr is Data:
+  DFr{+v: U32, +ks: List<&2, U32>}
+
+# The graph (graphFromEdges over the sorted nodes): each number's vertex
+# plus one (vx), each vertex's number (nd), the successors (g) and the
+# transpose's (gt), the pass that visited each vertex (vis), each
+# vertex's cyclic component plus one (sc), the vertex count; the first
+# pass's postorder (last first), the tree being walked (preorder, last
+# first), the cyclic components (last first) and their count, the dfs
+# stack, the roots to go, and the pass (1 on the transpose, 2 on g).
+type GR is Type:
+  GR{vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>}
+
+def gr.new(+nv: U32) -> GR:
+  +d: Nat = Ln.depth.of(nv)
+  GR{Array.new(U32, d, 0), Array.new(U32, d, 0), Array.new(List<&2, U32>, d, []), Array.new(List<&2, U32>, d, []), Array.new(U32, d, 0), Array.new(U32, d, 0), 0, [], [], [], 0, [], [], 1, Array.new(List<&2, String>, d, [])}
+
+def mk.one(g: GR, +x: U32) -> GR:
+  gr.vx.set(g, x, 1)
+
+def mk.list(xs: List<&2, U32>, g: GR) -> GR:
+  match xs:
+    case Nil{}:
+      g
+    case Con{+x, rest}:
+      mk.list(rest, mk.one(g, x))
+
+def mk.eq(e: ER, g: GR) -> GR:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      mk.list(lhs, mk.one(g, rhs))
+
+def mk.eqs(xs: List<&2, ER>, g: GR) -> GR:
+  match xs:
+    case Nil{}:
+      g
+    case Con{e, rest}:
+      mk.eqs(rest, mk.eq(e, g))
+
+# Number the marked numbers in ascending order.
+def nb.at(m: Bool, g: GR, +i: U32) -> GR:
+  match m:
+    case True{}:
+      (g: GR, +k: U32) <- gr.n(g)
+      gr.n.set(gr.nd.set(gr.vx.set(g, i, (k + 1 : U32)), k, i), (k + 1 : U32))
+    case False{}:
+      g
+
+def nb.one(g: GR, +i: U32) -> GR:
+  (g: GR, +m: U32) <- gr.vx(g, i)
+  nb.at(U32.is_eq(m, 1), g, i)
+
+def nb.go(n: Nat, +i: U32, g: GR) -> GR:
+  match n:
+    case 0n:
+      g
+    case 1n+m:
+      nb.go(m, (i + 1 : U32), nb.one(g, i))
+
+def nb.all(+nv: U32, g: GR) -> GR:
+  nb.go(U32.to_nat(nv), 0, g)
+
+# Edges, summand to total: IntMap.fromListWith (<>) keeps the last first.
+def ed.one(g: GR, +r: U32, +l: U32) -> GR:
+  (g: GR, +vl: U32) <- gr.vx(g, l)
+  (g: GR, +vr: U32) <- gr.vx(g, r)
+  (g: GR, +ks: List<&2, U32>) <- gr.g(g, (vl - 1 : U32))
+  gr.g.set(g, (vl - 1 : U32), (vr - 1 : U32) <> ks)
+
+def ed.list(xs: List<&2, U32>, +r: U32, g: GR) -> GR:
+  match xs:
+    case Nil{}:
+      g
+    case Con{+l, rest}:
+      ed.list(rest, r, ed.one(g, r, l))
+
+def ed.eq(e: ER, g: GR) -> GR:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      ed.list(lhs, rhs, g)
+
+def ed.eqs(xs: List<&2, ER>, g: GR) -> GR:
+  match xs:
+    case Nil{}:
+      g
+    case Con{e, rest}:
+      ed.eqs(rest, ed.eq(e, g))
+
+# transposeG: buildG (accumArray (flip (:))) over reverseE.
+def tr.one(+v: U32, g: GR, +x: U32) -> GR:
+  (g: GR, +ks: List<&2, U32>) <- gr.gt(g, x)
+  gr.gt.set(g, x, v <> ks)
+
+def tr.list(xs: List<&2, U32>, +v: U32, g: GR) -> GR:
+  match xs:
+    case Nil{}:
+      g
+    case Con{+x, rest}:
+      tr.list(rest, v, tr.one(v, g, x))
+
+def tr.v(g: GR, +v: U32) -> GR:
+  (g: GR, +ks: List<&2, U32>) <- gr.g(g, v)
+  tr.list(ks, v, g)
+
+def tr.go(n: Nat, +v: U32, g: GR) -> GR:
+  match n:
+    case 0n:
+      g
+    case 1n+m:
+      tr.go(m, (v + 1 : U32), tr.v(g, v))
+
+def tr.all(g: GR) -> GR:
+  (g: GR, +n: U32) <- gr.n(g)
+  tr.go(U32.to_nat(n), 0, g)
+
+# dfs, as a machine: the stack holds each open vertex with the successors
+# it has left; a tree ends when the stack empties.
+type DN is Type:
+  DnMore{g: GR}
+  DnStop{g: GR}
+
+def df.adj(first: Bool, g: GR, +w: U32) -> GR & List<&2, U32>:
+  match first:
+    case True{}:
+      gr.gt(g, w)
+    case False{}:
+      gr.g(g, w)
+
+def df.enter(g: GR, +w: U32) -> GR:
+  (g: GR, +p: U32) <- gr.pass(g)
+  (g: GR, +ks: List<&2, U32>) <- df.adj(U32.is_eq(p, 1), gr.vis.set(g, w, p), w)
+  (g: GR, +cur: List<&2, U32>) <- gr.cur(g)
+  (g: GR, +st: List<&2, DFr>) <- gr.st(g)
+  gr.st.set(gr.cur.set(g, w <> cur), DFr{w, ks} <> st)
+
+def df.visit(seen: Bool, g: GR, +w: U32) -> DN:
+  match seen:
+    case True{}:
+      DnMore{g}
+    case False{}:
+      DnMore{df.enter(g, w)}
+
+def df.try(g: GR, +w: U32) -> DN:
+  (g: GR, +p: U32) <- gr.pass(g)
+  (g: GR, +m: U32) <- gr.vis(g, w)
+  df.visit(U32.is_eq(m, p), g, w)
+
+def df.post(first: Bool, g: GR, +v: U32) -> GR:
+  match first:
+    case True{}:
+      (g: GR, +po: List<&2, U32>) <- gr.po(g)
+      gr.po.set(g, v <> po)
+    case False{}:
+      g
+
+def df.pop(g: GR, +v: U32) -> DN:
+  (g: GR, +p: U32) <- gr.pass(g)
+  DnMore{df.post(U32.is_eq(p, 1), g, v)}
+
+def df.frame(fr: DFr, g: GR, +rest: List<&2, DFr>) -> DN:
+  match fr:
+    case DFr{+v, +ks}:
+      match ks:
+        case Nil{}:
+          df.pop(gr.st.set(g, rest), v)
+        case Con{+w, +ws}:
+          df.try(gr.st.set(g, DFr{v, ws} <> rest), w)
+
+# A finished tree of the second pass: a cyclic component if it has two
+# members or one with an edge to itself (decode, mentions_itself).
+def tf.id(g: GR, +acc: List<&2, U32>, +x: U32) -> GR & List<&2, U32>:
+  (g: GR, +i: U32) <- gr.nd(g, x)
+  (g, i <> acc)
+
+def tf.ids(xs: List<&2, U32>, r: GR & List<&2, U32>) -> GR & List<&2, U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (g, acc) = r
+      tf.ids(rest, tf.id(g, acc, x))
+
+def tf.mark(xs: List<&2, U32>, +i: U32, g: GR) -> GR:
+  match xs:
+    case Nil{}:
+      g
+    case Con{+x, rest}:
+      tf.mark(rest, i, gr.sc.set(g, x, i))
+
+def tf.keep(cyc: Bool, g: GR, +cur: List<&2, U32>) -> GR:
+  match cyc:
+    case True{}:
+      (g: GR, +k: U32) <- gr.ntr(g)
+      (g: GR, +ids: List<&2, U32>) <- tf.ids(cur, (g, []))
+      (g: GR, +trs: List<&2, List<&2, U32>>) <- gr.trs(g)
+      gr.ntr.set(gr.trs.set(tf.mark(cur, (k + 1 : U32), g), ids <> trs), (k + 1 : U32))
+    case False{}:
+      g
+
+def tf.self(g: GR, +v: U32) -> GR & Bool:
+  (g: GR, +ks: List<&2, U32>) <- gr.g(g, v)
+  (g, u.has(ks, v))
+
+def tf.cyc(cur: List<&2, U32>, g: GR) -> GR & Bool:
+  match cur:
+    case Nil{}:
+      (g, False{})
+    case Con{+v, rest}:
+      match rest:
+        case Nil{}:
+          tf.self(g, v)
+        case Con{+y, t}:
+          (g, True{})
+
+def tf.two(g: GR, +cur: List<&2, U32>) -> GR:
+  (g: GR, +c: Bool) <- tf.cyc(cur, g)
+  tf.keep(c, g, cur)
+
+def tf.end(first: Bool, g: GR, +cur: List<&2, U32>) -> GR:
+  match first:
+    case True{}:
+      g
+    case False{}:
+      tf.two(g, cur)
+
+def df.finish(g: GR) -> GR:
+  (g: GR, +cur: List<&2, U32>) <- gr.cur.swap(g, [])
+  (g: GR, +p: U32) <- gr.pass(g)
+  tf.end(U32.is_eq(p, 1), g, cur)
+
+def df.top(top: List<&2, U32>, g: GR) -> DN:
+  match top:
+    case Nil{}:
+      DnStop{g}
+    case Con{+v, rest}:
+      df.try(gr.top.set(g, rest), v)
+
+def df.st(st: List<&2, DFr>, g: GR) -> DN:
+  match st:
+    case Nil{}:
+      (g: GR, +top: List<&2, U32>) <- gr.top.swap(df.finish(g), [])
+      df.top(top, g)
+    case Con{fr, rest}:
+      df.frame(fr, g, rest)
+
+def df.step(g: GR) -> DN:
+  (g: GR, +st: List<&2, DFr>) <- gr.st.swap(g, [])
+  df.st(st, g)
+
+def df.fin(n: DN) -> GR:
+  match n:
+    case DnMore{g}:
+      g
+    case DnStop{g}:
+      g
+
+def df.loop(fuel: Nat, n: DN) -> GR:
+  match fuel:
+    case 0n:
+      df.fin(n)
+    case 1n+f:
+      match n:
+        case DnMore{g}:
+          df.loop(f, df.step(g))
+        case DnStop{g}:
+          g
+
+def upto(n: Nat, +k: U32, +acc: List<&2, U32>) -> List<&2, U32>:
+  match n:
+    case 0n:
+      acc
+    case 1n+m:
+      upto(m, (k - 1 : U32), (k - 1 : U32) <> acc)
+
+# scc g = dfs g (reverse (postOrd (transposeG g)))
+def scc.two(g: GR) -> GR:
+  (g: GR, +po: List<&2, U32>) <- gr.po.swap(g, [])
+  df.loop(big(), DnMore{gr.pass.set(gr.top.set(g, po), 2)})
+
+def scc.run(g: GR) -> GR:
+  (g: GR, +n: U32) <- gr.n(g)
+  scc.two(df.loop(big(), DnMore{gr.top.set(g, upto(U32.to_nat(n), n, []))}))
+
+# The second half of cycleStep, planned over the graph: for every live
+# equation whose total is on a cycle, the numbers to force to zero.
+type ZP is Data:
+  ZP{+xs: List<&2, U32>, +bl: Blame}
+
+# Members of the total's component (counted) and the other summands
+# (last first).
+type PT is Data:
+  PT{+mem: U32, +oth: List<&2, U32>}
+
+def sc.of(g: GR, +x: U32) -> GR & U32:
+  (g: GR, +v: U32) <- gr.vx(g, x)
+  gr.sc(g, (v - 1 : U32))
+
+def pt.add(m: Bool, p: PT, +x: U32) -> PT:
+  match m:
+    case True{}:
+      match p:
+        case PT{+mem, +oth}:
+          PT{(mem + 1 : U32), oth}
+    case False{}:
+      match p:
+        case PT{+mem, +oth}:
+          PT{mem, x <> oth}
+
+def pt.push(g: GR, +i: U32, +p: PT, +x: U32) -> GR & PT:
+  (g: GR, +j: U32) <- sc.of(g, x)
+  (g, pt.add(U32.is_eq(i, j), p, x))
+
+def pt.go(xs: List<&2, U32>, +i: U32, r: GR & PT) -> GR & PT:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (g, p) = r
+      pt.go(rest, i, pt.push(g, i, p, x))
+
+# The equations touching each cycle, shown (the note's "through" part),
+# in one pass: each live equation's tuple goes to every cycle one of its
+# numbers is on, once.
+def th.str(lhs: List<&2, U32>, +rhs: U32, bl: Blame) -> String:
+  "(" ++ ints.show(lhs) ++ "," ++ U32.show(rhs) ++ "," ++ Sh.string(String.take(bl.why(bl), 24n)) ++ ")"
+
+def th.idx(g: GR, +acc: List<&2, U32>, +x: U32) -> GR & List<&2, U32>:
+  (g: GR, +j: U32) <- sc.of(g, x)
+  (g, Bool.pick(List<&2, U32>, U32.is_eq(j, 0), acc, Ln.u.ins(acc, j)))
+
+def th.idxs(xs: List<&2, U32>, r: GR & List<&2, U32>) -> GR & List<&2, U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (g, acc) = r
+      th.idxs(rest, th.idx(g, acc, x))
+
+def th.put(g: GR, +s: String, +i: U32) -> GR:
+  (g: GR, +old: List<&2, String>) <- gr.tl(g, i)
+  gr.tl.set(g, i, s <> old)
+
+def th.puts(ix: List<&2, U32>, +s: String, g: GR) -> GR:
+  match ix:
+    case Nil{}:
+      g
+    case Con{+i, rest}:
+      th.puts(rest, s, th.put(g, s, i))
+
+def th.eq(g: GR, e: ER) -> GR:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (g: GR, +ix: List<&2, U32>) <- th.idxs(rhs <> lhs, (g, []))
+      th.puts(ix, th.str(lhs, rhs, bl), g)
+
+def th.all(xs: List<&2, ER>, g: GR) -> GR:
+  match xs:
+    case Nil{}:
+      g
+    case Con{e, rest}:
+      th.all(rest, th.eq(g, e))
+
+# A cycle note's placeholder, and the notes themselves.
+def cn.ph(+id: U32) -> String:
+  SCon{Chr{1}, U32.show(id) ++ SCon{Chr{2}, SNil{}}}
+
+def cn.text(c: CN) -> String:
+  match c:
+    case CN{+id, +ms, +tl}:
+      " [cycle " ++ ints.show(ms) ++ " through " ++ "[" ++ String.join(tl, ",") ++ "]" ++ "]"
+
+def cn.id(c: CN) -> U32:
+  match c:
+    case CN{+id, +ms, +tl}:
+      id
+
+def cn.find(cs: List<&2, CN>, +k: String) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case Con{+c, rest}:
+      Bool.pick(String, String.eq(U32.show(cn.id(c)), k), cn.text(c), cn.find(rest, k))
+
+def cn.part(+p: String, +cs: List<&2, CN>) -> String:
+  cn.part.at(String.split(p, Chr{2}), cs)
+
+def cn.part.at(ps: List<&2, String>, +cs: List<&2, CN>) -> String:
+  match ps:
+    case Nil{}:
+      ""
+    case Con{+k, rest}:
+      cn.find(cs, k) ++ String.join(rest, SCon{Chr{2}, SNil{}})
+
+def cn.parts(ps: List<&2, String>, +cs: List<&2, CN>) -> String:
+  match ps:
+    case Nil{}:
+      ""
+    case Con{+p, rest}:
+      cn.part(p, cs) ++ cn.parts(rest, cs)
+
+# A string with its placeholders expanded.
+def cn.expand(+s: String, +cs: List<&2, CN>) -> String:
+  cn.first(String.split(s, Chr{1}), cs)
+
+def cn.first(ps: List<&2, String>, +cs: List<&2, CN>) -> String:
+  match ps:
+    case Nil{}:
+      ""
+    case Con{+p, rest}:
+      p ++ cn.parts(rest, cs)
+
+def bl.expand(b: Blame, +cs: List<&2, CN>) -> Blame:
+  match b:
+    case Blame{+loc, +why, +fr}:
+      Blame{loc, cn.expand(why, cs), fr}
+
+def bls.expand(bs: List<&2, Blame>, +cs: List<&2, CN>) -> List<&2, Blame>:
+  match bs:
+    case Nil{}:
+      []
+    case Con{+b, rest}:
+      bl.expand(b, cs) <> bls.expand(rest, cs)
+
+def err.expand(e: Err, +cs: List<&2, CN>) -> Err:
+  match e:
+    case BoxConflict{+need, +forbid}:
+      BoxConflict{bl.expand(need, cs), bl.expand(forbid, cs)}
+    case Unsat{+bs}:
+      Unsat{bls.expand(bs, cs)}
+    case other:
+      other
+
+def pt.add(m: Bool, p: PT, +x: U32) -> PT:
+  match m:
+    case True{}:
+      match p:
+        case PT{+mem, +oth}:
+          PT{(mem + 1 : U32), oth}
+    case False{}:
+      match p:
+        case PT{+mem, +oth}:
+          PT{mem, x <> oth}
+
+def pt.push(g: GR, +i: U32, +p: PT, +x: U32) -> GR & PT:
+  (g: GR, +j: U32) <- sc.of(g, x)
+  (g, pt.add(U32.is_eq(i, j), p, x))
+
+def pt.go(xs: List<&2, U32>, +i: U32, r: GR & PT) -> GR & PT:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (g, p) = r
+      pt.go(rest, i, pt.push(g, i, p, x))
+
+def pl.pick(two: Bool, g: GR, +acc: List<&2, ZP>, +rhs: U32, +oth: List<&2, U32>, +bl: Blame, +note: String) -> GR & List<&2, ZP>:
+  match two:
+    case True{}:
+      (g, ZP{[rhs], bl.derive("total equal to two of its own summands" ++ note, bl)} <> acc)
+    case False{}:
+      (g, ZP{List.reverse(&2, U32, oth), bl.derive("summand beside one equal to the total" ++ note, bl)} <> acc)
+
+def pl.mem(p: PT, g: GR, +acc: List<&2, ZP>, +base: U32, +i: U32, +rhs: U32, +bl: Blame) -> GR & List<&2, ZP>:
+  match p:
+    case PT{+mem, +oth}:
+      pl.k(U32.is_eq(mem, 0), g, acc, base, i, rhs, oth, bl, U32.is_lt(1, mem))
+
+def pl.k(none: Bool, g: GR, +acc: List<&2, ZP>, +base: U32, +i: U32, +rhs: U32, +oth: List<&2, U32>, +bl: Blame, +two: Bool) -> GR & List<&2, ZP>:
+  match none:
+    case True{}:
+      (g, acc)
+    case False{}:
+      pl.pick(two, g, acc, rhs, oth, bl, cn.ph(((base + i : U32) - 1 : U32)))
+
+def pl.at(off: Bool, g: GR, +acc: List<&2, ZP>, +base: U32, +i: U32, +lhs: List<&2, U32>, +rhs: U32, +bl: Blame) -> GR & List<&2, ZP>:
+  match off:
+    case True{}:
+      (g, acc)
+    case False{}:
+      (g: GR, +p: PT) <- pt.go(lhs, i, (g, PT{0, []}))
+      pl.mem(p, g, acc, base, i, rhs, bl)
+
+def pl.push(g: GR, +acc: List<&2, ZP>, +base: U32, e: ER) -> GR & List<&2, ZP>:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (g: GR, +i: U32) <- sc.of(g, rhs)
+      pl.at(U32.is_eq(i, 0), g, acc, base, i, lhs, rhs, bl)
+
+def pl.go(xs: List<&2, ER>, +base: U32, r: GR & List<&2, ZP>) -> GR & List<&2, ZP>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (g, acc) = r
+      pl.go(rest, base, pl.push(g, acc, base, e))
+
+# The notes of a round's cycles, numbered from base.
+def cn.of(g: GR, +acc: List<&2, CN>, +base: U32, +i: U32, +ms: List<&2, U32>) -> GR & List<&2, CN>:
+  (g: GR, +tl: List<&2, String>) <- gr.tl(g, i)
+  (g, CN{((base + i : U32) - 1 : U32), ms, List.reverse(&2, String, tl)} <> acc)
+
+def cn.go(xs: List<&2, List<&2, U32>>, +base: U32, +i: U32, r: GR & List<&2, CN>) -> GR & List<&2, CN>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+ms, rest}:
+      (g, acc) = r
+      cn.go(rest, base, (i + 1 : U32), cn.of(g, acc, base, i, ms))
+
+# The first half: merge every cyclic component (each member into the
+# first's class, in order).
+def ub.at(same: Bool, s: S, +a: Bool, +m: U32, +x: U32) -> S & Bool:
+  match same:
+    case True{}:
+      (s, a)
+    case False{}:
+      (union.b(s, m, x), True{})
+
+def ub.push(s: S, +a: Bool, +m: U32, +x: U32) -> S & Bool:
+  (s: S, +ra: U32) <- find.b(s, m)
+  (s: S, +rb: U32) <- find.b(s, x)
+  ub.at(U32.is_eq(ra, rb), s, a, m, x)
+
+def ub.go(xs: List<&2, U32>, +m: U32, r: S & Bool) -> S & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, a) = r
+      ub.go(rest, m, ub.push(s, a, m, x))
+
+def ub.ms(ms: List<&2, U32>, r: S & Bool) -> S & Bool:
+  match ms:
+    case Nil{}:
+      r
+    case Con{+m, rest}:
+      ub.go(rest, m, r)
+
+def ub.all(xss: List<&2, List<&2, U32>>, r: S & Bool) -> S & Bool:
+  match xss:
+    case Nil{}:
+      r
+    case Con{ms, rest}:
+      ub.all(rest, ub.ms(ms, r))
+
+def zp.one(p: ZP, r: S & Bool) -> S & Bool:
+  match p:
+    case ZP{+xs, +bl}:
+      cz.go(xs, bl, r)
+
+def zp.go(xs: List<&2, ZP>, r: S & Bool) -> S & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{p, rest}:
+      zp.go(rest, zp.one(p, r))
+
+def cy.graph(+nv: U32, +live: List<&2, ER>) -> GR:
+  scc.run(tr.all(ed.eqs(live, nb.all(nv, mk.eqs(live, gr.new(nv))))))
+
+def cy.apply(s: S, +trs: List<&2, List<&2, U32>>, +zs: List<&2, ZP>) -> S & Bool:
+  (s: S, +c1: Bool) <- ub.all(trs, (s, False{}))
+  (s: S, +c2: Bool) <- zp.go(zs, (s, False{}))
+  (s, Bool.or(c1, c2))
+
+def cy.notes(s: S, +base: U32, +n: U32, +cs: List<&2, CN>) -> S:
+  (s: S, +old: List<&2, CN>) <- s.cn(s)
+  s.ncn.set(s.cn.set(s, List.append(&2, CN, cs, old)), (base + n : U32))
+
+def cy.plan(g: GR, +live: List<&2, ER>, s: S) -> S & Bool:
+  (s: S, +base: U32) <- s.ncn(s)
+  (g: GR, +trs0: List<&2, List<&2, U32>>) <- gr.trs(th.all(live, g))
+  +trs: List<&2, List<&2, U32>> = List.reverse(&2, List<&2, U32>, trs0)
+  (g: GR, +zs: List<&2, ZP>) <- pl.go(live, base, (g, []))
+  (g: GR, +cs: List<&2, CN>) <- cn.go(trs, base, 1, (g, []))
+  cy.apply(cy.notes(s, base, u.len.ll(trs), cs), trs, List.reverse(&2, ZP, zs))
+
+def u.len.ll(xs: List<&2, List<&2, U32>>) -> U32:
+  U32.from_nat(List.length(&2, List<&2, U32>, xs))
+
+def cycle.step(s: S, +eqs: List<&2, ER>) -> S & Bool:
+  (s: S, +live: List<&2, ER>) <- live.of(s, eqs)
+  (s: S, +nv: U32) <- s.nv(s)
+  cy.plan(cy.graph(nv, live), live, s)
+
+# presolve: the four steps, in rounds, to a fixpoint (or the first error).
+type PSt is Type:
+  PsMore{s: S}
+  PsStop{s: S}
+
+def ps.next(c: Bool, s: S) -> PSt:
+  match c:
+    case True{}:
+      PsMore{s}
+    case False{}:
+      PsStop{s}
+
+def ps.round(s: S) -> PSt:
+  (s: S, +eqs: List<&2, ER>) <- resolve.eqs(s)
+  (s: S, +c1: Bool) <- zs.go(eqs, (s, False{}))
+  (s: S, +c2: Bool) <- es.go(eqs, (s, False{}))
+  (s: S, +c3: Bool) <- cycle.step(s, eqs)
+  (s: S, +c4: Bool) <- bs.go(eqs, (s, False{}))
+  (s: S, +f: Bool) <- failed(s)
+  ps.next(Bool.and(Bool.not(f), Bool.or(Bool.or(c1, c2), Bool.or(c3, c4))), s)
+
+def ps.fin(n: PSt) -> S:
+  match n:
+    case PsMore{s}:
+      fail(s, Internal{"presolve ran out of fuel"})
+    case PsStop{s}:
+      s
+
+def ps.loop(fuel: Nat, n: PSt) -> S:
+  match fuel:
+    case 0n:
+      ps.fin(n)
+    case 1n+f:
+      match n:
+        case PsMore{s}:
+          ps.loop(f, ps.round(s))
+        case PsStop{s}:
+          s
+
+def presolve(s: S) -> S:
+  (s: S, +f: Bool) <- failed(s)
+  ps.loop(big(), ps.next(Bool.not(f), s))
+
+# solveConstraints
+# ----------------
+
+# Leaf multiplicities: how many leaf paths run through each root.
+def lc.inc(s: S, p: Array<U32> & U32, +r: U32) -> S & Array<U32>:
+  (a, +c) = p
+  (s, Array.set(U32, a, r, (c + 1 : U32)))
+
+def lc.add(s: S, a: Array<U32>, +x: U32) -> S & Array<U32>:
+  (s: S, +r: U32) <- find.b(s, x)
+  lc.inc(s, Array.get(U32, a, r), r)
+
+def lc.lp(s: S, a: Array<U32>, l: Lp) -> S & Array<U32>:
+  match l:
+    case Lp{+fr, +base, +d}:
+      (s: S, a: Array<U32>) <- lc.add(s, a, base)
+      lc.add(s, a, d)
+
+def lc.go(xs: List<&2, Lp>, r: S & Array<U32>) -> S & Array<U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{l, rest}:
+      (s, a) = r
+      lc.go(rest, lc.lp(s, a, l))
+
+# The solver's inputs over the live numbers renumbered densely in
+# ascending order (the Haskell's IntMap order): lower bounds, weights.
+type SV is Type:
+  SV{s: S, g: GR, cnt: Array<U32>, lb: Array<U32>, w: Array<U32>}
+
+def sv.w(s: S, g: GR, p: Array<U32> & U32, lb: Array<U32>, w: Array<U32>, +k: U32) -> SV:
+  (cnt, +c) = p
+  SV{s, g, cnt, lb, Array.set(U32, w, k, (c + 1 : U32))}
+
+def sv.k(v: SV, +k: U32) -> SV:
+  match v:
+    case SV{s, g, cnt, lb, w}:
+      (g: GR, +id: U32) <- gr.nd(g, k)
+      (s: S, +c: CI) <- s.ci(s, id)
+      sv.w(s, g, Array.get(U32, cnt, id), Array.set(U32, lb, k, ci.lb(c)), w, k)
+
+def sv.go(n: Nat, +k: U32, v: SV) -> SV:
+  match n:
+    case 0n:
+      v
+    case 1n+m:
+      sv.go(m, (k + 1 : U32), sv.k(v, k))
+
+def dn.x(g: GR, +acc: List<&2, U32>, +x: U32) -> GR & List<&2, U32>:
+  (g: GR, +v: U32) <- gr.vx(g, x)
+  (g, (v - 1 : U32) <> acc)
+
+def dn.go(xs: List<&2, U32>, r: GR & List<&2, U32>) -> GR & List<&2, U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (g, acc) = r
+      dn.go(rest, dn.x(g, acc, x))
+
+def dn.list(g: GR, +xs: List<&2, U32>) -> GR & List<&2, U32>:
+  (g: GR, +ys: List<&2, U32>) <- dn.go(xs, (g, []))
+  (g, List.reverse(&2, U32, ys))
+
+def dn.eq(g: GR, +acc: List<&2, Ln.Eq>, e: ER) -> GR & List<&2, Ln.Eq>:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (g: GR, +ls: List<&2, U32>) <- dn.list(g, lhs)
+      (g: GR, +v: U32) <- gr.vx(g, rhs)
+      (g, Ln.Eq{ls, (v - 1 : U32)} <> acc)
+
+def dn.go.eqs(xs: List<&2, ER>, r: GR & List<&2, Ln.Eq>) -> GR & List<&2, Ln.Eq>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (g, acc) = r
+      dn.go.eqs(rest, dn.eq(g, acc, e))
+
+def dn.eqs(g: GR, +xs: List<&2, ER>) -> GR & List<&2, Ln.Eq>:
+  (g: GR, +ys: List<&2, Ln.Eq>) <- dn.go.eqs(xs, (g, []))
+  (g, List.reverse(&2, Ln.Eq, ys))
+
+# The blames of the equations a failed solve names.
+def us.got(m: Maybe<&2, ER>) -> Blame:
+  match m:
+    case Some{e}:
+      match e:
+        case ER{+lhs, +rhs, +bl}:
+          bl.derive("[eq " ++ ints.show(lhs) ++ " = " ++ U32.show(rhs) ++ "]", bl)
+    case None{}:
+      blame(gen("EAL"), "an equation the solver named is missing")
+
+def us.blames(xs: List<&2, U32>, +live: List<&2, ER>) -> List<&2, Blame>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+i, rest}:
+      us.got(List.get(&2, ER, live, U32.to_nat(i))) <> us.blames(rest, live)
+
+# Every root's value: zero if unboxed, else its lower bound, or the
+# solver's value for a live one.
+def vl.one(s: S, a: Array<U32>, +i: U32) -> S & Array<U32>:
+  (s: S, +c: CI) <- s.ci(s, i)
+  (s, Array.set(U32, a, i, Bool.pick(U32, ci.zero(c), 0, ci.lb(c))))
+
+def vl.base(n: Nat, +i: U32, r: S & Array<U32>) -> S & Array<U32>:
+  match n:
+    case 0n:
+      r
+    case 1n+m:
+      (s, a) = r
+      vl.base(m, (i + 1 : U32), vl.one(s, a, i))
+
+def vl.put(g: GR, a: Array<U32>, +k: U32, +x: Nat) -> GR & Array<U32>:
+  (g: GR, +id: U32) <- gr.nd(g, k)
+  (g, Array.set(U32, a, id, U32.from_nat(x)))
+
+def vl.dense(xs: List<&2, Nat>, +k: U32, r: GR & Array<U32>) -> GR & Array<U32>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (g, a) = r
+      vl.dense(rest, (k + 1 : U32), vl.put(g, a, k, x))
+
+# The check that the assignment satisfies every equation.
+def vf.add(a: Array<U32>, +t: U32, +x: U32) -> Array<U32> & U32:
+  (a: Array<U32>, +v: U32) <- Array.get(U32, a, x)
+  (a, (t + v : U32))
+
+def vf.sum(xs: List<&2, U32>, r: Array<U32> & U32) -> Array<U32> & U32:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (a, t) = r
+      vf.sum(rest, vf.add(a, t, x))
+
+def vf.pick(ok: Bool, +bad: Maybe<&2, Blame>, +bl: Blame) -> Maybe<&2, Blame>:
+  match ok:
+    case True{}:
+      bad
+    case False{}:
+      match bad:
+        case Some{+b}:
+          Some{b}
+        case None{}:
+          Some{bl}
+
+def vf.chk(a: Array<U32>, +bad: Maybe<&2, Blame>, e: ER) -> Array<U32> & Maybe<&2, Blame>:
+  match e:
+    case ER{+lhs, +rhs, +bl}:
+      (a: Array<U32>, +t: U32) <- vf.sum(lhs, (a, 0))
+      (a: Array<U32>, +v: U32) <- Array.get(U32, a, rhs)
+      (a, vf.pick(U32.is_eq(t, v), bad, bl))
+
+def vf.go(xs: List<&2, ER>, r: Array<U32> & Maybe<&2, Blame>) -> Array<U32> & Maybe<&2, Blame>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{e, rest}:
+      (a, bad) = r
+      vf.go(rest, vf.chk(a, bad, e))
+
+def vf.fail(m: Maybe<&2, Blame>, s: S) -> S:
+  match m:
+    case None{}:
+      s
+    case Some{+b}:
+      fail(s, Internal{"solver assignment violates an equation: " ++ blame.render(b)})
+
+def sc.done(s: S, g: GR, +nv: U32, +eqs: List<&2, ER>, +xs: List<&2, Nat>) -> S & Array<U32>:
+  (s: S, a: Array<U32>) <- vl.base(U32.to_nat(nv), 0, (s, Array.new(U32, Ln.depth.of(nv), 0)))
+  (g: GR, a: Array<U32>) <- vl.dense(xs, 0, (g, a))
+  (a: Array<U32>, +bad: Maybe<&2, Blame>) <- vf.go(eqs, (a, None{}))
+  (vf.fail(bad, s), a)
+
+def sc.res(r: Result<&2, &2, List<&2, U32>, List<&2, Nat>>, s: S, g: GR, +nv: U32, +eqs: List<&2, ER>, +live: List<&2, ER>) -> S & Array<U32>:
+  match r:
+    case Fail{+from}:
+      (fail(s, Unsat{us.blames(from, live)}), Array.new(U32, 1n, 0))
+    case Done{+xs}:
+      sc.done(s, g, nv, eqs, xs)
+
+def sc.solve(v: SV, +n: U32, +nv: U32, +eqs: List<&2, ER>, +live: List<&2, ER>) -> S & Array<U32>:
+  match v:
+    case SV{s, g, cnt, lb, w}:
+      (g: GR, +des: List<&2, Ln.Eq>) <- dn.eqs(g, live)
+      sc.res(Ln.solve(n, lb, w, des), s, g, nv, eqs, live)
+
+def sc.prep(s: S, g: GR, cnt: Array<U32>, +nv: U32, +eqs: List<&2, ER>, +live: List<&2, ER>) -> S & Array<U32>:
+  (g: GR, +n: U32) <- gr.n(g)
+  +d: Nat = Ln.depth.of(n)
+  sc.solve(sv.go(U32.to_nat(n), 0, SV{s, g, cnt, Array.new(U32, d, 0), Array.new(U32, d, 0)}), n, nv, eqs, live)
+
+# solveConstraints (presolve has run): every root's value, by number.
+def solve.cs(s: S) -> S & Array<U32>:
+  (s: S, +eqs: List<&2, ER>) <- resolve.eqs(s)
+  (s: S, +live: List<&2, ER>) <- live.of(s, eqs)
+  (s: S, +nv: U32) <- s.nv(s)
+  (s: S, +lfs: List<&2, Lp>) <- s.lfs(s)
+  (s: S, cnt: Array<U32>) <- lc.go(lfs, (s, Array.new(U32, Ln.depth.of(nv), 0)))
+  sc.prep(s, nb.all(nv, mk.eqs(live, gr.new(nv))), cnt, nv, eqs, live)
+
+def ms.got(m: Maybe<&2, List<&2, U32>>) -> List<&2, U32>:
+  match m:
+    case Some{+x}:
+      x
+    case None{}:
+      []

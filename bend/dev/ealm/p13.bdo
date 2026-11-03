@@ -1,0 +1,454 @@
+# The let-polymorphic fallbacks (inferEALLiftedWith)
+# --------------------------
+
+# Sets of strings, as maps to True.
+def set.add.all(kvs: List<&2, Sigma<&2, &2, String, _ => Bool>>, +m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          set.add.all(rest, Map.set(&2, Bool, m, k, True{}))
+
+def set.union(+a: Map<&2, Bool>, +b: Map<&2, Bool>) -> Map<&2, Bool>:
+  set.add.all(Map.to_list(&2, Bool, b), a)
+
+def set.keep(c: Bool, +k: String, +r: List<&2, String>) -> List<&2, String>:
+  match c:
+    case True{}:
+      k <> r
+    case False{}:
+      r
+
+# The keys of a not in b.
+def set.minus.go(kvs: List<&2, Sigma<&2, &2, String, _ => Bool>>, +b: Map<&2, Bool>) -> List<&2, String>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          set.keep(Bool.not(m.has(b, k)), k, set.minus.go(rest, b))
+
+def set.of(xs: List<&2, String>, +m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match xs:
+    case Nil{}:
+      m
+    case Con{+x, rest}:
+      set.of(rest, Map.set(&2, Bool, m, x, True{}))
+
+def set.minus(+a: Map<&2, Bool>, +b: Map<&2, Bool>) -> Map<&2, Bool>:
+  set.of(set.minus.go(Map.to_list(&2, Bool, a), b), Map.new(&2, Bool))
+
+def set.any.in(kvs: List<&2, Sigma<&2, &2, String, _ => Bool>>, +b: Map<&2, Bool>) -> Bool:
+  match kvs:
+    case Nil{}:
+      False{}
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          Bool.or(m.has(b, k), set.any.in(rest, b))
+
+def set.meets(+a: Map<&2, Bool>, +b: Map<&2, Bool>) -> Bool:
+  set.any.in(Map.to_list(&2, Bool, a), b)
+
+def set.empty(+a: Map<&2, Bool>) -> Bool:
+  U32.is_eq(U32.from_nat(Map.size(&2, Bool, a)), 0)
+
+# errorBodies: the bodies a failure's blames were made in (by fi.key).
+def eb.blame(+m: Map<&2, Bool>, b: Blame) -> Map<&2, Bool>:
+  match b:
+    case Blame{+loc, +why, +fr}:
+      Bool.pick(Map<&2, Bool>, U32.is_eq(fr, 0), m, Map.set(&2, Bool, m, fi.key((fr - 1 : U32)), True{}))
+
+def eb.blames(bs: List<&2, Blame>, +m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match bs:
+    case Nil{}:
+      m
+    case Con{+b, rest}:
+      eb.blames(rest, eb.blame(m, b))
+
+def error.bodies(e: Err) -> Map<&2, Bool>:
+  match e:
+    case BoxConflict{+need, +forbid}:
+      eb.blame(eb.blame(Map.new(&2, Bool), need), forbid)
+    case Unsat{+bs}:
+      eb.blames(bs, Map.new(&2, Bool))
+    case other:
+      Map.new(&2, Bool)
+
+# reach: the bodies each body reaches, itself included (by fi.key), per
+# rank, as a machine over the DAG.
+type RF is Data:
+  RF{+r: U32, +ds: List<&2, U32>}
+
+type RQ is Type:
+  RqGo{a: Array<Map<&2, Bool>>, d: Array<U32>, +st: List<&2, RF>}
+  RqEnd{a: Array<Map<&2, Bool>>}
+
+def rq.add(q: Array<Map<&2, Bool>> & Map<&2, Bool>, +m: Map<&2, Bool>) -> Array<Map<&2, Bool>> & Map<&2, Bool>:
+  (a, +s) = q
+  (a, set.union(m, s))
+
+def rq.union(xs: List<&2, U32>, q: Array<Map<&2, Bool>> & Map<&2, Bool>) -> Array<Map<&2, Bool>> & Map<&2, Bool>:
+  match xs:
+    case Nil{}:
+      q
+    case Con{+x, rest}:
+      (a, +m) = q
+      rq.union(rest, rq.add(Array.get(Map<&2, Bool>, a, x), m))
+
+def rq.done(q: Array<Map<&2, Bool>> & Map<&2, Bool>, d: Array<U32>, +r: U32, +rest: List<&2, RF>) -> RQ:
+  (a, +m) = q
+  RqGo{Array.set(Map<&2, Bool>, a, r, m), Array.set(U32, d, r, 1), rest}
+
+def rq.dep(seen: Bool, a: Array<Map<&2, Bool>>, d: Array<U32>, +p: PG, +r: U32, +x: U32, +xs: List<&2, U32>, +rest: List<&2, RF>) -> RQ:
+  match seen:
+    case True{}:
+      RqGo{a, d, RF{r, xs} <> rest}
+    case False{}:
+      RqGo{a, d, RF{x, pg.refs.at(p, x)} <> RF{r, x <> xs} <> rest}
+
+def rq.look(a: Array<Map<&2, Bool>>, q: Array<U32> & U32, +p: PG, +r: U32, +x: U32, +xs: List<&2, U32>, +rest: List<&2, RF>) -> RQ:
+  (d, +m) = q
+  rq.dep(U32.is_eq(m, 1), a, d, p, r, x, xs, rest)
+
+def rq.frame(f: RF, a: Array<Map<&2, Bool>>, d: Array<U32>, +p: PG, +rest: List<&2, RF>) -> RQ:
+  match f:
+    case RF{+r, +ds}:
+      match ds:
+        case Nil{}:
+          rq.done(rq.union(pg.refs.at(p, r), (a, Map.set(&2, Bool, Map.new(&2, Bool), fi.key(bd.fi(pg.bd(p, r))), True{}))), d, r, rest)
+        case Con{+x, +xs}:
+          rq.look(a, Array.get(U32, d, x), p, r, x, xs, rest)
+
+def rq.step(st: List<&2, RF>, a: Array<Map<&2, Bool>>, d: Array<U32>, +p: PG) -> RQ:
+  match st:
+    case Nil{}:
+      RqEnd{a}
+    case Con{+f, +rest}:
+      rq.frame(f, a, d, p, rest)
+
+def rq.fin(q: RQ) -> Array<Map<&2, Bool>>:
+  match q:
+    case RqGo{a, d, +st}:
+      a
+    case RqEnd{a}:
+      a
+
+def rq.loop(fuel: Nat, q: RQ, +p: PG) -> Array<Map<&2, Bool>>:
+  match fuel:
+    case 0n:
+      rq.fin(q)
+    case 1n+f:
+      match q:
+        case RqGo{a, d, +st}:
+          rq.loop(f, rq.step(st, a, d, p), p)
+        case RqEnd{a}:
+          a
+
+def rq.roots(n: Nat, +i: U32) -> List<&2, RF>:
+  match n:
+    case 0n:
+      []
+    case 1n+k:
+      RF{i, []} <> rq.roots(k, (i + 1 : U32))
+
+# Every body's reach, by rank: each rank gets a frame whose references are
+# pushed as it is met.
+def reach.all(+p: PG) -> Array<Map<&2, Bool>>:
+  rq.loop(big(), RqGo{Array.new(Map<&2, Bool>, Ln.depth.of(pg.n(p)), Map.new(&2, Bool)), Array.new(U32, Ln.depth.of(pg.n(p)), 0), rq.seed(U32.to_nat(pg.n(p)), 0, p)}, p)
+
+def rq.seed(n: Nat, +i: U32, +p: PG) -> List<&2, RF>:
+  match n:
+    case 0n:
+      []
+    case 1n+k:
+      RF{i, pg.refs.at(p, i)} <> rq.seed(k, (i + 1 : U32), p)
+
+# The reaches as data: a list by rank.
+def rl.add(q: Array<Map<&2, Bool>> & Map<&2, Bool>, +acc: List<&2, Map<&2, Bool>>) -> Array<Map<&2, Bool>> & List<&2, Map<&2, Bool>>:
+  (a, +m) = q
+  (a, m <> acc)
+
+def rl.go(n: Nat, +i: U32, q: Array<Map<&2, Bool>> & List<&2, Map<&2, Bool>>) -> Array<Map<&2, Bool>> & List<&2, Map<&2, Bool>>:
+  match n:
+    case 0n:
+      q
+    case 1n+k:
+      (a, +acc) = q
+      rl.go(k, (i + 1 : U32), rl.add(Array.get(Map<&2, Bool>, a, i), acc))
+
+def rl.fin(q: Array<Map<&2, Bool>> & List<&2, Map<&2, Bool>>) -> List<&2, Map<&2, Bool>>:
+  (a, +acc) = q
+  List.reverse(&2, Map<&2, Bool>, acc)
+
+def reach.list(n: Nat, a: Array<Map<&2, Bool>>) -> List<&2, Map<&2, Bool>>:
+  rl.fin(rl.go(n, 0, (a, [])))
+
+# What the narrowing reads: the program's ranks, every body's reach, and
+# the full deep specialization's SpecInfo.
+type NI is Data:
+  NI{+rk: Map<&2, U32>, +reach: List<&2, Map<&2, Bool>>, +defs: Map<&2, Bool>, +reads: Map<&2, Map<&2, Bool>>}
+
+def reach.of(+ni: NI, +h: String) -> Map<&2, Bool>:
+  match ni:
+    case NI{+rk, +reach, +defs, +reads}:
+      reach.got(List.get(&2, Map<&2, Bool>, reach, U32.to_nat(rank.of(rk, h))))
+
+def reach.got(m: Maybe<&2, Map<&2, Bool>>) -> Map<&2, Bool>:
+  match m:
+    case Some{+x}:
+      x
+    case None{}:
+      Map.new(&2, Bool)
+
+# readIn: what the given bodies read.
+def read.in.go(kvs: List<&2, Sigma<&2, &2, String, _ => Bool>>, +reads: Map<&2, Map<&2, Bool>>, +acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          read.in.go(rest, reads, set.union(acc, Pair.snd(Map<&2, Map<&2, Bool>>, Map<&2, Bool>, Map.get(Map<&2, Bool>, Map.new(&2, Bool), reads, k))))
+
+def read.in(+ni: NI, +fis: Map<&2, Bool>) -> Map<&2, Bool>:
+  match ni:
+    case NI{+rk, +reach, +defs, +reads}:
+      read.in.go(Map.to_list(&2, Bool, fis), reads, Map.new(&2, Bool))
+
+# owners: the definitions whose code reaches one of the bodies.
+def owners.go(kvs: List<&2, Sigma<&2, &2, String, _ => Bool>>, +ni: NI, +fis: Map<&2, Bool>, +acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +v):
+          owners.go(rest, ni, fis, Bool.pick(Map<&2, Bool>, set.meets(reach.of(ni, h), fis), Map.set(&2, Bool, acc, h, True{}), acc))
+
+def ni.defs(ni: NI) -> Map<&2, Bool>:
+  match ni:
+    case NI{+rk, +reach, +defs, +reads}:
+      defs
+
+# What the owners' reaches read, for every owner with code.
+def owned.go(kvs: List<&2, Sigma<&2, &2, String, _ => Bool>>, +ni: NI, +acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+o, +v):
+          owned.go(rest, ni, Bool.pick(Map<&2, Bool>, String.eq(o, "-"), acc, set.union(acc, read.in(ni, reach.of(ni, o)))))
+
+# pointedAt
+def pointed.at(+ni: NI, +fis: Map<&2, Bool>) -> Map<&2, Bool>:
+  pa.owners(ni, set.union(owners.go(Map.to_list(&2, Bool, ni.defs(ni)), ni, fis, Map.new(&2, Bool)), read.in(ni, fis)))
+
+def pa.owners(+ni: NI, +owners: Map<&2, Bool>) -> Map<&2, Bool>:
+  set.union(owners, owned.go(Map.to_list(&2, Bool, owners), ni, Map.new(&2, Bool)))
+
+def ni.of(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: PG) -> NI:
+  ni.sr(specialize(None{}, True{}, bodies, main), ranks(bodies), reach.list(U32.to_nat(pg.n(p)), reach.all(p)))
+
+def ni.sr(r: SR, +rk: Map<&2, U32>, +reach: List<&2, Map<&2, Bool>>) -> NI:
+  match r:
+    case SR{+bodies, +origin, +main, +defs, +reads}:
+      NI{rk, reach, defs, reads}
+
+# A specialized program's main pass.
+def sr.main(r: SR) -> Result<&2, &2, Err, MR>:
+  match r:
+    case SR{+bodies, +origin, +main, +defs, +reads}:
+      pg.main(pg.of(Lf.Lifted{bodies, main}), False{})
+
+def sr.changed(r: SR) -> Bool:
+  match r:
+    case SR{+bodies, +origin, +main, +defs, +reads}:
+      Bool.not(set.empty(sk.keys(Map.to_list(&2, String, origin), Map.new(&2, Bool))))
+
+def sk.keys(kvs: List<&2, Sigma<&2, &2, String, _ => String>>, +m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          sk.keys(rest, Map.set(&2, Bool, m, k, True{}))
+
+def res.some(r: Result<&2, &2, Err, MR>) -> Maybe<&2, MR>:
+  match r:
+    case Done{+m}:
+      Some{m}
+    case Fail{+e}:
+      None{}
+
+# originLayouts: a specialized body's layout is its origin's, met.
+def ol.go(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Shape>>, +origin: Map<&2, String>, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +s):
+          ol.go(rest, origin, ol.put(origin.of(origin, h), s, m))
+
+def ol.put(+h: String, +s: Lf.Shape, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
+  sm.has(Map.has(&2, Lf.Shape, m, h), h, s)
+
+def mr.origin(m: MR, +origin: Map<&2, String>) -> MR:
+  match m:
+    case MR{+top, +defers, +max, +shape, +shapes, +levels}:
+      MR{top, defers, max, shape, ol.go(Map.to_list(&2, Lf.Shape, shapes), origin, Map.new(&2, Lf.Shape)), levels}
+
+def sr.origin(r: SR) -> Map<&2, String>:
+  match r:
+    case SR{+bodies, +origin, +main, +defs, +reads}:
+      origin
+
+def res.some.o(r: Result<&2, &2, Err, MR>, +origin: Map<&2, String>) -> Maybe<&2, MR>:
+  match r:
+    case Done{+m}:
+      Some{mr.origin(m, origin)}
+    case Fail{+e}:
+      None{}
+
+# specialized deep: substitute everything, if anything changed.
+def specialized.at(changed: Bool, +r: SR) -> Maybe<&2, MR>:
+  match changed:
+    case True{}:
+      res.some.o(sr.main(r), sr.origin(r))
+    case False{}:
+      None{}
+
+def specialized(+deep: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+  +r: SR = specialize(None{}, deep, bodies, main)
+  specialized.at(sr.changed(r), r)
+
+# narrowed: substitute only what failures point at, adding to it until
+# the program certifies or nothing is left to add.
+type NF is Data:
+  NfGo{+allowed: Map<&2, Bool>, +e: Err}
+  NfDone{+r: Maybe<&2, MR>}
+
+def nf.run(r: Result<&2, &2, Err, MR>, +allowed: Map<&2, Bool>, +origin: Map<&2, String>) -> NF:
+  match r:
+    case Done{+m}:
+      NfDone{Some{mr.origin(m, origin)}}
+    case Fail{+e}:
+      NfGo{allowed, e}
+
+def nf.at(none: Bool, +allowed: Map<&2, Bool>, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> NF:
+  match none:
+    case True{}:
+      NfDone{None{}}
+    case False{}:
+      nf.sr(specialize(Some{allowed}, True{}, bodies, main), allowed)
+
+def nf.sr(+r: SR, +allowed: Map<&2, Bool>) -> NF:
+  nf.run(sr.main(r), allowed, sr.origin(r))
+
+def nf.step(+ni: NI, +allowed: Map<&2, Bool>, +e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> NF:
+  +new: Map<&2, Bool> = set.minus(pointed.at(ni, error.bodies(e)), allowed)
+  nf.at(set.empty(new), set.union(allowed, new), bodies, main)
+
+def nf.loop(fuel: Nat, +n: NF, +ni: NI, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+  match fuel:
+    case 0n:
+      None{}
+    case 1n+f:
+      match n:
+        case NfGo{+allowed, +e}:
+          nf.loop(f, nf.step(ni, allowed, e, bodies, main), ni, bodies, main)
+        case NfDone{+r}:
+          r
+
+def narrowed(+e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: PG) -> Maybe<&2, MR>:
+  nf.loop(big(), NfGo{Map.new(&2, Bool), e}, ni.of(bodies, main, p), bodies, main)
+
+# narrowed <|> specialized False <|> specialized True
+def fb.two(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+  match m:
+    case Some{+x}:
+      Some{x}
+    case None{}:
+      specialized(True{}, bodies, main)
+
+def fb.one(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> Maybe<&2, MR>:
+  match m:
+    case Some{+x}:
+      Some{x}
+    case None{}:
+      fb.two(specialized(False{}, bodies, main), bodies, main)
+
+def fallback(+e: Err, t: Lf.Lifted, +p: PG) -> Maybe<&2, MR>:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      fb.one(narrowed(e, bodies, main, p), bodies, main)
+
+# ealLiftedMain of inferEALLifted: main's pass, else a fallback's, else
+# main's failure behind its dependencies'.
+def lm.fb(m: Maybe<&2, MR>, +p: PG, +e: Err) -> Result<&2, &2, Err, MR>:
+  match m:
+    case Some{+x}:
+      Done{x}
+    case None{}:
+      Fail{with.deps(p, False{}, e)}
+
+def lm.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG) -> Result<&2, &2, Err, MR>:
+  match r:
+    case Done{+m}:
+      Done{m}
+    case Fail{+e}:
+      lm.fb(fallback(e, t, p), p, e)
+
+def lifted.main(+t: Lf.Lifted) -> Result<&2, &2, Err, MR>:
+  +p: PG = pg.of(t)
+  lm.at(pg.main(p, False{}), t, p)
+
+# certifyMain
+def cmain.at(r: Result<&2, &2, Err, MR>) -> Maybe<&2, Err>:
+  match r:
+    case Done{+m}:
+      cm.shape(m)
+    case Fail{+e}:
+      Some{e}
+
+def certify.main.full(+t: Lf.Lifted) -> Maybe<&2, Err>:
+  cmain.at(lifted.main(t))
+
+# ealCaptureLayouts of inferEALLifted: every body's layout when the
+# program certifies (through a fallback, by origin), none otherwise.
+def ly.keep(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +shapes: Map<&2, Lf.Shape>, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
+  match kvs:
+    case Nil{}:
+      m
+    case Con{kv, rest}:
+      match kv:
+        case (+h, +b):
+          ly.keep(rest, shapes, ly.at(Map.has(&2, Lf.Shape, shapes, h), h, m))
+
+def ly.at(r: Map<&2, Lf.Shape> & Bool, +h: String, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
+  (shapes, +known) = r
+  Bool.pick(Map<&2, Lf.Shape>, known, Map.set(&2, Lf.Shape, m, h, Pair.snd(Map<&2, Lf.Shape>, Lf.Shape, Map.get(Lf.Shape, Lf.CapOther{}, shapes, h))), m)
+
+def ly.res(r: Result<&2, &2, Err, MR>, t: Lf.Lifted) -> Map<&2, Lf.Shape>:
+  match r:
+    case Fail{+e}:
+      Map.new(&2, Lf.Shape)
+    case Done{+m}:
+      match m:
+        case MR{+top, +defers, +max, +shape, +shapes, +levels}:
+          match t:
+            case Lf.Lifted{+bodies, +main}:
+              ly.keep(Map.to_list(&2, Lf.Body, bodies), shapes, Map.new(&2, Lf.Shape))
+
+def layouts(+t: Lf.Lifted) -> Map<&2, Lf.Shape>:
+  ly.res(lifted.main(t), t)
+
+# certifyMain (the gate).
+def certify(+t: Lf.Lifted) -> Maybe<&2, Err>:
+  certify.main.full(t)

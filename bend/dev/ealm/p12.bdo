@@ -1,0 +1,660 @@
+# Let specialization (specializeLets)
+# ------------------
+
+# Paths are strings of steps, "L" for SL and "R" for SR, from the env
+# root in application order (as envPath gives them), so string order is
+# the Haskell's list order and isPrefixOf is starts_with. A substitution
+# (SpecSubst) is a map from paths to lifted terms; a SpecKey is a hash, or
+# "-" for Nothing (which sorts first, as Nothing does).
+
+def path.app(m: Maybe<&2, String>, +s: String) -> Maybe<&2, String>:
+  match m:
+    case Some{+p}:
+      Some{p ++ s}
+    case None{}:
+      None{}
+
+# envPath
+def path.of(t: Lf.L) -> Maybe<&2, String>:
+  match t:
+    case Lf.LEnv{+loc}:
+      Some{""}
+    case Lf.LUnsized{+loc, +tok}:
+      Some{""}
+    case Lf.LLeft{+loc, +x}:
+      path.app(path.of(x), "L")
+    case Lf.LRight{+loc, +x}:
+      path.app(path.of(x), "R")
+    case Lf.LCheck{+loc, +o, +tc, +c}:
+      path.of(c)
+    case other:
+      None{}
+
+def l.loc(t: Lf.L) -> Lc.Loc:
+  match t:
+    case Lf.LZero{+loc}:
+      loc
+    case Lf.LPair{+loc, +a, +b}:
+      loc
+    case Lf.LEnv{+loc}:
+      loc
+    case Lf.LSetEnv{+loc, +x}:
+      loc
+    case Lf.LGate{+loc}:
+      loc
+    case Lf.LLeft{+loc, +x}:
+      loc
+    case Lf.LRight{+loc, +x}:
+      loc
+    case Lf.LAbort{+loc}:
+      loc
+    case Lf.LUnsized{+loc, +tok}:
+      loc
+    case Lf.LCheck{+loc, +o, +tc, +c}:
+      loc
+    case Lf.LRef{+loc, +h}:
+      loc
+
+def is.l(+c: U32) -> Bool:
+  U32.is_eq(c, 76)
+
+# A value projected along the rest of a path: through literal pairs
+# directly, else by projections at the occurrence's place.
+def project(p: String, +anno: Lc.Loc, +v: Lf.L) -> Lf.L:
+  match p:
+    case SNil{}:
+      v
+    case SCon{ch, rest}:
+      match ch:
+        case Chr{+c}:
+          project(rest, anno, pj.one(v, anno, is.l(c)))
+
+def pj.one(+v: Lf.L, +anno: Lc.Loc, +left: Bool) -> Lf.L:
+  match v:
+    case Lf.LPair{+loc, +a, +b}:
+      Bool.pick(Lf.L, left, a, b)
+    case +other:
+      Bool.pick(Lf.L, left, Lf.LLeft{anno, other}, Lf.LRight{anno, other})
+
+def sa.find(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.L>>, +anno: Lc.Loc, +p: String) -> Maybe<&2, Lf.L>:
+  match kvs:
+    case Nil{}:
+      None{}
+    case Con{kv, rest}:
+      match kv:
+        case (+q, +v):
+          Bool.pick(Maybe<&2, Lf.L>, String.starts_with(p, q), Some{project(String.drop(p, String.length(q)), anno, v)}, sa.find(rest, anno, p))
+
+# substAt
+def subst.at(+anno: Lc.Loc, sub: Map<&2, Lf.L>, +p: String) -> Maybe<&2, Lf.L>:
+  sa.find(Map.to_list(&2, Lf.L, sub), anno, p)
+
+# Map.mapKeys (step :) and Map.filter carriesCode, over substitutions.
+def sub.pre(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.L>>, +s: String) -> List<&2, Sigma<&2, &2, String, _ => Lf.L>>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          (s ++ k, v) <> sub.pre(rest, s)
+
+def sub.keep(c: Bool, +k: String, +v: Lf.L, +r: List<&2, Sigma<&2, &2, String, _ => Lf.L>>) -> List<&2, Sigma<&2, &2, String, _ => Lf.L>>:
+  match c:
+    case True{}:
+      (k, v) <> r
+    case False{}:
+      r
+
+def sub.code(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.L>>) -> List<&2, Sigma<&2, &2, String, _ => Lf.L>>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          sub.keep(carries.code(v), k, v, sub.code(rest))
+
+# The entries below a path, re-rooted there.
+def sub.below(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.L>>, +p: String) -> List<&2, Sigma<&2, &2, String, _ => Lf.L>>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+q, +v):
+          sub.keep(Bool.and(String.starts_with(q, p), Bool.not(String.eq(q, p))), String.drop(q, String.length(p)), v, sub.below(rest, p))
+
+def cp.at(m: Maybe<&2, Lf.L>, sub: Map<&2, Lf.L>, +p: String) -> List<&2, Sigma<&2, &2, String, _ => Lf.L>>:
+  match m:
+    case Some{+v}:
+      [("", v)]
+    case None{}:
+      sub.below(Map.to_list(&2, Lf.L, sub), p)
+
+def cp.occ(m: Maybe<&2, String>, +sub: Map<&2, Lf.L>) -> List<&2, Sigma<&2, &2, String, _ => Lf.L>>:
+  match m:
+    case Some{+p}:
+      cp.at(subst.at(Lc.Unknown{}, sub, p), sub, p)
+    case None{}:
+      []
+
+# closedParts, as an entry list (its keys come out in order). A checking
+# wrapper's parts are its checked term's (its env path is that term's).
+def closed.parts(+sub: Map<&2, Lf.L>, t: Lf.L) -> List<&2, Sigma<&2, &2, String, _ => Lf.L>>:
+  match t:
+    case Lf.LPair{+loc, +a, +b}:
+      List.append(&2, Sigma<&2, &2, String, _ => Lf.L>, sub.pre(closed.parts(sub, a), "L"), sub.pre(closed.parts(sub, b), "R"))
+    case Lf.LCheck{+loc, +o, +tc, +c}:
+      closed.parts(sub, c)
+    case other:
+      cp.occ(path.of(other), sub)
+
+# closedTerm
+def closed.term(t: Lf.L) -> Bool:
+  match t:
+    case Lf.LEnv{+loc}:
+      False{}
+    case Lf.LUnsized{+loc, +tok}:
+      False{}
+    case Lf.LPair{+loc, +a, +b}:
+      Bool.and(closed.term(a), closed.term(b))
+    case Lf.LSetEnv{+loc, +x}:
+      closed.term(x)
+    case Lf.LLeft{+loc, +x}:
+      closed.term(x)
+    case Lf.LRight{+loc, +x}:
+      closed.term(x)
+    case Lf.LCheck{+loc, +o, +tc, +c}:
+      Bool.and(closed.term(tc), closed.term(c))
+    case other:
+      True{}
+
+# carriesCode
+def carries.code(t: Lf.L) -> Bool:
+  match t:
+    case Lf.LRef{+loc, +h}:
+      True{}
+    case Lf.LGate{+loc}:
+      True{}
+    case Lf.LPair{+loc, +a, +b}:
+      Bool.or(carries.code(a), carries.code(b))
+    case Lf.LSetEnv{+loc, +x}:
+      carries.code(x)
+    case Lf.LLeft{+loc, +x}:
+      carries.code(x)
+    case Lf.LRight{+loc, +x}:
+      carries.code(x)
+    case Lf.LCheck{+loc, +o, +tc, +c}:
+      Bool.or(carries.code(tc), carries.code(c))
+    case other:
+      False{}
+
+# codeOf, as a SpecKey before origin mapping ("-" for none).
+def code.of(t: Lf.L) -> String:
+  match t:
+    case Lf.LRef{+loc, +h}:
+      h
+    case Lf.LPair{+loc, +a, +b}:
+      match a:
+        case Lf.LRef{+aloc, +h}:
+          h
+        case other:
+          "-"
+    case other:
+      "-"
+
+def path.is(m: Maybe<&2, String>, +p: String) -> Bool:
+  match m:
+    case Some{+q}:
+      String.eq(q, p)
+    case None{}:
+      False{}
+
+# isTwiddle: (Left (Right Env), (Left Env, Right (Right Env)))
+def is.twiddle(t: Lf.L) -> Bool:
+  match t:
+    case Lf.LPair{+loc, +x, +yz}:
+      match yz:
+        case Lf.LPair{+l2, +y, +z}:
+          Bool.and(path.is(path.of(x), "RL"), Bool.and(path.is(path.of(y), "L"), path.is(path.of(z), "RR")))
+        case other:
+          False{}
+    case other:
+      False{}
+
+def body.twiddle(m: Map<&2, Lf.Body> & Maybe<&2, Lf.Body>) -> Bool:
+  (b, mb) = m
+  match mb:
+    case Some{+bd}:
+      match bd:
+        case Lf.Body{+fi, +body}:
+          is.twiddle(body)
+    case None{}:
+      False{}
+
+def twiddle.of(+bodies: Map<&2, Lf.Body>, +h: String) -> Bool:
+  body.twiddle(Map.pop(&2, Lf.Body, bodies, h))
+
+# appliedClosure: SetEnv (SetEnv (Pair tw (Pair operand (Pair (DeferRef
+# code) cap)))), its parts.
+type AC is Data:
+  AC{+a1: Lc.Loc, +a2: Lc.Loc, +a3: Lc.Loc, +tw: Lf.L, +a4: Lc.Loc, +operand: Lf.L, +a5: Lc.Loc, +a6: Lc.Loc, +code: String, +cap: Lf.L}
+
+def ac.of(t: Lf.L) -> Maybe<&2, AC>:
+  match t:
+    case Lf.LSetEnv{+a1, +x1}:
+      match x1:
+        case Lf.LSetEnv{+a2, +x2}:
+          match x2:
+            case Lf.LPair{+a3, +tw, +p4}:
+              match p4:
+                case Lf.LPair{+a4, +operand, +p5}:
+                  match p5:
+                    case Lf.LPair{+a5, +r6, +cap}:
+                      match r6:
+                        case Lf.LRef{+a6, +code}:
+                          Some{AC{a1, a2, a3, tw, a4, operand, a5, a6, code, cap}}
+                        case other:
+                          None{}
+                    case other:
+                      None{}
+                case other:
+                  None{}
+            case other:
+              None{}
+        case other:
+          None{}
+    case other:
+      None{}
+
+def ac.rebuild(c: AC, +o: Lf.L, +code: String, +k: Lf.L) -> Lf.L:
+  match c:
+    case AC{+a1, +a2, +a3, +tw, +a4, +operand, +a5, +a6, +cd, +cap}:
+      Lf.LSetEnv{a1, Lf.LSetEnv{a2, Lf.LPair{a3, tw, Lf.LPair{a4, o, Lf.LPair{a5, Lf.LRef{a6, code}, k}}}}}
+
+# twiddleRef: the applied pair's head is the twiddle defer.
+def tw.ref(tw: Lf.L, +bodies: Map<&2, Lf.Body>) -> Bool:
+  match tw:
+    case Lf.LRef{+loc, +h}:
+      twiddle.of(bodies, h)
+    case other:
+      False{}
+
+# Pair (DeferRef code) cap
+type PR is Data:
+  PR{+loc: Lc.Loc, +cloc: Lc.Loc, +code: String, +cap: Lf.L}
+
+def pr.of(t: Lf.L) -> Maybe<&2, PR>:
+  match t:
+    case Lf.LPair{+loc, +a, +cap}:
+      match a:
+        case Lf.LRef{+cloc, +code}:
+          Some{PR{loc, cloc, code, cap}}
+        case other:
+          None{}
+    case other:
+      None{}
+
+# The specialization's state (SpecState): the bodies (growing), each
+# specialized body's origin, the memo, deep, the substitutable keys (all,
+# if none), the body being specialized (its index plus one, 0 for main),
+# and the SpecInfo: every substitutable definition, and per body (by
+# fi.key) the keys it could substitute.
+type SP is Data:
+  SP{+bodies: Map<&2, Lf.Body>, +origin: Map<&2, String>, +memo: Map<&2, String>, +deep: Bool, +allowed: Maybe<&2, Map<&2, Bool>>, +body: U32, +defs: Map<&2, Bool>, +reads: Map<&2, Map<&2, Bool>>}
+
+type SV2 is Data:
+  VL{+l: Lf.L}
+  VH{+h: String}
+
+type SK is Data:
+  SkTerm{+sub: Map<&2, Lf.L>, +t: Lf.L}
+  SkBody{+h: String, +sub: Map<&2, Lf.L>}
+  SkPair{+loc: Lc.Loc}
+  SkSetEnv{+loc: Lc.Loc}
+  SkLeft{+loc: Lc.Loc}
+  SkRight{+loc: Lc.Loc}
+  SkCheck{+loc: Lc.Loc, +o: Lc.Origin}
+  SkApp1{+sub: Map<&2, Lf.L>, +c: AC}
+  SkApp2{+c: AC, +o: Lf.L, +k: Lf.L}
+  SkPRef1{+sub: Map<&2, Lf.L>, +p: PR}
+  SkPRef2{+loc: Lc.Loc, +cloc: Lc.Loc, +k: Lf.L}
+  SkRef{+loc: Lc.Loc}
+  SkBodyEnd{+h: String, +key: String, +fi: U32, +outer: U32, +body: Lf.L}
+
+type SM is Data:
+  SmGo{+sp: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>}
+  SmEnd{+sp: SP, +vs: List<&2, SV2>}
+
+def v.l(v: SV2) -> Lf.L:
+  match v:
+    case VL{+l}:
+      l
+    case VH{+h}:
+      Lf.LZero{Lc.Unknown{}}
+
+def v.h(v: SV2) -> String:
+  match v:
+    case VH{+h}:
+      h
+    case VL{+l}:
+      ""
+
+def m.has(+m: Map<&2, Bool>, +k: String) -> Bool:
+  Pair.snd(Map<&2, Bool>, Bool, Map.has(&2, Bool, m, k))
+
+def allowed.has(m: Maybe<&2, Map<&2, Bool>>, +k: String) -> Bool:
+  match m:
+    case None{}:
+      True{}
+    case Some{+s}:
+      m.has(s, k)
+
+def origin.of(+origin: Map<&2, String>, +h: String) -> String:
+  Pair.snd(Map<&2, String>, String, Map.get(String, h, origin, h))
+
+def sk.key(+origin: Map<&2, String>, +c: String) -> String:
+  Bool.pick(String, String.eq(c, "-"), "-", origin.of(origin, c))
+
+def reads.add(+reads: Map<&2, Map<&2, Bool>>, +fi: U32, +key: String) -> Map<&2, Map<&2, Bool>>:
+  +k: String = fi.key(fi)
+  Map.set(&2, Map<&2, Bool>, reads, k, Map.set(&2, Bool, Pair.snd(Map<&2, Map<&2, Bool>>, Map<&2, Bool>, Map.get(Map<&2, Bool>, Map.new(&2, Bool), reads, k)), key, True{}))
+
+# An env occurrence the substitution holds a value for: noted in the
+# SpecInfo, substituted if its key may be.
+def st.occ.v(p: SP, +t: Lf.L, +v: Lf.L, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match p:
+    case SP{+bodies, +origin, +memo, +deep, +allowed, +body, +defs, +reads}:
+      +key: String = sk.key(origin, code.of(v))
+      +defs2: Map<&2, Bool> = Bool.pick(Map<&2, Bool>, String.eq(key, "-"), defs, Map.set(&2, Bool, defs, key, True{}))
+      +reads2: Map<&2, Map<&2, Bool>> = Bool.pick(Map<&2, Map<&2, Bool>>, U32.is_eq(body, 0), reads, reads.add(reads, (body - 1 : U32), key))
+      SmGo{SP{bodies, origin, memo, deep, allowed, body, defs2, reads2}, ks, VL{Bool.pick(Lf.L, allowed.has(allowed, key), v, t)} <> vs}
+
+def st.occ(m: Maybe<&2, Lf.L>, +p: SP, +t: Lf.L, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match m:
+    case None{}:
+      SmGo{p, ks, VL{t} <> vs}
+    case Some{+v}:
+      st.occ.v(p, t, v, ks, vs)
+
+# The plain case: every child specialized, in order.
+def st.plain(t: Lf.L, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match t:
+    case Lf.LPair{+loc, +a, +b}:
+      SmGo{p, SkTerm{sub, a} <> SkTerm{sub, b} <> SkPair{loc} <> ks, vs}
+    case Lf.LSetEnv{+loc, +x}:
+      SmGo{p, SkTerm{sub, x} <> SkSetEnv{loc} <> ks, vs}
+    case Lf.LLeft{+loc, +x}:
+      SmGo{p, SkTerm{sub, x} <> SkLeft{loc} <> ks, vs}
+    case Lf.LRight{+loc, +x}:
+      SmGo{p, SkTerm{sub, x} <> SkRight{loc} <> ks, vs}
+    case Lf.LCheck{+loc, +o, +tc, +c}:
+      SmGo{p, SkTerm{sub, tc} <> SkTerm{sub, c} <> SkCheck{loc, o} <> ks, vs}
+    case other:
+      SmGo{p, ks, VL{other} <> vs}
+
+def st.ref(t: Lf.L, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match t:
+    case Lf.LRef{+loc, +h}:
+      SmGo{p, SkBody{h, Map.new(&2, Lf.L)} <> SkRef{loc} <> ks, vs}
+    case other:
+      st.plain(other, sub, p, ks, vs)
+
+def st.pr(m: Maybe<&2, PR>, +t: Lf.L, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match m:
+    case Some{+r}:
+      match r:
+        case PR{+loc, +cloc, +code, +cap}:
+          SmGo{p, SkTerm{sub, cap} <> SkPRef1{sub, PR{loc, cloc, code, cap}} <> ks, vs}
+    case None{}:
+      st.ref(t, sub, p, ks, vs)
+
+def sp.bodies(p: SP) -> Map<&2, Lf.Body>:
+  match p:
+    case SP{+bodies, +origin, +memo, +deep, +allowed, +body, +defs, +reads}:
+      bodies
+
+def st.ac.at(tw: Bool, +c: AC, +t: Lf.L, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match tw:
+    case True{}:
+      match c:
+        case AC{+a1, +a2, +a3, +twv, +a4, +operand, +a5, +a6, +code, +cap}:
+          SmGo{p, SkTerm{sub, operand} <> SkTerm{sub, cap} <> SkApp1{sub, AC{a1, a2, a3, twv, a4, operand, a5, a6, code, cap}} <> ks, vs}
+    case False{}:
+      st.plain(t, sub, p, ks, vs)
+
+def ac.tw(c: AC) -> Lf.L:
+  match c:
+    case AC{+a1, +a2, +a3, +tw, +a4, +operand, +a5, +a6, +code, +cap}:
+      tw
+
+def st.ac(m: Maybe<&2, AC>, +t: Lf.L, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match m:
+    case Some{+c}:
+      st.ac.at(tw.ref(ac.tw(c), sp.bodies(p)), c, t, sub, p, ks, vs)
+    case None{}:
+      st.pr(pr.of(t), t, sub, p, ks, vs)
+
+def st.path(m: Maybe<&2, String>, +t: Lf.L, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match m:
+    case Some{+q}:
+      st.occ(subst.at(l.loc(t), sub, q), p, t, ks, vs)
+    case None{}:
+      st.ac(ac.of(t), t, sub, p, ks, vs)
+
+# specTerm, one step.
+def st.term(+t: Lf.L, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  st.path(path.of(t), t, sub, p, ks, vs)
+
+# specBody: the memo key is the hash and the substitution's text.
+def sub.text(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.L>>) -> String:
+  match kvs:
+    case Nil{}:
+      ""
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          "[" ++ k ++ "]" ++ Lf.show(v) ++ ";" ++ sub.text(rest)
+
+def sb.found(m: Maybe<&2, Lf.Body>, +p: SP, +h: String, +key: String, +sub: Map<&2, Lf.L>, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match m:
+    case None{}:
+      SmGo{p, ks, VH{h} <> vs}
+    case Some{+b}:
+      match b:
+        case Lf.Body{+fi, +body}:
+          match p:
+            case SP{+bodies, +origin, +memo, +deep, +allowed, +outer, +defs, +reads}:
+              SmGo{SP{bodies, origin, memo, deep, allowed, (fi + 1 : U32), defs, reads}, SkTerm{sub, body} <> SkBodyEnd{h, key, fi, outer, body} <> ks, vs}
+
+def sb.memo(m: Maybe<&2, String>, +p: SP, +h: String, +key: String, +sub: Map<&2, Lf.L>, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match m:
+    case Some{+h2}:
+      SmGo{p, ks, VH{h2} <> vs}
+    case None{}:
+      sb.found(Pair.snd(Map<&2, Lf.Body>, Maybe<&2, Lf.Body>, Map.pop(&2, Lf.Body, sp.bodies(p), h)), p, h, key, sub, ks, vs)
+
+def sp.memo(p: SP) -> Map<&2, String>:
+  match p:
+    case SP{+bodies, +origin, +memo, +deep, +allowed, +body, +defs, +reads}:
+      memo
+
+def st.body(+h: String, +sub: Map<&2, Lf.L>, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  +key: String = h ++ "#" ++ sub.text(Map.to_list(&2, Lf.L, sub))
+  sb.memo(Pair.snd(Map<&2, String>, Maybe<&2, String>, Map.pop(&2, String, sp.memo(p), key)), p, h, key, sub, ks, vs)
+
+def sb.end(p: SP, +h: String, +key: String, +fi: U32, +outer: U32, +body: Lf.L, +body2: Lf.L, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match p:
+    case SP{+bodies, +origin, +memo, +deep, +allowed, +cur, +defs, +reads}:
+      +text: String = Lf.show(body2)
+      +same: Bool = String.eq(text, Lf.show(body))
+      +h2: String = Bool.pick(String, same, h, Lf.hash(body2))
+      +bodies2: Map<&2, Lf.Body> = Bool.pick(Map<&2, Lf.Body>, same, bodies, Map.set(&2, Lf.Body, bodies, h2, Lf.Body{fi, body2}))
+      +origin2: Map<&2, String> = Bool.pick(Map<&2, String>, same, origin, Map.set(&2, String, origin, h2, origin.of(origin, h)))
+      SmGo{SP{bodies2, origin2, Map.set(&2, String, memo, key, h2), deep, allowed, outer, defs, reads}, ks, VH{h2} <> vs}
+
+def sp.deep(p: SP) -> Bool:
+  match p:
+    case SP{+bodies, +origin, +memo, +deep, +allowed, +body, +defs, +reads}:
+      deep
+
+# The second half of a Pair (DeferRef code) cap: specialize the code on
+# what the captures take from the substitution, if deep and not the
+# twiddle.
+def pref.k(keep: Bool, r: PR, +sub: Map<&2, Lf.L>, +k: Lf.L, +p: SP, +ks: List<&2, SK>, +vs: List<&2, SV2>) -> SM:
+  match keep:
+    case True{}:
+      match r:
+        case PR{+loc, +cloc, +code, +cap}:
+          SmGo{p, ks, VL{Lf.LPair{loc, Lf.LRef{cloc, code}, k}} <> vs}
+    case False{}:
+      match r:
+        case PR{+loc, +cloc, +code, +cap}:
+          SmGo{p, SkBody{code, Map.from_list(&2, Lf.L, sub.code(sub.pre(closed.parts(sub, cap), "R")))} <> SkPRef2{loc, cloc, k} <> ks, vs}
+
+def pr.code(r: PR) -> String:
+  match r:
+    case PR{+loc, +cloc, +code, +cap}:
+      code
+
+def sk.pref1(+sub: Map<&2, Lf.L>, +r: PR, +p: SP, +ks: List<&2, SK>, vs: List<&2, SV2>) -> SM:
+  match vs:
+    case Con{+vk, +rest}:
+      pref.k(Bool.or(Bool.not(sp.deep(p)), twiddle.of(sp.bodies(p), pr.code(r))), r, sub, v.l(vk), p, ks, rest)
+    case Nil{}:
+      SmGo{p, ks, []}
+
+# The second half of an applied closure: the code specialized on the
+# closed parts of its operand and captures.
+def app.sub.of(+sub: Map<&2, Lf.L>, +from: List<&2, Sigma<&2, &2, String, _ => Lf.L>>, +cap: Lf.L) -> Map<&2, Lf.L>:
+  Map.from_list(&2, Lf.L, sub.code(List.append(&2, Sigma<&2, &2, String, _ => Lf.L>, sub.pre(from, "L"), sub.pre(closed.parts(sub, cap), "R"))))
+
+def app.sub(+sub: Map<&2, Lf.L>, +o2: Lf.L, +operand: Lf.L, +cap: Lf.L) -> Map<&2, Lf.L>:
+  app.sub.of(sub, Bool.pick(List<&2, Sigma<&2, &2, String, _ => Lf.L>>, closed.term(o2), [("", o2)], closed.parts(sub, operand)), cap)
+
+def sk.app1(+sub: Map<&2, Lf.L>, c: AC, +p: SP, +ks: List<&2, SK>, vs: List<&2, SV2>) -> SM:
+  match c:
+    case AC{+a1, +a2, +a3, +tw, +a4, +operand, +a5, +a6, +code, +cap}:
+      match vs:
+        case Con{+vk, +r1}:
+          match r1:
+            case Con{+vo, +r2}:
+              SmGo{p, SkBody{code, app.sub(sub, v.l(vo), operand, cap)} <> SkApp2{AC{a1, a2, a3, tw, a4, operand, a5, a6, code, cap}, v.l(vo), v.l(vk)} <> ks, r2}
+            case Nil{}:
+              SmGo{p, ks, []}
+        case Nil{}:
+          SmGo{p, ks, []}
+
+# A finished value, put together from the values below it.
+def sk.one(k: SK, +p: SP, +ks: List<&2, SK>, vs: List<&2, SV2>) -> SM:
+  match k:
+    case SkTerm{+sub, +t}:
+      st.term(t, sub, p, ks, vs)
+    case SkBody{+h, +sub}:
+      st.body(h, sub, p, ks, vs)
+    case SkPair{+loc}:
+      match vs:
+        case Con{+vb, +r1}:
+          match r1:
+            case Con{+va, +r2}:
+              SmGo{p, ks, VL{Lf.LPair{loc, v.l(va), v.l(vb)}} <> r2}
+            case Nil{}:
+              SmGo{p, ks, []}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkSetEnv{+loc}:
+      match vs:
+        case Con{+vx, +r1}:
+          SmGo{p, ks, VL{Lf.LSetEnv{loc, v.l(vx)}} <> r1}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkLeft{+loc}:
+      match vs:
+        case Con{+vx, +r1}:
+          SmGo{p, ks, VL{Lf.LLeft{loc, v.l(vx)}} <> r1}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkRight{+loc}:
+      match vs:
+        case Con{+vx, +r1}:
+          SmGo{p, ks, VL{Lf.LRight{loc, v.l(vx)}} <> r1}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkCheck{+loc, +o}:
+      match vs:
+        case Con{+vc, +r1}:
+          match r1:
+            case Con{+vt, +r2}:
+              SmGo{p, ks, VL{Lf.LCheck{loc, o, v.l(vt), v.l(vc)}} <> r2}
+            case Nil{}:
+              SmGo{p, ks, []}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkApp1{+sub, +c}:
+      sk.app1(sub, c, p, ks, vs)
+    case SkApp2{+c, +o, +kk}:
+      match vs:
+        case Con{+vh, +r1}:
+          SmGo{p, ks, VL{ac.rebuild(c, o, v.h(vh), kk)} <> r1}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkPRef1{+sub, +r}:
+      sk.pref1(sub, r, p, ks, vs)
+    case SkPRef2{+loc, +cloc, +kk}:
+      match vs:
+        case Con{+vh, +r1}:
+          SmGo{p, ks, VL{Lf.LPair{loc, Lf.LRef{cloc, v.h(vh)}, kk}} <> r1}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkRef{+loc}:
+      match vs:
+        case Con{+vh, +r1}:
+          SmGo{p, ks, VL{Lf.LRef{loc, v.h(vh)}} <> r1}
+        case Nil{}:
+          SmGo{p, ks, []}
+    case SkBodyEnd{+h, +key, +fi, +outer, +body}:
+      match vs:
+        case Con{+vb, +r1}:
+          sb.end(p, h, key, fi, outer, body, v.l(vb), ks, r1)
+        case Nil{}:
+          SmGo{p, ks, []}
+
+def sm.step(ks: List<&2, SK>, +p: SP, +vs: List<&2, SV2>) -> SM:
+  match ks:
+    case Nil{}:
+      SmEnd{p, vs}
+    case Con{+k, +rest}:
+      sk.one(k, p, rest, vs)
+
+def sm.loop(fuel: Nat, m: SM) -> SM:
+  match fuel:
+    case 0n:
+      m
+    case 1n+f:
+      match m:
+        case SmGo{+p, +ks, +vs}:
+          sm.loop(f, sm.step(ks, p, vs))
+        case SmEnd{+p, +vs}:
+          SmEnd{p, vs}
+
+# specializeLets: the bodies (grown), the origins, main specialized, and
+# the SpecInfo (every definition met, and per body what it reads).
+type SR is Data:
+  SR{+bodies: Map<&2, Lf.Body>, +origin: Map<&2, String>, +main: Lf.L, +defs: Map<&2, Bool>, +reads: Map<&2, Map<&2, Bool>>}
+
+def sr.of(m: SM) -> SR:
+  match m:
+    case SmEnd{+p, +vs}:
+      match p:
+        case SP{+bodies, +origin, +memo, +deep, +allowed, +body, +defs, +reads}:
+          match vs:
+            case Con{+v, +rest}:
+              SR{bodies, origin, v.l(v), defs, reads}
+            case Nil{}:
+              SR{bodies, origin, Lf.LZero{Lc.Unknown{}}, defs, reads}
+    case SmGo{+p, +ks, +vs}:
+      SR{sp.bodies(p), Map.new(&2, String), Lf.LZero{Lc.Unknown{}}, Map.new(&2, Bool), Map.new(&2, Map<&2, Bool>)}
+
+def specialize(+allowed: Maybe<&2, Map<&2, Bool>>, +deep: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L) -> SR:
+  sr.of(sm.loop(big(), SmGo{SP{bodies, Map.new(&2, String), Map.new(&2, String), deep, allowed, 0, Map.new(&2, Bool), Map.new(&2, Map<&2, Bool>)}, [SkTerm{Map.new(&2, Lf.L), main}], []}))

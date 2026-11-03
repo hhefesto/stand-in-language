@@ -1,0 +1,698 @@
+
+# Searches over types
+# -------------------
+
+def is.pair(+t: U32) -> Bool:
+  U32.is_eq((t .&. 7 : U32), 4)
+
+type OcN is Type:
+  OcGo{s: S, +i: U32, ts: List<&2, U32>}
+  OcHit{s: S}
+  OcNo{s: S}
+
+def oc.var(hit: Bool, s: S, +i: U32, rest: List<&2, U32>) -> OcN:
+  match hit:
+    case True{}:
+      OcHit{s}
+    case False{}:
+      OcGo{s, i, rest}
+
+def oc.pair(ps: PS, s: S, +i: U32, rest: List<&2, U32>) -> OcN:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              OcGo{s, i, at <> (bt <> rest)}
+
+def oc.k(k: K, s: S, +i: U32, +w: U32, rest: List<&2, U32>) -> OcN:
+  match k:
+    case KVar{}:
+      oc.var(U32.is_eq(ty.of(w), i), s, i, rest)
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, w)
+      oc.pair(ps, s, i, rest)
+    case other:
+      OcGo{s, i, rest}
+
+def oc.step(ts: List<&2, U32>, s: S, +i: U32) -> OcN:
+  match ts:
+    case Nil{}:
+      OcNo{s}
+    case Con{+t, rest}:
+      (s: S, +w: U32) <- walk(s, t)
+      oc.k(kind(w), s, i, w, rest)
+
+def oc.fin(n: OcN) -> S & Bool:
+  match n:
+    case OcGo{s, i, ts}:
+      (s, False{})
+    case OcHit{s}:
+      (s, True{})
+    case OcNo{s}:
+      (s, False{})
+
+def oc.loop(fuel: Nat, n: OcN) -> S & Bool:
+  match fuel:
+    case 0n:
+      oc.fin(n)
+    case 1n+f:
+      match n:
+        case OcGo{s, +i, ts}:
+          oc.loop(f, oc.step(ts, s, i))
+        case OcHit{s}:
+          (s, True{})
+        case OcNo{s}:
+          (s, False{})
+
+# occurs
+def occurs(s: S, +i: U32, +t: U32) -> S & Bool:
+  oc.loop(big(), oc.step([t], s, i))
+
+type ExN is Type:
+  ExGo{s: S, ts: List<&2, U32>, acc: List<&2, U32>}
+  ExDone{s: S, acc: List<&2, U32>}
+
+def ex.pair(ps: PS, s: S, rest: List<&2, U32>, acc: List<&2, U32>) -> ExN:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              ExGo{s, at <> (bt <> rest), acc}
+
+def ex.k(k: K, s: S, +w: U32, rest: List<&2, U32>, acc: List<&2, U32>) -> ExN:
+  match k:
+    case KCode{}:
+      ExGo{s, rest, ty.of(w) <> acc}
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, w)
+      ex.pair(ps, s, rest, acc)
+    case other:
+      ExGo{s, rest, acc}
+
+def ex.step(ts: List<&2, U32>, s: S, acc: List<&2, U32>) -> ExN:
+  match ts:
+    case Nil{}:
+      ExDone{s, List.reverse(&2, U32, acc)}
+    case Con{+t, rest}:
+      (s: S, +w: U32) <- walk(s, t)
+      ex.k(kind(w), s, w, rest, acc)
+
+def ex.fin(n: ExN) -> S & List<&2, U32>:
+  match n:
+    case ExGo{s, ts, acc}:
+      (s, List.reverse(&2, U32, acc))
+    case ExDone{s, acc}:
+      (s, acc)
+
+def ex.loop(fuel: Nat, n: ExN) -> S & List<&2, U32>:
+  match fuel:
+    case 0n:
+      ex.fin(n)
+    case 1n+f:
+      match n:
+        case ExGo{s, ts, acc}:
+          ex.loop(f, ex.step(ts, s, acc))
+        case ExDone{s, acc}:
+          (s, acc)
+
+# exposedClasses: the code classes a type exposes through pairs, in order.
+def exposed(s: S, +t: U32) -> S & List<&2, U32>:
+  ex.loop(big(), ex.step([t], s, []))
+
+# selfReferential
+# ---------------
+
+type SrI is Data:
+  SrTy{+vis: List<&2, U32>, +path: List<&2, U32>, +t: U32}
+  SrArg{+vis: List<&2, U32>, +path: List<&2, U32>, +t: U32}
+
+type SrN is Type:
+  SrGo{s: S, +r0: U32, st: List<&2, SrI>}
+  SrFound{s: S, +path: List<&2, U32>}
+  SrNo{s: S}
+
+def sr.if(+tag: U32, ifc: Maybe<&2, If>, +vis: List<&2, U32>, +path: List<&2, U32>, rest: List<&2, SrI>) -> List<&2, SrI>:
+  match ifc:
+    case Some{x}:
+      match x:
+        case If{env, res, doors}:
+          match env:
+            case Sg{eb, +et}:
+              match res:
+                case Sg{rb, +rt}:
+                  SrArg{vis, tag <> path, et} <> (SrTy{vis, tag <> path, rt} <> rest)
+    case None{}:
+      rest
+
+# A class's starts: per tag with an interface, its argument and its result.
+def sr.expand(es: List<&2, TE>, +vis: List<&2, U32>, +path: List<&2, U32>) -> List<&2, SrI>:
+  match es:
+    case Nil{}:
+      []
+    case Con{e, rest}:
+      match e:
+        case TE{+tag, cap, ifc}:
+          sr.if(tag, ifc, vis, path, sr.expand(rest, vis, path))
+
+# classIfaces
+def sr.class(s: S, +r0: U32, +r: U32, +vis: List<&2, U32>, +path: List<&2, U32>, rest: List<&2, SrI>) -> SrN:
+  (s: S, es: List<&2, TE>) <- captures.of(s, r)
+  SrGo{s, r0, List.append(&2, SrI, sr.expand(es, r <> vis, path), rest)}
+
+def sr.code(hit: Bool, seen: Bool, s: S, +r0: U32, +r: U32, +vis: List<&2, U32>, +path: List<&2, U32>, rest: List<&2, SrI>) -> SrN:
+  match hit:
+    case True{}:
+      SrFound{s, List.reverse(&2, U32, path)}
+    case False{}:
+      match seen:
+        case True{}:
+          SrGo{s, r0, rest}
+        case False{}:
+          sr.class(s, r0, r, vis, path, rest)
+
+def sr.pair(ps: PS, s: S, +r0: U32, +vis: List<&2, U32>, +path: List<&2, U32>, rest: List<&2, SrI>) -> SrN:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              SrGo{s, r0, SrTy{vis, path, at} <> (SrTy{vis, path, bt} <> rest)}
+
+def sr.ty(k: K, s: S, +r0: U32, +vis: List<&2, U32>, +path: List<&2, U32>, +w: U32, rest: List<&2, SrI>) -> SrN:
+  match k:
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, w)
+      sr.pair(ps, s, r0, vis, path, rest)
+    case KCode{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(w))
+      sr.code(U32.is_eq(r, r0), u.has(vis, r), s, r0, r, vis, path, rest)
+    case other:
+      SrGo{s, r0, rest}
+
+def sr.argp(ps: PS, s: S, +r0: U32, +vis: List<&2, U32>, +path: List<&2, U32>, rest: List<&2, SrI>) -> SrN:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          SrGo{s, r0, SrTy{vis, path, at} <> rest}
+
+# argumentOf: an env's argument half; data or unresolved holds nothing.
+def sr.arg(pair: Bool, s: S, +r0: U32, +vis: List<&2, U32>, +path: List<&2, U32>, +w: U32, rest: List<&2, SrI>) -> SrN:
+  match pair:
+    case True{}:
+      (s: S, ps: PS) <- pair.get(s, w)
+      sr.argp(ps, s, r0, vis, path, rest)
+    case False{}:
+      SrGo{s, r0, rest}
+
+def sr.step(st: List<&2, SrI>, s: S, +r0: U32) -> SrN:
+  match st:
+    case Nil{}:
+      SrNo{s}
+    case Con{it, rest}:
+      match it:
+        case SrTy{+vis, +path, +t}:
+          (s: S, +w: U32) <- walk(s, t)
+          sr.ty(kind(w), s, r0, vis, path, w, rest)
+        case SrArg{+vis, +path, +t}:
+          (s: S, +w: U32) <- walk(s, t)
+          sr.arg(is.pair(w), s, r0, vis, path, w, rest)
+
+def sr.fin(n: SrN) -> S & Maybe<&2, List<&2, U32>>:
+  match n:
+    case SrGo{s, r0, st}:
+      (s, None{})
+    case SrFound{s, path}:
+      (s, Some{path})
+    case SrNo{s}:
+      (s, None{})
+
+def sr.loop(fuel: Nat, n: SrN) -> S & Maybe<&2, List<&2, U32>>:
+  match fuel:
+    case 0n:
+      sr.fin(n)
+    case 1n+f:
+      match n:
+        case SrGo{s, +r0, st}:
+          sr.loop(f, sr.step(st, s, r0))
+        case SrFound{s, path}:
+          (s, Some{path})
+        case SrNo{s}:
+          (s, None{})
+
+# selfReferential: the cycle, as the tags whose interfaces it threads.
+def sr.run(s: S, +r0: U32) -> S & Maybe<&2, List<&2, U32>>:
+  sr.loop(big(), sr.class(s, r0, r0, [], [], []))
+
+def tag.name.code(r: S & Bd) -> S & String:
+  (s, b) = r
+  (s, Co.fi.show(bd.fi(b)))
+
+def tag.name.at(gate: Bool, gatefn: Bool, s: S, +tag: U32) -> S & String:
+  match gate:
+    case True{}:
+      (s, "TGate")
+    case False{}:
+      match gatefn:
+        case True{}:
+          (s, "TGateFn")
+        case False{}:
+          tag.name.code(bd.of(s, tag))
+
+def tag.name.acc(s: S, acc: List<&2, String>, +x: U32) -> S & List<&2, String>:
+  (s: S, +a: String) <- tag.name.at(U32.is_eq(x, tag.gate()), U32.is_eq(x, tag.gatefn()), s, x)
+  (s, a <> acc)
+
+def tag.names(xs: List<&2, U32>, r: S & List<&2, String>) -> S & List<&2, String>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, acc) = r
+      tag.names(rest, tag.name.acc(s, acc, x))
+
+# The unifier
+# -----------
+
+# A job of the unifier's work list: unify two sigmas or types (with the
+# capture classes visited and the dispatch's tag, none() outside one),
+# unify two records of one tag, merge two lists of bangs, or reject a
+# class that is its own interface's.
+type W is Data:
+  WSig{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: Sg, +b: Sg}
+  WTau{+vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32}
+  WInfo{+loc: Lc.Loc, +a: TE, +b: TE}
+  WBangs{+xs: List<&2, U32>, +ys: List<&2, U32>}
+  WSelf{+loc: Lc.Loc, +c: U32}
+
+type UN is Type:
+  UnGo{s: S, js: List<&2, W>}
+  UnDone{s: S}
+
+def te.tag(e: TE) -> U32:
+  match e:
+    case TE{+tag, cap, ifc}:
+      tag
+
+def te.head.is(es: List<&2, TE>, +tag: U32) -> Bool:
+  match es:
+    case Nil{}:
+      False{}
+    case Con{e, rest}:
+      U32.is_eq(te.tag(e), tag)
+
+def te.find.go(es: List<&2, TE>, +tag: U32, hit: Bool) -> Maybe<&2, TE>:
+  match es:
+    case Nil{}:
+      None{}
+    case Con{+e, +rest}:
+      match hit:
+        case True{}:
+          Some{e}
+        case False{}:
+          te.find.go(rest, tag, te.head.is(rest, tag))
+
+# Map.lookup on a class's tags.
+def te.find(+es: List<&2, TE>, +tag: U32) -> Maybe<&2, TE>:
+  te.find.go(es, tag, te.head.is(es, tag))
+
+def te.heads(xs: List<&2, TE>, ys: List<&2, TE>) -> Cmp:
+  match xs:
+    case Nil{}:
+      GT{}
+    case Con{x, xr}:
+      match ys:
+        case Nil{}:
+          LT{}
+        case Con{y, yr}:
+          U32.cmp(te.tag(x), te.tag(y))
+
+# mergeTagInfo: the gaps of one record filled from the other.
+def te.merge(a: TE, b: TE) -> TE:
+  match a:
+    case TE{+tag, ca, ia}:
+      match b:
+        case TE{tb, cb, ib}:
+          TE{tag, Maybe.or(&2, Sg, ca, cb), Maybe.or(&2, If, ia, ib)}
+
+# Map.unionWith mergeTagInfo
+def te.union.go(fuel: Nat, +xs: List<&2, TE>, +ys: List<&2, TE>, c: Cmp) -> List<&2, TE>:
+  match fuel:
+    case 0n:
+      []
+    case 1n+f:
+      match xs:
+        case Nil{}:
+          ys
+        case Con{+x, +xr}:
+          match ys:
+            case Nil{}:
+              Con{x, xr}
+            case Con{+y, +yr}:
+              match c:
+                case LT{}:
+                  x <> te.union.go(f, xr, Con{y, yr}, te.heads(xr, Con{y, yr}))
+                case GT{}:
+                  y <> te.union.go(f, Con{x, xr}, yr, te.heads(Con{x, xr}, yr))
+                case EQ{}:
+                  te.merge(x, y) <> te.union.go(f, xr, yr, te.heads(xr, yr))
+
+def te.union(+xs: List<&2, TE>, +ys: List<&2, TE>) -> List<&2, TE>:
+  te.union.go(big(), xs, ys, te.heads(xs, ys))
+
+def te.pend.at(m: Maybe<&2, TE>, +loc: Lc.Loc, +x: TE, rest: List<&2, W>) -> List<&2, W>:
+  match m:
+    case Some{y}:
+      WInfo{loc, x, y} <> rest
+    case None{}:
+      rest
+
+# The records of the tags on both sides, in the first's order.
+def te.pending(xs: List<&2, TE>, +ys: List<&2, TE>, +loc: Lc.Loc, +tail: List<&2, W>) -> List<&2, W>:
+  match xs:
+    case Nil{}:
+      tail
+    case Con{+x, rest}:
+      te.pend.at(te.find(ys, te.tag(x)), loc, x, te.pending(rest, ys, loc, tail))
+
+# unionTags
+def ut.at(same: Bool, s: S, +loc: Lc.Loc, +ra: U32, +rb: U32, rest: List<&2, W>) -> UN:
+  match same:
+    case True{}:
+      UnGo{s, rest}
+    case False{}:
+      (s: S, +ma: List<&2, TE>) <- s.ts(s, ra)
+      (s: S, +mb: List<&2, TE>) <- s.ts(s, rb)
+      s2 = s.ts.set(s.ts.set(s.tp.set(s, ra, (rb + 1 : U32)), rb, te.union(ma, mb)), ra, [])
+      UnGo{s2, te.pending(ma, mb, loc, WSelf{loc, rb} <> rest)}
+
+def ut(s: S, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  (s: S, +ra: U32) <- find.t(s, a)
+  (s: S, +rb: U32) <- find.t(s, b)
+  ut.at(U32.is_eq(ra, rb), s, loc, ra, rb, rest)
+
+# The capture jobs of every capture a package holds, in tag order.
+def rc.all(es: List<&2, TE>, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> List<&2, W>:
+  match es:
+    case Nil{}:
+      rest
+    case Con{e, er}:
+      match e:
+        case TE{tag, cap, ifc}:
+          match cap:
+            case Some{c}:
+              match c:
+                case Sg{cb, +ct}:
+                  WTau{vis, mode, loc, ct, t} <> rc.all(er, vis, mode, loc, t, rest)
+            case None{}:
+              rc.all(er, vis, mode, loc, t, rest)
+
+def rc.sel(m: Maybe<&2, TE>, +es: List<&2, TE>, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +t: U32, rest: List<&2, W>) -> List<&2, W>:
+  match m:
+    case Some{e}:
+      match e:
+        case TE{tag, cap, ifc}:
+          match cap:
+            case Some{c}:
+              match c:
+                case Sg{cb, +ct}:
+                  WTau{vis, mode, loc, ct, t} <> rest
+            case None{}:
+              rc.all(es, vis, mode, loc, t, rest)
+    case None{}:
+      rc.all(es, vis, mode, loc, t, rest)
+
+def rc.at(seen: Bool, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +r: U32, +t: U32, rest: List<&2, W>) -> UN:
+  match seen:
+    case True{}:
+      UnGo{s, rest}
+    case False{}:
+      (s: S, +es: List<&2, TE>) <- s.ts(s, r)
+      UnGo{s, rc.sel(te.find(es, mode), es, r <> vis, mode, loc, t, rest)}
+
+# resolveCapT
+def rc(s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> UN:
+  (s: S, +r: U32) <- find.t(s, i)
+  rc.at(u.has(vis, r), s, vis, mode, loc, r, t, rest)
+
+def self.jobs(cs: List<&2, U32>, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
+  match cs:
+    case Nil{}:
+      rest
+    case Con{+c, cr}:
+      WSelf{loc, c} <> self.jobs(cr, loc, rest)
+
+def bind.at(cyclic: Bool, s: S, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> UN:
+  match cyclic:
+    case True{}:
+      UnGo{s.tb.set(s, i, ty.data()), WTau{[], none(), loc, t, ty.data()} <> rest}
+    case False{}:
+      (s: S, cs: List<&2, U32>) <- exposed(s.tb.set(s, i, t), t)
+      UnGo{s, self.jobs(cs, loc, rest)}
+
+# bindTVar
+def bind(s: S, +loc: Lc.Loc, +i: U32, +t: U32, rest: List<&2, W>) -> UN:
+  (s: S, +cyc: Bool) <- occurs(s, i, t)
+  bind.at(cyc, s, loc, i, t, rest)
+
+def mode.show.at(nothing: Bool, s: S, +mode: U32) -> S & String:
+  match nothing:
+    case True{}:
+      (s, "Nothing")
+    case False{}:
+      (s: S, +t: String) <- tag.show(s, mode)
+      (s, "Just " ++ Bool.pick(String, U32.is_lt(mode, tag.gate()), "(" ++ t ++ ")", t))
+
+# The mismatch error.
+def un.bad(s: S, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32) -> UN:
+  (s: S, +da: String) <- ds.five(s, a)
+  (s: S, +db: String) <- ds.five(s, b)
+  (s: S, +ms: String) <- mode.show.at(U32.is_eq(mode, none()), s, mode)
+  UnDone{fail(s, TypeMismatch{loc, describe(a) ++ " vs " ++ describe(b) ++ " [mode " ++ ms ++ "; " ++ da ++ " ||| " ++ db ++ "]"})}
+
+def un.collapse(ps: PS, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, rest: List<&2, W>) -> UN:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              UnGo{s, WTau{vis, mode, loc, at, ty.data()} <> (WTau{vis, mode, loc, bt, ty.data()} <> rest)}
+
+def un.pairs(pa: PS, pb: PS, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, rest: List<&2, W>) -> UN:
+  match pa:
+    case PS{a1, a2}:
+      match pb:
+        case PS{b1, b2}:
+          UnGo{s, WSig{vis, mode, loc, a1, b1} <> (WSig{vis, mode, loc, a2, b2} <> rest)}
+
+def un.var.l(kb: K, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  match kb:
+    case KAbort{}:
+      UnGo{s, rest}
+    case KVar{}:
+      un.var.same(U32.is_eq(a, b), s, loc, a, b, rest)
+    case other:
+      bind(s, loc, ty.of(a), b, rest)
+
+def un.var.same(same: Bool, s: S, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  match same:
+    case True{}:
+      UnGo{s, rest}
+    case False{}:
+      bind(s, loc, ty.of(a), b, rest)
+
+def un.data.l(kb: K, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  match kb:
+    case KAbort{}:
+      UnGo{s, rest}
+    case KVar{}:
+      bind(s, loc, ty.of(b), a, rest)
+    case KData{}:
+      UnGo{s, rest}
+    case KCap{}:
+      rc(s, vis, mode, loc, ty.of(b), a, rest)
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, b)
+      un.collapse(ps, s, vis, mode, loc, rest)
+    case KCode{}:
+      un.bad(s, mode, loc, a, b)
+
+def un.code.l(kb: K, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  match kb:
+    case KAbort{}:
+      UnGo{s, rest}
+    case KVar{}:
+      bind(s, loc, ty.of(b), a, rest)
+    case KCode{}:
+      ut(s, loc, ty.of(a), ty.of(b), rest)
+    case KCap{}:
+      rc(s, vis, mode, loc, ty.of(b), a, rest)
+    case other:
+      un.bad(s, mode, loc, a, b)
+
+def un.cap.l(kb: K, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  match kb:
+    case KAbort{}:
+      UnGo{s, rest}
+    case KVar{}:
+      bind(s, loc, ty.of(b), a, rest)
+    case KCap{}:
+      ut(s, loc, ty.of(a), ty.of(b), rest)
+    case other:
+      rc(s, vis, mode, loc, ty.of(a), b, rest)
+
+def un.pair.l(kb: K, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  match kb:
+    case KAbort{}:
+      UnGo{s, rest}
+    case KVar{}:
+      bind(s, loc, ty.of(b), a, rest)
+    case KPair{}:
+      (s: S, pa: PS) <- pair.get(s, a)
+      (s: S, pb: PS) <- pair.get(s, b)
+      un.pairs(pa, pb, s, vis, mode, loc, rest)
+    case KData{}:
+      (s: S, ps: PS) <- pair.get(s, a)
+      un.collapse(ps, s, vis, mode, loc, rest)
+    case KCap{}:
+      rc(s, vis, mode, loc, ty.of(b), a, rest)
+    case KCode{}:
+      un.bad(s, mode, loc, a, b)
+
+# unifyTauAt, on two walked types.
+def un.tau(ka: K, kb: K, s: S, +vis: List<&2, U32>, +mode: U32, +loc: Lc.Loc, +a: U32, +b: U32, rest: List<&2, W>) -> UN:
+  match ka:
+    case KAbort{}:
+      UnGo{s, rest}
+    case KVar{}:
+      un.var.l(kb, s, vis, mode, loc, a, b, rest)
+    case KData{}:
+      un.data.l(kb, s, vis, mode, loc, a, b, rest)
+    case KCode{}:
+      un.code.l(kb, s, vis, mode, loc, a, b, rest)
+    case KCap{}:
+      un.cap.l(kb, s, vis, mode, loc, a, b, rest)
+    case KPair{}:
+      un.pair.l(kb, s, vis, mode, loc, a, b, rest)
+
+def info.cap(ca: Maybe<&2, Sg>, cb: Maybe<&2, Sg>, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
+  match ca:
+    case Some{x}:
+      match cb:
+        case Some{y}:
+          WSig{[], none(), loc, x, y} <> rest
+        case None{}:
+          rest
+    case None{}:
+      rest
+
+def info.if(ia: Maybe<&2, If>, ib: Maybe<&2, If>, +loc: Lc.Loc, rest: List<&2, W>) -> List<&2, W>:
+  match ia:
+    case Some{x}:
+      match x:
+        case If{ea, ra, da}:
+          match ib:
+            case Some{y}:
+              match y:
+                case If{eb, rb, db}:
+                  WSig{[], none(), loc, ea, eb} <> (WSig{[], none(), loc, ra, rb} <> (WBangs{da, db} <> rest))
+            case None{}:
+              rest
+    case None{}:
+      rest
+
+# unifyTagInfo: captures, then interfaces (env, result, doors).
+def un.info(a: TE, b: TE, s: S, +loc: Lc.Loc, rest: List<&2, W>) -> UN:
+  match a:
+    case TE{ta, ca, ia}:
+      match b:
+        case TE{tb, cb, ib}:
+          UnGo{s, info.cap(ca, cb, loc, info.if(ia, ib, loc, rest))}
+
+def un.self(m: Maybe<&2, List<&2, U32>>, s: S, +loc: Lc.Loc, rest: List<&2, W>) -> UN:
+  match m:
+    case None{}:
+      UnGo{s, rest}
+    case Some{path}:
+      (s: S, names: List<&2, String>) <- tag.names(path, (s, []))
+      UnDone{fail(s, TypeMismatch{loc, "self-application: a function is applied to a value that contains the"
+        ++ " function itself, so its argument would have to contain its own interface (cycle through "
+        ++ String.join(List.reverse(&2, String, names), " ") ++ ")"})}
+
+def un.job(j: W, s: S, rest: List<&2, W>) -> UN:
+  match j:
+    case WSig{+vis, +mode, +loc, a, b}:
+      match a:
+        case Sg{+ab, +at}:
+          match b:
+            case Sg{+bb, +bt}:
+              UnGo{union.b(s, ab, bb), WTau{vis, mode, loc, at, bt} <> rest}
+    case WTau{+vis, +mode, +loc, +a, +b}:
+      (s: S, +wa: U32) <- walk(s, a)
+      (s: S, +wb: U32) <- walk(s, b)
+      un.tau(kind(wa), kind(wb), s, vis, mode, loc, wa, wb, rest)
+    case WInfo{+loc, a, b}:
+      un.info(a, b, s, loc, rest)
+    case WBangs{xs, ys}:
+      UnGo{union.bs(xs, ys, s), rest}
+    case WSelf{+loc, +c}:
+      (s: S, m: Maybe<&2, List<&2, U32>>) <- sr.run(s, c)
+      un.self(m, s, loc, rest)
+
+def un.step.at(bad: Bool, s: S, js: List<&2, W>) -> UN:
+  match bad:
+    case True{}:
+      UnDone{s}
+    case False{}:
+      match js:
+        case Nil{}:
+          UnDone{s}
+        case Con{j, rest}:
+          un.job(j, s, rest)
+
+def un.step(s: S, js: List<&2, W>) -> UN:
+  (s: S, +bad: Bool) <- failed(s)
+  un.step.at(bad, s, js)
+
+def un.fin(n: UN) -> S:
+  match n:
+    case UnGo{s, js}:
+      fail(s, Internal{"the unifier ran out of fuel"})
+    case UnDone{s}:
+      s
+
+def un.loop(fuel: Nat, n: UN) -> S:
+  match fuel:
+    case 0n:
+      un.fin(n)
+    case 1n+f:
+      match n:
+        case UnGo{s, js}:
+          un.loop(f, un.step(s, js))
+        case UnDone{s}:
+          s
+
+def un.run(s: S, js: List<&2, W>) -> S:
+  un.loop(big(), un.step(s, js))
+
+# unifySigmaAt with a dispatch's tag (none() for none).
+def unify.sig.at(s: S, +mode: U32, +loc: Lc.Loc, +a: Sg, +b: Sg) -> S:
+  un.run(s, [WSig{[], mode, loc, a, b}])
+
+# unifySigma
+def unify.sig(s: S, +loc: Lc.Loc, +a: Sg, +b: Sg) -> S:
+  un.run(s, [WSig{[], none(), loc, a, b}])
+
+# unifyTau
+def unify.tau(s: S, +loc: Lc.Loc, +a: U32, +b: U32) -> S:
+  un.run(s, [WTau{[], none(), loc, a, b}])
+
+# unifyTagInfo
+def unify.info(s: S, +loc: Lc.Loc, +a: TE, +b: TE) -> S:
+  un.run(s, [WInfo{loc, a, b}])

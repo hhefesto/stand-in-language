@@ -1,0 +1,395 @@
+
+# Env usage (envUsageL, contractionSites)
+# ---------
+
+# An env use: its path (innermost projection first), count, first place.
+type Use is Data:
+  Use{+path: List<&2, U32>, +n: U32, +loc: Lc.Loc}
+
+type Site is Data:
+  Site{+path: List<&2, U32>, +loc: Lc.Loc}
+
+def use.path(u: Use) -> List<&2, U32>:
+  match u:
+    case Use{+path, n, loc}:
+      path
+
+def us.bump(u: Use) -> Use:
+  match u:
+    case Use{+up, +un, +ul}:
+      Use{up, (un + 1 : U32), ul}
+
+def us.cmp(+p: List<&2, U32>, xs: List<&2, Use>) -> Cmp:
+  match xs:
+    case Nil{}:
+      LT{}
+    case Con{u, rest}:
+      steps.cmp(p, use.path(u))
+
+# One more use at a path (the first use's place stays).
+def us.add(xs: List<&2, Use>, +p: List<&2, U32>, +loc: Lc.Loc, c: Cmp) -> List<&2, Use>:
+  match xs:
+    case Nil{}:
+      [Use{p, 1, loc}]
+    case Con{+u, +rest}:
+      match c:
+        case LT{}:
+          Use{p, 1, loc} <> Con{u, rest}
+        case EQ{}:
+          us.bump(u) <> rest
+        case GT{}:
+          u <> us.add(rest, p, loc, us.cmp(p, rest))
+
+def use.at(+p: List<&2, U32>, +loc: Lc.Loc, +acc: List<&2, Use>) -> List<&2, Use>:
+  us.add(acc, p, loc, us.cmp(p, acc))
+
+# envUsageL: the body's env uses by projection path. A reference is closed;
+# an abort's message is not counted.
+def usage(t: A, +proj: List<&2, U32>, +acc: List<&2, Use>) -> List<&2, Use>:
+  match t:
+    case ALeft{loc, x}:
+      usage(x, 0 <> proj, acc)
+    case ARight{loc, x}:
+      usage(x, 1 <> proj, acc)
+    case AEnv{+loc}:
+      use.at(proj, loc, acc)
+    case AUns{+loc}:
+      use.at(proj, loc, acc)
+    case ACheck{loc, c}:
+      usage(c, proj, acc)
+    case APair{loc, a, b}:
+      usage(b, [], usage(a, [], acc))
+    case ASetEnv{loc, x}:
+      usage(x, [], acc)
+    case other:
+      acc
+
+def sub.used(us: List<&2, Use>, +p: List<&2, U32>) -> Bool:
+  match us:
+    case Nil{}:
+      False{}
+    case Con{u, rest}:
+      match u:
+        case Use{+q, n, loc}:
+          Bool.or(Bool.and(steps.prefix(p, q), Bool.not(steps.eq(p, q))), sub.used(rest, p))
+
+def steps.eq(+p: List<&2, U32>, +q: List<&2, U32>) -> Bool:
+  steps.eq.at(steps.cmp(p, q))
+
+def steps.eq.at(c: Cmp) -> Bool:
+  match c:
+    case EQ{}:
+      True{}
+    case other:
+      False{}
+
+def site.at(bad: Bool, +p: List<&2, U32>, +loc: Lc.Loc, rest: List<&2, Site>) -> List<&2, Site>:
+  match bad:
+    case True{}:
+      Site{p, loc} <> rest
+    case False{}:
+      rest
+
+# contractionSites
+def sites(us: List<&2, Use>, +all: List<&2, Use>) -> List<&2, Site>:
+  match us:
+    case Nil{}:
+      []
+    case Con{u, rest}:
+      match u:
+        case Use{+p, +n, +loc}:
+          site.at(Bool.or(U32.is_ge(n, 2), Bool.and(U32.is_ge(n, 1), sub.used(all, p))), p, loc, sites(rest, all))
+
+# Frames
+# ------
+
+type KD is Data:
+  KD{+path: List<&2, U32>, +inner: U32}
+
+type Door is Data:
+  Door{+path: List<&2, U32>, +door: U32, +inner: U32}
+
+# DeferCtx: the frame's env bang and type, the unit, the doors, the body
+# (index plus one, 0 for main) and per duplicated capture path what the
+# body opens of it.
+type Ctx is Data:
+  Ctx{+bang: U32, +tau: U32, +unit: U32, +doorl: List<&2, U32>, +idx: U32, +doors: List<&2, KD>}
+
+# Paths: the node's depth plus one (0 at a frame root) and the frame's
+# global depth.
+type Pa is Data:
+  Pa{+par: U32, +base: U32}
+
+def sg.b(x: Sg) -> U32:
+  match x:
+    case Sg{+b, t}:
+      b
+
+def sg.t(x: Sg) -> U32:
+  match x:
+    case Sg{b, +t}:
+      t
+
+def ctx.unit(c: Ctx) -> U32:
+  match c:
+    case Ctx{bang, tau, +unit, doorl, idx, doors}:
+      unit
+
+def ctx.idx(c: Ctx) -> U32:
+  match c:
+    case Ctx{bang, tau, unit, doorl, +idx, doors}:
+      idx
+
+def ctx.doorl(c: Ctx) -> List<&2, U32>:
+  match c:
+    case Ctx{bang, tau, unit, +doorl, idx, doors}:
+      doorl
+
+def pa.d(p: Pa) -> U32:
+  match p:
+    case Pa{+par, base}:
+      (par - 1 : U32)
+
+def pa.base(p: Pa) -> U32:
+  match p:
+    case Pa{par, +base}:
+      base
+
+# envComponent's state: the bangs stepped through (last first) and the
+# component.
+type EC is Data:
+  EC{+bangs: List<&2, U32>, +cur: Sg}
+
+def ec.step(s: S, +loc: Lc.Loc, +st: U32, acc: EC) -> S & EC:
+  match acc:
+    case EC{+bangs, cur}:
+      match cur:
+        case Sg{cb, +ct}:
+          (s: S, +sl: Sg) <- fresh.sig(s)
+          (s: S, +sr: Sg) <- fresh.sig(s)
+          (s: S, +pt: U32) <- pair.new(s, sl, sr)
+          +nx: Sg = Bool.pick(Sg, U32.is_eq(st, 0), sl, sr)
+          (unify.tau(s, loc, ct, pt), EC{sg.b(nx) <> bangs, nx})
+
+def ec.go(steps: List<&2, U32>, r: S & EC, +loc: Lc.Loc) -> S & EC:
+  match steps:
+    case Nil{}:
+      r
+    case Con{+st, rest}:
+      (s, acc) = r
+      ec.go(rest, ec.step(s, loc, st, acc), loc)
+
+# envComponent: the env refined into pairs along a path.
+def env.component(s: S, +loc: Lc.Loc, c: Ctx, +steps: List<&2, U32>) -> S & EC:
+  match c:
+    case Ctx{+bang, +tau, unit, doorl, idx, doors}:
+      ec.go(steps, (s, EC{[], Sg{bang, tau}}), loc)
+
+def starts.r(p: List<&2, U32>) -> Bool:
+  match p:
+    case Nil{}:
+      False{}
+    case Con{+x, rest}:
+      U32.is_eq(x, 1)
+
+def fc.door(isr: Bool, s: S, +unit: U32, +path: List<&2, U32>, +uloc: Lc.Loc, +bq: U32, +acc: List<&2, Door>) -> S & List<&2, Door>:
+  match isr:
+    case False{}:
+      (s, acc)
+    case True{}:
+      (s: S, +door: U32) <- fresh(s)
+      (s: S, +inner: U32) <- fresh(s)
+      (s: S, +rest: U32) <- fresh(s)
+      (add.eq(add.eq(s, blame(uloc, "a duplicated capture's bang = door + what the body opens"), [door, inner], bq),
+        blame(uloc, "at most one door per duplicated capture"), [door, rest], unit), Door{path, door, inner} <> acc)
+
+def fc.k(ec: EC, s: S, +unit: U32, +what: String, +path: List<&2, U32>, +uloc: Lc.Loc, +acc: List<&2, Door>) -> S & List<&2, Door>:
+  match ec:
+    case EC{bangs, cur}:
+      match cur:
+        case Sg{+bq, ct}:
+          fc.door(starts.r(path), constrain_(s, bq, CLevel{1, blame(uloc, what ++ " path " ++ steps.show(path) ++ " duplicated")}),
+            unit, path, uloc, bq, acc)
+
+def fc.step(s: S, +unit: U32, +what: String, +c0: Ctx, site: Site, +acc: List<&2, Door>) -> S & List<&2, Door>:
+  match site:
+    case Site{+path, +uloc}:
+      (s: S, ec: EC) <- env.component(s, uloc, c0, path)
+      fc.k(ec, s, unit, what, path, uloc, acc)
+
+def fc.go(ss: List<&2, Site>, r: S & List<&2, Door>, +unit: U32, +what: String, +c0: Ctx) -> S & List<&2, Door>:
+  match ss:
+    case Nil{}:
+      r
+    case Con{site, rest}:
+      (s, +acc) = r
+      fc.go(rest, fc.step(s, unit, what, c0, site, acc), unit, what, c0)
+
+def doors.list(ds: List<&2, Door>) -> List<&2, U32>:
+  match ds:
+    case Nil{}:
+      []
+    case Con{d, rest}:
+      match d:
+        case Door{path, +door, inner}:
+          door <> doors.list(rest)
+
+def doors.kd(ds: List<&2, Door>) -> List<&2, KD>:
+  match ds:
+    case Nil{}:
+      []
+    case Con{d, rest}:
+      match d:
+        case Door{+path, door, +inner}:
+          KD{path, inner} <> doors.kd(rest)
+
+# frameContext
+def frame.context(s: S, +unit: U32, +idx: U32, +what: String, +benv: U32, +tenv: U32, body: A) -> S & Ctx:
+  +us: List<&2, Use> = usage(body, [], [])
+  (s: S, +ds: List<&2, Door>) <- fc.go(sites(us, us), (s, []), unit, what, Ctx{benv, tenv, unit, [], idx, []})
+  (s, Ctx{benv, tenv, unit, doors.list(List.reverse(&2, Door, ds)), idx, doors.kd(List.reverse(&2, Door, ds))})
+
+# Occurrences
+# -----------
+
+def leaf(s: S, +c: Ctx, +p: Pa) -> S:
+  rec.leaf(s, ctx.idx(c), pa.base(p), pa.d(p))
+
+def kd.find(ks: List<&2, KD>, +p: List<&2, U32>) -> Maybe<&2, U32>:
+  match ks:
+    case Nil{}:
+      None{}
+    case Con{k, rest}:
+      match k:
+        case KD{+q, +inner}:
+          kd.pick(steps.eq(p, q), inner, kd.find(rest, p))
+
+def kd.pick(hit: Bool, +inner: U32, m: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match hit:
+    case True{}:
+      Some{inner}
+    case False{}:
+      m
+
+def init(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+x, rest}:
+      init.at(rest, x)
+
+def init.at(xs: List<&2, U32>, +x: U32) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+y, rest}:
+      x <> init.at(rest, y)
+
+def opened.at(m: Maybe<&2, U32>, +bang: U32, +bangs: List<&2, U32>) -> List<&2, U32>:
+  match m:
+    case Some{+inner}:
+      bang <> List.append(&2, U32, init(bangs), [inner])
+    case None{}:
+      bang <> bangs
+
+# The bangs an occurrence opens: an argument's all; a duplicated
+# capture's all but the one door consumed outside the closure's box.
+def opened(c: Ctx, +steps: List<&2, U32>, +bangs: List<&2, U32>) -> List<&2, U32>:
+  match c:
+    case Ctx{+bang, tau, unit, doorl, idx, +doors}:
+      opened.at(Bool.pick(Maybe<&2, U32>, starts.r(steps), kd.find(doors, steps), None{}), bang, bangs)
+
+def eo.k(ec: EC, s: S, +c: Ctx, +p: Pa, +loc: Lc.Loc, +steps: List<&2, U32>) -> S & Sg:
+  match ec:
+    case EC{+rb, cur}:
+      match cur:
+        case Sg{cb, +ct}:
+          (s: S, +b: U32) <- forced.zero(add.eq(s, blame(loc, "env occurrence depth = the bangs this body opens"),
+            opened(c, steps, List.reverse(&2, U32, rb)), pa.d(p)), blame(loc, "variable occurrence is locally unboxed"))
+          (s, Sg{b, ct})
+
+# envOccurrence
+def env.occ(s: S, +c: Ctx, +p: Pa, +loc: Lc.Loc, +steps: List<&2, U32>) -> S & Sg:
+  (s: S, ec: EC) <- env.component(leaf(s, c, p), loc, c, steps)
+  eo.k(ec, s, c, p, loc, steps)
+
+def te.doors(es: List<&2, TE>) -> List<&2, U32>:
+  match es:
+    case Nil{}:
+      []
+    case Con{e, rest}:
+      match e:
+        case TE{tag, cap, ifc}:
+          match ifc:
+            case Some{x}:
+              match x:
+                case If{env, res, +doors}:
+                  List.append(&2, U32, doors, te.doors(rest))
+            case None{}:
+              te.doors(rest)
+
+def po.door(s: S, +loc: Lc.Loc, +bpkg: U32, +d: U32) -> S:
+  (s: S, +slack: U32) <- fresh(s)
+  add.eq(s, blame(loc, "a door needs the closure's own box"), [d, slack], bpkg)
+
+def po.doors(ds: List<&2, U32>, s: S, +loc: Lc.Loc, +bpkg: U32) -> S:
+  match ds:
+    case Nil{}:
+      s
+    case Con{+d, rest}:
+      po.doors(rest, po.door(s, loc, bpkg, d), loc, bpkg)
+
+def is.code(+t: U32) -> Bool:
+  U32.is_eq((t .&. 7 : U32), 2)
+
+def po.at(code: Bool, s: S, +loc: Lc.Loc, +sa: Sg, +sb: Sg, +w: U32) -> S & Sg:
+  match code:
+    case False{}:
+      (s: S, +pt: U32) <- pair.new(s, sa, sb)
+      plain(s, loc, "pair constructor is locally unboxed", pt)
+    case True{}:
+      (s: S, +p: U32) <- package.class(s, ty.of(w), sb)
+      (s: S, infos: List<&2, TE>) <- captures.of(s, ty.of(w))
+      (s: S, +bpkg: U32) <- fresh(s)
+      (s: S, +pt: U32) <- pair.new(po.doors(te.doors(infos), s, loc, bpkg), sa, Sg{sg.b(sb), ty.cap(p)})
+      (s, Sg{bpkg, pt})
+
+# pairOf: a code-headed pair is a closure package.
+def pair.of(s: S, +loc: Lc.Loc, +sa: Sg, +sb: Sg) -> S & Sg:
+  (s: S, +w: U32) <- walk(s, sg.t(sa))
+  po.at(is.code(w), s, loc, sa, sb, w)
+
+# An application's sigma (intrinsic's SetEnv), from the applied pair's.
+def set.env(s: S, +loc: Lc.Loc, +sx: Sg) -> S & Sg:
+  (s: S, +si: Sg) <- fresh.sig(s)
+  (s: S, +fnt: U32) <- fresh.tau(s)
+  (s: S, +fnb: U32) <- fresh(s)
+  (s: S, +pairb: U32) <- fresh(s)
+  (s: S, +k: U32) <- fresh(s)
+  (s: S, +pt: U32) <- pair.new(add.eq(s, blame(loc, "boxes entered = boxes on the applied pair + on the function"), [pairb, fnb], k),
+    Sg{fnb, fnt}, si)
+  (s: S, +opb: U32) <- fresh(unify.sig(s, loc, sx, Sg{pairb, pt}))
+  (s: S, +ceb: U32) <- fresh(add.eq(s, blame(loc, "operand boxes = applied pair boxes + its own"), [pairb, sg.b(si)], opb))
+  (s: S, +so: Sg) <- fresh.sig(add.eq(s, blame(loc, "operand boxes = boxes entered + boxes the callee sees"), [k, ceb], opb))
+  (s: S, +outb: U32) <- fresh(s)
+  (ap.new(add.eq(s, blame(loc, "result boxes = boxes entered + the callee's result boxes"), [k, sg.b(so)], outb),
+    Ap{fnt, Sg{ceb, sg.t(si)}, so, loc, []}), Sg{outb, sg.t(so)})
+
+# projection, from the projected value's sigma.
+def proj(s: S, +loc: Lc.Loc, +left: Bool, +sx: Sg) -> S & Sg:
+  (s: S, +sl: Sg) <- fresh.sig(s)
+  (s: S, +sr: Sg) <- fresh.sig(s)
+  (s: S, +pb: U32) <- fresh(s)
+  (s: S, +pt: U32) <- pair.new(s, sl, sr)
+  +c: Sg = Bool.pick(Sg, left, sl, sr)
+  (s: S, +out: U32) <- fresh(unify.sig(s, loc, sx, Sg{pb, pt}))
+  (add.eq(s, blame(loc, "projected component boxes = pair boxes + its own"), [pb, sg.b(c)], out), Sg{out, sg.t(c)})
+
+def data.leaf(s: S) -> S & Sg:
+  (s: S, +b: U32) <- fresh(s)
+  (s, Sg{b, ty.data()})
+
+# bottomSigma
+def bottom(s: S) -> S & Sg:
+  (s: S, +b: U32) <- fresh(s)
+  (s, Sg{b, ty.abort()})

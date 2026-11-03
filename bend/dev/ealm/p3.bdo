@@ -1,0 +1,230 @@
+
+# Showing types (deepShowTau)
+# -------------
+
+def bd.of(s: S, +r: U32) -> S & Bd:
+  s.bd(s, r)
+
+def bd.h(b: Bd) -> String:
+  match b:
+    case Bd{+h, fi, link, t}:
+      h
+
+def bd.fi(b: Bd) -> U32:
+  match b:
+    case Bd{h, +fi, link, t}:
+      fi
+
+def tag.show.code(r: S & Bd) -> S & String:
+  (s, b) = r
+  (s, "TCode " ++ bd.h(b))
+
+def tag.show.at(gate: Bool, gatefn: Bool, s: S, +tag: U32) -> S & String:
+  match gate:
+    case True{}:
+      (s, "TGate")
+    case False{}:
+      match gatefn:
+        case True{}:
+          (s, "TGateFn")
+        case False{}:
+          tag.show.code(bd.of(s, tag))
+
+# The derived Show of a Tag.
+def tag.show(s: S, +tag: U32) -> S & String:
+  tag.show.at(U32.is_eq(tag, tag.gate()), U32.is_eq(tag, tag.gatefn()), s, tag)
+
+def tags.show.acc(s: S, acc: List<&2, String>, +x: U32) -> S & List<&2, String>:
+  (s: S, +a: String) <- tag.show(s, x)
+  (s, a <> acc)
+
+def tags.show.go(xs: List<&2, U32>, r: S & List<&2, String>) -> S & List<&2, String>:
+  match xs:
+    case Nil{}:
+      r
+    case Con{+x, rest}:
+      (s, acc) = r
+      tags.show.go(rest, tags.show.acc(s, acc, x))
+
+# show (Set.toList tags)
+def tags.show(s: S, xs: List<&2, U32>) -> S & String:
+  (s: S, acc: List<&2, String>) <- tags.show.go(xs, (s, []))
+  (s, "[" ++ String.join(List.reverse(&2, String, acc), ",") ++ "]")
+
+def ds.zero(s: S, +t: U32) -> S & String:
+  (s, "...")
+
+def ds.one.pair(s: S, ps: PS) -> S & String:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              (s: S, +sa: String) <- ds.zero(s, at)
+              (s: S, +sb: String) <- ds.zero(s, bt)
+              (s, "(" ++ sa ++ ", " ++ sb ++ ")")
+
+def ds.one.k(k: K, s: S, +t: U32) -> S & String:
+  match k:
+    case KData{}:
+      (s, "D")
+    case KVar{}:
+      (s, "t" ++ U32.show(ty.of(t)))
+    case KCode{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s: S, es: List<&2, TE>) <- captures.of(s, ty.of(t))
+      (s: S, +ts: String) <- tags.show(s, te.tags(es))
+      (s, "Code#" ++ U32.show(r) ++ ts)
+    case KCap{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s, "Cap#" ++ U32.show(r))
+    case KAbort{}:
+      (s, "_|_")
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, t)
+      ds.one.pair(s, ps)
+
+def ds.one(s: S, +t: U32) -> S & String:
+  (s: S, +w: U32) <- walk(s, t)
+  ds.one.k(kind(w), s, w)
+
+def ds.two.pair(s: S, ps: PS) -> S & String:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              (s: S, +sa: String) <- ds.one(s, at)
+              (s: S, +sb: String) <- ds.one(s, bt)
+              (s, "(" ++ sa ++ ", " ++ sb ++ ")")
+
+def ds.two.k(k: K, s: S, +t: U32) -> S & String:
+  match k:
+    case KData{}:
+      (s, "D")
+    case KVar{}:
+      (s, "t" ++ U32.show(ty.of(t)))
+    case KCode{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s: S, es: List<&2, TE>) <- captures.of(s, ty.of(t))
+      (s: S, +ts: String) <- tags.show(s, te.tags(es))
+      (s, "Code#" ++ U32.show(r) ++ ts)
+    case KCap{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s, "Cap#" ++ U32.show(r))
+    case KAbort{}:
+      (s, "_|_")
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, t)
+      ds.two.pair(s, ps)
+
+def ds.two(s: S, +t: U32) -> S & String:
+  (s: S, +w: U32) <- walk(s, t)
+  ds.two.k(kind(w), s, w)
+
+def ds.three.pair(s: S, ps: PS) -> S & String:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              (s: S, +sa: String) <- ds.two(s, at)
+              (s: S, +sb: String) <- ds.two(s, bt)
+              (s, "(" ++ sa ++ ", " ++ sb ++ ")")
+
+def ds.three.k(k: K, s: S, +t: U32) -> S & String:
+  match k:
+    case KData{}:
+      (s, "D")
+    case KVar{}:
+      (s, "t" ++ U32.show(ty.of(t)))
+    case KCode{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s: S, es: List<&2, TE>) <- captures.of(s, ty.of(t))
+      (s: S, +ts: String) <- tags.show(s, te.tags(es))
+      (s, "Code#" ++ U32.show(r) ++ ts)
+    case KCap{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s, "Cap#" ++ U32.show(r))
+    case KAbort{}:
+      (s, "_|_")
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, t)
+      ds.three.pair(s, ps)
+
+def ds.three(s: S, +t: U32) -> S & String:
+  (s: S, +w: U32) <- walk(s, t)
+  ds.three.k(kind(w), s, w)
+
+def ds.four.pair(s: S, ps: PS) -> S & String:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              (s: S, +sa: String) <- ds.three(s, at)
+              (s: S, +sb: String) <- ds.three(s, bt)
+              (s, "(" ++ sa ++ ", " ++ sb ++ ")")
+
+def ds.four.k(k: K, s: S, +t: U32) -> S & String:
+  match k:
+    case KData{}:
+      (s, "D")
+    case KVar{}:
+      (s, "t" ++ U32.show(ty.of(t)))
+    case KCode{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s: S, es: List<&2, TE>) <- captures.of(s, ty.of(t))
+      (s: S, +ts: String) <- tags.show(s, te.tags(es))
+      (s, "Code#" ++ U32.show(r) ++ ts)
+    case KCap{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s, "Cap#" ++ U32.show(r))
+    case KAbort{}:
+      (s, "_|_")
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, t)
+      ds.four.pair(s, ps)
+
+def ds.four(s: S, +t: U32) -> S & String:
+  (s: S, +w: U32) <- walk(s, t)
+  ds.four.k(kind(w), s, w)
+
+def ds.five.pair(s: S, ps: PS) -> S & String:
+  match ps:
+    case PS{a, b}:
+      match a:
+        case Sg{ab, +at}:
+          match b:
+            case Sg{bb, +bt}:
+              (s: S, +sa: String) <- ds.four(s, at)
+              (s: S, +sb: String) <- ds.four(s, bt)
+              (s, "(" ++ sa ++ ", " ++ sb ++ ")")
+
+def ds.five.k(k: K, s: S, +t: U32) -> S & String:
+  match k:
+    case KData{}:
+      (s, "D")
+    case KVar{}:
+      (s, "t" ++ U32.show(ty.of(t)))
+    case KCode{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s: S, es: List<&2, TE>) <- captures.of(s, ty.of(t))
+      (s: S, +ts: String) <- tags.show(s, te.tags(es))
+      (s, "Code#" ++ U32.show(r) ++ ts)
+    case KCap{}:
+      (s: S, +r: U32) <- find.t(s, ty.of(t))
+      (s, "Cap#" ++ U32.show(r))
+    case KAbort{}:
+      (s, "_|_")
+    case KPair{}:
+      (s: S, ps: PS) <- pair.get(s, t)
+      ds.five.pair(s, ps)
+
+def ds.five(s: S, +t: U32) -> S & String:
+  (s: S, +w: U32) <- walk(s, t)
+  ds.five.k(kind(w), s, w)

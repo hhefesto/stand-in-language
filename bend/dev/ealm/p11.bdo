@@ -1,0 +1,231 @@
+# inferEALLifted
+# --------------
+
+# A lifted program as data, for the runs over it: the bodies by rank,
+# each body's direct references (refsOf, as sorted ranks), main and its
+# references.
+type PG is Data:
+  PG{+bds: List<&2, Bd>, +refs: List<&2, List<&2, U32>>, +n: U32, +main: A, +mrefs: List<&2, U32>}
+
+def rank.of(+rk: Map<&2, U32>, +h: String) -> U32:
+  Pair.snd(Map<&2, U32>, U32, Map.get(U32, none(), rk, h))
+
+# refsOf
+def refs.of(l: Lf.L, +rk: Map<&2, U32>, +acc: List<&2, U32>) -> List<&2, U32>:
+  match l:
+    case Lf.LRef{+loc, +h}:
+      Ln.u.ins(acc, rank.of(rk, h))
+    case Lf.LPair{+loc, +a, +b}:
+      refs.of(b, rk, refs.of(a, rk, acc))
+    case Lf.LSetEnv{+loc, +x}:
+      refs.of(x, rk, acc)
+    case Lf.LLeft{+loc, +x}:
+      refs.of(x, rk, acc)
+    case Lf.LRight{+loc, +x}:
+      refs.of(x, rk, acc)
+    case Lf.LCheck{+loc, +o, +tc, +c}:
+      refs.of(c, rk, refs.of(tc, rk, acc))
+    case other:
+      acc
+
+def pg.bds(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +rk: Map<&2, U32>) -> List<&2, Bd>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+h, b):
+          match b:
+            case Lf.Body{+fi, +body}:
+              Bd{h, fi, U32.is_eq(fi, 4294967288), to.a(body, rk)} <> pg.bds(rest, rk)
+
+def pg.refs(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +rk: Map<&2, U32>) -> List<&2, List<&2, U32>>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+h, b):
+          match b:
+            case Lf.Body{+fi, +body}:
+              refs.of(body, rk, []) <> pg.refs(rest, rk)
+
+def pg.of(t: Lf.Lifted) -> PG:
+  match t:
+    case Lf.Lifted{+bodies, +main}:
+      pg.mk(Map.to_list(&2, Lf.Body, bodies), ranks(bodies), U32.from_nat(Map.size(&2, Lf.Body, bodies)), main)
+
+def pg.mk(+kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +rk: Map<&2, U32>, +n: U32, +main: Lf.L) -> PG:
+  PG{pg.bds(kvs, rk), pg.refs(kvs, rk), n, to.a(main, rk), refs.of(main, rk, [])}
+
+def bds.arr(xs: List<&2, Bd>, +i: U32, a: Array<Bd>) -> Array<Bd>:
+  match xs:
+    case Nil{}:
+      a
+    case Con{+b, rest}:
+      bds.arr(rest, (i + 1 : U32), Array.set(Bd, a, i, b))
+
+# A fresh state over the program's bodies.
+def pg.state(p: PG, +uni: Bool) -> S:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      st.new(bds.arr(bds, 0, Array.new(Bd, Ln.depth.of(n), bd.dummy())), n, uni)
+
+def pg.bd(p: PG, +r: U32) -> Bd:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      bd.got(List.get(&2, Bd, bds, U32.to_nat(r)))
+
+def bd.got(m: Maybe<&2, Bd>) -> Bd:
+  match m:
+    case Some{+b}:
+      b
+    case None{}:
+      bd.dummy()
+
+def pg.refs.at(p: PG, +r: U32) -> List<&2, U32>:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      ms.got(List.get(&2, List<&2, U32>, refs, U32.to_nat(r)))
+
+def bd.term(b: Bd) -> A:
+  match b:
+    case Bd{+h, +fi, +link, +t}:
+      t
+
+def bd.hash(b: Bd) -> String:
+  match b:
+    case Bd{+h, +fi, +link, +t}:
+      h
+
+# summarizeBody's structure: the body walked standalone (walk, dispatch,
+# presolve), in a state of its own; its first error, if any.
+def summary(+p: PG, +uni: Bool, +r: U32) -> Maybe<&2, Err>:
+  +b: Bd = pg.bd(p, r)
+  sm.err(walk.top(pg.state(p, uni), False{}, "env of lifted body " ++ Co.fi.show(bd.fi(b)), bd.term(b)))
+
+def sm.err(r: S & WT) -> Maybe<&2, Err>:
+  (s, +w) = r
+  Pair.snd(S, Maybe<&2, Err>, s.err(s))
+
+def sm.ok(m: Maybe<&2, Err>) -> Bool:
+  match m:
+    case None{}:
+      True{}
+    case Some{+e}:
+      False{}
+
+# The verdicts withDeps reads, as a machine over the DAG: each frame a
+# body (the extra rank n stands for main) and the references it has yet
+# to see; a body fails at its first failing reference, else by its own
+# summary. Verdicts: 0 unknown, 1 certifies, 2 fails.
+type VF is Data:
+  VF{+r: U32, +ds: List<&2, U32>}
+
+type VQ is Type:
+  VqGo{v: Array<U32>, +st: List<&2, VF>}
+  VqEnd{v: Array<U32>}
+
+def vq.own(+p: PG, +uni: Bool, +r: U32) -> U32:
+  Bool.pick(U32, U32.is_eq(r, pg.n(p)), 1, Bool.pick(U32, sm.ok(summary(p, uni, r)), 1, 2))
+
+def pg.n(p: PG) -> U32:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      n
+
+def vq.dep(unknown: Bool, ok: Bool, v: Array<U32>, +p: PG, +r: U32, +d: U32, +dr: List<&2, U32>, +rest: List<&2, VF>) -> VQ:
+  match unknown:
+    case True{}:
+      VqGo{v, VF{d, pg.refs.at(p, d)} <> VF{r, d <> dr} <> rest}
+    case False{}:
+      match ok:
+        case True{}:
+          VqGo{v, VF{r, dr} <> rest}
+        case False{}:
+          VqGo{vq.failed(v, pg.n(p), r, d), rest}
+
+# A failure, and for main (rank n) the reference it failed at, plus one,
+# at n + 1 (others write to the spare n + 2).
+def vq.failed(v: Array<U32>, +n: U32, +r: U32, +d: U32) -> Array<U32>:
+  Array.set(U32, Array.set(U32, v, r, 2), Bool.pick(U32, U32.is_eq(r, n), (n + 1 : U32), (n + 2 : U32)), (d + 1 : U32))
+
+def vq.look(+p: PG, +r: U32, +d: U32, +dr: List<&2, U32>, +rest: List<&2, VF>, q: Array<U32> & U32) -> VQ:
+  (v, +m) = q
+  vq.dep(U32.is_eq(m, 0), U32.is_eq(m, 1), v, p, r, d, dr, rest)
+
+def vq.frame(f: VF, v: Array<U32>, +p: PG, +uni: Bool, +rest: List<&2, VF>) -> VQ:
+  match f:
+    case VF{+r, +ds}:
+      match ds:
+        case Nil{}:
+          VqGo{Array.set(U32, v, r, vq.own(p, uni, r)), rest}
+        case Con{+d, +dr}:
+          vq.look(p, r, d, dr, rest, Array.get(U32, v, d))
+
+def vq.step(st: List<&2, VF>, v: Array<U32>, +p: PG, +uni: Bool) -> VQ:
+  match st:
+    case Nil{}:
+      VqEnd{v}
+    case Con{+f, +rest}:
+      vq.frame(f, v, p, uni, rest)
+
+def vq.fin(q: VQ) -> Array<U32>:
+  match q:
+    case VqGo{v, +st}:
+      v
+    case VqEnd{v}:
+      v
+
+def vq.loop(fuel: Nat, q: VQ, +p: PG, +uni: Bool) -> Array<U32>:
+  match fuel:
+    case 0n:
+      vq.fin(q)
+    case 1n+f:
+      match q:
+        case VqGo{v, +st}:
+          vq.loop(f, vq.step(st, v, p, uni), p, uni)
+        case VqEnd{v}:
+          v
+
+# withDeps mainTerm (Left mainError)
+def with.deps(+p: PG, +uni: Bool, +e: Err) -> Err:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      wd.after(Array.get(U32, vq.loop(big(), VqGo{Array.new(U32, Ln.depth.of((n + 3 : U32)), 0), [VF{n, mrefs}]}, p, uni), (n + 1 : U32)), p, e)
+
+def wd.after(q: Array<U32> & U32, +p: PG, +e: Err) -> Err:
+  (v, +d) = q
+  wd.pick(U32.is_eq(d, 0), p, e, d)
+
+def wd.pick(none: Bool, +p: PG, +e: Err, +d: U32) -> Err:
+  match none:
+    case True{}:
+      e
+    case False{}:
+      DependencyFailed{bd.hash(pg.bd(p, (d - 1 : U32)))}
+
+# runMain over the program as data.
+def pg.main(+p: PG, +uni: Bool) -> Result<&2, &2, Err, MR>:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      rm.got(go.main(pg.state(p, uni), main))
+
+# allDataShape
+def cm.shape(m: MR) -> Maybe<&2, Err>:
+  match m:
+    case MR{+top, +defers, +max, +shape, +shapes, +levels}:
+      Bool.pick(Maybe<&2, Err>, all.data(shape), Some{TypeMismatch{gen("EAL certification"), "main is data through and through; a program must be a function of its input"}}, None{})
+
+# certifyMain, without the let-specialization fallbacks yet: main's
+# refusal, or the first failing dependency's.
+def cm.at(r: Result<&2, &2, Err, MR>, +p: PG) -> Maybe<&2, Err>:
+  match r:
+    case Done{+m}:
+      cm.shape(m)
+    case Fail{+e}:
+      Some{with.deps(p, False{}, e)}
+
+def certify.main(t: Lf.Lifted) -> Maybe<&2, Err>:
+  +p: PG = pg.of(t)
+  cm.at(pg.main(p, False{}), p)

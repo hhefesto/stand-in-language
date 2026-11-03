@@ -1,0 +1,304 @@
+
+# Application dispatch (resolveApplies)
+# --------------------
+
+def te.head.done(es: List<&2, TE>, +done: List<&2, U32>) -> Bool:
+  match es:
+    case Nil{}:
+      False{}
+    case Con{e, rest}:
+      u.has(done, te.tag(e))
+
+def te.new.go(es: List<&2, TE>, +done: List<&2, U32>, hit: Bool) -> List<&2, TE>:
+  match es:
+    case Nil{}:
+      []
+    case Con{+e, +rest}:
+      match hit:
+        case True{}:
+          te.new.go(rest, done, te.head.done(rest, done))
+        case False{}:
+          e <> te.new.go(rest, done, te.head.done(rest, done))
+
+# Map.withoutKeys
+def te.keys.has(+es: List<&2, TE>, +done: List<&2, U32>) -> List<&2, TE>:
+  te.new.go(es, done, te.head.done(es, done))
+
+def te.mark(es: List<&2, TE>, +done: List<&2, U32>) -> List<&2, U32>:
+  match es:
+    case Nil{}:
+      done
+    case Con{e, rest}:
+      te.mark(rest, Ln.u.ins(done, te.tag(e)))
+
+# Map.intersectionWith (,): the pairs of records of the tags on both sides.
+def te.both(xs: List<&2, TE>, +ys: List<&2, TE>, +loc: Lc.Loc) -> List<&2, W>:
+  te.pending(xs, ys, loc, [])
+
+# codeInfosOfCaptures' merge: same-tag records unify, then the maps union.
+def ci.merge(s: S, +loc: Lc.Loc, +acc: List<&2, TE>, +m: List<&2, TE>) -> S & List<&2, TE>:
+  (un.run(s, te.both(acc, m, loc)), te.union(acc, m))
+
+type CK is Data:
+  CkGo{+vis: List<&2, U32>, +i: U32}
+  CkRet{+m: List<&2, TE>}
+
+type CF is Data:
+  CfFold{+vis: List<&2, U32>, +rest: List<&2, TE>, +acc: List<&2, TE>}
+
+type CM is Type:
+  CmGo{s: S, +loc: Lc.Loc, task: CK, st: List<&2, CF>}
+  CmEnd{s: S, m: List<&2, TE>}
+
+def ck.kind(k: K, s: S, +loc: Lc.Loc, +w: U32, +vis: List<&2, U32>, +rest: List<&2, TE>, +acc: List<&2, TE>, st: List<&2, CF>) -> CM:
+  match k:
+    case KCode{}:
+      (s: S, +m: List<&2, TE>) <- captures.of(s, ty.of(w))
+      CmGo{s, loc, CkRet{m}, CfFold{vis, rest, acc} <> st}
+    case KCap{}:
+      CmGo{s, loc, CkGo{vis, ty.of(w)}, CfFold{vis, rest, acc} <> st}
+    case other:
+      CmGo{s, loc, CkRet{[]}, CfFold{vis, rest, acc} <> st}
+
+# The fold over a package's captures: the next capture's code records.
+def ck.next(es: List<&2, TE>, s: S, +loc: Lc.Loc, +vis: List<&2, U32>, +acc: List<&2, TE>, st: List<&2, CF>) -> CM:
+  match es:
+    case Nil{}:
+      CmGo{s, loc, CkRet{acc}, st}
+    case Con{e, rest}:
+      match e:
+        case TE{tag, cap, ifc}:
+          match cap:
+            case Some{c}:
+              match c:
+                case Sg{cb, +ct}:
+                  (s: S, +w: U32) <- walk(s, ct)
+                  ck.kind(kind(w), s, loc, w, vis, rest, acc, st)
+            case None{}:
+              CmGo{s, loc, CkRet{[]}, CfFold{vis, rest, acc} <> st}
+
+def ck.go.at(seen: Bool, s: S, +loc: Lc.Loc, +vis: List<&2, U32>, +r: U32, st: List<&2, CF>) -> CM:
+  match seen:
+    case True{}:
+      CmGo{s, loc, CkRet{[]}, st}
+    case False{}:
+      (s: S, es: List<&2, TE>) <- s.ts(s, r)
+      ck.next(es, s, loc, r <> vis, [], st)
+
+def ck.frame(fr: CF, s: S, +loc: Lc.Loc, +m: List<&2, TE>, st: List<&2, CF>) -> CM:
+  match fr:
+    case CfFold{+vis, rest, +acc}:
+      (s: S, +acc2: List<&2, TE>) <- ci.merge(s, loc, acc, m)
+      ck.next(rest, s, loc, vis, acc2, st)
+
+def ck.ret(st: List<&2, CF>, s: S, +loc: Lc.Loc, +m: List<&2, TE>) -> CM:
+  match st:
+    case Nil{}:
+      CmEnd{s, m}
+    case Con{fr, rest}:
+      ck.frame(fr, s, loc, m, rest)
+
+def ck.task(task: CK, s: S, +loc: Lc.Loc, st: List<&2, CF>) -> CM:
+  match task:
+    case CkGo{+vis, +i}:
+      (s: S, +r: U32) <- find.t(s, i)
+      ck.go.at(u.has(vis, r), s, loc, vis, r, st)
+    case CkRet{+m}:
+      ck.ret(st, s, loc, m)
+
+def ck.fin(n: CM) -> S & List<&2, TE>:
+  match n:
+    case CmGo{s, loc, task, st}:
+      (s, [])
+    case CmEnd{s, m}:
+      (s, m)
+
+def ck.loop(fuel: Nat, n: CM) -> S & List<&2, TE>:
+  match fuel:
+    case 0n:
+      ck.fin(n)
+    case 1n+f:
+      match n:
+        case CmGo{s, +loc, task, st}:
+          ck.loop(f, ck.task(task, s, loc, st))
+        case CmEnd{s, m}:
+          (s, m)
+
+# codeInfosOfCaptures
+def code.infos(s: S, +loc: Lc.Loc, +i: U32) -> S & List<&2, TE>:
+  ck.loop(big(), CmGo{s, loc, CkGo{[], i}, []})
+
+def ifc.or(m: Maybe<&2, If>) -> If:
+  match m:
+    case Some{+x}:
+      x
+    case None{}:
+      If{Sg{0, ty.data()}, Sg{0, ty.data()}, []}
+
+def dt.gatefn(s: S, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
+  (s: S, +sbe: Sg) <- fresh.sig(s)
+  (s: S, +sbt: Sg) <- fresh.sig(s)
+  (s: S, +brb: U32) <- fresh(s)
+  (s: S, +pt: U32) <- pair.new(s, sbe, sbt)
+  (s: S, +re: U32) <- fresh(unify.sig(s, loc, env, Sg{brb, pt}))
+  (s: S, +rt: U32) <- fresh(unify.sig(add.eq(s, blame(loc, "taken branch boxes = branch pair boxes + its own"), [brb, sg.b(sbe)], re),
+    loc, res, Sg{re, sg.t(sbe)}))
+  unify.sig(add.eq(s, blame(loc, "taken branch boxes = branch pair boxes + its own"), [brb, sg.b(sbt)], rt), loc, res, Sg{rt, sg.t(sbt)})
+
+def dt.gate(s: S, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
+  (s: S, +scrb: U32) <- fresh(s)
+  (s: S, +gt: U32) <- builtin.code(unify.sig(s, loc, env, Sg{scrb, ty.data()}), tag.gatefn())
+  (s: S, +gfn: Sg) <- plain(s, loc, "gate switch function is locally unboxed", gt)
+  unify.sig(s, loc, res, gfn)
+
+def dt.code(x: If, s: S, +tag: U32, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
+  match x:
+    case If{+ie, +ir, doors}:
+      unify.sig(unify.sig.at(s, tag, loc, env, ie), loc, res, ir)
+
+def dt.at(gate: Bool, gatefn: Bool, s: S, e: TE, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
+  match gate:
+    case True{}:
+      dt.gate(s, env, res, loc)
+    case False{}:
+      match gatefn:
+        case True{}:
+          dt.gatefn(s, env, res, loc)
+        case False{}:
+          match e:
+            case TE{+tag, cap, ifc}:
+              dt.code(ifc.or(ifc), s, tag, env, res, loc)
+
+# dispatchTag: the constraints of applying one tag at one site.
+def dispatch.tag(s: S, +e: TE, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
+  dt.at(U32.is_eq(te.tag(e), tag.gate()), U32.is_eq(te.tag(e), tag.gatefn()), s, e, env, res, loc)
+
+def dispatch.all(es: List<&2, TE>, s: S, +env: Sg, +res: Sg, +loc: Lc.Loc) -> S:
+  match es:
+    case Nil{}:
+      s
+    case Con{+e, rest}:
+      dispatch.all(rest, dispatch.tag(s, e, env, res, loc), env, res, loc)
+
+def ap.done.set(a: Ap, +done: List<&2, U32>) -> Ap:
+  match a:
+    case Ap{+fn, +env, +res, +loc, old}:
+      Ap{fn, env, res, loc, done}
+
+# dispatchNew: dispatch the tags not dispatched at this site yet.
+def dispatch.new(s: S, +k: U32, a: Ap, +infos: List<&2, TE>) -> S & Bool:
+  match a:
+    case Ap{+fn, +env, +res, +loc, +done}:
+      dn.at(te.keys.has(infos, done), s, k, fn, env, res, loc, done)
+
+def dn.at(new: List<&2, TE>, s: S, +k: U32, +fn: U32, +env: Sg, +res: Sg, +loc: Lc.Loc, +done: List<&2, U32>) -> S & Bool:
+  match new:
+    case Nil{}:
+      (s, False{})
+    case Con{+e, +rest}:
+      (dispatch.all(Con{e, rest}, s.ap.set(s, k, Ap{fn, env, res, loc, te.mark(Con{e, rest}, done)}), env, res, loc), True{})
+
+def site.kind(kd: K, s: S, +k: U32, +a: Ap, +w: U32) -> S & Bool:
+  match kd:
+    case KVar{}:
+      (s, False{})
+    case KData{}:
+      (s, False{})
+    case KCode{}:
+      (s: S, +es: List<&2, TE>) <- captures.of(s, ty.of(w))
+      dispatch.new(s, k, a, es)
+    case KCap{}:
+      (s: S, +es: List<&2, TE>) <- code.infos(s, ap.loc(a), ty.of(w))
+      dispatch.new(s, k, a, es)
+    case KAbort{}:
+      (s: S, +bt: Sg) <- bottom(s)
+      (unify.sig(s, ap.loc(a), ap.res(a), bt), False{})
+    case KPair{}:
+      (s: S, +fs: String) <- ds.four(s, w)
+      (s: S, +es: String) <- ds.four(s, sg.t(ap.env(a)))
+      (fail(s, TypeMismatch{ap.loc(a), "applied value is " ++ describe(w) ++ ", not code: " ++ fs ++ " applied to " ++ es}), False{})
+
+def ap.loc(a: Ap) -> Lc.Loc:
+  match a:
+    case Ap{fn, env, res, +loc, done}:
+      loc
+
+def ap.res(a: Ap) -> Sg:
+  match a:
+    case Ap{fn, env, +res, loc, done}:
+      res
+
+def ap.env(a: Ap) -> Sg:
+  match a:
+    case Ap{fn, +env, res, loc, done}:
+      env
+
+def ap.fn(a: Ap) -> U32:
+  match a:
+    case Ap{+fn, env, res, loc, done}:
+      fn
+
+# resolveSite
+def site.resolve(s: S, +k: U32) -> S & Bool:
+  (s: S, +a: Ap) <- s.ap(s, k)
+  (s: S, +w: U32) <- walk(s, ap.fn(a))
+  site.kind(kind(w), s, k, a, w)
+
+def round.go(n: Nat, r: S & Bool, +k: U32) -> S & Bool:
+  match n:
+    case 0n:
+      r
+    case 1n+m:
+      (s, +acc) = r
+      round.go(m, round.or(acc, site.resolve(s, k)), (k + 1 : U32))
+
+def round.or(+acc: Bool, r: S & Bool) -> S & Bool:
+  (s, +c) = r
+  (s, Bool.or(acc, c))
+
+# dispatchRound: every site, in key order.
+def round(s: S) -> S & Bool:
+  (s: S, +na: U32) <- s.na(s)
+  round.go(U32.to_nat(na), (s, False{}), 0)
+
+type RA is Type:
+  RaGo{s: S}
+  RaDone{s: S}
+
+def ra.at(more: Bool, bad: Bool, s: S) -> RA:
+  match more:
+    case True{}:
+      match bad:
+        case True{}:
+          RaDone{s}
+        case False{}:
+          RaGo{s}
+    case False{}:
+      RaDone{s}
+
+def ra.k(r: S & Bool) -> RA:
+  (s, +more) = r
+  (s: S, +bad: Bool) <- failed(s)
+  ra.at(more, bad, s)
+
+def ra.fin(n: RA) -> S:
+  match n:
+    case RaGo{s}:
+      s
+    case RaDone{s}:
+      s
+
+def ra.loop(fuel: Nat, n: RA) -> S:
+  match fuel:
+    case 0n:
+      ra.fin(n)
+    case 1n+f:
+      match n:
+        case RaGo{s}:
+          ra.loop(f, ra.k(round(s)))
+        case RaDone{s}:
+          s
+
+# resolveApplies: rounds to a fixpoint.
+def resolve.applies(s: S) -> S:
+  ra.loop(big(), RaGo{s})
