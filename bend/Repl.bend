@@ -4,6 +4,16 @@ import ./Core.bend as Co
 import ./Front.bend as Fr
 import ./Size.bend as Sz
 import ./Reference.bend as Rf
+import ./Syntax.bend as S
+import ./Term.bend as T
+import ./Parse.bend as P
+import ./Expand.bend as E
+import ./Resolve.bend as Rs
+import ./Desugar.bend as D
+import ./Lower.bend as Lw
+import ./Split.bend as Sp
+import ./Lift.bend as Lf
+import ./EALm.bend as EM
 
 # The REPL (master's app/Repl.hs, `telomare-repl`): an expression over the
 # Prelude, compiled as a unit test is (sized uncapped, its aborts made
@@ -14,8 +24,10 @@ import ./Reference.bend as Rf
 # the input. An assignment, `name = expression`, binds name for the lines
 # after it.
 #
-# Not ported yet: `:t` (EAL's verdict), `:d`, `:p`, `:l`, `:r`, and the
-# multi-line `:{` `:}`; haskeline's line editing.
+# `:t EXPR` prints EAL's verdict on the expression as master's does.
+#
+# Not ported yet: `:d`, `:p`, `:l`, `:r`, and the multi-line `:{` `:}`;
+# haskeline's line editing.
 
 # An expression's value, as master's REPL prints it (PrettyBasic): a
 # number, a pair, or anything else as the core shows it.
@@ -131,6 +143,61 @@ type St is Type:
   Loop{i: Tx.In, binds: String}
   Quit{}
 
+# `:t`
+# ----
+# Master's `:t` (renderEALVerdict . inferEALWithLifting): the expression
+# alone, parsed from column 1 of a nameless file, with the builtins but
+# neither the Prelude nor the bindings so far (resolveBinding' looks up
+# `_tmp_` only, so a name from either fails to resolve).
+def verdict(r: Result<&2, &2, EM.Err, EM.MR>) -> String:
+  match r:
+    case Fail{e}:
+      "does not certify: " ++ EM.render(e)
+    case Done{m}:
+      match m:
+        case EM.MR{top, defers, max, shape, shapes, levels}:
+          "certifies: max box level " ++ U32.show(max) ++ ", input bang " ++ U32.show(top)
+
+def typed.term(r: Result<&2, &2, Rs.ResErr, T.Term2()>) -> String:
+  match r:
+    case Fail{e}:
+      "some sort of error?"
+    case Done{t}:
+      verdict(EM.lifted.main(Lf.defer.lift(Sp.split(t))))
+
+# runReplParser expands as it parses: either failing is a parse error.
+def typed.expanded(r: Result<&2, &2, E.ExpErr, S.Expanded()>) -> String:
+  match r:
+    case Fail{e}:
+      "parse error"
+    case Done{+x}:
+      typed.term(Lw.process(D.desugar(x)))
+
+def typed.parsed(r: Result<&2, &2, P.PErr, S.Parsed()>) -> String:
+  match r:
+    case Fail{e}:
+      "parse error"
+    case Done{p}:
+      typed.expanded(E.term(p))
+
+# An assignment after `:t` is a ReplAssignment, which `:t` refuses.
+def typed.if(+text: String, a: Bool) -> String:
+  match a:
+    case True{}:
+      "parse error"
+    case False{}:
+      typed.parsed(P.expression("", text))
+
+def typed(+text: String) -> String:
+  typed.if(text, assigns(text))
+
+def tail(s: String) -> String:
+  match s:
+    case SCon{c, +rest}:
+      rest
+    case SNil{}:
+      ""
+
 def stepped(+prelude: String, i: Tx.In, +binds: String, a: Bool, +line: String) -> IO(St):
   match a:
     case True{}:
@@ -140,12 +207,22 @@ def stepped(+prelude: String, i: Tx.In, +binds: String, a: Bool, +line: String) 
         IO.print(eval(prelude, binds, line))
         return Loop{i, binds}
 
+# A line starting with `:t` (`":t" isPrefixOf`), its spaces dropped.
+def command(+prelude: String, i: Tx.In, +binds: String, t: Bool, +text: String) -> IO(St):
+  match t:
+    case True{}:
+      do IO<St>:
+        IO.print(typed(after.spaces(tail(tail(text)))))
+        return Loop{i, binds}
+    case False{}:
+      stepped(prelude, i, binds, assigns(text), text)
+
 def line(+prelude: String, i: Tx.In, +binds: String, quit: Bool, +text: String) -> IO(St):
   match quit:
     case True{}:
       IO.pure(St, Quit{})
     case False{}:
-      stepped(prelude, i, binds, assigns(text), text)
+      command(prelude, i, binds, String.starts_with(text, ":t"), text)
 
 def got(+prelude: String, +binds: String, l: Tx.Line) -> IO(St):
   match l:
