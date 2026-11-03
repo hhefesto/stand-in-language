@@ -1822,10 +1822,19 @@ into with bend2's comp.ts). `fbtime.bend` has the faithful phases now
 (fwalk fmain fnarrow fshallow fdeep fshwalk fdpwalk faithful), and
 master's cert-oracle fwalk fmain fshwalk fdpwalk to compare.
 
+**Step 5, the tests (2026-11-03): `bend/tests/ealm.bend`** is master's
+EALTests (`98de497c`, test/EALTests.hs: 33 cases) on EALm.bend, a line a
+case with master's assertions: deferBang, ealMaxLevel and ealTopLevelBang
+(`EM.lifted.main`), ealGuidance's Rights and Lefts (`EM.lr.full`: guide and
+fails, the capture layouts, speculation), contractionSites of envUsageL
+(`EM.sites`, `EM.usage`), and over the Prelude the verdicts before and after
+sizing (compileUnitTest as `Sz.size` with no cap; inferEALCompiled over the
+lifted `Sized.plain`). All 33 pass (2 s, 42 MB); nix/bend.nix's `ealm` list
+and the gate's tests run it. `tests/eal.bend` stays: it is haskell-final's
+EALTests on EAL.bend, which the guard and the counts still use.
+
 Next: the memory and time of the shallow reading (rat), the guard's
-layouts by the same derivation, then step 5: tests/eal.bend to master's
-EALTests (390 lines, 34 groups at `98de497c`; the port's has 14), the
-README and section 7.
+layouts by the same derivation, then the README and section 7.
 
 Bend 2 rules learned writing it (each cost a failed check):
 - a match or a tuple destructure takes only a def's parameter, or a field
