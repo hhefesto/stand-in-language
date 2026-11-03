@@ -1,0 +1,38 @@
+status 0
+--- stdout
+telomare> Parse error: 1:1:
+  |
+1 | )
+  | ^
+unexpected ")"
+expecting expression
+
+telomare> Parse error: 1:1:
+  |
+1 | _tmp_ = 9
+  | ^
+unexpected "_"
+expecting expression
+
+telomare> Parse error: 1:8:
+  |
+1 | [a, b] = [1, 2]
+  |        ^
+unexpected "="
+expecting end of input
+
+telomare> Parse error: 1:5:
+  |
+1 | x = 
+  |     ^
+unexpected end of input
+expecting expression
+
+telomare> Parse error: 1:1:
+  |
+1 | <empty line>
+  | ^
+unexpected end of input
+expecting expression
+
+telomare> --- stderr

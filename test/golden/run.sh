@@ -141,6 +141,12 @@ repl_() {
   run "$1" Prelude.tel "" "$bin_dir/telomare-repl" --expr "$2"
 }
 
+# replin_ NAME PROGRAM STDIN: the REPL in PROGRAM's directory, its lines
+# from STDIN.
+replin_() {
+  run "$1" "$2" "$3" "$bin_dir/telomare-repl"
+}
+
 # shellcheck source=test/golden/cases
 . "$root/test/golden/cases"
 

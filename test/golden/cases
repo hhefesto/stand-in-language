@@ -2,6 +2,7 @@
 #
 #   case_ NAME PROGRAM STDIN [ARGS...]   telomare ARGS on PROGRAM, fed STDIN
 #   repl_ NAME EXPR                      telomare-repl --expr EXPR
+#   replin_ NAME PROGRAM STDIN           telomare-repl beside PROGRAM, fed STDIN
 #
 # STDIN takes printf %b escapes, one line per input the program asks for.
 # The cases cover the plain run (the reference evaluator), the interaction
@@ -51,6 +52,8 @@ case_ simpleplus.telc-certificate test/programs/simpleplus.telc '' --certificate
 case_ tictactoe.run tictactoe.tel '1\n4\n2\n5\n3\n'
 case_ tictactoe.certificate tictactoe.tel '' --certificate
 case_ tictactoe.ic tictactoe.tel '1\n4\n2\n5\n3\n' --ic
+# A line the guard refuses, answered by master's program (every check in it).
+case_ tictactoe.ic-abort tictactoe.tel '10\n' --ic
 # The game haskell-final's test suite played (test/ResolverTests.hs, "test
 # tictactoe.tel": fullRunTicTacToeString is this transcript plus the test
 # harness's closing "done"), sized and on the net.
@@ -88,3 +91,11 @@ case_ unbounded-input-recursion.fast test/programs/limits/unbounded-input-recurs
 repl_ repl.succ 'succ 7'
 repl_ repl.factorial 'c2d (factorial 4)'
 repl_ repl.pair '(4, 5)'
+# Its lines (master's 98de497c): the commands; assignments (a name keeps
+# its first binding) and `:{ ... :}`; loading and reloading a file; parse
+# errors (the port's parser's words: port/).
+replin_ repl.commands Prelude.tel ':d 3\n:d succ 2\n:d (1,2)\n:d \\x -> x\n:p 3\n:p (1, 2)\n:p left (3,4)\n:p \\x -> (x, 1)\n:p (\\x -> (x, 1)) 5\n:p \\x -> if x then 1 else 2\n:p (\\x y -> (y, x)) 7\n:d )\n:p foo\n:t 3\n:t\n:q\n'
+replin_ repl.assign Prelude.tel 'x = 1\nx = 2\nx\nsucc = \\y -> 0\nsucc 5\nmain = 7\nmain\ny = x\ny\nfoo\n:{\nz = 5\n:}\nz\n:{\n(1,\n 2)\n:}\n'
+replin_ repl.load test/programs/repl/defs.tel ':l defs.tel\nfoo\nbar 1\nsucc 1\n:r\nsucc 1\nfoo\n'
+replin_ repl.load-error test/programs/repl/baddefs.tel ':l baddefs.tel\nsucc 1\n'
+replin_ repl.parse-error Prelude.tel ')\n_tmp_ = 9\n[a, b] = [1, 2]\nx = \n\n'

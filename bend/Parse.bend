@@ -835,6 +835,14 @@ def line.got(m: Maybe<&2, String>) -> String:
 def line.of(n: U32, s: String) -> String:
   line.got(List.get(&2, String, String.split(s, '\n'), U32.to_nat((n - 1 : U32))))
 
+# megaparsec shows an empty line so.
+def line.shown(s: String) -> String:
+  match s:
+    case SNil{}:
+      "<empty line>"
+    case SCon{c, t}:
+      SCon{c, t}
+
 def spaces(n: Nat) -> String:
   String.repeat(" ", n)
 
@@ -843,7 +851,7 @@ def render.at(file: String, text: String, +line: U32, +col: U32, msg: String) ->
   +pad = spaces(1n+String.length(num))
   file ++ ":" ++ num ++ ":" ++ U32.show(col) ++ ":\n"
     ++ pad ++ "|\n"
-    ++ num ++ " | " ++ line.of(line, text) ++ "\n"
+    ++ num ++ " | " ++ line.shown(line.of(line, text)) ++ "\n"
     ++ pad ++ "| " ++ spaces(U32.to_nat((col - 1 : U32))) ++ "^\n"
     ++ msg ++ "\n"
 

@@ -1,0 +1,26 @@
+status 0
+--- stdout
+telomare> P P P Z
+      Z
+    Z
+  Z
+telomare> some sort of error?
+telomare> P P Z
+    Z
+  P P Z
+      Z
+    Z
+telomare> P F0 L E
+  Z
+telomare> 3
+telomare> (1,2)
+telomare> 3
+telomare> (Fix "DeferSF "FunctionIndex {unFunctionIndex = 0}" ("Fix "PairSF ("Fix "LeftSF ("Fix "EnvSF"")"", "Fix "PairSF ("Fix "ZeroSF"", "Fix "ZeroSF"")"")"")",0)
+telomare> (5,1)
+telomare> (Fix "DeferSF "FunctionIndex {unFunctionIndex = 0}" ("Fix "SetEnvSF ("Fix "PairSF ("Fix "SetEnvSF ("Fix "PairSF ("Fix "GateSF"", "Fix "LeftSF ("Fix "EnvSF"")"")"")"", "Fix "PairSF ("Fix "PairSF ("Fix "PairSF ("Fix "ZeroSF"", "Fix "ZeroSF"")"", "Fix "ZeroSF"")"", "Fix "PairSF ("Fix "ZeroSF"", "Fix "ZeroSF"")"")"")"")"")",0)
+telomare> (Fix "DeferSF "FunctionIndex {unFunctionIndex = 1}" ("Fix "PairSF ("Fix "LeftSF ("Fix "EnvSF"")"", "Fix "LeftSF ("Fix "RightSF ("Fix "EnvSF"")"")"")"")",8)
+telomare> parse error
+telomare> some sort of error?
+telomare> certifies: max box level 0, input bang 0
+telomare> parse error
+telomare> --- stderr

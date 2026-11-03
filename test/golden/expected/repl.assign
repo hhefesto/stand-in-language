@@ -1,0 +1,10 @@
+status 0
+--- stdout
+telomare> telomare> telomare> 1
+telomare> telomare> 6
+telomare> telomare> 7
+telomare> telomare> 1
+telomare> RE (missing definition "foo" at line 1, column 1)
+telomare> telomare> 5
+telomare> (1,2)
+telomare> --- stderr
