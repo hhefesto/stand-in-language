@@ -1,0 +1,264 @@
+== 0
+OK
+== 1
+OK
+== 2
+t:1:10:
+  |
+1 | f = \"a" "b" -> 1
+  |          ^^
+unexpected ""b"
+expecting "->"
+== 3
+t:1:10:
+  |
+1 | f = \"a" "b"-> 1
+  |          ^^
+unexpected ""b"
+expecting "->"
+== 4
+t:1:11:
+  |
+1 | f = \"a"  "b" -> 1
+  |           ^^
+unexpected ""b"
+expecting "->"
+== 5
+t:1:11:
+  |
+1 | f = \"a"  "b"-> 1
+  |           ^^
+unexpected ""b"
+expecting "->"
+== 6
+t:2:1:
+  |
+2 | "b" -> 1
+  | ^^
+unexpected ""b"
+expecting "->"
+== 7
+t:2:1:
+  |
+2 | "b"-> 1
+  | ^^
+unexpected ""b"
+expecting "->"
+== 8
+OK
+== 9
+OK
+== 10
+t:1:10:
+  |
+1 | f = \"a" b -> 1
+  |          ^^
+unexpected "b "
+expecting "->"
+== 11
+t:1:10:
+  |
+1 | f = \"a" b-> 1
+  |          ^^
+unexpected "b-"
+expecting "->"
+== 12
+OK
+== 13
+OK
+== 14
+t:1:10:
+  |
+1 | f = \"a" (x, y) -> 1
+  |          ^^
+unexpected "(x"
+expecting "->"
+== 15
+t:1:10:
+  |
+1 | f = \"a" (x, y)-> 1
+  |          ^^
+unexpected "(x"
+expecting "->"
+== 16
+OK
+== 17
+OK
+== 18
+t:1:10:
+  |
+1 | f = \"a" _ -> 1
+  |          ^^
+unexpected "_ "
+expecting "->"
+== 19
+t:1:10:
+  |
+1 | f = \"a" _-> 1
+  |          ^^
+unexpected "_-"
+expecting "->"
+== 20
+OK
+== 21
+OK
+== 22
+t:1:10:
+  |
+1 | f = \"a" 1 -> 1
+  |          ^^
+unexpected "1 "
+expecting "->"
+== 23
+t:1:10:
+  |
+1 | f = \"a" 1-> 1
+  |          ^^
+unexpected "1-"
+expecting "->"
+== 24
+OK
+== 25
+OK
+== 26
+t:1:14:
+  |
+1 | f = \"a"{-c-}"b" -> 1
+  |              ^^
+unexpected ""b"
+expecting "->"
+== 27
+t:1:14:
+  |
+1 | f = \"a"{-c-}"b"-> 1
+  |              ^^
+unexpected ""b"
+expecting "->"
+== 28
+t:1:15:
+  |
+1 | f = \"a"{-c-} b -> 1
+  |               ^^
+unexpected "b "
+expecting "->"
+== 29
+t:1:15:
+  |
+1 | f = \"a"{-c-} b-> 1
+  |               ^^
+unexpected "b-"
+expecting "->"
+== 30
+t:2:1:
+  |
+2 | "b" -> 1
+  | ^^
+unexpected ""b"
+expecting "->"
+== 31
+t:2:1:
+  |
+2 | "b"-> 1
+  | ^^
+unexpected ""b"
+expecting "->"
+== 32
+OK
+== 33
+OK
+== 34
+OK
+== 35
+OK
+== 36
+OK
+== 37
+OK
+== 38
+OK
+== 39
+OK
+== 40
+OK
+== 41
+OK
+== 42
+OK
+== 43
+OK
+== 44
+OK
+== 45
+OK
+== 46
+OK
+== 47
+OK
+== 48
+OK
+== 49
+OK
+== 50
+t:1:10:
+  |
+1 | f = \"a" (x : 1) -> 1
+  |          ^^
+unexpected "(x"
+expecting "->"
+== 51
+t:1:10:
+  |
+1 | f = \"a" (x : 1)-> 1
+  |          ^^
+unexpected "(x"
+expecting "->"
+== 52
+t:1:17:
+  |
+1 | f = \"a"        "b" -> 1
+  |                 ^^
+unexpected ""b"
+expecting "->"
+== 53
+t:1:17:
+  |
+1 | f = \"a"        "b"-> 1
+  |                 ^^
+unexpected ""b"
+expecting "->"
+== 54
+t:2:1:
+  |
+2 | "a" -> 1
+  | ^^
+unexpected ""a"
+expecting "->"
+== 55
+t:2:1:
+  |
+2 | "a"-> 1
+  | ^^
+unexpected ""a"
+expecting "->"
+== 56
+t:2:1:
+  |
+2 | "a" -> 1
+  | ^^
+unexpected ""a"
+expecting "->"
+== 57
+t:2:1:
+  |
+2 | "a"-> 1
+  | ^^
+unexpected ""a"
+expecting "->"
+== 58
+OK
+== 59
+OK
+== 60
+OK
+== 61
+OK

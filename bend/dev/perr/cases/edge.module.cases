@@ -1,0 +1,135 @@
+main = let
+  a = 1
+   b = 2
+  in a
+main = let a = 1
+            b = 2
+        in a
+main = let a = 1
+          b = 2
+        in a
+main = let
+	a = 1
+	b = 2
+ in a
+main = f
+  x
+ y
+main = f
+x
+main =	f	(	x	,	)
+main = "a\x"
+main = "\o"
+main = "\^"
+main = "\^a"
+main = "\DELx\NUL\SO\SOH\SP\HT\q"
+main = "\1114112"
+main = "\&"
+main = "a\&\&\&\&\&\&\&b"
+main = "\00000000065"
+main = "\12345678901"
+main = "\
+"
+main = "\"main = "\main = 1
+main = (1,
+main = x 
+  y
+a = 1
+b = 
+main = é
+main = xé
+é = 1
+main = 日本
+main = (日本 , )
+x = "日本" (
+main =  x
+main = (
+main = 　(
+main = x (
+main = {- {- -} 
+main = {- -} -- x
+(main = -- 
+-- only
+{- a -}{-main = case x of
+  1 -> 2
+  _ ->
+main = case x of
+main = case x of 1 -> 2 2 -> 3
+(main = \(x : 1) y -> x
+main = \(x : ) -> x
+main = \( : 1) -> x
+main = \_ "a" 1 (a, b) ->
+import
+import qualified M as
+import M
+import
+import qualified
+x = 1
+import M as N
+[a, b] = 
+[a,, b] = 1
+[] = 1
+[a] 1
+x : 1 = 2
+x : = 2
+x :: 1
+main = #
+main = $
+main = $x
+main = $99999999999999999999
+main = 99999999999999999999
+main = 9223372036854775807
+main = 9223372036854775808
+main = {1,2}
+main = {1,2,3,}
+main = [1,]
+main = [,]
+main = []
+(main = if 1 then 2
+main = if then else
+main = let in 1
+main = let x = 1 in
+main = let x = 1
+main = let
+main = letx
+main = inx
+main = x.y.z (
+main = _
+main = ""(
+main = 
+main = 
+main = 		(	(main = (
+
+
+main = (
+	
+
+
+
+  (main
+main ==main = 1
+  2
+ 3
+main = f (g
+  x) y
+main = f (g
+x) y
+main = (f
+ x)
+main = let a = 1
+           b = 2 in a
+main = let a = 1
+  in let b = 2
+  in (
+main = \x -> \y -> 
+main = \ -> 1
+main = \x y
+main = \x ->
+  let a = x
+      b = a
+   in (
+x = 'a'
+x = "\SOx"(
+x = "\^@\^_"(
+x = "\x41g"(
+x = "\o101\o8"(

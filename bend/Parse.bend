@@ -61,7 +61,7 @@ type Frame is Data:
   FPatParen{}
   FPatAnn{+p: S.ParsedPat()}
   FPatPair{+a: S.ParsedPat()}
-  FLPat{+loc: L.Loc}
+  FLPat{+loc: L.Loc, +stop: Bool}
   FDefCheck{+name: L.Name, +cloc: L.Loc}
   FDefBody{+name: L.Name}
   FDefChecked{+name: L.Name, +cloc: L.Loc, +check: S.Parsed()}
@@ -128,7 +128,7 @@ def describe(k: Lx.TK) -> String:
       Sh.string(U32.show(n))
     case Lx.KChurch{n}:
       Sh.string("$" ++ U32.show(n))
-    case Lx.KStr{s}:
+    case Lx.KStr{s, spaced}:
       Sh.string(Sh.string(s))
     case Lx.KSym{c}:
       Sh.string(sym.text(c))
@@ -151,7 +151,7 @@ def atom.start(k: Lx.TK) -> Bool:
   match k:
     case Lx.KId{name}:
       True{}
-    case Lx.KStr{s}:
+    case Lx.KStr{s, spaced}:
       True{}
     case Lx.KNat{n}:
       True{}
@@ -329,26 +329,28 @@ def app.fallback(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, head: S.Parsed
       bad(toks, stack, "expression")
 
 # After an atom of an application: the next token continues it when it can
-# start an atom and is on the same line, or on a later line right of the
-# head's column. On a later line right of the head, anything else makes
-# megaparsec abandon the application and fall back to the head alone
-# (`try parseApplied <|> parseSingleExpr`).
+# start an atom and stands right of the head's column (lineFold's guard
+# looks at the column only, so a token on the line of the atom before it
+# can still be too far left, as after a lambda that ran onto a later line).
+# On a later line right of the head, anything else makes megaparsec abandon
+# the application and fall back to the head alone (`try parseApplied <|>
+# parseSingleExpr`).
 def app.decide(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
                +lvl: U32, +fallback: Bool, head: S.Parsed(), args: List<&2, S.Parsed()>,
-               after: List<&2, Lx.Tok>, end: Bool, nl: Bool, left: Bool,
+               after: List<&2, Lx.Tok>, end: Bool, left: Bool, nl: Bool,
                atom: Bool) -> PS:
-  match end nl left atom:
+  match end left nl atom:
     case True{} _ _ _:
       app.done(toks, stack, loc, head, args)
-    case False{} True{} True{} _:
+    case False{} True{} _ _:
       app.done(toks, stack, loc, head, args)
-    case False{} True{} False{} True{}:
+    case False{} False{} True{} True{}:
       PS{toks, FAppArg{loc, lvl, fallback, head, args, after} <> stack, Want{GAtom{}}}
-    case False{} True{} False{} False{}:
+    case False{} False{} True{} False{}:
       app.fallback(toks, stack, head, after, fallback)
-    case False{} False{} _ True{}:
+    case False{} False{} False{} True{}:
       PS{toks, FAppArg{loc, lvl, fallback, head, args, after} <> stack, Want{GAtom{}}}
-    case False{} False{} _ False{}:
+    case False{} False{} False{} False{}:
       app.done(toks, stack, loc, head, args)
 
 def app.look(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
@@ -356,8 +358,8 @@ def app.look(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
              after: List<&2, Lx.Tok>, t: Lx.Tok) -> PS:
   match t:
     case Lx.Tok{+k, at, ws, nl}:
-      app.decide(toks, stack, loc, lvl, fallback, head, args, after, is.end(k), nl,
-                 U32.is_le(pos.col(at), lvl), atom.start(k))
+      app.decide(toks, stack, loc, lvl, fallback, head, args, after, is.end(k),
+                 U32.is_le(pos.col(at), lvl), nl, atom.start(k))
 
 def app.next(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, +loc: L.Loc,
              +lvl: U32, +fallback: Bool, head: S.Parsed(), args: List<&2, S.Parsed()>,
@@ -439,7 +441,7 @@ def atom.begin(+file: String, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t
       match k:
         case Lx.KId{+name}:
           got.term(next(toks), stack, S.SVar{L.word(file, at, name), name})
-        case Lx.KStr{s}:
+        case Lx.KStr{s, spaced}:
           got.term(next(toks), stack, S.SStr{L.at(file, at), s})
         case Lx.KNat{n}:
           got.term(next(toks), stack, S.SInt{L.at(file, at), n})
@@ -467,7 +469,7 @@ def pat.begin(+file: String, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t:
           got.pat(next(toks), stack, S.PIgnore{})
         case Lx.KId{name}:
           got.pat(next(toks), stack, S.PVar{L.Name{L.at(file, at), name}})
-        case Lx.KStr{s}:
+        case Lx.KStr{s, spaced}:
           got.pat(next(toks), stack, S.PStr{s})
         case Lx.KNat{n}:
           got.pat(next(toks), stack, S.PInt{n})
@@ -484,8 +486,10 @@ def lpat.begin(+file: String, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t
       match k:
         case Lx.KId{name}:
           PS{next(toks), stack, Got{VLPat{S.LPat{L.at(file, at), S.PVar{L.Name{L.at(file, at), name}}}}}}
+        case Lx.KStr{x, spaced}:
+          PS{toks, FLPat{L.at(file, at), spaced} <> stack, Want{GPat{}}}
         case _:
-          PS{toks, FLPat{L.at(file, at)} <> stack, Want{GPat{}}}
+          PS{toks, FLPat{L.at(file, at), False{}} <> stack, Want{GPat{}}}
 
 # Definitions
 # -----------
@@ -597,13 +601,61 @@ def list.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
     case _:
       bad(toks, stack, "\",\" or \"]\"")
 
+# Whether a lambda's parameter lets the next one start on a later line:
+# master's variable pattern eats newlines after it (`<* scn`); `_`,
+# numbers, pairs and annotations eat same-line space only, and a string
+# nothing.
+# A string pattern followed by any space ends the parameters: it takes no
+# space itself, so the next one would start on that space.
+def lpat.stop(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, lp: S.ParsedLPat(), t: Lx.Tok) -> PS:
+  match t:
+    case Lx.Tok{Lx.KSym{1}, at, ws, nl}:
+      PS{toks, stack, Got{VLPat{lp}}}
+    case Lx.Tok{k, at, ws, nl}:
+      bad(toks, stack, "\"->\"")
+
+def lpat.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, lp: S.ParsedLPat(), stop: Bool) -> PS:
+  match stop:
+    case True{}:
+      lpat.stop(toks, stack, lp, peek(toks))
+    case False{}:
+      PS{toks, stack, Got{VLPat{lp}}}
+
+def lpat.more(lp: S.ParsedLPat(), nl: Bool) -> Bool:
+  match lp:
+    case S.LPat{l, p}:
+      match p:
+        case S.PVar{n}:
+          True{}
+        case _:
+          Bool.not(nl)
+
+def pats.more(+pats: List<&2, S.ParsedLPat()>, nl: Bool) -> Bool:
+  match pats:
+    case []:
+      True{}
+    case lp <> rest:
+      lpat.more(lp, nl)
+
+# Another parameter, unless the last one's trailing space stops it (megaparsec
+# ends the parameters there and wants the arrow): a variable takes any space,
+# newlines too; the others stay on their line. A string pattern takes no space
+# at all (lpat.stop).
+def lam.more(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
+             pats: List<&2, S.ParsedLPat()>, go: Bool) -> PS:
+  match go:
+    case True{}:
+      PS{toks, FLam{loc, pats} <> stack, Want{GLPat{}}}
+    case False{}:
+      bad(toks, stack, "\"->\"")
+
 def lam.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, loc: L.Loc,
-            pats: List<&2, S.ParsedLPat()>, t: Lx.Tok) -> PS:
+            +pats: List<&2, S.ParsedLPat()>, t: Lx.Tok) -> PS:
   match t:
     case Lx.Tok{Lx.KSym{1}, at, ws, nl}:
       PS{next(toks), FLamBody{loc, List.reverse(&2, S.ParsedLPat(), pats)} <> stack, Want{GLong{False{}}}}
-    case _:
-      PS{toks, FLam{loc, pats} <> stack, Want{GLPat{}}}
+    case Lx.Tok{k, at, ws, nl}:
+      lam.more(toks, stack, loc, pats, pats.more(pats, nl))
 
 def patparen.got(+toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, p: S.ParsedPat(), t: Lx.Tok) -> PS:
   match t:
@@ -688,8 +740,8 @@ def got(+file: String, fr: Frame, v: Val, +toks: List<&2, Lx.Tok>, stack: List<&
       close.pat(toks, stack, S.PAnn{p, as.term(v)})
     case FPatPair{a}:
       close.pat(toks, stack, S.PPair{a, as.pat(v)})
-    case FLPat{loc}:
-      PS{toks, stack, Got{VLPat{S.LPat{loc, as.pat(v)}}}}
+    case FLPat{loc, stop}:
+      lpat.got(toks, stack, S.LPat{loc, as.pat(v)}, stop)
     case FDefCheck{name, cloc}:
       sep.sym(61, toks, FDefChecked{name, cloc, as.term(v)}, stack)
     case FDefBody{name}:

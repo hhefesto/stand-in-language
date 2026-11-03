@@ -1,0 +1,134 @@
+== 0
+OK
+== 1
+OK
+== 2
+t:1:9:
+  |
+1 | main = "\^?"
+  |         ^
+unexpected '\'
+expecting '"' or literal character
+== 3
+OK
+== 4
+OK
+== 5
+OK
+== 6
+OK
+== 7
+OK
+== 8
+OK
+== 9
+OK
+== 10
+OK
+== 11
+t:1:18:
+  |
+1 | main = "a\&\&\&\&\&b"
+  |                  ^
+unexpected '\'
+expecting '"' or literal character
+== 12
+OK
+== 13
+t:1:19:
+  |
+1 | main = "\n\&\&\&\&\&b"
+  |                   ^
+unexpected '\'
+expecting '"' or literal character
+== 14
+OK
+== 15
+t:1:19:
+  |
+1 | main = "\SOH\&\&\&\&b"
+  |                   ^
+unexpected '\'
+expecting '"' or literal character
+== 16
+OK
+== 17
+t:1:18:
+  |
+1 | main = "\^A\&\&\&\&b"
+  |                  ^
+unexpected '\'
+expecting '"' or literal character
+== 18
+OK
+== 19
+t:1:18:
+  |
+1 | main = "\65\&\&\&\&b"
+  |                  ^
+unexpected '\'
+expecting '"' or literal character
+== 20
+OK
+== 21
+t:1:9:
+  |
+1 | main = "\&"
+  |         ^
+unexpected '\'
+expecting '"' or literal character
+== 22
+OK
+== 23
+t:1:9:
+  |
+1 | main = "\x"
+  |         ^
+unexpected '\'
+expecting '"' or literal character
+== 24
+t:1:9:
+  |
+1 | main = "\o"
+  |         ^
+unexpected '\'
+expecting '"' or literal character
+== 25
+OK
+== 26
+t:1:19:
+  |
+1 | main = "\1114111\&\&b"
+  |                   ^
+unexpected '\'
+expecting '"' or literal character
+== 27
+t:1:9:
+  |
+1 | main = "\xg"
+  |         ^
+unexpected '\'
+expecting '"' or literal character
+== 28
+t:1:9:
+  |
+1 | main = "\X"
+  |         ^
+unexpected '\'
+expecting '"' or literal character
+== 29
+t:1:9:
+  |
+1 | main = "\O8"
+  |         ^
+unexpected '\'
+expecting '"' or literal character
+== 30
+OK
+== 31
+t:1:9:
+  |
+1 | main = "\Xz"
+  |         ^
+unexpected '\'
+expecting '"' or literal character

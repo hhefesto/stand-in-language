@@ -13,7 +13,7 @@ def kind(k: Lx.TK) -> String:
       "nat " ++ U32.show(n)
     case Lx.KChurch{n}:
       "church " ++ U32.show(n)
-    case Lx.KStr{s}:
+    case Lx.KStr{s, spaced}:
       "str " ++ s
     case Lx.KSym{c}:
       "sym " ++ U32.show(c)

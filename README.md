@@ -26,7 +26,9 @@ interaction-net runtime behind `--ic` (`bend/IC.bend`, its loop in C).
 It certifies with master's EAL (`bend/EALm.bend`, master's PR #157), and
 the interaction net runs under the capture layouts master's EAL gives
 after sizing. The REPL (`telomare-repl`) and the language server
-(`telomare-lsp`) are master's; the REPL has no line editing.
+(`telomare-lsp`) are master's. Parse errors are master's word for word
+(`bend/Mega.bend`), except that a literal above 4294967295 is refused
+(`natural literal exceeds the supported range`) where master parses it.
 
 The Bend `telomare` command is the flake's default app. It takes master's
 command line, `--help` and the errors included:
@@ -529,9 +531,10 @@ $ ./result/bin/telomare-repl --expr 'dPlus 2 3'
 5
 ```
 
-A parse error is the port's parser's text, as on the command line
-(`test/golden/port/repl.*`). Haskeline's line editing and history are not
-ported.
+A parse error is master's text, as on the command line. At a terminal the
+flake's `telomare-repl` runs under `rlwrap`, for line editing and the
+session's history; the binary itself, as `bend/dev/gate.sh` builds it, reads
+plain lines.
 
 ## Editor Support (LSP)
 
@@ -539,8 +542,7 @@ The language server is `telomare-lsp` (`bend/Lsp.bend`, a port of master's
 `app/LSP.hs`), the flake's `lsp` app; the Emacs major mode under
 [`emacs-telomare-mode/`](emacs-telomare-mode/), with variants for Spacemacs,
 Doom, and vanilla Emacs, starts it. It gives master's answers on the
-sessions in `test/lsp` (`test/lsp/run.sh`), but for the text of a parse
-error, which is the port's parser's, as on the command line.
+sessions in `test/lsp` (`test/lsp/run.sh`), parse errors' text included.
 
 ### LSP capabilities
 
@@ -703,7 +705,7 @@ identifier ::= letter (letter | digit | "_" | ".")*
 ```
 
 The keywords are `let`, `in`, `if`, `then`, `else`, `case`, `of`, `import`,
-`qualified`, and `as`. Naturals must fit in the implementation's `Int` range;
+`qualified`, and `as`. Naturals must fit in 32 bits (master: in an `Int`);
 oversized literals are parse errors rather than wrapping.
 
 UDTs deliberately retain the existing list-definition convention:
@@ -746,7 +748,7 @@ is checked against the Haskell tests it can answer (master's EALTests are
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
 | Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 4, written with no IC certificate; version 5 with a session guard) |
-| REPL | `app/Repl.hs` | ported: `bend/{Repl,Partial}.bend` (no line editing) |
+| REPL | `app/Repl.hs` | ported: `bend/{Repl,Partial}.bend` (line editing: `rlwrap`) |
 | LSP | `app/LSP.hs` | ported: `bend/{Json,Lsp}.bend` |
 
 Each stage hands the next a type in which the previous stage's forms cannot

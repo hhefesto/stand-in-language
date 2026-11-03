@@ -1,0 +1,32 @@
+main = "\X41"
+main = "\O101"
+main = "\^?"
+main = "\^@"
+main = "\0000000065"
+main = "\00000000065"
+main = "\x00000041"
+main = "\x000000041"
+main = "\o00000101"
+main = "\o000000101"
+main = "a\&\&\&\&b"
+main = "a\&\&\&\&\&b"
+main = "\n\&\&\&\&b"
+main = "\n\&\&\&\&\&b"
+main = "\SOH\&\&\&b"
+main = "\SOH\&\&\&\&b"
+main = "\^A\&\&\&b"
+main = "\^A\&\&\&\&b"
+main = "\65\&\&\&b"
+main = "\65\&\&\&\&b"
+main = "\SO\&H"
+main = "\&"
+main = "a\&"
+main = "\x"
+main = "\o"
+main = "\1114111\&b"
+main = "\1114111\&\&b"
+main = "\xg"
+main = "\X"
+main = "\O8"
+main = "\NUL\SOH"
+main = "\Xz"

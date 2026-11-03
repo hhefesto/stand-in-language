@@ -5,6 +5,7 @@ import ./Lexical.bend as Lx
 import ./Loc.bend as L
 import ./Syntax.bend as S
 import ./Parse.bend as P
+import ./Mega.bend as Mg
 import ./Expand.bend as E
 import ./Resolve.bend as Rs
 import ./Desugar.bend as D
@@ -1452,8 +1453,21 @@ def perr.off(e: P.PErr) -> U32:
         case L.Pos{l, c, off}:
           off
 
+def diag.at(+text: String, +off: U32, msg: String) -> Diag:
+  Diag{range.after(pos.at(starts(text), off)), "parser", msg}
+
+# Master's error where Mega.bend finds it, else the port's own.
+def diag.shown(+text: String, +e: P.PErr, m: Maybe<&2, Mg.Shown>) -> Diag:
+  match m:
+    case Some{s}:
+      match s:
+        case Mg.MgShown{o, x}:
+          diag.at(text, o, x)
+    case None{}:
+      diag.at(text, perr.off(e), unfile(P.render("", text, e)))
+
 def diag.parse(+text: String, +e: P.PErr) -> Diag:
-  Diag{range.after(pos.at(starts(text), perr.off(e))), "parser", unfile(P.render("", text, e))}
+  diag.shown(text, e, Mg.check(Mg.MgModule{}, "", text))
 
 def exp.range(+ss: List<&2, U32>, e: E.ExpErr) -> Range:
   match e:
@@ -1812,7 +1826,7 @@ def pe.mod(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>, +pre: List<&2, Rs.Mod
 def pe.defs(r: Result<&2, &2, P.PErr, List<&2, S.Item>>, +pre: List<&2, Rs.Mod>, +text: String, +e0: P.PErr) -> String:
   match r:
     case Fail{e}:
-      "Evaluation Error: " ++ unfile(P.render("", text, e0))
+      "Evaluation Error: " ++ Mg.message(Mg.MgOneOf{}, "", text, unfile(P.render("", text, e0)))
     case Done{items}:
       pe.mod(E.module(items), pre)
 

@@ -1,4 +1,5 @@
 import Base
+import ./Unicode.bend as Unicode
 import ./Lexical.bend as Lexical
 import ./Show.bend as Show
 import ./Loc.bend as Loc
@@ -6,6 +7,7 @@ import ./Text.bend as Text
 import ./Syntax.bend as Syntax
 import ./Lex.bend as Lex
 import ./Parse.bend as Parse
+import ./Mega.bend as Mega
 import ./Expand.bend as Expand
 import ./Resolve.bend as Resolve
 import ./Desugar.bend as Desugar

@@ -1,0 +1,556 @@
+== 0
+t:1:22:
+  |
+1 | main = \input -> (0, )
+  |                      ^^
+unexpected ")<newline>"
+expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+== 1
+OK
+== 2
+t:5:1:
+  |
+5 | <empty line>
+  | ^
+unexpected end of input
+expecting "-}" or "{-"
+== 3
+t:1:4:
+  |
+1 | fo as o
+  |    ^
+unexpected 'a'
+expecting ':' or assignment =
+== 4
+t:2:1:
+  |
+2 | 9
+  | ^
+unexpected '9'
+expecting "import", end of input, letter, or list assignment names
+== 5
+t:2:9:
+  |
+2 | bar =#z \x -> (x, foo)
+  |         ^
+unexpected '\'
+expecting "import", '"', '#', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
+== 6
+t:51:9:
+   |
+51 |         '       } a
+   |         ^
+unexpected '''
+expecting '}'
+== 7
+OK
+== 8
+OK
+== 9
+t:86:27:
+   |
+86 |                           (not (toBool boardIn))
+   |                           ^
+Expected same indentation.
+== 10
+OK
+== 11
+OK
+== 12
+t:19:39:
+   |
+19 |                           then concat ["1", $49{succ (dMinus r 10)]
+   |                                       ^^^^
+unexpected "["1""
+expecting "else"
+== 13
+t:12:28:
+   |
+12 |                           (, _) -> l
+   |                            ^
+unexpected ','
+expecting '"', '(', '_', annotated pattern, integer, letter, or pattern before ':'
+== 14
+t:1:1:
+  |
+1 | import \
+  | ^
+unexpected 'i'
+expecting end of input
+== 15
+OK
+== 16
+OK
+== 17
+OK
+== 18
+t:3:55:
+  |
+3 | main = \input -> (if dEqual O.foo 3 then "ok" else "ba
+  |                                                       ^
+unexpected end of input
+expecting '"' or literal character
+== 19
+t:10:1:
+   |
+10 | <empty line>
+   | ^
+unexpected end of input
+expecting "-}" or "{-"
+== 20
+OK
+== 21
+t:8:1:
+  |
+8 | <empty line>
+  | ^
+Expected same indentation.
+== 22
+t:3:24:
+  |
+3 |   let toCase = ("a stri
+  |                        ^
+unexpected end of input
+expecting '"' or literal character
+== 23
+t:6:1:
+  |
+6 | $          ((3,"s1"),(var0,var1)) -> "True"
+  | ^
+unexpected '$'
+expecting '"', '(', '_', annotated pattern, integer, or letter
+== 24
+OK
+== 25
+OK
+== 26
+t:4:14:
+  |
+4 |             0- > "zero"
+  |              ^^
+unexpected "- "
+expecting "->" or digit
+== 27
+t:2:4:
+  |
+2 | mai
+  |    ^
+unexpected end of input
+expecting ':', assignment =, or variable
+== 28
+t:2:33:
+  |
+2 | main = \input -> let f = \(a, b -> b
+  |                                 ^
+unexpected '-'
+expecting ')'
+== 29
+t:9:17:
+  |
+9 |                 firstChar = left userInput
+  |                 ^
+Expected same indentation.
+== 30
+OK
+== 31
+t:1:23:
+  |
+1 | main = \input -> (map (\-> dPlus x 48) (concat [(zipWith dPlus (map succ []) (if 0 then [3, 2] els e[0, 0, 4])), (drop 3 (take 1 []))]), 0)
+  |                       ^
+unexpected '('
+expecting ')' or ','
+== 32
+t:1:23:
+  |
+1 | main = \input -> (map (\x >- dPlus x 48) [(max (dMod 5 (succ 1)) (gcd (succ 1) (succ 1)))], 0)
+  |                       ^
+unexpected '('
+expecting ')' or ','
+== 33
+OK
+== 34
+t:1:11:
+  |
+1 | main = \in as put -> (map (\x -> dPlus x 48) [8], 0)
+  |           ^
+keyword "in" cannot be an identifier
+== 35
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (quicksort (take (dMinus
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 36
+OK
+== 37
+t:1:18:
+  |
+1 | main = \input -> 
+  |                  ^
+unexpected end of input
+expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+== 38
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (concat [(drop 1 [6, 5, 4]),ake 0 [])]), 0)
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 39
+t:1:41:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48)
+  |                                         ^
+unexpected end of input
+expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+== 40
+OK
+== 41
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(listLength$(concat [(range 0 2), (quicksort [2, 1])]))], 0)
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 42
+t:1:22:
+  |
+1 | main = \input -> (map"\ (\x -> dPlus x 48) [9], 0)
+  |                      ^
+unexpected '"'
+expecting ')', ',', or variable
+== 43
+OK
+== 44
+OK
+== 45
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (range (dMinus (min 3 4) (min 5 0)) (dMinus (gcd (succ 
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 46
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (if (dEqual (dTimes((\f -> f (f 0)) (\z -> (dMinus z 3)))) then (range 0 3) else (quicksort (filter (\x -> dEqual x 3) [2]))), 0)
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 47
+t:1:166:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (mapdPlus x (dMinus (dTimes 2 3) (dMod (if 0 then 0 else 2) (succ (dMinus 5 3))))) (take 1 (filter (\x -> dEqual x 0) [1]))), 0)
+  |                                                                                                                                                                      ^
+unexpected ','
+expecting "import", '"', '#', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
+== 48
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (concat [(drop 1 (range 
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 49
+t:1:23:
+  |
+1 | main = \input -> (map (\x -> dPl$us x 48) [(dFactorial 3)], 0)
+  |                       ^
+unexpected '('
+expecting ')' or ','
+== 50
+OK
+== 51
+t:1:48:
+  |
+1 | main = \input -> (mapcase z (\x -> dPlus x 48) [(min (succ 1) (dMo
+  |                                                ^
+unexpected '['
+expecting ')' or ','
+== 52
+OK
+== 53
+t:1:59:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (map succ [6]), 0=
+  |                                                           ^
+unexpected '='
+expecting '"', '#', '$', '(', ')', '[', '{', digit, integer, or letter
+== 54
+OK
+== 55
+OK
+== 56
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(let y  :  = (foldr (\x a -> dPlus x a) 0 [4, 3]) in dPlus y y)], 0)
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 57
+OK
+== 58
+OK
+== 59
+OK
+== 60
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(let y = (foldr (\x a
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 61
+t:1:41:
+  |
+1 | man = \input -> (map (\x -> dPlus x 48) [(max (min ((\f -) f (f (let y = 4 in dPlus y y))) (\z -> (succ z))) (c2d (times $4 $3))) 9)], 0)
+  |                                         ^
+unexpected '['
+expecting ')' or ','
+== 62
+t:1:23:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48") [(if 0 then 3 else 4)], 0)
+  |                       ^
+unexpected '('
+expecting ')' or ','
+== 63
+OK
+== 64
+t:1:23:
+  |
+1 | main = \input -> (map 99999999999999999999-(\x -> dPlus x 48) [(c2d (\f x -> $4 f (f x)))], 0)
+  |                       ^
+unexpected '9'
+expecting ')' or ','
+== 65
+t:1:5:
+  |
+1 | main"\x41", = \input -> (map (\x -> dPlus x 48) (concat [(map (\x -> dPlus x (dMix.ynus 2 2)) (map (\x -> dTimes x 2) [3, 2])), [(let y = 2 in dPlus y y)]]), 0)
+  |     ^
+unexpected '"'
+expecting ':', assignment =, or variable
+== 66
+OK
+== 67
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) ([dTimes 2 (dMinus (dPlus 3 3) (gcd (succ 0) (succ 1))))], 0)
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 68
+t:1:20:
+  |
+1 | main = \input -> (m->$ap (\x -> dPlus x 48) [(dTimes 1 1)], 0)
+  |                    ^
+unexpected '-'
+expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+== 69
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [((x : dFactorial 2)], 0)
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 70
+t:1:23:
+  |
+1 | main = \input -> (map (\
+  |                       ^
+unexpected '('
+expecting ')' or ','
+== 71
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (zipWith dPlus (map (\x# -> dTimes x 2) (zipWith dPlus [3] [])) (zipWith dPlus (map (\x -> dPlus x 1) []) (if 0 then [] else []))), 0)
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 72
+t:1:22:
+  |
+1 | main = \input -> (map
+  |                      ^
+unexpected end of input
+expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+== 73
+OK
+== 74
+OK
+== 75
+t:1:6:
+  |
+1 | main nput -> (map (\x -> dPlus x 48) (map (\x -> dTimes x 2) (map (\x -> dPlus x 0) (quicksort (map succ [0, 5, 2])))), 0)
+  |      ^
+unexpected 'n'
+expecting ':' or assignment =
+== 76
+t:1:23:
+  |
+1 | main = \input -> (map (\x -> dPlus 
+  |                       ^
+unexpected '('
+expecting ')' or ','
+== 77
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (concat [(range 3 1), (map (\x -> dPlus "
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 78
+t:1:23:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48( [(dMod 5 (suc 2))], 0)
+  |                       ^
+unexpected '('
+expecting ')' or ','
+== 79
+t:1:41:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48)
+  |                                         ^
+unexpected end of input
+expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+== 80
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(foldl (\a x -> dPlus a x) (max (dTimes 1 2) (99999999999999999999if 0 then 4 else 0)) (map (\x -> dPlus x 3) (foldr (\x l -> (x, l)) 0 [])))], 0)
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 81
+t:1:23:
+  |
+1 | main = \input -> (map 
+  |                       ^
+unexpected end of input
+expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+== 82
+t:1:7:
+  |
+1 | main =
+  |       ^
+unexpected end of input
+expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+== 83
+OK
+== 84
+OK
+== 85
+t:1:68:
+  |
+1 | main = \input -> (mif ,ap (\x -> dPlus x 48) (map succ (range 2 2)), 0)
+  |                                                                    ^
+unexpected ','
+expecting '"', '#', '$', '(', ')', '[', '{', integer, or letter
+== 86
+OK
+== 87
+t:1:4:
+  |
+1 | mai\q
+  |    ^
+unexpected '\'
+expecting ':', assignment =, or variable
+== 88
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(min (dPlus (dTimes (dMinus 1 5) (dMinus 5 4)) (dFactorial 0)) (let y = (dMod (min 4 3)cc 0)) in dPlus y y))], 0)
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 89
+t:1:19:
+  |
+1 | main = \input -> (]map (\x -> dPlus x 48) [(if 0 then 5 else 1)], 0)
+  |                   ^^^^
+unexpected "]map"
+expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+== 90
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (if (toBool ((\f -> f (f (c2d $3))) (\z -> (dMinus z (dMinus 3 5))))) then (concat [(foldr (\x l -> (x, l)) 0 (if 1 then [4, 5, 3] els"\x41"e [4, 0, 2])), (foldr (\x l -> (x, l)) 0 (map (\x -> dPlus x 1) [4, 3, 0]))]) else [(max (foldr (\x a -> dPlus x a) 0 [2, 2, 6]) (foldr (\x a -> dPlus x a) 0 [6, 6, 0])), (gcd (succ 2) (succ 1)), (dFactorial 3)]), 0)
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 91
+t:1:21:
+  |
+1 | main = \input -> (ma
+  |                     ^
+unexpected end of input
+expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+== 92
+t:1:11:
+  |
+1 | main = \in
+  |           ^
+keyword "in" cannot be an identifier
+== 93
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(max (c2d (\f x -> $4 f (f x))) (zlet y = (c2d $1) in dPlus y y))], 0)
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 94
+t:1:122:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(dDiv (min (foldr (\x a -> dPlus x a) 0 [0, 5]) (dDiv 3 (succ 0))) (succ 2))], 
+  |                                                                                                                          ^
+unexpected end of input
+expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+== 95
+t:1:63:
+  |
+1 | main = \input ->  (\x -> dPlus x 48) [(dTimes (dMinus 5 2) 1)], 0)
+  |                                                               ^
+unexpected ','
+expecting "import", '"', '#', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
+== 96
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (quicksort (if (dEqual (dMinus 5 4) (dMinus 4 1)) then (map (\x 9223372036854775808-> dTimes x 2) (if 1 then [6, 0] else [2])) else (map (\x -> dTimes x 2) (foldr (\x l -> (x, l)) 0 [0])))), 0)
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 97
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) (zipWith dPlus (map (\x -> dPlus x (dMinus (c2d $4) (dMod 4 (succ 2)))) (quicksort (quicksort [2, 6]))) (map (\x >- dPlus x 1) (concat [[5, 3], []]))), 0)
+  |                                          ^
+unexpected '('
+expecting ')' or ','
+== 98
+t:1:42:
+  |
+1 | main = \input -> (map (\x -> dPlus x 48) [(dDiv } (succ 3))], 0)
+  |                                          ^
+unexpected '['
+expecting ')' or ','
+== 99
+t:1:2:
+  |
+1 | m"\x41"$ain = \input -> (map (\x -> dPlus x 48) [(dMod 3 (succ 0))], 0)
+  |  ^
+unexpected '"'
+expecting ':', assignment =, or variable
+== 100
+OK
+== 101
+t:1:5:
+  |
+1 | mai n = \f -> \x -> f x x
+  |     ^
+unexpected 'n'
+expecting ':' or assignment =
+== 102
+t:1:26:
+  |
+1 | main = \x -> listEqual  ["ab"
+  |                          ^
+unexpected '"'
+expecting letter

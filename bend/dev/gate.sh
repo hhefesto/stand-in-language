@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gate.sh [build|tests|goldens|lsp|corpus|proofs|all]...: the handoff's
+# gate.sh [build|tests|goldens|lsp|perr|corpus|proofs|all]...: the handoff's
 # verifying checks by hand, as P1-P7 ran them, and the proofs. Binaries go
 # to $GATE/bin and logs to $GATE/logs; GATE defaults to /tmp/telomare-gate.
 # Run from anywhere in the repo, inside `nix develop`. `nix flake check` is
@@ -51,6 +51,16 @@ lsp() {
   bash test/lsp/run.sh "$B" check > "$S/logs/lsp.out" 2>&1
   tail -1 "$S/logs/lsp.out"
   grep -q FAIL "$S/logs/lsp.out" && { grep FAIL "$S/logs/lsp.out"; fail=1; }
+}
+
+# Parse errors against master's recorded ones (bend/dev/perr/cases).
+perr() {
+  echo "== perr"
+  bend bend/dev/perr/megamain.bend -o "$B/megamain" || { echo "BUILD FAILED megamain"; fail=1; return; }
+  bend bend/dev/perr/portmain.bend -o "$B/portmain" || { echo "BUILD FAILED portmain"; fail=1; return; }
+  python3 -I bend/dev/perr/check.py "$B/megamain" "$B/portmain" > "$S/logs/perr.out" 2>&1 || fail=1
+  grep -m 20 FAIL "$S/logs/perr.out"
+  tail -1 "$S/logs/perr.out"
 }
 
 corpus() {
@@ -128,9 +138,10 @@ for s in "${steps[@]}"; do
     tests) tests ;;
     goldens) goldens ;;
     lsp) lsp ;;
+    perr) perr ;;
     corpus) corpus ;;
     proofs) proofs ;;
-    all) build; tests; goldens; lsp; corpus; proofs ;;
+    all) build; tests; goldens; lsp; perr; corpus; proofs ;;
   esac
 done
 [ $fail -eq 0 ] && echo "GATE OK" || echo "GATE FAILED"

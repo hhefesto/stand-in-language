@@ -1,0 +1,659 @@
+== 0
+OK
+== 1
+OK
+== 2
+2:29:
+  |
+2 | main = \input -> let result 9 { \i -> 0                -- Base case (never used)
+  |                             ^
+unexpected '9'
+expecting ':' or assignment =
+== 3
+OK
+== 4
+6:1:
+  |
+6 | <empty line>
+  | ^
+unexpected end of input
+expecting "-}" or "{-"
+== 5
+5:5:
+  |
+5 | f =9\x -> x {- y -} 12 $3
+  |     ^
+unexpected '\'
+expecting '"', '#', '$', '(', '[', '{', digit, end of input, integer, letter, or list assignment names
+== 6
+OK
+== 7
+1:3:
+  |
+1 | fo' = )
+  |   ^
+unexpected '''
+expecting ':', assignment =, or variable
+== 8
+1:7:
+  |
+1 | foo = )
+  |       ^
+unexpected ')'
+expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+== 9
+1:1:
+  |
+1 | ]oo = )
+  | ^
+unexpected ']'
+expecting end of input, letter, or list assignment names
+== 10
+OK
+== 11
+OK
+== 12
+OK
+== 13
+1:6:
+  |
+1 | foo ='. 
+  |      ^^^^
+unexpected "'. <newline>"
+expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+== 14
+OK
+== 15
+3:1:
+  |
+3 | <empty line>
+  | ^
+unexpected end of input
+expecting ')'
+== 16
+3:1:
+  |
+3 | <empty line>
+  | ^
+unexpected end of input
+expecting "-}" or "{-"
+== 17
+130:6:
+    |
+130 | trunc\ate = \n ->
+    |      ^
+unexpected '\'
+expecting ':', assignment =, or variable
+== 18
+OK
+== 19
+109:11:
+    |
+109 | take = \n : -> let lengthed = n (\x -> (0,x)) 0
+    |           ^^
+unexpected ": "
+expecting "->", '"', '(', '_', annotated pattern, integer, or letter
+== 20
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 21
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 22
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 23
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 24
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 25
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 26
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 27
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 28
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 29
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 30
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 31
+1:7:
+  |
+1 | impor tPrelude
+  |       ^
+unexpected 't'
+expecting ':' or assignment =
+== 32
+1:1:
+  |
+1 | import Prelued
+  | ^
+unexpected 'i'
+expecting end of input
+== 33
+1:1:
+  |
+1 | import Prleude
+  | ^
+unexpected 'i'
+expecting end of input
+== 34
+1:1:
+  |
+1 | import P        elude
+  | ^
+unexpected 'i'
+expecting end of input
+== 35
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 36
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 37
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 38
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 39
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 40
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 41
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 42
+1:1:
+  |
+1 | import Prelud
+  | ^
+unexpected 'i'
+expecting end of input
+== 43
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 44
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 45
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 46
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 47
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 48
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 49
+1:1:
+  |
+1 | import _Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 50
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 51
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 52
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 53
+1:9:
+  |
+1 | impo    t Prelude
+  |         ^
+unexpected 't'
+expecting ':' or assignment =
+== 54
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 55
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 56
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 57
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 58
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 59
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 60
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 61
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 62
+1:5:
+  |
+1 | impo
+  |     ^
+unexpected end of input
+expecting ':', assignment =, or variable
+== 63
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 64
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 65
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 66
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 67
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 68
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 69
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 70
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 71
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 72
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 73
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 74
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 75
+1:8:
+  |
+1 | i_port Prelude
+  |        ^
+unexpected 'P'
+expecting ':' or assignment =
+== 76
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 77
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 78
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 79
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 80
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 81
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 82
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 83
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 84
+1:1:
+  |
+1 | import Preludemain = \input ->
+  | ^
+unexpected 'i'
+expecting end of input
+== 85
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 86
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 87
+1:1:
+  |
+1 | import Pr
+  | ^
+unexpected 'i'
+expecting end of input
+== 88
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 89
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 90
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 91
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 92
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 93
+1:1:
+  |
+1 | import Prelude
+  | ^
+unexpected 'i'
+expecting end of input
+== 94
+OK
+== 95
+OK
+== 96
+2:11:
+  |
+2 |           
+  |           ^
+unexpected end of input
+expecting ','
+== 97
+1:31:
+  |
+1 | main = \input -> let x = if in x
+  |                               ^
+keyword "in" cannot be an identifier
+== 98
+2:1:
+  |
+2 | <empty line>
+  | ^
+unexpected end of input
+expecting '"' or literal character
+== 99
+OK
+== 100
+1:1:
+  |
+1 | import M as
+  | ^
+unexpected 'i'
+expecting end of input
+== 101
+1:16:
+  |
+1 | x = "\SOH\SO\^A\1114112"
+  |                ^
+unexpected '\'
+expecting '"' or literal character
+== 102
+3:4:
+  |
+3 |    b = 2
+  |    ^
+Expected same indentation.

@@ -1,0 +1,93 @@
+== 0
+t:1:10:
+  |
+1 | f = \"a" "b" -> 1
+  |          ^^
+unexpected ""b"
+expecting "->"
+== 1
+OK
+== 2
+OK
+== 3
+t:2:2:
+  |
+2 |  x -> 1
+  |  ^^
+unexpected "x "
+expecting "->"
+== 4
+OK
+== 5
+OK
+== 6
+OK
+== 7
+t:2:2:
+  |
+2 |  x -> 1
+  |  ^^
+unexpected "x "
+expecting "->"
+== 8
+t:2:2:
+  |
+2 |  x -> 1
+  |  ^^
+unexpected "x "
+expecting "->"
+== 9
+OK
+== 10
+OK
+== 11
+OK
+== 12
+OK
+== 13
+OK
+== 14
+OK
+== 15
+OK
+== 16
+t:2:2:
+  |
+2 |  y -> 1
+  |  ^^
+unexpected "y "
+expecting "->"
+== 17
+OK
+== 18
+OK
+== 19
+OK
+== 20
+OK
+== 21
+OK
+== 22
+OK
+== 23
+OK
+== 24
+t:2:2:
+  |
+2 |  x -> 1
+  |  ^^
+unexpected "x "
+expecting "->"
+== 25
+OK
+== 26
+OK
+== 27
+OK
+== 28
+t:2:2:
+  |
+2 |  (c,d) -> 1
+  |  ^^
+unexpected "(c"
+expecting "->"

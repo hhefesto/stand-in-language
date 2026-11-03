@@ -1,6 +1,7 @@
 import Base
 import ./Loc.bend as L
 import ./Lexical.bend as X
+import ./Unicode.bend as U
 
 # The tokenizer under the parser (the lexical half of haskell-final's
 # megaparsec parser). One character at a time through a state machine, so
@@ -15,7 +16,7 @@ type TK is Data:
   KKw{+word: String}
   KNat{+n: U32}
   KChurch{+n: U32}
-  KStr{+s: String}
+  KStr{+s: String, +spaced: Bool}
   KSym{+c: U32}
   KBad{+c: U32}
   KEnd{}
@@ -37,9 +38,12 @@ type LS is Data:
   LNat{+start: L.Pos, +ws: L.Pos, +nl: Bool, +val: U32, +big: Bool}
   LDollar{+start: L.Pos, +ws: L.Pos, +nl: Bool}
   LChurch{+start: L.Pos, +ws: L.Pos, +nl: Bool, +val: U32, +big: Bool}
-  LStr{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String}
-  LEsc{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String}
-  LEscNum{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String, +base: U32, +val: U32, +seen: Bool}
+  LStr{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String, +left: U32}
+  LStrEnd{+start: L.Pos, +ws: L.Pos, +nl: Bool, +s: String}
+  LEsc{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String, +left: U32}
+  LEscNum{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String, +base: U32, +val: U32, +seen: Bool, +used: U32}
+  LEscCtl{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String}
+  LEscName{+start: L.Pos, +ws: L.Pos, +nl: Bool, +acc: String, +name: String}
   LDash{+start: L.Pos, +ws: L.Pos, +nl: Bool}
   LBrace{+start: L.Pos, +ws: L.Pos, +nl: Bool}
 
@@ -63,19 +67,12 @@ def in_range(c: U32, lo: U32, n: U32) -> Bool:
 def is_digit(c: U32) -> Bool:
   in_range(c, 48, 10)
 
-def is_alpha(+c: U32) -> Bool:
-  in_range(c, 65, 26) || in_range(c, 97, 26)
-
 def is_ident(+c: U32) -> Bool:
-  is_alpha(c) || is_digit(c) || U32.is_eq(c, 95) || U32.is_eq(c, 46)
+  U.is_alnum(c) || U32.is_eq(c, 95) || U32.is_eq(c, 46)
 
 # Space or tab: what the same-line space consumer eats.
 def is_blank(+c: U32) -> Bool:
   U32.is_eq(c, 32) || U32.is_eq(c, 9)
-
-# Any other white space goes past the line as far as layout goes (isSpace).
-def is_space(+c: U32) -> Bool:
-  in_range(c, 9, 5) || U32.is_eq(c, 32) || U32.is_eq(c, 160)
 
 # ( ) [ ] } , = : \ # _
 def is_sym(+c: U32) -> Bool:
@@ -87,21 +84,21 @@ def is_sym(+c: U32) -> Bool:
 # Positions
 # ---------
 
-def next.pos.at(nl: Bool, tab: Bool, +line: U32, +col: U32, off: U32) -> L.Pos:
+def next.pos.at(nl: Bool, tab: Bool, +c: U32, +line: U32, +col: U32, off: U32) -> L.Pos:
   match nl tab:
     case True{} _:
       L.Pos{(line + 1 : U32), 1, off}
     case False{} True{}:
       L.Pos{line, (((col - 1) / 8 + 1) * 8 + 1 : U32), off}
     case False{} False{}:
-      L.Pos{line, (col + 1 : U32), off}
+      L.Pos{line, (col + U.width(c) : U32), off}
 
 # The position after character c (a tab moves to the next multiple of 8,
-# plus 1).
+# plus 1; a wide character takes two columns).
 def next.pos(+c: U32, p: L.Pos) -> L.Pos:
   match p:
     case L.Pos{+line, +col, off}:
-      next.pos.at(U32.is_eq(c, 10), U32.is_eq(c, 9), line, col, (off + 1 : U32))
+      next.pos.at(U32.is_eq(c, 10), U32.is_eq(c, 9), c, line, col, (off + 1 : U32))
 
 # Tokens
 # ------
@@ -157,7 +154,7 @@ def gap.open(+c: U32, +p: L.Pos, ws: L.Pos, nl: Bool, toks: List<&2, Tok>,
              quote: Bool, dollar: Bool, dash: Bool, brace: Bool) -> LR:
   match quote dollar dash brace:
     case True{} _ _ _:
-      LOk{LStr{p, ws, nl, SNil{}}, toks}
+      LOk{LStr{p, ws, nl, SNil{}, 0}, toks}
     case False{} True{} _ _:
       LOk{LDollar{p, ws, nl}, toks}
     case False{} False{} True{} _:
@@ -186,7 +183,7 @@ def gap.pick(+c: U32, +p: L.Pos, ws: L.Pos, nl: Bool, toks: List<&2, Tok>,
 
 # A character in the gap between tokens.
 def gap(+c: U32, +p: L.Pos, ws: L.Pos, nl: Bool, toks: List<&2, Tok>) -> LR:
-  gap.pick(c, p, ws, nl, toks, is_blank(c), is_space(c), is_alpha(c),
+  gap.pick(c, p, ws, nl, toks, is_blank(c), U.is_space(c), U.is_letter(c),
            is_digit(c), is_sym(c))
 
 # A finished token, then the character that ended it, back in the gap.
@@ -259,30 +256,39 @@ def digit.val.pick(+c: U32, +base: U32, dec: Bool, lo: Bool, hi: Bool) -> U32:
 def digit.val(+c: U32, +base: U32) -> U32:
   digit.val.pick(c, base, is_digit(c), in_range(c, 97, 6), in_range(c, 65, 6))
 
-# A character inside a string literal.
+# Space or a comment after a string literal: a string pattern takes none, so
+# a lambda's parameters end there.
+def str.spaced(+c: U32) -> Bool:
+  U.is_space(c) || U32.is_eq(c, 45) || U32.is_eq(c, 123)
+
+# A character inside a string literal. Master reads one with megaparsec's
+# charLiteral: readLitChar on the next ten characters, which takes one
+# character and every `\&` after it inside those ten. `left` is how many of
+# the ten remain for those `\&`s; a `\&` beyond them, or first in the string,
+# is an error, and a numeric escape stops at the tenth.
 def str.char.pick(+c: U32, +p: L.Pos, +start: L.Pos, ws: L.Pos, nl: Bool,
-                  acc: String, toks: List<&2, Tok>, quote: Bool, slash: Bool) -> LR:
+                  acc: String, toks: List<&2, Tok>, +left: U32, quote: Bool, slash: Bool) -> LR:
   match quote slash:
     case True{} _:
-      LOk{LGap{p, False{}}, tok(KStr{String.reverse(acc)}, start, ws, nl) <> toks}
+      LOk{LStrEnd{start, ws, nl, String.reverse(acc)}, toks}
     case False{} True{}:
-      LOk{LEsc{start, ws, nl, acc}, toks}
+      LOk{LEsc{start, ws, nl, acc, left}, toks}
     case False{} False{}:
-      LOk{LStr{start, ws, nl, SCon{Chr{c}, acc}}, toks}
+      LOk{LStr{start, ws, nl, SCon{Chr{c}, acc}, 9}, toks}
 
 def str.char(+c: U32, +p: L.Pos, +start: L.Pos, ws: L.Pos, nl: Bool,
-             acc: String, toks: List<&2, Tok>) -> LR:
-  str.char.pick(c, p, start, ws, nl, acc, toks, U32.is_eq(c, 34), U32.is_eq(c, 92))
+             acc: String, toks: List<&2, Tok>, +left: U32) -> LR:
+  str.char.pick(c, p, start, ws, nl, acc, toks, left, U32.is_eq(c, 34), U32.is_eq(c, 92))
 
 def esc.num.base(+c: U32, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
                  toks: List<&2, Tok>, dec: Bool, hex: Bool, oct: Bool) -> LR:
   match dec hex oct:
     case True{} _ _:
-      LOk{LEscNum{start, ws, nl, acc, 10, (c - 48 : U32), True{}}, toks}
+      LOk{LEscNum{start, ws, nl, acc, 10, (c - 48 : U32), True{}, 2}, toks}
     case False{} True{} _:
-      LOk{LEscNum{start, ws, nl, acc, 16, 0, False{}}, toks}
+      LOk{LEscNum{start, ws, nl, acc, 16, 0, False{}, 2}, toks}
     case False{} False{} True{}:
-      LOk{LEscNum{start, ws, nl, acc, 8, 0, False{}}, toks}
+      LOk{LEscNum{start, ws, nl, acc, 8, 0, False{}, 2}, toks}
     case False{} False{} False{}:
       fail(start, "unsupported escape in string literal")
 
@@ -290,37 +296,127 @@ def esc.char.got(+c: U32, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
                  toks: List<&2, Tok>, m: Maybe<&2, U32>) -> LR:
   match m:
     case Some{x}:
-      LOk{LStr{start, ws, nl, SCon{Chr{x}, acc}}, toks}
+      LOk{LStr{start, ws, nl, SCon{Chr{x}, acc}, 8}, toks}
     case None{}:
-      esc.num.base(c, start, ws, nl, acc, toks, is_digit(c), U32.is_eq(c, 120),
-                   U32.is_eq(c, 111))
+      esc.num.base(c, start, ws, nl, acc, toks, is_digit(c),
+                   U32.is_eq(c, 120) || U32.is_eq(c, 88),
+                   U32.is_eq(c, 111) || U32.is_eq(c, 79))
+
+# The ASCII control names of Haskell's character escapes (`\SOH` and
+# `\SO`: the longest name wins).
+type Asc is Data:
+  Asc{+name: String, +code: U32}
+
+def asc.names() -> List<&2, Asc>:
+  [Asc{"NUL", 0}, Asc{"SOH", 1}, Asc{"STX", 2}, Asc{"ETX", 3}, Asc{"EOT", 4},
+   Asc{"ENQ", 5}, Asc{"ACK", 6}, Asc{"BEL", 7}, Asc{"BS", 8}, Asc{"HT", 9},
+   Asc{"LF", 10}, Asc{"VT", 11}, Asc{"FF", 12}, Asc{"CR", 13}, Asc{"SO", 14},
+   Asc{"SI", 15}, Asc{"DLE", 16}, Asc{"DC1", 17}, Asc{"DC2", 18}, Asc{"DC3", 19},
+   Asc{"DC4", 20}, Asc{"NAK", 21}, Asc{"SYN", 22}, Asc{"ETB", 23}, Asc{"CAN", 24},
+   Asc{"EM", 25}, Asc{"SUB", 26}, Asc{"ESC", 27}, Asc{"FS", 28}, Asc{"GS", 29},
+   Asc{"RS", 30}, Asc{"US", 31}, Asc{"SP", 32}, Asc{"DEL", 127}]
+
+# Whether some name starts with `pre`; the code of the name that is `pre`.
+def asc.prefix(es: List<&2, Asc>, +pre: String) -> Bool:
+  match es:
+    case Nil{}:
+      False{}
+    case Con{Asc{name, code}, rest}:
+      String.starts_with(name, pre) || asc.prefix(rest, pre)
+
+def asc.exact(es: List<&2, Asc>, +pre: String) -> Maybe<&2, U32>:
+  match es:
+    case Nil{}:
+      None{}
+    case Con{Asc{name, code}, rest}:
+      esc.first(String.eq(name, pre), code, asc.exact(rest, pre))
+
+# `\&` is no character: after one it is skipped (GHC's lexChar takes it
+# with the character before); first in a string it is an error.
+def esc.empty(+start: L.Pos, ws: L.Pos, nl: Bool, acc: String, toks: List<&2, Tok>,
+              +left: U32, fits: Bool) -> LR:
+  match fits:
+    case True{}:
+      LOk{LStr{start, ws, nl, acc, (left - 2 : U32)}, toks}
+    case False{}:
+      fail(start, "unsupported escape in string literal")
+
+def esc.char.kind(+c: U32, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
+                  toks: List<&2, Tok>, +left: U32, amp: Bool, hat: Bool, upper: Bool) -> LR:
+  match amp hat upper:
+    case True{} _ _:
+      esc.empty(start, ws, nl, acc, toks, left, U32.is_gt(left, 1))
+    case False{} True{} _:
+      LOk{LEscCtl{start, ws, nl, acc}, toks}
+    case False{} False{} True{}:
+      LOk{LEscName{start, ws, nl, acc, SCon{Chr{c}, SNil{}}}, toks}
+    case False{} False{} False{}:
+      esc.char.got(c, start, ws, nl, acc, toks, esc.look(c, escapes()))
 
 # The character after a backslash in a string.
 def esc.char(+c: U32, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
-             toks: List<&2, Tok>) -> LR:
-  esc.char.got(c, start, ws, nl, acc, toks, esc.look(c, escapes()))
+             toks: List<&2, Tok>, +left: U32) -> LR:
+  esc.char.kind(c, start, ws, nl, acc, toks, left, U32.is_eq(c, 38), U32.is_eq(c, 94),
+                in_range(c, 65, 26) && U32.is_ne(c, 88) && U32.is_ne(c, 79))
 
-def esc.num.put(+start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
-                toks: List<&2, Tok>, base: U32, val: U32, over: Bool) -> LR:
-  match over:
+# `\^@` to `\^_`: the control characters 0 to 31.
+def esc.ctl(+c: U32, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
+            toks: List<&2, Tok>, ok: Bool) -> LR:
+  match ok:
     case True{}:
-      fail(start, "character escape out of range")
+      LOk{LStr{start, ws, nl, SCon{Chr{(c - 64 : U32)}, acc}, 7}, toks}
     case False{}:
-      LOk{LEscNum{start, ws, nl, acc, base, val, True{}}, toks}
+      fail(start, "unsupported escape in string literal")
+
+# A name's characters so far, and the next: on while some name goes on so,
+# else the name so far, then c as any character of the string.
+def esc.name.end(+c: U32, +p: L.Pos, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
+                 toks: List<&2, Tok>, +name: String, m: Maybe<&2, U32>) -> LR:
+  match m:
+    case Some{x}:
+      str.char(c, p, start, ws, nl, SCon{Chr{x}, acc}, toks,
+               (9 - U32.from_nat(String.length(name)) : U32))
+    case None{}:
+      fail(start, "unsupported escape in string literal")
+
+def esc.name.on(+c: U32, +p: L.Pos, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
+                toks: List<&2, Tok>, +name: String, +longer: String, more: Bool) -> LR:
+  match more:
+    case True{}:
+      LOk{LEscName{start, ws, nl, acc, longer}, toks}
+    case False{}:
+      esc.name.end(c, p, start, ws, nl, acc, toks, name, asc.exact(asc.names(), name))
+
+def esc.name(+c: U32, +p: L.Pos, +start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
+             toks: List<&2, Tok>, +name: String) -> LR:
+  +longer = name ++ SCon{Chr{c}, SNil{}}
+  esc.name.on(c, p, start, ws, nl, acc, toks, name, longer, asc.prefix(asc.names(), longer))
+
+# The tenth character ends a numeric escape, digits or not: the rest are
+# characters of their own.
+def esc.num.put(+start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
+                toks: List<&2, Tok>, base: U32, +val: U32, +used: U32, over: Bool, full: Bool) -> LR:
+  match over full:
+    case True{} _:
+      fail(start, "character escape out of range")
+    case False{} True{}:
+      LOk{LStr{start, ws, nl, SCon{Chr{val}, acc}, 0}, toks}
+    case False{} False{}:
+      LOk{LEscNum{start, ws, nl, acc, base, val, True{}, used}, toks}
 
 def esc.num.next(+start: L.Pos, ws: L.Pos, nl: Bool, acc: String,
-                 toks: List<&2, Tok>, base: U32, +val: U32) -> LR:
-  esc.num.put(start, ws, nl, acc, toks, base, val, U32.is_gt(val, 1114111))
+                 toks: List<&2, Tok>, base: U32, +val: U32, +used: U32) -> LR:
+  esc.num.put(start, ws, nl, acc, toks, base, val, used, U32.is_gt(val, 1114111), U32.is_eq(used, 10))
 
 # A digit of a numeric escape, or the character after it.
 def esc.num.more(+c: U32, +p: L.Pos, +start: L.Pos, ws: L.Pos, nl: Bool,
                  acc: String, toks: List<&2, Tok>, +base: U32, +val: U32,
-                 seen: Bool, +d: U32, more: Bool) -> LR:
+                 seen: Bool, +used: U32, +d: U32, more: Bool) -> LR:
   match seen more:
     case _ True{}:
-      esc.num.next(start, ws, nl, acc, toks, base, ((val * base) + d : U32))
+      esc.num.next(start, ws, nl, acc, toks, base, ((val * base) + d : U32), (used + 1 : U32))
     case True{} False{}:
-      str.char(c, p, start, ws, nl, SCon{Chr{val}, acc}, toks)
+      str.char(c, p, start, ws, nl, SCon{Chr{val}, acc}, toks, (10 - used : U32))
     case False{} False{}:
       fail(start, "unsupported escape in string literal")
 
@@ -434,13 +530,19 @@ def step(+c: U32, +p: L.Pos, st: LS, toks: List<&2, Tok>) -> LR:
       dollar.char(c, p, start, ws, nl, toks, is_digit(c))
     case LChurch{start, ws, nl, val, big}:
       church.char(c, p, start, ws, nl, val, big, toks, is_digit(c))
-    case LStr{start, ws, nl, acc}:
-      str.char(c, p, start, ws, nl, acc, toks)
-    case LEsc{start, ws, nl, acc}:
-      esc.char(c, start, ws, nl, acc, toks)
-    case LEscNum{start, ws, nl, acc, +base, val, seen}:
+    case LStr{start, ws, nl, acc, left}:
+      str.char(c, p, start, ws, nl, acc, toks, left)
+    case LStrEnd{start, ws, nl, x}:
+      emit(KStr{x, str.spaced(c)}, start, ws, nl, c, p, toks)
+    case LEsc{start, ws, nl, acc, left}:
+      esc.char(c, start, ws, nl, acc, toks, left)
+    case LEscCtl{start, ws, nl, acc}:
+      esc.ctl(c, start, ws, nl, acc, toks, in_range(c, 64, 32))
+    case LEscName{start, ws, nl, acc, name}:
+      esc.name(c, p, start, ws, nl, acc, toks, name)
+    case LEscNum{start, ws, nl, acc, +base, val, seen, used}:
       +d = digit.val(c, base)
-      esc.num.more(c, p, start, ws, nl, acc, toks, base, val, seen, d, U32.is_lt(d, base))
+      esc.num.more(c, p, start, ws, nl, acc, toks, base, val, seen, used, d, U32.is_lt(d, base))
     case LDash{start, ws, nl}:
       dash.char(c, p, start, ws, nl, toks, U32.is_eq(c, 45), U32.is_eq(c, 62))
     case LBrace{start, ws, nl}:
@@ -489,6 +591,8 @@ def flush(st: LS, +p: L.Pos, toks: List<&2, Tok>) -> Result<&2, &2, LexErr, List
       lex.last.num(KNat{val}, start, ws, nl, big, p, toks)
     case LChurch{start, ws, nl, val, big}:
       lex.last.num(KChurch{val}, start, ws, nl, big, p, toks)
+    case LStrEnd{start, ws, nl, x}:
+      lex.last(KStr{x, True{}}, start, ws, nl, p, toks)
     case LDollar{start, ws, nl}:
       lex.last(KBad{36}, start, ws, nl, p, toks)
     case LDash{start, ws, nl}:

@@ -2330,12 +2330,25 @@ meter format (`port/*.ic-meter`), the artifact's bytes (`port/*.compile`;
 the stored node count is master's), `--ic --certificate`'s extra section
 (`port/*.ic-certificate`), `--ic` on a line the guard refuses (master's
 reference message, where master's net can run out of fuel:
-`port/tictactoe.ic-abort`), ASCII-only identifiers, and the language server's text for a parse error (the
-port's parser's, as for the command; `test/lsp/port/*`, and the REPL's,
-`test/golden/port/repl.*`). Not ported: the REPL's line editing.
+`port/tictactoe.ic-abort`), and a literal above 4294967295, which the lexer
+refuses (`natural literal exceeds the supported range`) where master parses
+it, and runs out of memory if the program uses it (3G, 2026-11-03; a program
+that never uses one runs on master).
 
-- `Lexical`: identifier classes are ASCII; Haskell's are Unicode. Every
-  program in the repo is ASCII.
+- Parse errors are master's word for word, in the command, the REPL and the
+  language server (2026-11-03): `bend/Mega.bend` runs master's grammar as
+  megaparsec 9.7 does when `Parse.bend` refuses a text, and first in the
+  REPL. `bend/dev/perr` and the gate's `perr` step hold the evidence: 24,000
+  cases (mutants of the repo's programs, seeds 1-3, and hand-written edges),
+  no difference from master's `errorBundlePretty`, and `Parse.bend` accepts
+  what master accepts but those literals. Through the binaries, 311 files
+  and 220 REPL lines gave master's bytes and exit codes. `Mega.bend` costs
+  about 7 ms per KB, so only a text with an error pays it.
+- `bend/Unicode.bend` holds `isLetter`, `isAlphaNum`, `isSpace` and
+  megaparsec's wide characters as master's parser answers them, on every code
+  point above ASCII (`bend/dev/uni/probe.sh` regenerates it, from GHC 9.10's
+  tables as master is built). Identifiers are Unicode as on master, and a wide
+  character takes two columns.
 - `--meter` prints the interaction count, not haskell-final's storage
   figures (`test/golden/port/*.ic-meter`). The interaction line equals
   haskell-final's on all three goldens.
@@ -2347,7 +2360,8 @@ port's parser's, as for the command; `test/lsp/port/*`, and the REPL's,
   value) with the usage after them, exit 1, and `-h`/`--help`, are
   master's byte for byte on 34 command lines tried; `--draw-net`, which
   master dropped, is an invalid option as there (the `*.ic-draw-net`
-  goldens pass). The REPL's line editing (haskeline) is not ported.
+  goldens pass). The flake's `telomare-repl` runs under `rlwrap` at a
+  terminal, for haskeline's line editing and in-session history.
 - A plain run and its `--meter` (the reference evaluator, on main with
   every check) skip the erasure checker (`Sz.size.at.checked`, 2026-11-03):
   only `--ic`, `--certificate` and `--compile` use what it proves.
@@ -2360,14 +2374,12 @@ port's parser's, as for the command; `test/lsp/port/*`, and the REPL's,
   `:p` (`bend/Partial.bend`, master's evalPartial over Machine's steps),
   `:t`, `:l`, `:r` and `:{ ... :}` are master's. Its goldens
   (`replin_` cases, `test/golden/expected/repl.*` from master's
-  98de497c) pass but for parse errors' words (`port/repl.load-error`,
-  `port/repl.parse-error`). A file `:l` cannot read ends the REPL, as
+  98de497c) pass. A file `:l` cannot read ends the REPL, as
   master's does, without haskeline's backtrace.
 - The language server (`bend/Lsp.bend`, `telomare-lsp`, 2026-11-03) is
   master's `app/LSP.hs`: the same messages for its sessions in
   `test/lsp/sessions`, recorded from master's server (`test/lsp/run.sh`,
-  the gate's `lsp` step and the flake's `lsp` check), but a parse error's
-  text, which is the port's parser's (`test/lsp/port/*`). It writes JSON
+  the gate's `lsp` step and the flake's `lsp` check). It writes JSON
   with keys sorted, as aeson does, so its bytes are master's too; it
   reads a `file:` URI's path without decoding `%XX`, where master's
   `uriToFilePath` decodes it; it answers in order, where master's
@@ -2620,7 +2632,8 @@ empty.
 ## 11. Layout
 
 - `bend/Everything.bend` imports every module.
-- Front end: `Lex`, `Parse` (→ `Syntax`), `Expand`, `Resolve`, `Desugar`,
+- Front end: `Unicode`, `Lexical`, `Lex`, `Parse` (→ `Syntax`), `Mega`
+  (master's parse errors), `Expand`, `Resolve`, `Desugar`,
   `Lower` (→ `Term`), `Split`, and `Front` (loading, both lowerings).
 - `Expr` (sizing's IR) and `Size`, which hands on `Core`: the runnable core
   `V`, data `D`, the reserved function indices.

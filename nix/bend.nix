@@ -233,13 +233,24 @@ let
 
   # The `telomare` command, compiled to a native binary: bend/Native.bend,
   # which is bend/Main.bend's command with the IC's loop in C; the REPL,
-  # `telomare-repl` (bend/Repl.bend); and the language server,
-  # `telomare-lsp` (bend/Lsp.bend).
+  # `telomare-repl` (bend/Repl.bend), under rlwrap at a terminal for the line
+  # editing and history master's haskeline gives (in the session only, as
+  # haskeline's defaults keep them; rlwrap from leanPkgs, whose nixpkgs has a
+  # binary cache, where corepkgs would build a C compiler for it); and the
+  # language server, `telomare-lsp` (bend/Lsp.bend).
   telomare = bendCommand "telomare" bendSrc ''
-    mkdir -p $out/bin
+    mkdir -p $out/bin $out/libexec
     bend bend/Native.bend -o $out/bin/telomare
-    bend bend/Repl.bend -o $out/bin/telomare-repl
+    bend bend/Repl.bend -o $out/libexec/telomare-repl
     bend bend/Lsp.bend -o $out/bin/telomare-lsp
+    cat > $out/bin/telomare-repl <<EOF
+    #!${pkgs.runtimeShell}
+    if [ -t 0 ] && [ -t 1 ] && [ -n "\''${TERM:-}" ] && [ "\$TERM" != dumb ]; then
+      exec ${leanPkgs.rlwrap}/bin/rlwrap -c -n -H /dev/null $out/libexec/telomare-repl "\$@"
+    fi
+    exec $out/libexec/telomare-repl "\$@"
+    EOF
+    chmod +x $out/bin/telomare-repl
   '';
 
   # BendTT's kernel, the Lean program `bend --verdict` re-checks proofs with

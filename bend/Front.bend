@@ -2,6 +2,7 @@ import Base
 import ./Loc.bend as L
 import ./Syntax.bend as S
 import ./Parse.bend as P
+import ./Mega.bend as Mg
 import ./Expand.bend as E
 import ./Resolve.bend as Rs
 import ./Desugar.bend as D
@@ -378,8 +379,8 @@ def in.module(+name: String, err: String) -> String:
 
 def render.mod(e: ModErr) -> String:
   match e:
-    case NoParse{+name, text, pe}:
-      in.module(name, P.render(name, text, pe))
+    case NoParse{+name, +text, pe}:
+      in.module(name, Mg.message(Mg.MgModule{}, name, text, P.render(name, text, pe)))
     case NoExpand{+name, ee}:
       in.module(name, E.render(ee))
 

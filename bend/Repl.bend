@@ -8,6 +8,7 @@ import ./Reference.bend as Rf
 import ./Syntax.bend as S
 import ./Term.bend as T
 import ./Parse.bend as P
+import ./Mega.bend as Mg
 import ./Expand.bend as E
 import ./Resolve.bend as Rs
 import ./Desugar.bend as D
@@ -38,7 +39,8 @@ import ./Partial.bend as Pe
 #   :{ ... :} the lines between, as one;
 #   :q        quit.
 #
-# Not ported: haskeline's line editing and history.
+# Line editing and history (master's haskeline) are rlwrap's: nix/bend.nix
+# wraps this binary at a terminal.
 
 # An expression's value, as master's REPL prints it (PrettyBasic): a
 # number, a pair, or anything else as the core shows it.
@@ -236,8 +238,22 @@ def assign.parsed(r: Result<&2, &2, P.PErr, List<&2, S.Item>>, +text: String) ->
     case Done{+items}:
       assign.one(is.single(items), items, text)
 
+# Master's grammar decides first (Mega.bend, megaparsec's way, word for
+# word): a line it rejects is its error. The REPL's step has quirks a
+# module has not (no space before a definition or a lambda, nothing after
+# the line), and its lines are short. What it accepts, the port's parser
+# parses.
+def step.gated(+text: String, m: Maybe<&2, Mg.Shown>) -> RS:
+  match m:
+    case Some{s}:
+      match s:
+        case Mg.MgShown{o, x}:
+          RErr{x}
+    case None{}:
+      assign.parsed(P.module("", text), text)
+
 def step.of(+text: String) -> RS:
-  assign.parsed(P.module("", text), text)
+  step.gated(text, Mg.check(Mg.MgRepl{}, "", text))
 
 # Bindings
 # --------
@@ -434,8 +450,18 @@ def ld.parsed(r: Result<&2, &2, P.PErr, List<&2, S.Item>>, +text: String) -> Ld:
     case Done{+items}:
       ld.items(first.import(items), text, items)
 
+# A loaded file: master's runParseDefinitions decides first, as for a line.
+def ld.gated(+text: String, m: Maybe<&2, Mg.Shown>) -> Ld:
+  match m:
+    case Some{s}:
+      match s:
+        case Mg.MgShown{o, x}:
+          LErr{x}
+    case None{}:
+      ld.parsed(P.module("", text), text)
+
 def ld.of(+text: String) -> Ld:
-  ld.parsed(P.module("", text), text)
+  ld.gated(text, Mg.check(Mg.MgDefs{}, "", text))
 
 def ld.message(+name: String, l: Ld) -> String:
   match l:
