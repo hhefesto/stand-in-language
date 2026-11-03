@@ -1684,9 +1684,9 @@ expanded only when an error is returned (`err.expand` in `rm.err`).
 The same program's fallbacks now take ~17s (master ~7s).
 
 EALm is the gate since 2026-10-31 (Main.bend imports it as `EM` at the
-`certify` sites: compile, --fast, the guard; Session.bend keeps the old
-`EAL.layouts` for the IC, and swapping those in changes the goldens' IC
-step counts, so it waits). Goldens with it: 54/54. The 65 programs the
+`certify` sites: compile, --fast, the guard; Session.bend kept the old
+`EAL.layouts` for the IC until 2026-11-03, below, since swapping those in
+changes the goldens' IC step counts). Goldens with it: 54/54. The 65 programs the
 old gate refused under --fast give master's output.
 
 Its speed on tictactoe (main pass certifies, no fallback): `--compile`
@@ -1755,11 +1755,77 @@ declares them as executables), `lin/gen*.py` (the Linear systems) and
 `/tmp/bx/oracle98/telomare`), since `/tmp/bx` does not survive a
 reboot.
 
-Next: `inferEALFaithful` (`faithfulProgram`, uniform chains,
-`located`), `deriveSizedGuidance` and the IC layouts (Session.bend's
-`EAL.layouts`), and the per-body guidance (usage, speculatable). Then
-step 5: tests/eal.bend to master's EALTests (390 lines, 34 groups at
-`98de497c`; the port's has 14), the README and section 7.
+**Post-sizing (2026-11-03, 075af0ef; gate1103d `GATE OK`: every test group,
+goldens 54/54, corpus meters 17 and certificates 16 same): `bend/dev/ealm/p14.bdo`**:
+`CodeGuidance` (`G`: index, `envUsageL`, env bang, level, speculatable
+via `unsizedIn`, capture layout), `EALLiftedResult` (`LR`: the guidance,
+the failing bodies, main's verdict), `inferEALFaithful` (`faithful`:
+master's `faithfulProgram`, two-link chains and refinement checks under
+their own keys, then the uniform reading, `uni`, through `located`,
+`narrowed`, `specialized`), `deriveSizedGuidance` (`derive`: images and
+preimages of the bodies under the sizing substitution, main's image
+equal to the sized main), `certifiedProgramFrom` (`certified.program`,
+`inferEALCompiled`'s fallback `lr.full`), master's `bodyResults` under a
+refused main (every body a root of the withDeps verdict machine, p11's
+`vq`, which now records each body's failing dependency at n + 3 + r),
+`renderRefusal` (`refusal`) and `programPlan` (`lr.plan`). Lift.bend
+gained `LAborted` (master's `AbortF`, so a sized abort hashes as master's
+does) and `lift.expr` over Co.V; IC.bend's `lifted`/`code.of` take the
+origins so the IC keys its bodies by the same hashes.
+
+The session now runs under master's layouts: Session.bend `layouts.from`
+and `plan.from` (run, the counts, and master's sized program,
+`Sized.plain`), used by Main's `--ic` run (`admitted`: a refusal is
+printed and exits 1, as master's `withICPlan` dies), `--compile`'s
+artifact, and the tests. The session runs `Sized.expr` (plain with what
+sizing discharged erased); bodies plain shares with it run under these
+layouts, erased ones under none. Deriving over `expr` itself never
+matches once a check is erased, and the fallback inference over a sized
+program is what the faithful certificate exists to avoid (natudt's ran
+out of 10G). The guard (a port extension) still infers over its sized
+program (`Ss.layouts`).
+
+Checked against master's `cert-oracle post` (test/CertOracle.hs: the
+faithful verdict, the derivation, certifiedProgramFrom's verdict and every
+body's guidance with its hash; the Bend side test/post.bend,
+post-all.sh, post-cmp.py): the same on the 18 golden and corpus programs
+both finish, hashes included (fact: the refusal and its 82 bodies'
+guidance); arith and ratarith run both out of 8G; rat: the port's
+faithful reading takes 416s and 9.1G (master 115s, 3.2G: the main pass
+fails, the narrowing finds nothing, the shallow specialization certifies
+over 1,647,787 variables and 555,472 equations, the walk alone 140s and
+8.5G against master's 80s).
+
+IC counts with master's layouts (the port's records re-recorded): casea
+817,555 -> 601,564, cases 3,833,408 -> 2,932,561, ctall 2,453,990 ->
+1,799,750, ctstr 3,001,547 -> 2,193,112, tictactoe `1 4 2 5 3` 6,180,262
+-> 5,454,169, rat 85,217 -> 78,846; up a little: casei 9,704 -> 9,814,
+natarith 49,430 -> 52,522, natudt 601,286 -> 603,094, simpleplus `3 4`
+44,344 -> 44,390, nonex 13,445 -> 13,458, qual 632 -> 635; tc 146 and
+patlam 2,702 unchanged. The artifacts' bytes change with the layouts
+(the `*compile` goldens re-recorded into `port/`). `--ic` on `fact.tel`
+is refused with master's message byte for byte (`fact.hs-ic`, master
+98de497c's `--ic --meter`), and on arith and ratarith runs out of memory
+as master's does: the gate's corpus now runs their plain run against
+`P.hs-run` (gate.sh), and the IC on those three no longer runs.
+
+Blame reasons are values now (`Why`, p1.bend: a message by number, a
+text, a duplicated capture's path, or a presolve derivation of another
+blame), rendered only when an error shows them: presolve derived a
+string per equation per round. The main pass matches master's on all
+1456 programs after it, messages included (par.py). The walk on rat's
+shallow system: 140s -> 110s. Its memory did not move (8.5G), and why
+the walk holds ~5KB a variable is open: replacing every reason by "" (or
+by the constant 0) gives 5.9G, by its message number 8.5G, which
+suggests the runtime's sharing rather than the reason's size (to look
+into with bend2's comp.ts). `fbtime.bend` has the faithful phases now
+(fwalk fmain fnarrow fshallow fdeep fshwalk fdpwalk faithful), and
+master's cert-oracle fwalk fmain fshwalk fdpwalk to compare.
+
+Next: the memory and time of the shallow reading (rat), the guard's
+layouts by the same derivation, then step 5: tests/eal.bend to master's
+EALTests (390 lines, 34 groups at `98de497c`; the port's has 14), the
+README and section 7.
 
 Bend 2 rules learned writing it (each cost a failed check):
 - a match or a tuple destructure takes only a def's parameter, or a field
@@ -2279,7 +2345,9 @@ identifiers.
   `port/*.certificate`, `port/*.telc-certificate`, `port/*.compile`, and
   the corpus's `NAME.port-certificate`). The rest of the report is
   unchanged.
-- EAL is haskell-final's, not master's rework (since the 2026-10-27 merge).
+- EAL was haskell-final's, not master's rework, from the 2026-10-27 merge
+  until EALm (P9: the gate since 2026-10-31, the IC's layouts since
+  2026-11-03). The rest of this bullet is about the old one.
   Every golden and corpus program certifies on both. `main = (if 0 then
   (\x -> x) else $1) succ 0` (EALTests' PINNED same-arity gate join)
   certifies on master and is refused here, and a refusal can number its
@@ -2306,7 +2374,8 @@ identifiers.
   game costs 6,166,768 interactions, was 6,016,132). Master reads a check
   nested in another in place (`refinementCheckStep`, `d6d5a309`); a port
   must keep master's bounds, which the 2026-10-27 draft did not.
-- Master's EAL rework (PR #157 and before) is not ported. (The `bend-proof` check,
+- Master's EAL rework (PR #157 and before) is ported as EALm (P9); left:
+  the shallow reading's memory, the guard's layouts, master's EALTests. (The `bend-proof` check,
   `--verdict` with BendTT's kernel built from the `lean` input, is in
   `nix flake check` since 2026-10-22.)
 - Appendix A analogues, kept for byte-identical output:
