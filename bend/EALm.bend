@@ -151,12 +151,18 @@ type Mt is Data:
   MtNone{}
   MtSome{+t: Tm}
 
+# A sum equation over class roots (EqR).
+type ER is Data:
+  ER{+lhs: List<&2, U32>, +rhs: U32, +bl: Blame}
+
 # A cycle note of presolve's cycleStep, kept for rendering: the cycle's
-# members and the equations touching it, shown. A derived blame holds a
-# placeholder for it (\1 number \2), expanded only when an error is
-# rendered (the Haskell builds the note lazily, and it is long).
+# members and the equations touching it, shown only when an error is
+# rendered (th.str). A derived blame holds a placeholder for it (\1
+# number \2), expanded then too (the Haskell builds the note lazily, and
+# it is long: shown eagerly, every round's notes were most of the walk's
+# memory).
 type CN is Data:
-  CN{+id: U32, +ms: List<&2, U32>, +tl: List<&2, String>}
+  CN{+id: U32, +ms: List<&2, U32>, +tl: List<&2, ER>}
 
 # The state (EALState).
 type S is Type:
@@ -343,13 +349,6 @@ type RA is Type:
   RaGo{s: S}
   RaDone{s: S}
 
-# Constraint solving (presolve, solveConstraints)
-# -------------------
-
-# A sum equation over class roots (EqR).
-type ER is Data:
-  ER{+lhs: List<&2, U32>, +rhs: U32, +bl: Blame}
-
 # cycleStep: Data.Graph.stronglyConnComp, in its order
 # ---------
 
@@ -365,7 +364,7 @@ type DFr is Data:
 # first), the cyclic components (last first) and their count, the dfs
 # stack, the roots to go, and the pass (1 on the transpose, 2 on g).
 type GR is Type:
-  GR{vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>}
+  GR{vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>}
 
 # dfs, as a machine: the stack holds each open vertex with the successors
 # it has left; a tree ends when the stack empties.
@@ -862,6 +861,9 @@ def render.at(m: Maybe<&2, String>) -> String:
       " (at " ++ place ++ ")"
     case None{}:
       ""
+
+# Constraint solving (presolve, solveConstraints)
+# -------------------
 
 # show :: [Int] -> String
 def ints.go(xs: List<&2, U32>) -> String:
@@ -1364,7 +1366,7 @@ def s.ncn.swap(s: S, x: U32) -> S & U32:
     case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
       (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, x}, ncn)
 
-def gr.vx.got(nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.vx.got(nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (vx, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -1383,7 +1385,7 @@ def gr.vx.swap(s: GR, x: Array<U32>) -> GR & Array<U32>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{x, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, vx)
 
-def gr.nd.got(vx: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.nd.got(vx: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (nd, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -1402,7 +1404,7 @@ def gr.nd.swap(s: GR, x: Array<U32>) -> GR & Array<U32>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, x, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, nd)
 
-def gr.g.got(vx: Array<U32>, nd: Array<U32>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
+def gr.g.got(vx: Array<U32>, nd: Array<U32>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
   (g, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -1421,7 +1423,7 @@ def gr.g.swap(s: GR, x: Array<List<&2, U32>>) -> GR & Array<List<&2, U32>>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, x, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, g)
 
-def gr.gt.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
+def gr.gt.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
   (gt, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -1440,7 +1442,7 @@ def gr.gt.swap(s: GR, x: Array<List<&2, U32>>) -> GR & Array<List<&2, U32>>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, x, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, gt)
 
-def gr.vis.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.vis.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (vis, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -1459,7 +1461,7 @@ def gr.vis.swap(s: GR, x: Array<U32>) -> GR & Array<U32>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, gt, x, sc, n, po, cur, trs, ntr, st, top, pass, tl}, vis)
 
-def gr.sc.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.sc.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (sc, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -1598,21 +1600,21 @@ def gr.pass.swap(s: GR, x: U32) -> GR & U32:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, x, tl}, pass)
 
-def gr.tl.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, r: Array<List<&2, String>> & List<&2, String>) -> GR & List<&2, String>:
+def gr.tl.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, r: Array<List<&2, ER>> & List<&2, ER>) -> GR & List<&2, ER>:
   (tl, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
-def gr.tl(s: GR, +i: U32) -> GR & List<&2, String>:
+def gr.tl(s: GR, +i: U32) -> GR & List<&2, ER>:
   match s:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
-      gr.tl.got(vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.get(List<&2, String>, tl, i))
+      gr.tl.got(vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.get(List<&2, ER>, tl, i))
 
-def gr.tl.set(s: GR, +i: U32, x: List<&2, String>) -> GR:
+def gr.tl.set(s: GR, +i: U32, x: List<&2, ER>) -> GR:
   match s:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
-      GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.set(List<&2, String>, tl, i, x)}
+      GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.set(List<&2, ER>, tl, i, x)}
 
-def gr.tl.swap(s: GR, x: Array<List<&2, String>>) -> GR & Array<List<&2, String>>:
+def gr.tl.swap(s: GR, x: Array<List<&2, ER>>) -> GR & Array<List<&2, ER>>:
   match s:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, x}, tl)
@@ -5343,7 +5345,7 @@ def live.of(s: S, +xs: List<&2, ER>) -> S & List<&2, ER>:
 
 def gr.new(+nv: U32) -> GR:
   +d: Nat = Ln.depth.of(nv)
-  GR{Array.new(U32, d, 0), Array.new(U32, d, 0), Array.new(List<&2, U32>, d, []), Array.new(List<&2, U32>, d, []), Array.new(U32, d, 0), Array.new(U32, d, 0), 0, [], [], [], 0, [], [], 1, Array.new(List<&2, String>, d, [])}
+  GR{Array.new(U32, d, 0), Array.new(U32, d, 0), Array.new(List<&2, U32>, d, []), Array.new(List<&2, U32>, d, []), Array.new(U32, d, 0), Array.new(U32, d, 0), 0, [], [], [], 0, [], [], 1, Array.new(List<&2, ER>, d, [])}
 
 def mk.one(g: GR, +x: U32) -> GR:
   gr.vx.set(g, x, 1)
@@ -5722,9 +5724,9 @@ def pt.go(xs: List<&2, U32>, +i: U32, r: GR & PT) -> GR & PT:
       (g, p) = r
       pt.go(rest, i, pt.push(g, i, p, x))
 
-# The equations touching each cycle, shown (the note's "through" part),
-# in one pass: each live equation's tuple goes to every cycle one of its
-# numbers is on, once.
+# The equations touching each cycle (the note's "through" part), in one
+# pass: each live equation goes to every cycle one of its numbers is on,
+# once. They are shown (th.str) only when a note is rendered.
 def th.str(lhs: List<&2, U32>, +rhs: U32, bl: Blame) -> String:
   "(" ++ ints.show(lhs) ++ "," ++ U32.show(rhs) ++ "," ++ Sh.string(String.take(bl.why(bl), 24n)) ++ ")"
 
@@ -5743,23 +5745,23 @@ def th.idxs(xs: List<&2, U32>, r: GR & List<&2, U32>) -> GR & List<&2, U32>:
       (g, acc) = r
       th.idxs(rest, th.idx(g, acc, x))
 
-def th.put.k1(+s: String, +i: U32, kr: GR & List<&2, String>) -> GR:
+def th.put.k1(+e: ER, +i: U32, kr: GR & List<&2, ER>) -> GR:
   (g, +old) = kr
-  gr.tl.set(g, i, s <> old)
+  gr.tl.set(g, i, e <> old)
 
-def th.put(g: GR, +s: String, +i: U32) -> GR:
-  th.put.k1(s, i, gr.tl(g, i))
+def th.put(g: GR, +e: ER, +i: U32) -> GR:
+  th.put.k1(e, i, gr.tl(g, i))
 
-def th.puts(ix: List<&2, U32>, +s: String, g: GR) -> GR:
+def th.puts(ix: List<&2, U32>, +e: ER, g: GR) -> GR:
   match ix:
     case Nil{}:
       g
     case Con{+i, rest}:
-      th.puts(rest, s, th.put(g, s, i))
+      th.puts(rest, e, th.put(g, e, i))
 
 def th.eq.k1(+lhs: List<&2, U32>, +rhs: U32, +bl: Blame, kr: GR & List<&2, U32>) -> GR:
   (g, +ix) = kr
-  th.puts(ix, th.str(lhs, rhs, bl), g)
+  th.puts(ix, ER{lhs, rhs, bl}, g)
 
 def th.eq(g: GR, e: ER) -> GR:
   match e:
@@ -5773,10 +5775,19 @@ def th.all(xs: List<&2, ER>, g: GR) -> GR:
     case Con{e, rest}:
       th.all(rest, th.eq(g, e))
 
+def th.strs(es: List<&2, ER>) -> List<&2, String>:
+  match es:
+    case Nil{}:
+      []
+    case Con{e, rest}:
+      match e:
+        case ER{+lhs, +rhs, +bl}:
+          th.str(lhs, rhs, bl) <> th.strs(rest)
+
 def cn.text(c: CN) -> String:
   match c:
     case CN{+id, +ms, +tl}:
-      " [cycle " ++ ints.show(ms) ++ " through " ++ "[" ++ String.join(tl, ",") ++ "]" ++ "]"
+      " [cycle " ++ ints.show(ms) ++ " through " ++ "[" ++ String.join(th.strs(tl), ",") ++ "]" ++ "]"
 
 def cn.id(c: CN) -> U32:
   match c:
@@ -5887,9 +5898,9 @@ def pl.go(xs: List<&2, ER>, +base: U32, r: GR & List<&2, ZP>) -> GR & List<&2, Z
       pl.go(rest, base, pl.push(g, acc, base, e))
 
 # The notes of a round's cycles, numbered from base.
-def cn.of.k1(+acc: List<&2, CN>, +base: U32, +i: U32, +ms: List<&2, U32>, kr: GR & List<&2, String>) -> GR & List<&2, CN>:
+def cn.of.k1(+acc: List<&2, CN>, +base: U32, +i: U32, +ms: List<&2, U32>, kr: GR & List<&2, ER>) -> GR & List<&2, CN>:
   (g, +tl) = kr
-  (g, CN{((base + i : U32) - 1 : U32), ms, List.reverse(&2, String, tl)} <> acc)
+  (g, CN{((base + i : U32) - 1 : U32), ms, List.reverse(&2, ER, tl)} <> acc)
 
 def cn.of(g: GR, +acc: List<&2, CN>, +base: U32, +i: U32, +ms: List<&2, U32>) -> GR & List<&2, CN>:
   cn.of.k1(acc, base, i, ms, gr.tl(g, i))

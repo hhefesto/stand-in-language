@@ -145,12 +145,18 @@ type Mt is Data:
   MtNone{}
   MtSome{+t: Tm}
 
+# A sum equation over class roots (EqR).
+type ER is Data:
+  ER{+lhs: List<&2, U32>, +rhs: U32, +bl: Blame}
+
 # A cycle note of presolve's cycleStep, kept for rendering: the cycle's
-# members and the equations touching it, shown. A derived blame holds a
-# placeholder for it (\1 number \2), expanded only when an error is
-# rendered (the Haskell builds the note lazily, and it is long).
+# members and the equations touching it, shown only when an error is
+# rendered (th.str). A derived blame holds a placeholder for it (\1
+# number \2), expanded then too (the Haskell builds the note lazily, and
+# it is long: shown eagerly, every round's notes were most of the walk's
+# memory).
 type CN is Data:
-  CN{+id: U32, +ms: List<&2, U32>, +tl: List<&2, String>}
+  CN{+id: U32, +ms: List<&2, U32>, +tl: List<&2, ER>}
 
 # The state (EALState).
 type S is Type:

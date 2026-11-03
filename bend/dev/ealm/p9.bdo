@@ -1,10 +1,6 @@
 # Constraint solving (presolve, solveConstraints)
 # -------------------
 
-# A sum equation over class roots (EqR).
-type ER is Data:
-  ER{+lhs: List<&2, U32>, +rhs: U32, +bl: Blame}
-
 # show :: [Int] -> String
 def ints.go(xs: List<&2, U32>) -> String:
   match xs:
@@ -312,11 +308,11 @@ type DFr is Data:
 # first), the cyclic components (last first) and their count, the dfs
 # stack, the roots to go, and the pass (1 on the transpose, 2 on g).
 type GR is Type:
-  GR{vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>}
+  GR{vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>}
 
 def gr.new(+nv: U32) -> GR:
   +d: Nat = Ln.depth.of(nv)
-  GR{Array.new(U32, d, 0), Array.new(U32, d, 0), Array.new(List<&2, U32>, d, []), Array.new(List<&2, U32>, d, []), Array.new(U32, d, 0), Array.new(U32, d, 0), 0, [], [], [], 0, [], [], 1, Array.new(List<&2, String>, d, [])}
+  GR{Array.new(U32, d, 0), Array.new(U32, d, 0), Array.new(List<&2, U32>, d, []), Array.new(List<&2, U32>, d, []), Array.new(U32, d, 0), Array.new(U32, d, 0), 0, [], [], [], 0, [], [], 1, Array.new(List<&2, ER>, d, [])}
 
 def mk.one(g: GR, +x: U32) -> GR:
   gr.vx.set(g, x, 1)
@@ -621,9 +617,9 @@ def pt.go(xs: List<&2, U32>, +i: U32, r: GR & PT) -> GR & PT:
       (g, p) = r
       pt.go(rest, i, pt.push(g, i, p, x))
 
-# The equations touching each cycle, shown (the note's "through" part),
-# in one pass: each live equation's tuple goes to every cycle one of its
-# numbers is on, once.
+# The equations touching each cycle (the note's "through" part), in one
+# pass: each live equation goes to every cycle one of its numbers is on,
+# once. They are shown (th.str) only when a note is rendered.
 def th.str(lhs: List<&2, U32>, +rhs: U32, bl: Blame) -> String:
   "(" ++ ints.show(lhs) ++ "," ++ U32.show(rhs) ++ "," ++ Sh.string(String.take(bl.why(bl), 24n)) ++ ")"
 
@@ -639,22 +635,22 @@ def th.idxs(xs: List<&2, U32>, r: GR & List<&2, U32>) -> GR & List<&2, U32>:
       (g, acc) = r
       th.idxs(rest, th.idx(g, acc, x))
 
-def th.put(g: GR, +s: String, +i: U32) -> GR:
-  (g: GR, +old: List<&2, String>) <- gr.tl(g, i)
-  gr.tl.set(g, i, s <> old)
+def th.put(g: GR, +e: ER, +i: U32) -> GR:
+  (g: GR, +old: List<&2, ER>) <- gr.tl(g, i)
+  gr.tl.set(g, i, e <> old)
 
-def th.puts(ix: List<&2, U32>, +s: String, g: GR) -> GR:
+def th.puts(ix: List<&2, U32>, +e: ER, g: GR) -> GR:
   match ix:
     case Nil{}:
       g
     case Con{+i, rest}:
-      th.puts(rest, s, th.put(g, s, i))
+      th.puts(rest, e, th.put(g, e, i))
 
 def th.eq(g: GR, e: ER) -> GR:
   match e:
     case ER{+lhs, +rhs, +bl}:
       (g: GR, +ix: List<&2, U32>) <- th.idxs(rhs <> lhs, (g, []))
-      th.puts(ix, th.str(lhs, rhs, bl), g)
+      th.puts(ix, ER{lhs, rhs, bl}, g)
 
 def th.all(xs: List<&2, ER>, g: GR) -> GR:
   match xs:
@@ -663,6 +659,15 @@ def th.all(xs: List<&2, ER>, g: GR) -> GR:
     case Con{e, rest}:
       th.all(rest, th.eq(g, e))
 
+def th.strs(es: List<&2, ER>) -> List<&2, String>:
+  match es:
+    case Nil{}:
+      []
+    case Con{e, rest}:
+      match e:
+        case ER{+lhs, +rhs, +bl}:
+          th.str(lhs, rhs, bl) <> th.strs(rest)
+
 # A cycle note's placeholder, and the notes themselves.
 def cn.ph(+id: U32) -> String:
   SCon{Chr{1}, U32.show(id) ++ SCon{Chr{2}, SNil{}}}
@@ -670,7 +675,7 @@ def cn.ph(+id: U32) -> String:
 def cn.text(c: CN) -> String:
   match c:
     case CN{+id, +ms, +tl}:
-      " [cycle " ++ ints.show(ms) ++ " through " ++ "[" ++ String.join(tl, ",") ++ "]" ++ "]"
+      " [cycle " ++ ints.show(ms) ++ " through " ++ "[" ++ String.join(th.strs(tl), ",") ++ "]" ++ "]"
 
 def cn.id(c: CN) -> U32:
   match c:
@@ -799,8 +804,8 @@ def pl.go(xs: List<&2, ER>, +base: U32, r: GR & List<&2, ZP>) -> GR & List<&2, Z
 
 # The notes of a round's cycles, numbered from base.
 def cn.of(g: GR, +acc: List<&2, CN>, +base: U32, +i: U32, +ms: List<&2, U32>) -> GR & List<&2, CN>:
-  (g: GR, +tl: List<&2, String>) <- gr.tl(g, i)
-  (g, CN{((base + i : U32) - 1 : U32), ms, List.reverse(&2, String, tl)} <> acc)
+  (g: GR, +tl: List<&2, ER>) <- gr.tl(g, i)
+  (g, CN{((base + i : U32) - 1 : U32), ms, List.reverse(&2, ER, tl)} <> acc)
 
 def cn.go(xs: List<&2, List<&2, U32>>, +base: U32, +i: U32, r: GR & List<&2, CN>) -> GR & List<&2, CN>:
   match xs:

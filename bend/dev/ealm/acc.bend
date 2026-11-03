@@ -424,7 +424,7 @@ def s.ncn.swap(s: S, x: U32) -> S & U32:
     case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
       (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, x}, ncn)
 
-def gr.vx.got(nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.vx.got(nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (vx, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -443,7 +443,7 @@ def gr.vx.swap(s: GR, x: Array<U32>) -> GR & Array<U32>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{x, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, vx)
 
-def gr.nd.got(vx: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.nd.got(vx: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (nd, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -462,7 +462,7 @@ def gr.nd.swap(s: GR, x: Array<U32>) -> GR & Array<U32>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, x, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, nd)
 
-def gr.g.got(vx: Array<U32>, nd: Array<U32>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
+def gr.g.got(vx: Array<U32>, nd: Array<U32>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
   (g, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -481,7 +481,7 @@ def gr.g.swap(s: GR, x: Array<List<&2, U32>>) -> GR & Array<List<&2, U32>>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, x, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, g)
 
-def gr.gt.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
+def gr.gt.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<List<&2, U32>> & List<&2, U32>) -> GR & List<&2, U32>:
   (gt, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -500,7 +500,7 @@ def gr.gt.swap(s: GR, x: Array<List<&2, U32>>) -> GR & Array<List<&2, U32>>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, x, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, gt)
 
-def gr.vis.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.vis.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (vis, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -519,7 +519,7 @@ def gr.vis.swap(s: GR, x: Array<U32>) -> GR & Array<U32>:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, gt, x, sc, n, po, cur, trs, ntr, st, top, pass, tl}, vis)
 
-def gr.sc.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, String>>, r: Array<U32> & U32) -> GR & U32:
+def gr.sc.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (sc, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
@@ -658,21 +658,21 @@ def gr.pass.swap(s: GR, x: U32) -> GR & U32:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, x, tl}, pass)
 
-def gr.tl.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, r: Array<List<&2, String>> & List<&2, String>) -> GR & List<&2, String>:
+def gr.tl.got(vx: Array<U32>, nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, r: Array<List<&2, ER>> & List<&2, ER>) -> GR & List<&2, ER>:
   (tl, x) = r
   (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}, x)
 
-def gr.tl(s: GR, +i: U32) -> GR & List<&2, String>:
+def gr.tl(s: GR, +i: U32) -> GR & List<&2, ER>:
   match s:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
-      gr.tl.got(vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.get(List<&2, String>, tl, i))
+      gr.tl.got(vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.get(List<&2, ER>, tl, i))
 
-def gr.tl.set(s: GR, +i: U32, x: List<&2, String>) -> GR:
+def gr.tl.set(s: GR, +i: U32, x: List<&2, ER>) -> GR:
   match s:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
-      GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.set(List<&2, String>, tl, i, x)}
+      GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, Array.set(List<&2, ER>, tl, i, x)}
 
-def gr.tl.swap(s: GR, x: Array<List<&2, String>>) -> GR & Array<List<&2, String>>:
+def gr.tl.swap(s: GR, x: Array<List<&2, ER>>) -> GR & Array<List<&2, ER>>:
   match s:
     case GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, tl}:
       (GR{vx, nd, g, gt, vis, sc, n, po, cur, trs, ntr, st, top, pass, x}, tl)
