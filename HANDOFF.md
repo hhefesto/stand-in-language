@@ -2463,8 +2463,9 @@ that never uses one runs on master).
   nested in another in place (`refinementCheckStep`, `d6d5a309`); a port
   must keep master's bounds, which the 2026-10-27 draft did not.
 - Master's EAL rework (PR #157 and before) is ported as EALm (P9); left:
-  the shallow reading's memory and time (rat: 416 s and 9.1G, master
-  115 s and 3.2G; arith's factorial beside a rational check). (The `bend-proof` check,
+  the shallow reading's memory (rat: 78.6 s and 4 GB, master 104 s and
+  2.2 GB; fact 3.87 s, master 2.99 s; 2026-11-03, after a9f2cc10's reduced
+  costs in an array, from 416 s and 9.1G). (The `bend-proof` check,
   `--verdict` with BendTT's kernel built from the `lean` input, is in
   `nix flake check` since 2026-10-22.)
 - Appendix A analogues, kept for byte-identical output:
