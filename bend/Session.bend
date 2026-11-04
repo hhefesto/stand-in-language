@@ -223,10 +223,21 @@ def plan.from(+run: T.C, +counts: List<&2, E.TS>, +plain: Co.V) -> Result<&2, &2
 def prepared(+expr: Co.V) -> IC.Prog:
   IC.prepare(expr, layouts(expr))
 
+# master's program, unprepared: a third of a `.telc`'s start, for a line
+# most sessions never see. A refused line prepares it, and only it, so no
+# line pays for EAL.
+type Full is Data:
+  Full{+expr: Co.V, +ls: Map<&2, Lf.Shape>}
+
+def full.prog(f: Full) -> IC.Prog:
+  match f:
+    case Full{+expr, +ls}:
+      IC.prepare(expr, ls)
+
 # What the session runs: main, and the guard it runs on each line before
 # main, if main has input refinements.
 type Prog is Data:
-  Prog{+main: IC.Prog, +guard: Maybe<&2, IC.Prog>, +full: Maybe<&2, IC.Prog>}
+  Prog{+main: IC.Prog, +guard: Maybe<&2, IC.Prog>, +full: Maybe<&2, Full>}
 
 # A program no guard comes before.
 def alone(p: IC.Prog) -> Prog:
@@ -242,15 +253,15 @@ def guard.from(+run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, +plain: Co.V) ->
 
 # master's program, for the lines the guard refuses, if there is a guard:
 # master's sized program (plain), under the layouts compiling gave it,
-# which are main's. Prepared once, here: inferring layouts over a sized
+# which are main's. Its layouts are fixed here: inferring them over a sized
 # program at the session's boundary (inferEALCompiled) can run for
 # minutes (tictactoe's) or out of memory.
-def full.if(g: Maybe<&2, IC.Prog>, +full: Co.V, +ls: Map<&2, Lf.Shape>) -> Maybe<&2, IC.Prog>:
+def full.if(g: Maybe<&2, IC.Prog>, +full: Co.V, +ls: Map<&2, Lf.Shape>) -> Maybe<&2, Full>:
   match g:
     case None{}:
       None{}
     case Some{x}:
-      Some{IC.prepare(full, ls)}
+      Some{Full{full, ls}}
 
 # What the session runs, from main's sized program (under the layouts
 # compiling gave it) and the guard, prepared (guard.from), and master's
@@ -323,11 +334,12 @@ def turn.kept(net: IC.Net, h: How, r: IC.Run, before: Cost) -> Turn:
       turn.of(net, outcome(h, out), cost.plus(before, spent, unrolls))
 
 # The line the guard refused, answered by master's program.
-def full.run(f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+def full.run(f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
   match f:
     case None{}:
       turn(h, IC.run(m, net, input, fuel(h)), cost)
-    case Some{+fp}:
+    case Some{+fl}:
+      +fp = full.prog(fl)
       turn.kept(net, h, IC.run(fp, IC.net.new(fp), input, fuel(h)), cost)
 
 # The first iteration runs on 0, unguarded.
@@ -336,7 +348,7 @@ def start(p: Prog, +h: How) -> Turn:
     case Prog{+m, g, f}:
       turn(h, IC.run(m, IC.net.new(m), Co.DZero{}, fuel(h)), cost.none())
 
-def checked(v: Maybe<&2, Outcome>, f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> Turn:
+def checked(v: Maybe<&2, Outcome>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> Turn:
   match v:
     case None{}:
       turn(h, IC.run(m, net, input, fuel(h)), cost)
@@ -346,12 +358,12 @@ def checked(v: Maybe<&2, Outcome>, f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, 
 # Main on input, once the guard's run r passes it. The guard's
 # interactions count; its unrolls do not, since its recursion sites are
 # its own and the meter's table locates main's.
-def guarded(r: IC.Run, f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+def guarded(r: IC.Run, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
   match r:
     case IC.Run{gnet, out, +spent, unrolls}:
       checked(guard.verdict(h, out), f, h, m, net, input, cost.plus(cost, spent, []))
 
-def answered(g: Maybe<&2, IC.Prog>, f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+def answered(g: Maybe<&2, IC.Prog>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
   match g:
     case None{}:
       turn(h, IC.run(m, net, input, fuel(h)), cost)
@@ -385,28 +397,29 @@ def start.by(~rt: Runner(), p: Prog, +h: How) -> IO(Turn):
     case Prog{+m, g, f}:
       turn.by(~rt, h, m, IC.net.new(m), Co.DZero{}, cost.none())
 
-def full.by(~rt: Runner(), f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+def full.by(~rt: Runner(), f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
   match f:
     case None{}:
       turn.by(~rt, h, m, net, input, cost)
-    case Some{+fp}:
+    case Some{+fl}:
+      +fp = full.prog(fl)
       do IO<Turn>:
         r : IC.Run <- rt(fp, IC.net.new(fp), input, fuel(h))
         return turn.kept(net, h, r, cost)
 
-def checked.by(~rt: Runner(), v: Maybe<&2, Outcome>, f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> IO(Turn):
+def checked.by(~rt: Runner(), v: Maybe<&2, Outcome>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> IO(Turn):
   match v:
     case None{}:
       turn.by(~rt, h, m, net, input, cost)
     case Some{o}:
       full.by(~rt, f, h, m, net, input, cost)
 
-def guarded.by(~rt: Runner(), r: IC.Run, f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+def guarded.by(~rt: Runner(), r: IC.Run, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
   match r:
     case IC.Run{gnet, out, +spent, unrolls}:
       checked.by(~rt, guard.verdict(h, out), f, h, m, net, input, cost.plus(cost, spent, []))
 
-def answered.by(~rt: Runner(), g: Maybe<&2, IC.Prog>, f: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+def answered.by(~rt: Runner(), g: Maybe<&2, IC.Prog>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
   match g:
     case None{}:
       turn.by(~rt, h, m, net, input, cost)
