@@ -694,7 +694,7 @@ expression  ::= "let" definition* "in" expression
               | "case" expression "of" alternative+
               | atom+
 alternative ::= pattern "->" expression
-atom        ::= identifier | natural | string | "$" natural | "#" atom
+atom        ::= identifier | natural | string | "$" natural
               | "(" expression ")" | "(" expression "," expression ")"
               | "[" (expression ("," expression)*)? "]"
               | "{" expression "," expression "," expression "}"
@@ -708,16 +708,20 @@ The keywords are `let`, `in`, `if`, `then`, `else`, `case`, `of`, `import`,
 `qualified`, and `as`. Naturals must fit in 32 bits (master: in an `Int`);
 oversized literals are parse errors rather than wrapping.
 
-UDTs deliberately retain the existing list-definition convention:
+An annotation `(p : P)` attaches a predicate to a pattern: it holds where `P`
+applied to the matched value gives anything but Zero. In a `case` alternative a
+failing predicate falls through to the next alternative. A definition
+`x : P = e` and a lambda parameter `\(x : P) -> e` have no alternative to fall
+to, so a failing predicate aborts with the value that failed it. A pattern may
+not bind a name twice, and a predicate may not mention a name its own pattern
+binds.
 
 ```telomare
-[T, constructor, extractor, operation] = \h ->
-  [ constructorBody, extractorBody, operationBody ]
+classify = \n -> case n of
+  (x : \v -> dEqual v 0) -> "zero"
+  (x : \v -> dEqual v 1) -> "one"
+  _                      -> "many"
 ```
-
-Expansion recognizes this only when the first name starts uppercase and the body
-is a lambda. There must be exactly one more name than body slots: the extra
-name is the generated validator. This classification is not parser behavior.
 
 | Source form | Parsed representation | Immediate expansion result |
 | --- | --- | --- |
@@ -725,7 +729,6 @@ name is the generated validator. This classification is not parser behavior.
 | `let defs in e` | `LetSugarF` | `LetUPF` |
 | `x : T = e` | annotated `SingleDefF` | `CheckF T e` |
 | `[a, b] = e` | `ListDefF` | one binding per name |
-| `[T, ...] = \h -> [...]` | `ListDefF` | UDT bindings and validator |
 | `import ...` | `ModuleImportItem ImportDecl` | `ExpandedModuleImport ImportDecl` |
 | `case e of ...` | `CaseUPF` | lowered later by `Telomare.Desugar` |
 

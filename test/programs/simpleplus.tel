@@ -2,22 +2,22 @@ import Prelude
 
 validDigit = \x -> and (toBool ($47 left x)) (not (toBool ($57 left x)))
 
-validInput = \x -> assert (and (validDigit (left x))
-                               (and (validDigit (left (right (right x))))
-                                    (not (toBool ($3 right x)))))
-                          "invalid input"
+validInput = \x -> and (validDigit (left x))
+                       (and (validDigit (left (right (right x))))
+                            (not (toBool ($3 right x))))
 
 toI = \x -> $48 left x
 
 doAdd = \x y -> c2d (plus (d2c (toI x)) (d2c (toI y)))
 
-main = \input -> let inString : validInput = left input
-                     x = left inString
-                     y = left (right (right inString))
-                     r = doAdd x y
-                     dr = if dMinus r 9
-                          then concat ["1", $49 succ (dMinus r 10)]
-                          else $49 succ r
-                 in if not (toBool input)
-                    then ("enter two digits separated by a space", 1)
-                    else (concat [succ x, " plus ", succ y, " is ", dr], 0)
+main = \input -> case input of
+                      (s, _) ->
+                        let inString : validInput = s
+                            x = left inString
+                            y = left (right (right inString))
+                            r = doAdd x y
+                            dr = if dMinus r 9
+                                  then concat ["1", $49 succ (dMinus r 10)]
+                                  else $49 succ r
+                        in (concat [succ x, " plus ", succ y, " is ", dr], 0)
+                      _ -> ("enter two digits separated by a space", 1) 
