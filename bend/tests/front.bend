@@ -52,7 +52,6 @@ def accepted() -> List<&2, Bool>:
    accepts("right (\\x y z -> [x, y, z, 0], 0) 1 2 3"),
    accepts("trace (\\x -> (\\y -> (x,y))) 0 0"),
    accepts("app (\\x y z -> x) 0 1 2"),
-   accepts("# (\\x -> x)"),
    accepts("(\"Hello World!\", \"0\")"),
    accepts(lines(["if", "  1", "then 1", "else", "  2"])),
    accepts(lines(["if 1", "  then", "                1", "              else 2"])),
@@ -151,21 +150,21 @@ def arity(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>) -> Bool:
     case _:
       False{}
 
-def not.list(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>) -> Bool:
+def duplicate(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>, +n: String) -> Bool:
   match r:
-    case Fail{E.UDTBodyNotList{loc, tname, desc}}:
-      String.eq(tname, "T") && String.eq(desc, "IntUPF 0")
+    case Fail{E.DuplicatePatternVariable{loc, name}}:
+      String.eq(name, n)
     case _:
       False{}
 
-def udt.arity(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>) -> Bool:
+def own.binder(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>, +n: String) -> Bool:
   match r:
-    case Fail{E.UDTArityMismatch{loc, tname, n, m}}:
-      Nat.is_eq(n, 2n) && Nat.is_eq(m, 2n)
+    case Fail{E.GuardUsesOwnBinder{loc, name}}:
+      String.eq(name, n)
     case _:
       False{}
 
-def udt.ok(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>) -> Bool:
+def expands(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>) -> Bool:
   Result.is_done(&2, &2, E.ExpErr, List<&2, S.EItem>, r)
 
 # Programs
@@ -282,9 +281,11 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
     IO.print(verdict("parse-module", module.items(P.module("Example", "import qualified Data.List as L\nmain = 0\n"))))
     IO.print(verdict("parse-empty-list-def", module.fails(P.module("", "[] = []"))))
     IO.print(verdict("expand-errors", arity(expand("[a, b] = [1, 2, 3]\n"))
-      && not.list(expand("[T, mk] = \\h -> 0\n"))
-      && udt.arity(expand("[T, mk] = \\h -> [0, 1]\n"))
-      && udt.ok(expand("[T] = \\h -> []\n"))))
+      && expands(expand("x = \\((a : Bool), b) -> case b of\n  (x, (y : Bool)) -> y\n  _ -> a\n"))
+      && duplicate(expand("x = case 0 of\n  (x, x) -> x\n"), "x")
+      && own.binder(expand("x = case 0 of\n  (x, (y : \\v -> x)) -> y\n"), "x")
+      && expands(expand("x = case 0 of\n  (y : \\y -> let x = y in x) -> y\n"))
+      && expands(expand("[T, mk] = [0, 1]\n"))))
     IO.print(verdict("programs-parse", all([
       module.parses("Prelude", prelude), module.parses("tictactoe", ttt),
       module.parses("simpleplus", plus), module.parses("tc_ultra_minimal", tc),
@@ -297,10 +298,10 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       "tc_ultra_minimal:6:25 (#0)")))
     IO.print(verdict("sites-simpleplus", String.eq(
       sites(Fr.compile(with.prelude("simpleplus", plus, prelude), "simpleplus")),
-      "Prelude:44:18 (#0), Prelude:62:23 (#1), simpleplus:12:42 (#2), simpleplus:12:28 (#3)")))
+      "Prelude:42:18 (#0), Prelude:60:23 (#1), simpleplus:11:42 (#2), simpleplus:11:28 (#3)")))
     IO.print(verdict("sites-tictactoe", String.eq(
       sites(Fr.compile(with.prelude("tictactoe", ttt, prelude), "tictactoe")),
-      "Prelude:44:18 (#0), Prelude:62:23 (#1), Prelude:76:24 (#2), Prelude:81:42 (#3), tictactoe:31:50 (#4), tictactoe:31:28 (#5), tictactoe:32:30 (#6), tictactoe:59:65 (#7), tictactoe:59:43 (#8), tictactoe:60:57 (#9), tictactoe:61:57 (#10), tictactoe:74:45 (#11), tictactoe:77:63 (#12), tictactoe:88:51 (#13), tictactoe:96:45 (#14)")))
+      "Prelude:42:18 (#0), Prelude:60:23 (#1), Prelude:74:24 (#2), Prelude:79:42 (#3), tictactoe:31:50 (#4), tictactoe:31:28 (#5), tictactoe:32:30 (#6), tictactoe:59:65 (#7), tictactoe:59:43 (#8), tictactoe:60:57 (#9), tictactoe:61:57 (#10), tictactoe:73:39 (#11), tictactoe:76:57 (#12), tictactoe:86:45 (#13), tictactoe:94:39 (#14), tictactoe:115:34 (#15)")))
     IO.print(verdict("sites-limits", String.eq(
       sites(Fr.compile(with.prelude("over-budget-recursion", over, prelude), "over-budget-recursion")),
       "over-budget-recursion:30:34 (#0)") && String.eq(
@@ -308,7 +309,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       "unbounded-input-recursion:27:34 (#0)")))
     IO.print(verdict("testchar-error", String.eq(
       error(Fr.compile([Fr.Src{"testchar", tchar}], "testchar")),
-      "RE (missing definition \"assert\" at line 6, column 20)")))
+      "RE (missing definition \"concat\" at line 14, column 31)")))
 
 def main() -> IO(Unit):
   do IO<Unit>:

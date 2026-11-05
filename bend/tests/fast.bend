@@ -47,71 +47,43 @@ def unguided(r: Result<&2, &2, String, Co.V>) -> Maybe<&2, IC.Prog>:
     case Done{v}:
       Some{IC.prepare(v, Map.new(&2, Lf.Shape))}
 
-def fast.guard(m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
-  match m:
-    case None{}:
-      None{}
-    case Some{t}:
-      unguided(E.fast(t))
-
-def fast.of(r: Result<&2, &2, String, Co.V>, g: Maybe<&2, IC.Prog>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
+def fast.of(r: Result<&2, &2, String, Co.V>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{form}:
       Ss.Replay{["left " ++ form], Ss.cost.none()}
     case Done{v}:
-      Ss.replay(Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), g, None{}}, h, lines)
+      Ss.replay(Ss.Prog{IC.prepare(v, Map.new(&2, Lf.Shape)), None{}}, h, lines)
 
-def fast.compiled(r: Result<&2, &2, String, Fr.Program>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
+def fast.compiled(r: Result<&2, &2, String, T.C>, +h: Ss.How, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], Ss.cost.none()}
-    case Done{p}:
-      match p:
-        case Fr.Program{run, g, boundary}:
-          fast.of(E.fast(run), fast.guard(g), h, lines)
+    case Done{+run}:
+      fast.of(E.fast(run), h, lines)
 
-# A session run unsized, each iteration capped at fuel (0: no cap), main's
-# input refinements run first, as the command runs it.
+# A session run unsized, each iteration capped at fuel (0: no cap).
 def fast(srcs: List<&2, Fr.Src>, +entry: String, +fuel: U32, lines: List<&2, String>) -> Ss.Replay:
-  fast.compiled(Fr.compile.program(srcs, entry), Ss.Fast{fuel}, lines)
+  fast.compiled(Fr.compile(srcs, entry), Ss.Fast{fuel}, lines)
 
-def sized.prog(+t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, IC.Prog>:
-  match r:
-    case Fail{f}:
-      None{}
-    case Done{s}:
-      match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
-          Some{Ss.guard.from(t, counts, expr, pl)}
-
-def guard.prog(m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
-  match m:
-    case None{}:
-      None{}
-    case Some{+t}:
-      sized.prog(t, Sz.size(65536, True{}, t))
-
-def sized.of(+run: T.C, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def sized.of(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
-          Ss.replay(Ss.session(expr, Ss.layouts.from(run, counts, pl), g, pl), Ss.Sized{}, lines)
+        case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
+          Ss.replay(Ss.session(expr, Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro)), pro), Ss.Sized{}, lines)
 
-def sized.compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
+def sized.compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], Ss.cost.none()}
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, +g, +boundary}:
-          sized.of(run, guard.prog(g), Sz.size.guarded(65536, boundary, g, run), lines)
+    case Done{+run}:
+      sized.of(run, Sz.size(65536, True{}, run), lines)
 
 # The same session sized, as the command runs it.
 def sized(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
-  sized.compiled(Fr.compile.program(srcs, entry), lines)
+  sized.compiled(Fr.compile(srcs, entry), lines)
 
 def joined(xs: List<&2, String>) -> String:
   match xs:
@@ -225,7 +197,7 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String, +unb: Str
     IO.print(verdict("fast-base-case", base.ran(base.case())))
     IO.print(verdict("fast-sites", String.eq(
       sites(fast(with.prelude(prelude, "simpleplus", plus), "simpleplus", 16777216, ["3 4"])),
-      "#0 20;#1 24;#2 6;#3 5;")))
+      "#0 10;#1 24;#2 5;#3 4;")))
     IO.print(verdict("fast-unsized", all([
       unsized.fails(Fr.compile(with.prelude(prelude, "unbounded-input-recursion", unb), "unbounded-input-recursion")),
       String.eq(shown(fast(with.prelude(prelude, "unbounded-input-recursion", unb), "unbounded-input-recursion", 0, ["a", "a"])),

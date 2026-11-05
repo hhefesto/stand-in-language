@@ -2,20 +2,22 @@ status 0
 --- stdout
 O
 --- stderr
-interactions (measured): 519
-  era-leaf: 182
-  era-pair: 161
-  split-pair: 70
-  setenv-pair: 44
-  apply-ref: 40
+interactions (measured): 153
+  split-pair: 52
+  setenv-pair: 32
+  apply-ref: 29
+  era-leaf: 18
   template-compiled: 15
   template-reused: 14
   dup-plan-copy: 9
-  dup-leaf: 6
-  apply-gate: 3
+  era-plan-drop: 7
+  dup-leaf: 4
   dup-closure: 3
   dup-pair: 3
-  scrut-zero: 3
+  apply-gate: 2
+  era-closure: 2
+  era-pair: 2
+  scrut-zero: 2
   split-zero: 2
   apply-erased: 1
-  era-aborted: 1
+  const-open: 1

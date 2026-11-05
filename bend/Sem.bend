@@ -121,7 +121,7 @@ def is.watch(m: Mode) -> Bool:
       False{}
 
 # What a check is: kept, as the program runs it; gone, its value (erased);
-# or watched, its value where its test gives 0 and a mark where it does not.
+# or watched, its value where its predicate holds and a mark where it does not.
 type How is Data:
   Kept{}
   Gone{}
@@ -294,12 +294,12 @@ def abort.of(+at: E.Site, e: W) -> R:
     case _:
       Val{WStuck{}}
 
-# A watched check: its value where its test gave 0, else a mark.
+# A watched check: its value where its predicate gave a pair, else a mark.
 def checked(+site: U32, t: R, c: R) -> R:
   match t:
     case Val{w}:
       match w:
-        case WZero{}:
+        case WPair{a, b}:
           c
         case WHole{p}:
           Needs{p}

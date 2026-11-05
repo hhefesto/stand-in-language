@@ -14,6 +14,7 @@ import ./Size.bend as Sz
 import ./Core.bend as Co
 import ./Term.bend as T
 import ./Show.bend as Sh
+import ./Session.bend as Ss
 
 # The language server (master's app/LSP.hs, `telomare-lsp`): LSP over
 # standard input and output, framed by Content-Length headers, for the
@@ -380,7 +381,6 @@ type Look is Data:
   LDigit{}
   LLambda{}
   LArrow{}
-  LHash{}
   LIdent{}
   LOp{}
   LPunct{}
@@ -395,10 +395,9 @@ def look.of(+c: U32, +s: String, +t: String) -> Look:
   Bool.pick(Look, is.digit(c), LDigit{},
   Bool.pick(Look, U32.is_eq(c, 92) && Bool.not(head.op(t)), LLambda{},
   Bool.pick(Look, U32.is_eq(c, 45) && head.gt(t), LArrow{},
-  Bool.pick(Look, U32.is_eq(c, 35), LHash{},
   Bool.pick(Look, Lx.identifier_start(Chr{c}), LIdent{},
   Bool.pick(Look, is.op(c), LOp{},
-  Bool.pick(Look, is.punct(c), LPunct{}, LOther{}))))))))))))
+  Bool.pick(Look, is.punct(c), LPunct{}, LOther{})))))))))))
 
 # A token of len characters at col, then going on after it.
 def lx.emit(+ln: U32, +col: U32, +len: U32, +ty: U32, +rest: String, acc: List<&2, Tok>) -> LxS:
@@ -422,8 +421,6 @@ def lx.go(+ln: U32, l: Look, +col: U32, +c: U32, +t: String, acc: List<&2, Tok>)
       lx.emit(ln, col, 1, tok.keyword(), t, acc)
     case LArrow{}:
       lx.emit(ln, col, 2, tok.keyword(), String.drop(t, 1n), acc)
-    case LHash{}:
-      lx.emit(ln, col, 1, tok.operator(), t, acc)
     case LIdent{}:
       LxS{ln, Id{col, ""}, col, SCon{Chr{c}, t}, acc}
     case LOp{}:
@@ -972,8 +969,6 @@ def kids(look: Bool, +env: List<&2, L.Name>, t: S.Surf<Empty, Unit, Empty>, rest
       wk(env, x) <> rest
     case S.SRight{loc, x}:
       wk(env, x) <> rest
-    case S.SHash{loc, x}:
-      wk(env, x) <> rest
     case S.SRec{loc, a, r, b}:
       rec.wks(look, env, a, r, b, rest)
     case S.SLet{loc, binds, body}:
@@ -1473,11 +1468,9 @@ def exp.range(+ss: List<&2, U32>, e: E.ExpErr) -> Range:
   match e:
     case E.ListArityMismatch{l, n, s}:
       range.loc(ss, l)
-    case E.UDTBodyNotList{l, t, d}:
+    case E.DuplicatePatternVariable{l, n}:
       range.loc(ss, l)
-    case E.UDTArityMismatch{l, t, n, s}:
-      range.loc(ss, l)
-    case E.MisplacedPatternAnnotation{l}:
+    case E.GuardUsesOwnBinder{l, n}:
       range.loc(ss, l)
     case E.MissingMain{}:
       range.point(0, 0)
@@ -1767,6 +1760,13 @@ def action(+uri: String, +r: Range, m: Maybe<&2, Doc>) -> J.Json:
 # Partial evaluation (eval2IExpr)
 # -------------------------------
 
+def pe.checked(m: Maybe<&2, String>, +x: Co.V) -> String:
+  match m:
+    case Some{e}:
+      "Evaluation Error: " ++ e
+    case None{}:
+      "Result: " ++ Co.show(x)
+
 # The expression compiled as a unit test is, and shown as Haskell shows
 # the compiled term; or why it was not.
 def pe.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
@@ -1775,8 +1775,8 @@ def pe.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "Evaluation Error: the expression did not size"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, x, checks, plain}:
-          "Result: " ++ Co.show(x)
+        case Sz.Sized{counts, +x, checks, plain, p}:
+          pe.checked(Ss.static.check(x), x)
 
 def pe.err(e: Fr.Err) -> String:
   match e:
@@ -1785,21 +1785,19 @@ def pe.err(e: Fr.Err) -> String:
     case Fr.Modules{es}:
       Fr.render.mods(es)
 
-def pe.program(r: Result<&2, &2, Fr.Err, Fr.Program>) -> String:
+def pe.program(r: Result<&2, &2, Fr.Err, T.C>) -> String:
   match r:
     case Fail{e}:
       "Evaluation Error: " ++ pe.err(e)
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, g, b}:
-          pe.sized(Sz.size(65536, False{}, run))
+    case Done{+run}:
+      pe.sized(Sz.size(65536, False{}, run))
 
 def pe.expanded(r: Result<&2, &2, E.ExpErr, S.Surf<Empty, Unit, Empty>>) -> String:
   match r:
     case Fail{e}:
       "Evaluation Error: " ++ E.render(e)
     case Done{x}:
-      pe.program(Fr.program.of(D.desugar(x)))
+      pe.program(Fr.term.of(D.desugar(x)))
 
 def pe.gen() -> L.Loc:
   L.Gen{"eval2IExpr.import"}
@@ -1812,7 +1810,7 @@ def pe.import() -> S.EItem:
 def pe.main(yes: Bool, +items: List<&2, S.EItem>, +pre: List<&2, Rs.Mod>) -> String:
   match yes:
     case True{}:
-      pe.program(Fr.program(Fr.Mods{Rs.Mod{"Current", pe.import() <> items} <> pre, []}, "Current"))
+      pe.program(Fr.term(Fr.Mods{Rs.Mod{"Current", pe.import() <> items} <> pre, []}, "Current"))
     case False{}:
       "Evaluation Error: missing 'main' definition"
 

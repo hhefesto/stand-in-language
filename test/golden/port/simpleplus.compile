@@ -1,6 +1,6 @@
 status 0
 --- stdout
 --- stderr
-wrote simpleplus.telc (41627 nodes, sources fb11cad7d33c)
+wrote simpleplus.telc (20884 nodes, sources 740eeca078e8)
 --- files
-aa21bd906224a080650aa5d3fbf44d044d904748a8bdb9525737d8ac09549938 133254 simpleplus.telc
+58af33240a886fb2f7ec51a764dd9163831926a764c853b2473c763d908347af 62256 simpleplus.telc

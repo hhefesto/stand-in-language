@@ -1,6 +1,7 @@
 import Prelude
+import Ratio
 b = \x -> if x then "1" else "0"
-rEq = \r n d -> and (dEqual (left (right r)) n) (dEqual (right (right r)) d)
+rEq = \r n d -> and (dEqual (left r) n) (dEqual (right r) d)
 main = \input ->
   ( concat [ b (rEq (rPlus (fromRational 1 2) (fromRational 1 2)) 1 1)
            , b (rEq (rMinus (fromRational 1 2) (fromRational 1 2)) 0 1)

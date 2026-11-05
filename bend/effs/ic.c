@@ -575,7 +575,7 @@ static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
 
 // Is fi the step of an unbounded recursion (Core.bend's is.limit)?
 static inline bool nt_limit(u32 fi) {
-  return fi >= 0x80000000u && fi <= 0xFFFFFFF4u;
+  return fi >= 0x80000000u && fi <= 0xFFFFFFF2u;
 }
 
 // The loop: pop, skip a stale pair, fire; stop when no pair is left, a

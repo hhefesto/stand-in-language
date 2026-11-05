@@ -349,8 +349,6 @@ def go(+fuel: Nat, +scope: Set(), n: ON) -> OV:
               VT{S.SLeft{anno, vt(go(f, scope, OT{x}))}}
             case S.SRight{anno, x}:
               VT{S.SRight{anno, vt(go(f, scope, OT{x}))}}
-            case S.SHash{anno, x}:
-              VT{S.SHash{anno, vt(go(f, scope, OT{x}))}}
             case S.SRec{anno, a, b, c}:
               VT{S.SRec{anno, vt(go(f, scope, OT{a})), vt(go(f, scope, OT{b})), vt(go(f, scope, OT{c}))}}
             case S.SLet{anno, +binds, body}:
@@ -427,10 +425,12 @@ type Node is Data:
   NInt{+path: String, +n: U32}
   NStr{+path: String, +s: String}
   NVar{+path: String, +name: L.Name}
+  NGuard{+path: String, +g: S.Desugared()}
 
-# Every pair, literal and variable of a pattern, in left-to-right preorder,
-# ahead of rest (patternNodes).
-def nodes.of(p: S.ExpandedPat(), +path: String, rest: List<&2, Node>) -> List<&2, Node>:
+# Every pair, literal, variable and guard of a pattern, in left-to-right
+# preorder, ahead of rest (patternNodes). A guard comes after the nodes of
+# the pattern it annotates.
+def nodes.of(p: S.DesugaredPat(), +path: String, rest: List<&2, Node>) -> List<&2, Node>:
   match p:
     case S.PPair{a, b}:
       NPair{path} <> nodes.of(a, path ++ "L", nodes.of(b, path ++ "R", rest))
@@ -443,7 +443,7 @@ def nodes.of(p: S.ExpandedPat(), +path: String, rest: List<&2, Node>) -> List<&2
     case S.PIgnore{}:
       rest
     case S.PAnn{q, t}:
-      nodes.of(q, path, rest)
+      nodes.of(q, path, NGuard{path, t} <> rest)
 
 def at(path: String, +x: S.Desugared()) -> S.Desugared():
   match path:
@@ -456,7 +456,7 @@ def at(path: String, +x: S.Desugared()) -> S.Desugared():
 
 # A pattern's literal skeleton as a term, variables and ignores as 0
 # (patternToTerm).
-def pattern.term(+anno: L.Loc, p: S.ExpandedPat()) -> S.Desugared():
+def pattern.term(+anno: L.Loc, p: S.DesugaredPat()) -> S.Desugared():
   match p:
     case S.PPair{a, b}:
       S.SPair{anno, pattern.term(anno, a), pattern.term(anno, b)}
@@ -480,10 +480,10 @@ def app(+f: S.Desugared(), x: S.Desugared()) -> S.Desugared():
 def equal(+name: String, a: S.Desugared(), b: S.Desugared()) -> S.Desugared():
   app(app(helper(name), a), b)
 
-# Bool-valued checks that x has the pattern's pairs and literals
-# (matchChecks): a pair node, any value, is made a Bool before it reaches
-# `and`, whose arguments are refined to Bool; numbers are compared with
-# dEqual, strings whole with listEqual.
+# Bool-valued checks that x has the pattern's pairs and literals, and that
+# its guards hold (matchChecks): a pair node or a guard's result, any value,
+# is made a Bool before it reaches `and`, whose arguments are refined to
+# Bool; numbers are compared with dEqual, strings whole with listEqual.
 def checks(+anno: L.Loc, +x: S.Desugared(), ns: List<&2, Node>) -> List<&2, S.Desugared()>:
   match ns:
     case Nil{}:
@@ -498,6 +498,8 @@ def checks(+anno: L.Loc, +x: S.Desugared(), ns: List<&2, Node>) -> List<&2, S.De
           equal("__case_listEqual", at(path, x), S.SStr{anno, t}) <> checks(anno, x, rest)
         case NVar{path, name}:
           checks(anno, x, rest)
+        case NGuard{path, +g}:
+          S.SIte{S.loc(Empty, Empty, Empty, g), app(g, at(path, x)), S.SInt{anno, 1}, S.SInt{anno, 0}} <> checks(anno, x, rest)
 
 # The conjunction of non-empty checks (allOf).
 def all.of(+anno: L.Loc, cs: List<&2, S.Desugared()>) -> S.Desugared():
@@ -566,10 +568,10 @@ def alternative(+ra: L.Loc, cs: List<&2, S.Desugared()>, bound: S.Desugared(), n
     case Con{c, more}:
       ite(all.of(ra, c <> more), bound, next)
 
-# A case alternative lowered: its pattern (read for its shape only) and its
+# A case alternative lowered: its pattern, its guards lowered, and its
 # lowered result.
 type Arm is Data:
-  Arm{+p: S.ExpandedPat(), +body: S.Desugared()}
+  Arm{+p: S.DesugaredPat(), +body: S.Desugared()}
 
 # What lowering gives back: no case can be written in it.
 type LV is Data:
@@ -577,6 +579,7 @@ type LV is Data:
   DTs{+xs: List<&2, S.Desugared()>}
   DBs{+bs: List<&2, S.DesugaredBind()>}
   DArms{+arms: List<&2, Arm>}
+  DP{+p: S.DesugaredPat()}
 
 def dt(v: LV) -> S.Desugared():
   match v:
@@ -598,6 +601,13 @@ def dbs(v: LV) -> List<&2, S.DesugaredBind()>:
       bs
     case _:
       []
+
+def dp(v: LV) -> S.DesugaredPat():
+  match v:
+    case DP{p}:
+      p
+    case _:
+      S.PIgnore{}
 
 def darms(v: LV) -> List<&2, Arm>:
   match v:
@@ -658,8 +668,6 @@ def lower(+fuel: Nat, n: ON) -> LV:
               DT{S.SLeft{a, dt(lower(f, OT{x}))}}
             case S.SRight{a, x}:
               DT{S.SRight{a, dt(lower(f, OT{x}))}}
-            case S.SHash{a, x}:
-              DT{S.SHash{a, dt(lower(f, OT{x}))}}
             case S.SRec{a, x, y, z}:
               DT{S.SRec{a, dt(lower(f, OT{x})), dt(lower(f, OT{y})), dt(lower(f, OT{z}))}}
             case S.SLet{a, binds, body}:
@@ -705,9 +713,21 @@ def lower(+fuel: Nat, n: ON) -> LV:
             case Con{alt, rest}:
               match alt:
                 case S.Alt{p, body}:
-                  DArms{Arm{p, dt(lower(f, OT{body}))} <> darms(lower(f, OAs{rest}))}
+                  DArms{Arm{dp(lower(f, OP{p})), dt(lower(f, OT{body}))} <> darms(lower(f, OAs{rest}))}
         case OP{p}:
-          DT{S.SZero{L.Unknown{}}}
+          match p:
+            case S.PAnn{q, t}:
+              DP{S.PAnn{dp(lower(f, OP{q})), dt(lower(f, OT{t}))}}
+            case S.PPair{a, b}:
+              DP{S.PPair{dp(lower(f, OP{a})), dp(lower(f, OP{b}))}}
+            case S.PVar{name}:
+              DP{S.PVar{name}}
+            case S.PInt{n}:
+              DP{S.PInt{n}}
+            case S.PStr{t}:
+              DP{S.PStr{t}}
+            case S.PIgnore{}:
+              DP{S.PIgnore{}}
         case OArgs{args}:
           DT{S.SZero{L.Unknown{}}}
         case OSpine{sp}:

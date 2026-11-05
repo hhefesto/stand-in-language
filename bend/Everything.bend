@@ -16,6 +16,7 @@ import ./Lower.bend as Lower
 import ./Split.bend as Split
 import ./Expr.bend as Expr
 import ./Core.bend as Core
+import ./Plan.bend as Plan
 import ./Size.bend as Size
 import ./Sem.bend as Sem
 import ./Check.bend as Check

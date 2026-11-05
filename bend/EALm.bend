@@ -1,4 +1,5 @@
 import Base
+import ./Plan.bend as Pl
 
 import ./Show.bend as Sh
 
@@ -8437,9 +8438,9 @@ def core.got(r: Result<&2, &2, String, Co.V>) -> Co.V:
       Co.VZero{}
 
 # A sized recursion chain of n links (sizedRecursionChain), lifted: its
-# value and its constant bodies (the link and the abort base).
+# value and its constant bodies (the link and the base).
 def chain.lifted(+tok: U32, +n: U32) -> Lf.L & Map<&2, Lf.Body>:
-  Lf.lift.expr(core.got(E.core(Map.new(&2, Lc.Origin), E.sized.chain(tok, n, False{}))), Lc.Gen{"compiled2Term3"})(Map.new(&2, Lf.Body))
+  Lf.lift.expr(core.got(E.core(Map.new(&2, Lc.Origin), E.sized.chain(n, False{}))), Lc.Gen{"compiled2Term3"})(Map.new(&2, Lf.Body))
 
 def chain.main(+tok: U32, +n: U32) -> Lf.L:
   Pair.fst(Lf.L, Map<&2, Lf.Body>, chain.lifted(tok, n))
@@ -8611,9 +8612,32 @@ def faithful.lr(+t: Lf.Lifted) -> LR:
 # deriveSizedGuidance
 # -------------------
 
+# The sizing substitution: each recursion's count, and the checks main still
+# makes (Plan.bend's keep).
+type Subst is Data:
+  Subst{+counts: List<&2, E.TS>, +keep: Maybe<&2, Set()>}
+
+def sub.count(s: Subst, +tok: U32) -> U32:
+  match s:
+    case Subst{counts, keep}:
+      E.count.of(counts, tok)
+
+def sub.kept(s: Subst, +o: Lc.Origin) -> Bool:
+  match s:
+    case Subst{counts, keep}:
+      Pl.kept(keep, o)
+
+def im.check(kept: Bool, +loc: Lc.Loc, +o: Lc.Origin, +tc: Lf.L, +c: Lf.L) -> Lf.L:
+  match kept:
+    case True{}:
+      check.l(loc, check.perform(o), tc, c)
+    case False{}:
+      c
+
 # A term's image under the sizing substitution: references to their
-# bodies' images, holes to chains of their links, wrappers to checks.
-def im.rw(l: Lf.L, +imgs: Map<&2, String>, +counts: List<&2, E.TS>) -> Lf.L:
+# bodies' images, holes to chains of their links, wrappers to checks, the
+# checks the analysis erased to the values they guard.
+def im.rw(l: Lf.L, +imgs: Map<&2, String>, +counts: Subst) -> Lf.L:
   match l:
     case Lf.LRef{+loc, +h}:
       Lf.LRef{loc, Pair.snd(Map<&2, String>, String, Map.get(String, h, imgs, h))}
@@ -8626,9 +8650,9 @@ def im.rw(l: Lf.L, +imgs: Map<&2, String>, +counts: List<&2, E.TS>) -> Lf.L:
     case Lf.LRight{loc, x}:
       Lf.LRight{loc, im.rw(x, imgs, counts)}
     case Lf.LUnsized{loc, +tok}:
-      chain.main(tok, E.count.of(counts, tok))
+      chain.main(tok, sub.count(counts, tok))
     case Lf.LCheck{+loc, +o, tc, c}:
-      check.l(loc, check.perform(o), im.rw(tc, imgs, counts), im.rw(c, imgs, counts))
+      im.check(sub.kept(counts, o), loc, o, im.rw(tc, imgs, counts), im.rw(c, imgs, counts))
     case other:
       other
 
@@ -8657,10 +8681,10 @@ def lt.got(m: Maybe<&2, Lf.L>) -> Lf.L:
     case None{}:
       Lf.LZero{Lc.Unknown{}}
 
-def im.put(+h: String, +body: Lf.L, +imgs: Map<&2, String>, +counts: List<&2, E.TS>) -> Map<&2, String>:
+def im.put(+h: String, +body: Lf.L, +imgs: Map<&2, String>, +counts: Subst) -> Map<&2, String>:
   Map.set(&2, String, imgs, h, Lf.hash(im.rw(body, imgs, counts)))
 
-def iq.frame(f: RF, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: List<&2, E.TS>, +rest: List<&2, RF>) -> IQ:
+def iq.frame(f: RF, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: Subst, +rest: List<&2, RF>) -> IQ:
   match f:
     case RF{+r, +ds}:
       match ds:
@@ -8669,7 +8693,7 @@ def iq.frame(f: RF, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +hs: List<&2,
         case Con{+x, +xs}:
           iq.look(Array.get(U32, d, x), imgs, p, r, x, xs, rest)
 
-def iq.step(st: List<&2, RF>, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: List<&2, E.TS>) -> IQ:
+def iq.step(st: List<&2, RF>, d: Array<U32>, +imgs: Map<&2, String>, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: Subst) -> IQ:
   match st:
     case Nil{}:
       IqEnd{imgs}
@@ -8683,7 +8707,7 @@ def iq.fin(q: IQ) -> Map<&2, String>:
     case IqEnd{+imgs}:
       imgs
 
-def iq.loop(fuel: Nat, q: IQ, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: List<&2, E.TS>) -> Map<&2, String>:
+def iq.loop(fuel: Nat, q: IQ, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>, +counts: Subst) -> Map<&2, String>:
   match fuel:
     case 0n:
       iq.fin(q)
@@ -8695,7 +8719,7 @@ def iq.loop(fuel: Nat, q: IQ, +p: PG, +hs: List<&2, String>, +ts: List<&2, Lf.L>
           imgs
 
 # images: each unsized body's image's hash.
-def images(t: Lf.Lifted, +counts: List<&2, E.TS>) -> Map<&2, String>:
+def images(t: Lf.Lifted, +counts: Subst) -> Map<&2, String>:
   match t:
     case Lf.Lifted{+bodies, +main}:
       +p: PG = pg.of(Lf.Lifted{bodies, main})
@@ -8827,13 +8851,13 @@ def lf.main(t: Lf.Lifted) -> Lf.L:
     case Lf.Lifted{+bodies, +main}:
       main
 
-def dv.cert(+counts: List<&2, E.TS>, +pre: Lf.Lifted, +cert: Map<&2, G>, +m: MR, +post: Lf.Lifted) -> Result<&2, &2, String, LR>:
+def dv.cert(+counts: Subst, +pre: Lf.Lifted, +cert: Map<&2, G>, +m: MR, +post: Lf.Lifted) -> Result<&2, &2, String, LR>:
   +imgs: Map<&2, String> = images(pre, counts)
   dv.lr(dv.main(String.eq(Lf.show(im.rw(lf.main(pre), imgs, counts)), Lf.show(lf.main(post))), preimages(Map.to_list(&2, String, imgs), Map.new(&2, List<&2, String>)), cert, post), m)
 
 # deriveSizedGuidance links unsized cert sized: Fail when the certificate
 # is a refusal, or the sized program is not the unsized one's image.
-def derive(+counts: List<&2, E.TS>, +pre: Lf.Lifted, cert: LR, +post: Lf.Lifted) -> Result<&2, &2, String, LR>:
+def derive(+counts: Subst, +pre: Lf.Lifted, cert: LR, +post: Lf.Lifted) -> Result<&2, &2, String, LR>:
   match cert:
     case LR{+guide, +fails, +main}:
       match main:
@@ -8951,9 +8975,9 @@ def cp.pick(r: Result<&2, &2, String, LR>, +post: Lf.Lifted) -> LR:
     case Fail{+why}:
       lr.full(False{}, post)
 
-def certified.program(+pre: Lf.Lifted, +counts: List<&2, E.TS>, +sized: Co.V) -> LR:
+def certified.program(+pre: Lf.Lifted, +counts: List<&2, E.TS>, +keep: Maybe<&2, Set()>, +sized: Co.V) -> LR:
   +post: Lf.Lifted = Lf.defer.lift.expr(sized)
-  cp.pick(derive(counts, pre, faithful.lr(pre), post), post)
+  cp.pick(derive(Subst{counts, keep}, pre, faithful.lr(pre), post), post)
 
 # ealCaptureLayouts of a result.
 def lr.layouts.go(kvs: List<&2, Sigma<&2, &2, String, _ => G>>, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:

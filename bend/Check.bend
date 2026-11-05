@@ -14,7 +14,8 @@ import ./Sem.bend as Sm
 #
 # The run starts on an input it knows nothing of (XVar ""). Where it needs
 # a position's shape (Needs), the input is split there, 0 and a pair, and
-# each side runs again; the guard runs first and prunes what it refuses.
+# each side runs again; the guard (main's input prologue) runs first and
+# prunes what it refuses.
 # Every input lies under one leaf of that tree, and a leaf's run never
 # looked at what it left unknown, so it is that input's run. A program is
 # proven when no leaf fires; one that fires names the input; one past the

@@ -3,49 +3,45 @@ status 0
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:44:18 (#0)     <= 79
-  Prelude:62:23 (#1)     <= 32
-  Prelude:76:24 (#2)     <= 10
-  Prelude:81:42 (#3)     <= 127
-  tictactoe:31:50 (#4)   <= 9
-  tictactoe:31:28 (#5)   <= 10
-  tictactoe:32:30 (#6)   <= 10
-  tictactoe:59:65 (#7)   <= 9
-  tictactoe:59:43 (#8)   <= 4
-  tictactoe:60:57 (#9)   <= 4
-  tictactoe:61:57 (#10)  <= 4
-  tictactoe:74:45 (#11)  <= 78
-  tictactoe:77:63 (#12)  <= 78
-  tictactoe:88:51 (#13)  <= 2
-  tictactoe:96:45 (#14)  <= 2
+  Prelude:42:18 (#0)      <= 79
+  Prelude:60:23 (#1)      <= 32
+  Prelude:74:24 (#2)      <= 10
+  Prelude:79:42 (#3)      <= 127
+  tictactoe:31:50 (#4)    <= 9
+  tictactoe:31:28 (#5)    <= 10
+  tictactoe:32:30 (#6)    <= 10
+  tictactoe:59:65 (#7)    <= 9
+  tictactoe:59:43 (#8)    <= 4
+  tictactoe:60:57 (#9)    <= 4
+  tictactoe:61:57 (#10)   <= 4
+  tictactoe:73:39 (#11)   <= 78
+  tictactoe:76:57 (#12)   <= 78
+  tictactoe:86:45 (#13)   <= 3
+  tictactoe:94:39 (#14)   <= 2
+  tictactoe:115:34 (#15)  <= 2
 
 sizing budget in force: 65536 unrollings
 
-refinement checks: 0 discharged statically, 8 left to run time:
-  Prelude:17:8     at run time (not proven for every input)
-  Prelude:17:19    at run time (not proven for every input)
-  Prelude:19:7     at run time (not proven for every input)
-  Prelude:19:18    at run time (not proven for every input)
-  Prelude:21:8     at run time (validates input)
-  tictactoe:68:30  at the session boundary
-  tictactoe:70:26  at the session boundary
-  tictactoe:71:27  at the session boundary
-erasures in main: none; every recursion bottom and check stays a run-time abort
-  sizing did not prove main for every input
-erasures in the guard: none; every recursion bottom and check stays a run-time abort
-  sizing did not prove the guard for every input
+refinement checks: 0 discharged statically, 6 left to run time:
+  Prelude:15:8     at run time
+  Prelude:15:19    at run time
+  Prelude:19:8     at run time
+  tictactoe:69:21  at run time
+  tictactoe:70:21  at run time
+  tictactoe:71:24  at run time
+erasures in main: none past the check analysis's; the chains keep their bases
+  the erasure checker could not prove them unreachable: its budget of evaluation steps ran out
 
 recursion nesting (structural, approximate):
   triple         function               levels
-  Prelude:25:17  Prelude.d2c            0, 1, 2
-  Prelude:53:13  Prelude.map            0, 1
-  Prelude:58:32  Prelude.foldr.fixed    0, 1, 2
-  Prelude:70:33  Prelude.zipWith.fixed  0, 1
+  Prelude:23:17  Prelude.d2c            0, 1, 2
+  Prelude:51:13  Prelude.map            0, 1
+  Prelude:56:32  Prelude.foldr.fixed    0, 1, 2
+  Prelude:68:33  Prelude.zipWith.fixed  0, 1
 
 maximum nesting depth: 3
 
 bindings used below the level they were bound at:
-  tictactoe.main.input           !!  (2 levels below its binding)
   tictactoe.main.placeString     !!  (2 levels below its binding)
   tictactoe.whoWon.board         !!  (2 levels below its binding)
   Prelude.d2c.b                  !  (1 level below its binding)
@@ -56,10 +52,8 @@ bindings used below the level they were bound at:
   Prelude.map.f                  !  (1 level below its binding)
   Prelude.zipWith.f              !  (1 level below its binding)
   tictactoe.fullBoard.board      !  (1 level below its binding)
-  tictactoe.main.boardIn         !  (1 level below its binding)
   tictactoe.main.newBoard        !  (1 level below its binding)
   tictactoe.main.oldBoard        !  (1 level below its binding)
-  tictactoe.main.oldState        !  (1 level below its binding)
   tictactoe.main.place           !  (1 level below its binding)
   tictactoe.main.placeOccupied   !  (1 level below its binding)
   tictactoe.main.playerIn        !  (1 level below its binding)

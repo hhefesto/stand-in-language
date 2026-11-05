@@ -702,7 +702,6 @@ type Rf is Data:
   RfUrec{}
   RfList{}
   RfIte{}
-  RfHash{}
   RfListDef{}
   RfCase{}
   RfSCase{}
@@ -754,8 +753,6 @@ def rf.id(x: Rf) -> U32:
       11
     case RfIte{}:
       12
-    case RfHash{}:
-      13
     case RfListDef{}:
       14
     case RfCase{}:
@@ -911,8 +908,6 @@ def gram(x: Rf) -> Nd:
     case RfIte{}:
       sq([kw("if"), scn(), expr(), scn(), kw("then"), scn(), expr(), scn(), kw("else"), scn(),
           expr(), scn()])
-    case RfHash{}:
-      sq([sym("#"), scn(), rf(RfSingle{})])
     case RfListDef{}:
       sq([NdLbl{"list assignment names",
                 sq([sym("["), sep.by1(sq([scn(), rf(RfLocId{}), scn()]), sym(",")), sym("]"),
@@ -948,7 +943,7 @@ def gram(x: Rf) -> Nd:
                 sym(":"), scn(), NdLbl{"type expression after ':'", NdSeq{expr(), scn()}},
                 sym(")")])}
     case RfSingle{}:
-      ch([NdTry{rf(RfHash{})}, NdTry{rf(RfString{})}, NdTry{rf(RfNumber{})},
+      ch([NdTry{rf(RfString{})}, NdTry{rf(RfNumber{})},
           NdTry{rf(RfPair{})}, NdTry{rf(RfUrec{})}, NdTry{rf(RfList{})},
           NdTry{rf(RfChurch{})}, NdTry{NdSeq{NdIdent{}, sc()}},
           NdTry{sq([sym("("), scn(), expr(), scn(), sym(")")])}])

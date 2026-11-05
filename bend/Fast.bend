@@ -78,7 +78,7 @@ def app(c: FX, i: FX) -> FX:
 # A refinement check: master's refinementCheckB, its defers bare.
 def checking(+o: L.Origin, tc: FX, c: FX) -> FX:
   FSetEnv{FPair{FDefer{FSetEnv{FPair{FDefer{FSetEnv{FPair{
-      FSetEnv{FPair{FSetEnv{FPair{FGate{}, FLeft{FEnv{}}}}, FPair{FDefer{FEnv{}}, FAbort{o, FLeft{FEnv{}}}}}},
+      FSetEnv{FPair{FSetEnv{FPair{FGate{}, FLeft{FEnv{}}}}, FPair{FAbort{o, FPair{FPair{FZero{}, FZero{}}, FRight{FEnv{}}}}, FDefer{FEnv{}}}}},
       FRight{FEnv{}}}}},
     FPair{app(FLeft{FEnv{}}, FRight{FEnv{}}), FRight{FEnv{}}}}}},
     FPair{tc, c}}}

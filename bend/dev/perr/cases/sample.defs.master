@@ -24,7 +24,7 @@ expecting "-}" or "{-"
 5 | f =9\x -> x {- y -} 12 $3
   |     ^
 unexpected '\'
-expecting '"', '#', '$', '(', '[', '{', digit, end of input, integer, letter, or list assignment names
+expecting '"', '$', '(', '[', '{', digit, end of input, integer, letter, or list assignment names
 == 6
 OK
 == 7
@@ -40,7 +40,7 @@ expecting ':', assignment =, or variable
 1 | foo = )
   |       ^
 unexpected ')'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 9
 1:1:
   |
@@ -60,7 +60,7 @@ OK
 1 | foo ='. 
   |      ^^^^
 unexpected "'. <newline>"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 14
 OK
 == 15

@@ -1,4 +1,5 @@
 import Base
+import ../Loc.bend as L
 import ../Front.bend as Fr
 import ../Size.bend as Sz
 import ../Expr.bend as E
@@ -48,7 +49,7 @@ def sized(+max: U32, +t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Strin
       Sz.render(f, t, max)
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks, pl}:
+        case Sz.Sized{cs, expr, checks, pl, pro}:
           counts(cs)
 
 def size.term(+max: U32, r: Result<&2, &2, String, T.C>) -> String:
@@ -56,7 +57,7 @@ def size.term(+max: U32, r: Result<&2, &2, String, T.C>) -> String:
     case Fail{e}:
       e
     case Done{+run}:
-      sized(max, run, Sz.size(max, True{}, run))
+      sized(max, run, Sz.size.checked(max, True{}, run, Sz.WantCounts{}))
 
 # The counts, in token order, or the failure as the command reports it.
 def size(+max: U32, srcs: List<&2, Fr.Src>, +entry: String) -> String:
@@ -79,48 +80,54 @@ def keys(xs: List<&2, String>) -> String:
         case Con{y, more}:
           x ++ "," ++ keys(Con{y, more})
 
-def checks.text(c: Sz.Checks) -> String:
-  match c:
-    case Sz.Checks{v, b, r, o, p, e}:
-      "validating " ++ keys(Set.to_list(v)) ++ "; boundary " ++ keys(Set.to_list(b)) ++ "; reaching " ++ keys(Set.to_list(r))
-        ++ "; opening " ++ keys(Set.to_list(o)) ++ Bool.pick(String, p, "; proven", "")
+# The kinds of the aborts in a program (remainingChecks).
+def kinds.add(x: Co.V, acc: Set()) -> Set():
+  match x:
+    case Co.VAbort{o, m}:
+      kinds.add(m, Set.add(acc, L.kind.show(L.Origin.kind(o))))
+    case Co.VPair{a, b}:
+      kinds.add(b, kinds.add(a, acc))
+    case Co.VDefer{fi, b}:
+      kinds.add(b, acc)
+    case Co.VSetEnv{a}:
+      kinds.add(a, acc)
+    case Co.VLeft{a}:
+      kinds.add(a, acc)
+    case Co.VRight{a}:
+      kinds.add(a, acc)
+    case _:
+      acc
 
-def checked(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
+def kinds(x: Co.V) -> String:
+  keys(Set.to_list(kinds.add(x, Set.new())))
+
+def kinds.of(g: Maybe<&2, Co.V>) -> String:
+  match g:
+    case Some{x}:
+      kinds(x)
+    case None{}:
+      ""
+
+def placed.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
   match r:
     case Fail{f}:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks, pl}:
-          checks.text(checks)
+        case Sz.Sized{cs, expr, checks, pl, g}:
+          kinds(pl) ++ "/" ++ kinds.of(g)
 
-def checked.term(r: Result<&2, &2, String, T.C>) -> String:
+def placed.term(r: Result<&2, &2, String, T.C>) -> String:
   match r:
     case Fail{e}:
       e
-    case Done{run}:
-      checked(Sz.size(65536, True{}, run))
+    case Done{+run}:
+      placed.of(Sz.size.checked(65536, True{}, run, Sz.WantPlain{}))
 
-# What sizing proved of the checks, by number, with no guard.
-def checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
-  checked.term(Fr.compile(srcs, entry))
-
-def guarded.program(r: Result<&2, &2, String, Fr.Program>) -> Result<&2, &2, Sz.SizeFail, Sz.Sized>:
-  match r:
-    case Fail{e}:
-      Fail{Sz.Internal{e}}
-    case Done{p}:
-      match p:
-        case Fr.Program{run, +g, +boundary}:
-          Sz.size.guarded(65536, boundary, g, run)
-
-def guarded.sized(srcs: List<&2, Fr.Src>, +entry: String) -> Result<&2, &2, Sz.SizeFail, Sz.Sized>:
-  guarded.program(Fr.compile.program(srcs, entry))
-
-# What sizing proved of the checks, by number, as the command sizes main:
-# its input refinements run by the session's guard.
-def guarded.checks(srcs: List<&2, Fr.Src>, +entry: String) -> String:
-  checked(guarded.sized(srcs, entry))
+# The kinds of the checks master's main still makes, and those its input
+# prologue makes.
+def placed(srcs: List<&2, Fr.Src>, +entry: String) -> String:
+  placed.term(Fr.compile(srcs, entry))
 
 # Whether an Abort is left in the code that runs.
 def has.abort(x: Co.V) -> Bool:
@@ -146,7 +153,7 @@ def aborts.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{cs, expr, checks, pl}:
+        case Sz.Sized{cs, expr, checks, pl, g}:
           Bool.pick(String, has.abort(expr), "Abort", "none")
 
 def aborts.term(r: Result<&2, &2, String, T.C>) -> String:
@@ -160,17 +167,9 @@ def aborts.term(r: Result<&2, &2, String, T.C>) -> String:
 def aborts(srcs: List<&2, Fr.Src>, +entry: String) -> String:
   aborts.term(Fr.compile(srcs, entry))
 
-# Whether main, sized as the command sizes it, holds an Abort.
-def guarded.aborts(srcs: List<&2, Fr.Src>, +entry: String) -> String:
-  aborts.of(guarded.sized(srcs, entry))
-
 def case.of(+prelude: String, +scrutinee: String) -> List<&2, Fr.Src>:
   with.prelude("cased", "import Prelude\nmain = \\input -> (case " ++ scrutinee
     ++ " of\n  0 -> \"zero\"\n  1 -> \"one\", 0)\n", prelude)
-
-# A case on a constant: Prelude's abort is its one check.
-def cased(+prelude: String, +scrutinee: String) -> String:
-  checks(case.of(prelude, scrutinee), "cased")
 
 # Which alternatives filter.at keeps of a superposition at q (left 0, right
 # a pair), in the branch a choice at n took: haskell-final's filterLeft and
@@ -189,7 +188,7 @@ def kept(x: E.X) -> String:
 def filtered(+q: String, left: Bool, +n: String) -> String:
   kept(Sz.filter.at(Some{q}, left, n, E.XZero{}, E.XPair{E.XZero{}, E.XZero{}}))
 
-def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String) -> IO(Unit):
+def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String, +cor: String, +anti: String, +ninp: String, +misl: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("size-tc_ultra_minimal", String.eq(
       size(65536, [Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "1")))
@@ -197,7 +196,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       size(65536, with.prelude("simpleplus", plus, prelude), "simpleplus"), "11 7 10 10")))
     IO.print(verdict("size-tictactoe", String.eq(
       size(65536, with.prelude("tictactoe", ttt, prelude), "tictactoe"),
-      "79 32 10 127 9 10 10 9 4 4 4 78 78 2 2")))
+      "79 32 10 127 9 10 10 9 4 4 4 78 78 3 2 2")))
     IO.print(verdict("size-over-budget", String.eq(
       size(65536, with.prelude("over-budget-recursion", over, prelude), "over-budget-recursion"), "34")))
     IO.print(verdict("size-budget-exhausted", String.eq(
@@ -205,22 +204,14 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       "could not size recursion #0 at over-budget-recursion:30:34:\n  its test had still not stopped after 6 unrollings.\n  Either it needs a deeper recursion than the sizing budget allows, or\n  its test never stops.")))
     IO.print(verdict("size-unbounded-input", String.eq(
       size(65536, with.prelude("unbounded-input-recursion", unb, prelude), "unbounded-input-recursion"),
-      "could not size recursion #0 at unbounded-input-recursion:27:34:\n  its test depends on input that nothing bounds, so no finite iteration\n  count can be proven for it. Constrain that input with a refinement\n  (`x : someValidator`) or an `assert` before recursing on it.")))
-    IO.print(verdict("size-checks", all([
-      String.eq(checks(with.prelude("simpleplus", plus, prelude), "simpleplus"), "validating 3; boundary ; reaching ; opening "),
-      String.eq(checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "validating 4,5,6,7; boundary ; reaching ; opening "),
-      String.eq(cased(prelude, "0"), "validating ; boundary ; reaching ; opening ; proven"),
-      String.eq(cased(prelude, "3"), "validating ; boundary ; reaching 1; opening ; proven")])))
-    # tictactoe's guard is not proven since the Prelude refined `not`'s
-    # argument to Bool: inside validInput that check (4) restricts the input
-    # as sizing reads it, and it is not one the session runs at the
-    # boundary. Master reads a check nested in a check in place
-    # (refinementCheckStep, d6d5a309); the port does not yet.
-    IO.print(verdict("size-boundary", all([
-      String.eq(guarded.checks(with.prelude("simpleplus", plus, prelude), "simpleplus"),
-        "validating 3; boundary 3; reaching ; opening ; proven"),
-      String.eq(guarded.checks(with.prelude("tictactoe", ttt, prelude), "tictactoe"),
-        "validating 4,5,6,7; boundary 5,6,7; reaching ; opening ")])))
+      "could not size recursion #0 at unbounded-input-recursion:27:34:\n  its test depends on input that nothing bounds, so no finite iteration\n  count can be proven for it. Constrain that input with a refinement\n  (`x : somePredicate`) before recursing on it.")))
+    IO.print(verdict("size-mislabeled", String.eq(
+      size(65536, with.prelude("mislabeled-size", misl, prelude), "mislabeled-size"), "9")))
+    IO.print(verdict("size-where-checks-go", all([
+      String.eq(placed(with.prelude("simpleplus", plus, prelude), "simpleplus"), "/RefinementAbort"),
+      String.eq(placed(with.prelude("correlated-check", cor, prelude), "correlated-check"), "/"),
+      String.eq(placed(with.prelude("anticorrelated-check", anti, prelude), "anticorrelated-check"), "RefinementAbort/"),
+      String.eq(placed(with.prelude("notinput", ninp, prelude), "notinput"), "/RefinementAbort")])))
     IO.print(verdict("size-filter", all([
       String.eq(filtered("R", True{}, "L"), "both"),
       String.eq(filtered("L", True{}, "L"), "a"),
@@ -229,15 +220,14 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       String.eq(filtered("L", False{}, "L"), "b"),
       String.eq(filtered("L", False{}, "LL"), "b"),
       String.eq(filtered("R", False{}, "L"), "both")])))
-    # tictactoe keeps its aborts: the erasure checker spends its budget on
-    # it and gives up (SIZING-PROOF.md §5, D3).
+    # The net's program, where the erasure checker proves it: a case on a
+    # constant that matches holds no abort, one that does not keeps it, and
+    # simpleplus's only check runs before main.
     IO.print(verdict("size-erased", all([
       String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
       String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),
       String.eq(aborts(case.of(prelude, "3"), "cased"), "Abort"),
-      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "Abort"),
-      String.eq(guarded.aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "none"),
-      String.eq(guarded.aborts(with.prelude("tictactoe", ttt, prelude), "tictactoe"), "Abort")])))
+      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "none")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -247,4 +237,8 @@ def main() -> IO(Unit):
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     over : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/over-budget-recursion.tel")
     unb : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/unbounded-input-recursion.tel")
-    report(text(prelude), text(ttt), text(plus), text(tc), text(over), text(unb))
+    cor : Result<&1, &1, String, String> <- Tx.read_file("test/programs/correlated-check.tel")
+    anti : Result<&1, &1, String, String> <- Tx.read_file("test/programs/anticorrelated-check.tel")
+    ninp : Result<&1, &1, String, String> <- Tx.read_file("test/programs/notinput.tel")
+    misl : Result<&1, &1, String, String> <- Tx.read_file("test/programs/mislabeled-size.tel")
+    report(text(prelude), text(ttt), text(plus), text(tc), text(over), text(unb), text(cor), text(anti), text(ninp), text(misl))

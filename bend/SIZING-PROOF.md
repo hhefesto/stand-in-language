@@ -28,6 +28,13 @@ PROOFS CHECK. PROOF.bend is about 7,700 lines and is part of
 `nix flake check`'s `bend-proof` rechecks them with `--verdict`
 (BendTT's Lean-proven kernel, §7), which the flake builds.
 
+**Since 2026-11-05** master's own check analysis (`bend/Plan.bend`) decides which
+checks main makes and hoists the rest into its input prologue, and a chain's
+bottom is a base case, not an abort. The checker now proves what the net's
+program does past that: every chain's bottom erased to 0, and no check the
+analysis erased reached, on every input the prologue passes (the prologue is
+`g`, the guard of the laws). What follows speaks of the guard as it was before.
+
 **The checker is wired into sizing.** Sizing calls `Ck.check` on main's
 witness and on its guard's (`Sz.erasure.of`, `Sz.erased`). Bottoms and
 discharged checks are erased only when sizing proves the program *and* the

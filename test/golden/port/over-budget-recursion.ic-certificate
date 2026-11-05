@@ -7,13 +7,11 @@ recursion sites (iterations, over every input):
 
 sizing budget in force: 65536 unrollings
 
-refinement checks: 1 discharged statically, 1 left to run time:
-  Prelude:21:8                 discharged
-  over-budget-recursion:29:32  at the session boundary
-erasures in main: proven, by the erasure checker in 933837 evaluation steps
+refinement checks: 0 discharged statically, 2 left to run time:
+  Prelude:19:8                 before main
+  over-budget-recursion:29:32  at run time
+erasures in main: proven, by the erasure checker in 240537 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
-erasures in the guard: none; every recursion bottom and check stays a run-time abort
-  sizing did not prove the guard for every input
 
 recursion nesting (structural, approximate):
   triple                       function                         levels

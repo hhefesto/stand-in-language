@@ -90,12 +90,11 @@ Intel Core i7-1160G7 laptop, 4 cores and 8 threads, 16 GB):
 | the Prelude's `Rational` | 31.3 s | 0.7 s | 43× |
 
 haskell-final ran the property-shapes program with its heap capped at 8 GB
-(`GHCRTS=-M8G`); uncapped, it ran this machine low on memory. tic-tac-toe
-took 2.4 s before its input refinements moved to the session boundary (see
-[Design](#design)), which adds a second program, the guard, to certify, size
-and run.
+(`GHCRTS=-M8G`); uncapped, it ran this machine low on memory.
 
-These times predate the erasure checker (see [Design](#design)), which now
+These times predate master's check analysis (`bend/Plan.bend`, about 80 s of a
+tic-tac-toe compile, which spends all of its 100M-step budget there as it does on
+master; `.telc` avoids it), the erasure checker (see [Design](#design)), which now
 runs as part of sizing, and the Prelude's `Bool` refinements (master's). On an
 AMD Ryzen 7 3700X the checker adds about 4 s to `simpleplus.tel`, where it
 proves the erasures. On `tictactoe.tel` it no longer runs, since sizing
@@ -154,12 +153,10 @@ in these places:
   count per rule of its own net, and haskell-final's printed "logical
   storage" counted on its map-of-ports net; the port shares neither, and
   so cannot report them honestly.
-- `--compile` writes haskell-final's version 4 artifact with no IC
-  certificate (the port has none to store), and `--ic --compile` writes the
-  same. Its stored report has the checks section below, and a program whose
-  session has a guard (below) is written as version 5: version 4 and then
-  the guard, which haskell-final refuses by its version rather than run main
-  unguarded. haskell-final's artifacts load in the port.
+- `--compile` writes the port's version 9 artifact: master's layout up to its
+  program, with no IC certificate (the port has none to store), then the capture
+  layouts, master's program, and master's input prologue. `--ic --compile` writes
+  the same, and a Haskell telomare refuses it by its version.
 - The IC runs only the branch an `if` chooses (DESIGN.md §11.3). The core
   keeps one conditional, the strict gate-switch, and sizing and EAL read
   it as before. The IC compiles each branch into a template of its own,
@@ -172,82 +169,47 @@ in these places:
   more than the strict one does, each captured part going once to the
   chosen branch instead of fanning to both. Displays are unchanged;
   interaction counts are not master's: the tic-tac-toe game `1 4 2 5 3`
-  takes 5,454,169 interactions on the port's net and 33,560,000 on
-  master's (haskell-final's took 15,168,230).
-- Main's input refinements are checked at the session boundary (DESIGN.md
-  §11.10's convention, made a rule). These are the refined bindings of the
-  `let` that `main = \input -> let ... in body` opens with. On each line it
-  reads, the session runs them first, as a program of their own (the
-  guard: main with its body replaced by the refined values), and calls main
-  only when they pass. A line they refuse is answered by master's program
-  (main with every check in it, under the same layouts), so the session
-  ends as master's reference evaluator ends it: tic-tac-toe's `10` with
-  `invalid input (from refinement check at tictactoe:68:30)`, in 8,790,010
-  interactions, where master's net runs out of its 10,000,000 of fuel
-  (`port/tictactoe.ic-abort`). The opening call, main on 0, is not
-  checked, since 0 is no input. The guard runs only with `--ic`; a plain
-  run and `--fast` run master's program. Displays of the example programs
-  are unchanged.
-- `--ic --certificate` also says what sizing proved of each refinement check
-  (DESIGN.md §10's split, which haskell-final's report lacks): discharged,
-  or left to run time because the session runs it at its boundary, because
-  it validates input otherwise, because its abort reaches the result on
-  some input, or because it is not proven for every input. Sizing's main
-  run assumes the refinements that bound the input pass (its limits pass
-  learned the input positions they force), so it explores only input that
-  passes them. With the boundary that is every input main is called on,
-  once sizing also runs the opening call, and provided each restriction is
-  exactly what its check needs (sizing checks that). A program whose input
-  is validated anywhere else is proven for nothing. Otherwise the split is
-  exactly as sound as sizing's exploration.
-- A program proven so runs without what sizing discharged (DESIGN.md §10
-  and C5), where the erasure checker proves that too. Main's boundary
-  checks and its discharged checks become the values they checked, and
-  every chain's bottom becomes 0 instead of an abort. The counts are
-  sizing's claim that no input main is called on reaches a bottom (§10:
-  the bottom "is provably dead if the certificate is right"). The checker
-  (`bend/Check.bend`) does not take sizing's word for it. It runs main's
-  sized form, every erasable site still marked, over every input the
-  guard passes, splitting the input wherever the run needs to see it, and
-  it proves the erasures when no input reaches a marked site. That this
-  verdict makes erasing safe is proven (see [What is
-  proven](#what-is-proven)). Where the checker cannot decide, because it
-  finds an input that reaches one or because it spends its budget first,
-  every bottom and check stays a run-time abort, and `--ic --certificate` says
-  so. simpleplus is proven: `3 4` takes 44,390 interactions (782,347 before
-  the erasures, with the Prelude of then), nearly all of the difference
-  being the check no longer run inside main. tic-tac-toe is not, and its
-  main keeps its aborts (the game `1 4 2 5 3` takes 5,454,169
-  interactions): since the Prelude refined `not`'s argument to `Bool`, that
-  check validates the input inside tic-tac-toe's guard, as sizing reads it,
-  so the guard and main are not proven for every input. Master reads a
-  check nested in another check in place (its `refinementCheckStep`); the
-  port does not yet. `tc_ultra_minimal` drops from 150 to 146.
+  takes 4,895,725 interactions on the port's net.
+- Where a program's refinement checks go is master's check analysis
+  (`bend/Plan.bend`): one exact run of the sized main over a symbolic input.
+  Checks that can never fail are erased, checks decided by main's input alone
+  move into its input prologue, which runs before main on each line, and the rest
+  stay in main. When the analysis is over its budget of 100M steps every check
+  stays, as tic-tac-toe's do. Master tells shared values by pointer; Bend cannot,
+  so each value carries a 64-bit digest of its structure, and equal digests are
+  the same value.
+- `--ic --certificate` also says where each refinement check went (DESIGN.md
+  §10's split, which master's report lacks): discharged, before main, or at run
+  time.
+- The net's program goes one step past master's, where the erasure checker
+  (`bend/Check.bend`) proves it safe: every chain's bottom becomes 0 instead of a
+  closure that applies the base case. The checker does not take sizing's word for
+  the counts. It runs main's sized form, every erasable site still marked, over
+  every input the prologue passes, splitting the input wherever the run needs to
+  see it, and it proves the erasures when no input reaches a marked site. That
+  this verdict makes erasing safe is proven (see [What is
+  proven](#what-is-proven)). Where the checker cannot decide, because it finds an
+  input that reaches one or because it spends its budget first, the net runs
+  master's program, and `--ic --certificate` says so. simpleplus is proven: `3 4`
+  takes 35,173 interactions. `tc_ultra_minimal` takes 118.
 - The checker's budget is work, not runs: 2^28 evaluation steps
-  (`check.work` in `bend/Size.bend`), counted over every run it makes.
-  simpleplus takes 222,334,169. A budget of runs would let a program whose
-  runs are long, like tic-tac-toe's, take minutes to give up (110 s at the
-  16,384 runs simpleplus needs); this one gave up on it in about 7 s. A budget
-  never makes an erasure unsafe: it only decides when the checker stops
-  and leaves the aborts in.
+  (`check.work` in `bend/Size.bend`), counted over every run it makes. A budget
+  never makes an erasure unsafe: it only decides when the checker stops.
 - The IC runs under the capture layouts master's `--ic` uses: derived from
   the certificate of the program before sizing (`inferEALFaithful`,
   `deriveSizedGuidance`), else inferred over the sized program
   (`certifiedProgramFrom`); a program for which neither certifies is
   refused with master's message, exit 1, as master's `withICPlan` refuses
-  it. The port's own programs get theirs the same way: main runs master's
-  sized program with what sizing discharged erased, its bodies that master's
-  shares under master's layouts and the erased ones under none, and the
-  guard is certified, sized and laid out as a program of its own.
+  it. The net's program runs master's sized program with the chains' bottoms
+  erased, its bodies that master's shares under master's layouts and the erased
+  ones under none, and the input prologue is certified on its own, as on master.
 
 Of DESIGN.md's open questions (§11), three are resolved: the certified
 term is the executed one (§11.4), the IC runs only an `if`'s chosen branch
 (§11.3; both above), and `trace` (§11.7) is master's: a builtin that is
-the identity once resolved. Abort (§10, §11.6) is erased where sizing and the erasure checker
-prove it dead. main's
-input refinements run at the session boundary (§11.10), in a guard that
-keeps them as checks. Abort stays a core form there, in the guard, in the
-checks left to run time, and in programs sizing does not prove.
+the identity once resolved. Abort (§10, §11.6) is master's: erased where the check
+analysis shows it can never fire, hoisted into main's input prologue where the
+input alone decides it (§11.10), and a core form in the checks main still makes.
 
 ### What is proven
 
@@ -263,7 +225,7 @@ its meaning in the IC's evaluation order:
 - **what_runs**: the program the compiler hands the runtime answers as the
   checker's witness does with its sites erased.
 - **certificate_opening** and **certificate_guarded**: where the checker
-  says proven, neither the opening call nor a call on any input the guard
+  says proven, neither the opening call nor a call on any input the prologue
   passes reaches an erasable site, at any fuel.
 - **fuel_more**: more fuel never changes an answer a run already has.
 
@@ -375,14 +337,12 @@ $ telomare test/programs/simpleplus.tel --ic --certificate
 sizing budget in force: 65536 unrollings
 
 refinement checks: 3 discharged statically, 1 left to run time:
-  Prelude:17:8      discharged
-  Prelude:17:19     discharged
-  Prelude:21:8      discharged
-  simpleplus:14:31  at the session boundary
-erasures in main: proven, by the erasure checker in 223976086 evaluation steps
+  Prelude:15:8      discharged
+  Prelude:15:19     discharged
+  Prelude:19:8      discharged
+  simpleplus:15:38  before main
+erasures in main: proven, by the erasure checker in 5255407 evaluation steps
   no input it is called on reaches an erased recursion bottom or check
-erasures in the guard: none; every recursion bottom and check stays a run-time abort
-  sizing did not prove the guard for every input
 ...
 ```
 
@@ -396,23 +356,19 @@ index differently — a count is per instantiation, a nesting row is per `{test,
 recursion, last}` as written — so they do not line up row by row, and the
 report says so.
 
-The checks section (`--ic` only) splits the program's refinement checks as DESIGN.md §10
-asks. These are every `x : v = e` and every refined lambda parameter `\(x :
-v) -> e`, plus Prelude's `abort`, the one check that `case`, UDT validators
-and pattern lambdas call. A check is *discharged* when sizing proved that no
-input makes its abort reach the result. Otherwise it is left to run time,
-and the report says why. The three Prelude checks are `and`'s and `not`'s
-arguments, refined to `Bool`. simpleplus's `validInput` is a refinement of
-main's input, so the session runs it before main on each line it reads, and
-main runs without it.
+The checks section (`--ic` only) says where the program's refinement checks went,
+as DESIGN.md §10 asks. These are every `x : v = e` and every refined lambda
+parameter `\(x : v) -> e`. A check is *discharged* when the check analysis showed
+it can never fail, or that its failing is never seen; *before main* when the input
+alone decides it, so the prologue makes it; and *at run time* when main still
+makes it. The three Prelude checks are `and`'s and `not`'s arguments, refined to
+`Bool`. simpleplus's `validInput` depends on the input alone, so it runs before
+main on each line and main runs without it.
 
-The two `erasures` lines say, for main and for its guard, whether the
-program the interaction net runs leaves out its recursion bottoms and discharged checks.
-It does only when the erasure checker proved that no input reaches them
-(see [Design](#design)); otherwise the second line says why they stay.
-On `tictactoe.tel` it reads "sizing did not prove main for every input":
-one of its checks, on `not`'s argument, validates the input inside the
-guard, as sizing reads it (see [Design](#design)).
+The `erasures` line says whether the program the interaction net runs leaves out
+its recursion bottoms. It does only when the erasure checker proved that no input
+reaches them or a check the analysis erased (see [Design](#design)); otherwise the
+second line says why they stay.
 
 `--meter` runs the program and reports what the run cost, on stderr once
 the session ends. That is a measurement of one run, not a prediction about
@@ -743,14 +699,14 @@ is checked against the Haskell tests it can answer (master's EALTests are
 | Lexical facts | `Telomare.Lexical` | ported: `bend/Lexical.bend` |
 | Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend` |
 | Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
-| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size}.bend`, handing on `bend/Core.bend`'s CompiledExpr |
+| Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size,Plan}.bend`, handing on `bend/Core.bend`'s CompiledExpr |
 | Certify | `Telomare.EAL` (master's, PR #157), the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,Rat,Linear,EALm}.bend` (the verdict, the fallbacks, the certificate after sizing and the capture layouts it gives, the REPL's `:t`; `bend/EAL.bend` is haskell-final's, kept for its tests) |
 | IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying guided by the EAL capture layouts |
 | Evaluate | `Telomare.Eval.Reference`, `Telomare.Eval.Meter`, `Telomare.Fast` | ported: `bend/{Reference,Fast}.bend` |
 | Drive | `Telomare.Driver`, the `telomare` command | ported: `bend/{Session,Meter,Main,Native}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
-| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 4, written with no IC certificate; version 5 with a session guard) |
+| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 9, written with no IC certificate) |
 | REPL | `app/Repl.hs` | ported: `bend/{Repl,Partial}.bend` (line editing: `rlwrap`) |
 | LSP | `app/LSP.hs` | ported: `bend/{Json,Lsp}.bend` |
 

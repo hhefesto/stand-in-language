@@ -323,7 +323,7 @@ def sized.lr(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> EM.LR:
       EM.LR{Map.new(&2, EM.G), [], Fail{EM.Internal{"sizing failed"}}}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, plain}:
+        case Sz.Sized{counts, expr, checks, plain, pro}:
           EM.lr.full(False{}, Lf.defer.lift.expr(plain))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> EM.LR:
@@ -339,7 +339,7 @@ def sized.main(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, EM.Er
       Fail{EM.Internal{"sizing failed"}}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, plain}:
+        case Sz.Sized{counts, expr, checks, plain, pro}:
           EM.lifted.main(Lf.defer.lift.expr(plain))
 
 # sizedVerdicts: the main verdicts before and after sizing; the test's rule

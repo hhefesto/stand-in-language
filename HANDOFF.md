@@ -23,6 +23,11 @@ proof"), and its open items are in section 8.
 ("bring master changes into bend first"), and the oracle is now master's
 Haskell `telomare`, not haskell-final (section 3, "Merging master").
 
+**Updated 2026-11-05.** telomare/master (`1cfcb3de`) is merged into `bend`
+(`e8e03392`) and ported (section 3, "Merging master, 2026-11-05"). Master's input
+prologue replaces the port's session guard; older text here that speaks of the
+guard, the boundary or `Full` is history.
+
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
 parity corpus, committed for the move too). Drop both commits ("Hand off
@@ -283,6 +288,72 @@ outcome: a line it refuses runs master's program (`Ss.Prog.full`), so
 `ic-guard`'s empty line gives "got a line", as on master. The goldens
 need port records only for `*.ic-meter`, `*.compile` (the artifact's
 bytes) and `*.ic-certificate`.
+
+### Merging master, 2026-11-05 (`1cfcb3de`)
+
+`e8e03392` merges Sam's eight commits after `98de497c`, the merge keeping the
+port's tree as before. What each became:
+
+- `fc369673` (recursion aborts erased): a chain's base applies the base case
+  with no test and no abort (`E.bottom`), a chain has one link per depth whose
+  test a run reached (`E.count.of`, no `+ 1`), and the test records its depth
+  whatever it decides (`E.step.body`). `KRecursion` and `L.recursion.origin` are
+  gone; artifacts number the kinds as master does.
+- `60b557a6`, `80fb09a6`, `8664c85c` (the check analysis): `bend/Plan.bend` is
+  `analyzeChecks`, `checkVerdicts`, `inputPrologue`, `checkPlan`,
+  `exactSuperStepM`, `mergeExact` and `eraseChecks`. Sizing's own fixes are in
+  `Size.bend`: `gateSuper` (`gate.side`), `isSelectorTree`, `stuckSizingStepM`
+  (`stuck.or`), `mergeShallow`'s stuck paths, and `refinementCheckStep`'s gate
+  switches (`switch`, `bar.fill`), which the port had not carried until now.
+  Master tells shared values by pointer; Bend cannot, so every analysis value
+  carries a 64-bit digest of its structure (`Pl.H`), and equal digests are the
+  same value.
+- `60b557a6` and `1ac8cc74`'s meter: `Reference.bend` charges each check its
+  steps, by origin, and `--meter` prints master's table.
+- `aae88cfd` (UDTs out) and `9eb3eeb2` (a predicate on a pattern): `SHash`,
+  `THash`, the hash pass, `RfHash`, `KValidator` and the UDT half of `Expand.bend`
+  are gone. `E.check.of` and `S.abort.term` are master's new shapes; a check
+  passes on anything but 0 and fails with `(1, value)`, reported as `check failed
+  on V` (`Ss.abort.text`). Guards lower in `Desugar.bend` (`NGuard`), and
+  `Expand.bend` has `DuplicatePatternVariable` and `GuardUsesOwnBinder`.
+- `Sem.checked` follows the new polarity; `PROOF.bend` needed its `checked_*`
+  lemmas swapped between the `WZero` and `WPair` arms and nothing else. All six
+  laws still check. **`LAWS.bend`'s header comment now misstates Watch:** it says
+  "a check whose test does not give 0" is a mark, and it should say "a check
+  whose predicate gives 0". That file is the user's, so it is left as it is.
+
+**The guard is gone.** Master's prologue does what the session guard did, found
+by analysis where the guard read `main`'s first `let`: `Fr.Program`,
+`Fr.guard.of`, `boundary`, `Ss.Full`, and sizing's `validating`, `reaching`,
+`opening` and `exact` went with it. `Sz.Sized` holds `plain` (master's main) and
+`prologue`; `expr`, what the net runs, is `plain` with every chain's bottom
+erased where the erasure checker proves it, the checker running main's witness
+over the inputs the prologue passes. Its erasable checks are those the plan
+erased. A line the prologue refuses ends as master's does, so `port/*.ic-abort`
+is gone. `Sz.Want` says how far a compile goes: a plain `--certificate` reads the
+counts alone, as master's laziness has it.
+
+**Not ported:** the IC half of `1ac8cc74` (closed data as one constant agent). It
+changes interaction counts and speed, not what a program displays, and the port's
+net has its own counts anyway (section 7). It would touch `IC.bend` and
+`effs/ic.c` word for word.
+
+**Cost:** the check analysis is budgeted at 100M steps, and tic-tac-toe spends
+all of them on master as well, so main keeps every check. In the port that is
+about 80 s (the whole compile about 110 s; master's whole `--meter` run is 57 s).
+`bend/dev/plantime.bend` times it. `.telc` avoids it.
+
+**The REPL and the language server** now make master's static check
+(`Ss.static.check`, `runStaticChecks`): `abort "boom"` answers `StaticCheckError
+"user abort: boom (from abort at 1:1)"`, and `:d` and `:p` say `some sort of
+error?`. The port had not carried this; the new refinement tests showed it.
+
+**perr:** `bend/dev/perr/cases/*.master` are re-recorded from `1cfcb3de`'s grammar
+(no `#` in what is expected), built as that directory's DESIGN.md says.
+
+**Corpus:** `rat`, `ratarith`, `arith` and `natudt` used the Prelude's `Rational`
+and UDTs, so they now use `bend/dev/corpus/Ratio.tel` and a tagged natural behind
+a predicate, and their `hs-*` records are new.
 
 **A finding to keep:** `bend/dev/corpus/ratarith.tel` (Rational arithmetic)
 dies of fuel under both haskell-final `--ic` and the port:
@@ -2322,19 +2393,23 @@ The alignment steps that were done:
 **Since the 2026-10-27 parity work** (section 3, "Master's runtimes"):
 a plain run, `--meter` (steps and nodes built), `--fast` (applications,
 gates, unrolls, its fuel and errors), `--certificate`, `trace`, abort
-origins, and a guard-refused line are master's, and the bullets below on
-them are history. Since P9, EAL is master's too (`bend/EALm.bend`: the
-gate, the IC's layouts and the guard's, the REPL's `:t`, master's
+origins, and a line the prologue refuses are master's, and the bullets below
+on them are history. Since P9, EAL is master's too (`bend/EALm.bend`: the
+gate, the IC's layouts and the prologue's, the REPL's `:t`, master's
 EALTests). What is still the port's own (2026-11-03): `--ic`'s counts and
 meter format (`port/*.ic-meter`), the artifact's bytes (`port/*.compile`;
 the stored node count is master's), `--ic --certificate`'s extra section
-(`port/*.ic-certificate`), `--ic` on a line the guard refuses (master's
-reference message, where master's net can run out of fuel:
-`port/tictactoe.ic-abort`), and a literal above 4294967295, which the lexer
+(`port/*.ic-certificate`), and a literal above 4294967295, which the lexer
 refuses (`natural literal exceeds the supported range`) where master parses
 it, and runs out of memory if the program uses it (3G, 2026-11-03; a program
 that never uses one runs on master).
 
+- A refinement predicate that recurses, such as `let x : (\\v -> dEqual v 3) = 3`,
+  stops master's compile at `1cfcb3de` with `refinementCheckStep eval unexpected`
+  (its check evaluation meets an unknown value applied as a function, and
+  `error`s). The port reads no restriction from that check and goes on, so the
+  program runs. Seen 2026-11-05; master's `--certificate` on the same program
+  stops too.
 - Parse errors are master's word for word, in the command, the REPL and the
   language server (2026-11-03): `bend/Mega.bend` runs master's grammar as
   megaparsec 9.7 does when `Parse.bend` refuses a text, and first in the
@@ -2518,6 +2593,8 @@ that never uses one runs on master).
 - `fastdiff.sh BIN [SESSIONS [SEED]]`: sized vs `--fast` sessions, a
   differential test (bend/SIZING-PROOF.md §3).
 - `gate.sh`: the gate (section 9).
+- `plantime`: sizing with the check plan, and the analysis's run alone, timed,
+  with the steps it took (run it where `tictactoe.tel` is).
 
 Build a tool with `bend bend/dev/X.bend -o /tmp/X` (inside `nix develop`),
 and run it from the repo root: modules load as `M.tel` from the cwd.
@@ -2636,6 +2713,8 @@ empty.
 - Front end: `Unicode`, `Lexical`, `Lex`, `Parse` (→ `Syntax`), `Mega`
   (master's parse errors), `Expand`, `Resolve`, `Desugar`,
   `Lower` (→ `Term`), `Split`, and `Front` (loading, both lowerings).
+- `Plan`: where a sized main's checks go (master's check analysis), read by
+  `Size`.
 - `Expr` (sizing's IR) and `Size`, which hands on `Core`: the runnable core
   `V`, data `D`, the reserved function indices.
 - `Sha256`, `Lift` (deferLift, CapShape), `EAL`.

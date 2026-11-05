@@ -14,6 +14,11 @@
   Prelude's `Rational`. An uppercase list assignment is now an ordinary list
   assignment. Artifacts keep their abort-kind numbering, with 3 retired. The
   `telomare-udt-test` suite is now `telomare-prelude-test`.
+* The Bend `telomare` follows master to `1cfcb3de`: refinements and guards as one
+  construct, no user-defined types, chains with no abort at the bottom, checks
+  erased or hoisted into main's input prologue by the check analysis
+  (`bend/Plan.bend`), per-check metering, and artifact version 9. The prologue
+  replaces the session guard the port had.
 * Telomare is being ported to Bend 2. The Haskell implementation was
   removed after the tag `haskell-final`: the library, the `telomare`,
   `telomare-repl` and `telomare-lsp` executables, the test suites, the

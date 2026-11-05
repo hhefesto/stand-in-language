@@ -133,7 +133,7 @@ expecting digit or end of input
 1 | (1,
   |     ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 22
 2:3:
   |
@@ -162,7 +162,7 @@ OK
 1 | (日本 , )
   |         ^
 unexpected ')'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 29
 1:12:
   |
@@ -178,14 +178,14 @@ OK
 1 | main = (
   |         ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 32
 1:4:
   |
 1 | 　(
   |    ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 33
 1:3:
   |
@@ -206,28 +206,28 @@ expecting "-}" or "{-"
 2 | (
   |  ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 36
 1:4:
   |
 1 | -- 
   |    ^
 unexpected end of input
-expecting '"', '#', '$', '(', '[', '{', integer, or letter
+expecting '"', '$', '(', '[', '{', integer, or letter
 == 37
 1:8:
   |
 1 | -- only
   |        ^
 unexpected end of input
-expecting '"', '#', '$', '(', '[', '{', integer, or letter
+expecting '"', '$', '(', '[', '{', integer, or letter
 == 38
 1:8:
   |
 1 | {- a -}
   |        ^
 unexpected end of input
-expecting '"', '#', '$', '(', '[', '{', integer, or letter
+expecting '"', '$', '(', '[', '{', integer, or letter
 == 39
 1:3:
   |
@@ -255,7 +255,7 @@ expecting '"', '(', '_', annotated pattern, integer, or letter
 1 | case x of 1 -> 2 2 -> 3
   |                    ^
 unexpected '-'
-expecting '"', '#', '$', '(', '[', '_', '{', annotated pattern, end of input, integer, or letter
+expecting '"', '$', '(', '[', '_', '{', annotated pattern, end of input, integer, or letter
 == 43
 OK
 == 44
@@ -315,21 +315,21 @@ keyword "import" cannot be an identifier
 1 | [a, b] = 
   |        ^
 unexpected '='
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 53
 1:4:
   |
 1 | [a,, b] = 1
   |    ^^^^
 unexpected ", b]"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 54
 1:4:
   |
 1 | [] = 1
   |    ^
 unexpected '='
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 55
 OK
 == 56
@@ -340,21 +340,21 @@ OK
 1 | x : = 2
   |   ^
 unexpected ':'
-expecting '"', '#', '$', '(', '[', '{', assignment =, end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', assignment =, end of input, integer, or letter
 == 58
 1:3:
   |
 1 | x :: 1
   |   ^
 unexpected ':'
-expecting '"', '#', '$', '(', '[', '{', assignment =, end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', assignment =, end of input, integer, or letter
 == 59
-1:2:
+1:1:
   |
 1 | #
-  |  ^
-unexpected end of input
-expecting '"', '#', '$', '(', '[', '{', integer, or letter
+  | ^
+unexpected '#'
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 60
 1:2:
   |
@@ -395,28 +395,28 @@ natural literal exceeds the supported range
 1 | {1,2}
   |     ^
 unexpected '}'
-expecting '"', '#', '$', '(', ',', '[', '{', digit, integer, or letter
+expecting '"', '$', '(', ',', '[', '{', digit, integer, or letter
 == 67
 1:7:
   |
 1 | {1,2,3,}
   |       ^
 unexpected ','
-expecting '"', '#', '$', '(', '[', '{', '}', digit, integer, or letter
+expecting '"', '$', '(', '[', '{', '}', digit, integer, or letter
 == 68
 1:4:
   |
 1 | [1,]
   |    ^
 unexpected ']'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 69
 1:2:
   |
 1 | [,]
   |  ^
 unexpected ','
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', ']', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', ']', '{', integer, or letter
 == 70
 1:3:
   |
@@ -430,7 +430,7 @@ expecting end of input
 1 | if 1 then 2
   |            ^
 unexpected end of input
-expecting "else", '"', '#', '$', '(', '[', '{', digit, integer, or letter
+expecting "else", '"', '$', '(', '[', '{', digit, integer, or letter
 == 72
 1:8:
   |
@@ -445,7 +445,7 @@ OK
 1 | let x = 1 in
   |             ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 75
 1:10:
   |
@@ -475,7 +475,7 @@ expecting ':', assignment =, or end of input
 1 | _
   | ^
 unexpected '_'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 81
 1:6:
   |
@@ -489,49 +489,49 @@ expecting end of input
 1 | 
   | ^
 unexpected start of heading
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 83
 1:1:
   |
 1 | 
   | ^
 unexpected delete
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 84
 1:18:
   |
 1 |                 (
   |                  ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 85
 1:10:
   |
 1 |         (
   |          ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 86
 1:2:
   |
 1 | (
   |  ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 87
 2:9:
   |
 2 |         
   |         ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 88
 4:4:
   |
 4 |   (
   |    ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 89
 OK
 == 90
@@ -540,14 +540,14 @@ OK
 1 | main =
   |       ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 91
 1:1:
   |
 1 | =
   | ^
 unexpected '='
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 92
 OK
 == 93
@@ -583,14 +583,14 @@ Expected same indentation.
 3 |   in (
   |       ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 98
 1:13:
   |
 1 | \x -> \y -> 
   |             ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 99
 1:3:
   |
@@ -611,14 +611,14 @@ expecting "->", '"', '(', '_', annotated pattern, integer, letter, or variable
 4 |    in (
   |        ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 102
 1:5:
   |
 1 | x = 'a'
   |     ^^^
 unexpected "'a'"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 103
 1:11:
   |

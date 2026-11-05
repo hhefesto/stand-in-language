@@ -201,21 +201,19 @@ def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, +lines: List<&2, String>) ->
       IO.pure(Bool, False{})
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, pl}:
+        case Sz.Sized{counts, expr, checks, pl, pro}:
           +m = Ss.prepared(expr)
           iter(1n+List.length(&2, String, lines), m, Again{lines, True{}, IC.net.new(m), IC.net.new(m), Co.DZero{}})
 
-def compiled(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> IO(Bool):
+def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> IO(Bool):
   match r:
     case Fail{e}:
       IO.pure(Bool, False{})
-    case Done{p}:
-      match p:
-        case Fr.Program{run, g, +boundary}:
-          sized(Sz.size.guarded(65536, boundary, g, run), lines)
+    case Done{+run}:
+      sized(Sz.size(65536, True{}, run), lines)
 
 def session(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> IO(Bool):
-  compiled(Fr.compile.program(srcs, entry), lines)
+  compiled(Fr.compile(srcs, entry), lines)
 
 def text(r: Result<&1, &1, String, String>) -> String:
   match r:

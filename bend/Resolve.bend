@@ -114,8 +114,6 @@ def fv(+fuel: Nat, n: FN) -> Set():
               fv(f, FT{x})
             case S.SRight{loc, x}:
               fv(f, FT{x})
-            case S.SHash{loc, x}:
-              fv(f, FT{x})
             case S.SRec{loc, a, b, c}:
               union(fv(f, FT{a}), union(fv(f, FT{b}), fv(f, FT{c})))
             case S.SLet{loc, binds, body}:
@@ -311,8 +309,6 @@ def qualify(+fuel: Nat, +names: Set(), +q: String, +bound: Set(), n: QN) -> QV:
               VT{S.SLeft{loc, vt(qualify(f, names, q, bound, QT{x}))}}
             case S.SRight{loc, x}:
               VT{S.SRight{loc, vt(qualify(f, names, q, bound, QT{x}))}}
-            case S.SHash{loc, x}:
-              VT{S.SHash{loc, vt(qualify(f, names, q, bound, QT{x}))}}
             case S.SRec{loc, a, b, c}:
               VT{S.SRec{loc, vt(qualify(f, names, q, bound, QT{a})), vt(qualify(f, names, q, bound, QT{b})),
                          vt(qualify(f, names, q, bound, QT{c}))}}

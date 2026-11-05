@@ -1,16 +1,12 @@
 import Prelude
-[Nat, toNat, fromNat, nPlus, nMinus] = \h ->
-  [ \x -> (h, x)
-  , \x -> Nat x
-  , \a b -> let aa = Nat a
-                bb = Nat b
-            in (h, d2c aa succ bb)
-  , \a b ->
-      let aa = Nat a
-          bb = Nat b
-          sLeft = \x -> case x of
+natTag = 1
+Nat = \v -> left v
+toNat = \x -> (natTag, x)
+fromNat = \(x : Nat) -> right x
+nPlus = \(a : Nat) (b : Nat) -> (natTag, d2c (right a) succ (right b))
+nMinus = \(a : Nat) (b : Nat) ->
+      let sLeft = \x -> case x of
                           (l, _) -> l
                           y      -> abort "can't subtract larger number from smaller one"
-      in (h, d2c bb sLeft aa)
-  ]
+      in (natTag, d2c (right b) sLeft (right a))
 main = \input -> (if dEqual (right (nPlus (toNat 2) (toNat 3))) 5 then "ok" else "bad", 0)

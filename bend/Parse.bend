@@ -39,7 +39,6 @@ type Frame is Data:
   FAppHead{+loc: L.Loc, +lvl: U32, +fallback: Bool}
   FAppArg{+loc: L.Loc, +lvl: U32, +fallback: Bool, +head: S.Parsed(),
           +args: List<&2, S.Parsed()>, +after: List<&2, Lx.Tok>}
-  FHash{+loc: L.Loc}
   FParen{+loc: L.Loc}
   FPair{+loc: L.Loc, +a: S.Parsed()}
   FRec1{+loc: L.Loc}
@@ -447,8 +446,6 @@ def atom.begin(+file: String, +toks: List<&2, Lx.Tok>, stack: List<&2, Frame>, t
           got.term(next(toks), stack, S.SInt{L.at(file, at), n})
         case Lx.KChurch{n}:
           got.term(next(toks), stack, S.SChurch{L.at(file, at), n})
-        case Lx.KSym{35}:
-          PS{next(toks), FHash{L.at(file, at)} <> stack, Want{GAtom{}}}
         case Lx.KSym{40}:
           PS{next(toks), FParen{L.at(file, at)} <> stack, Want{GLong{False{}}}}
         case Lx.KSym{123}:
@@ -700,8 +697,6 @@ def got(+file: String, fr: Frame, v: Val, +toks: List<&2, Lx.Tok>, stack: List<&
       app.next(toks, stack, loc, lvl, fallback, as.term(v), [], toks)
     case FAppArg{loc, lvl, fallback, head, args, after}:
       app.next(toks, stack, loc, lvl, fallback, head, as.term(v) <> args, after)
-    case FHash{loc}:
-      got.term(toks, stack, S.SHash{loc, as.term(v)})
     case FParen{loc}:
       paren.got(toks, stack, loc, as.term(v), peek(toks))
     case FPair{loc, a}:

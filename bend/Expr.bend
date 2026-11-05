@@ -14,11 +14,10 @@ import ./Loc.bend as L
 # left and right, where Haskell numbers positions 2n+1 and 2n+2: a
 # position descends from another when its path extends the other's.
 
-# Where an abort comes from: a refinement check, by its number; a recursion,
-# by token, run past its size (a sized chain's bottom, or sizing's own
-# aborts as it unrolls); or an abort of the runnable core read back as X,
-# with what raised it (Split builds none). Aborted values keep their site,
-# so sizing can tell which checks can reach the result.
+# Where an abort comes from: a refinement check, by its number; sizing's own
+# aborts as it unrolls recursion tok, or the mark Sem leaves at a chain's
+# bottom; or an abort of the runnable core read back as X, with what raised
+# it (Split builds none).
 
 type Site is Data:
   AtCheck{+n: U32}
@@ -58,8 +57,8 @@ def count.pick(yes: Bool, n: U32, later: U32) -> U32:
     case False{}:
       later
 
-# The links a recursion site's chain gets: its count plus one; one never
-# reached gets one.
+# The links a recursion site's chain gets (chainLinks): one per depth whose
+# test the abstract run reached; one never reached gets one.
 def count.of(counts: List<&2, TS>, +tok: U32) -> U32:
   match counts:
     case Nil{}:
@@ -67,7 +66,7 @@ def count.of(counts: List<&2, TS>, +tok: U32) -> U32:
     case Con{c, rest}:
       match c:
         case TS{t, n}:
-          count.pick(U32.is_eq(t, tok), (n + 1 : U32), count.of(rest, tok))
+          count.pick(U32.is_eq(t, tok), n, count.of(rest, tok))
 
 type X is Data:
   XZero{}
@@ -179,14 +178,22 @@ def abort.any() -> X:
 def abort.unsizeable(tok: U32) -> X:
   XPair{XPair{XPair{XPair{XZero{}, XZero{}}, XZero{}}, XZero{}}, int.u32(tok)}
 
+# A sizing run reached a step the real evaluator would be stuck on, such as
+# data applied as a function (AbortStuck): those values never meet on a real
+# run, or the run stops there. Either way no recursion after it needs a count.
+def abort.stuck() -> X:
+  XPair{XPair{XPair{XPair{XPair{XZero{}, XZero{}}, XZero{}}, XZero{}}, XZero{}}, XZero{}}
+
 # One unrolling of a recursion while sizing: if the test holds, apply the
-# recursive step to the next unrolling (a stub, expanded when reached),
-# else stop here, recording depth n (unsizedStepBody). Its environment is
-# (input, (test, (recursive, (base, 0)))).
+# recursive step to the next unrolling (a stub, expanded when reached), else
+# the base (unsizedStepBody). The test records that the recursion reached
+# depth n, whatever it decides: a sized chain has one link per depth recorded
+# and its base has no test, so every test a run can evaluate needs a link.
+# Its environment is (input, (test, (recursive, (base, 0)))).
 def step.body(+tok: U32, +n: U32) -> X:
-  ite(app(var(1n), var(0n)),
+  ite(XStage{[TS{tok, n}], app(var(1n), var(0n))},
       app(app(var(2n), XStep{tok, n, XEnv{}}), var(0n)),
-      XStage{[TS{tok, n}], app(var(3n), var(0n))})
+      app(var(3n), var(0n)))
 
 # One step of a sized recursion: if test input then recursive recur input
 # else base input, both branches built (approximantStep with GateSwitchEE).
@@ -194,24 +201,24 @@ def approx.body() -> X:
   gate.switch(app(var(4n), var(0n)), app(app(var(3n), var(1n)), var(0n)), app(var(2n), var(0n)))
 
 # master's abort node (AbortB o m) as X writes it: the abort applied to its
-# message. The core reads it back as the one node (`core`). Sizing, Sem and
-# the laws read an abort as haskell-final's function, which aborts on a
-# pair and is the identity on 0; every abort a program holds is applied to
-# a message that is a pair wherever its value is used (a failed check's
-# answer, a chain's (0, token)), so the two readings agree on the runs.
+# message. The core reads it back as the one node (`core`), and sizing runs
+# it as that node. Sem and the laws read an abort as haskell-final's
+# function, which aborts on a pair and is the identity on 0; every abort a
+# program holds is applied to a message that is a pair wherever its value is
+# used (a failed check's (1, value)), so the two readings agree on the runs.
 def abort.with(+at: Site, m: X) -> X:
   fill(XAbort{at}, m)
 
-# A chain's bottom: a closure that aborts with (0, token) when applied; or,
-# where sizing proved no input reaches it, 0, so the program holds no Abort
-# for it (DESIGN §10).
-def bottom(+tok: U32, inert: Bool) -> X:
+# A chain's bottom: a closure that applies the base case without testing, so
+# the chain is a plain total function, since sound sizing never exhausts it
+# (sizedRecursionChain); or, where the erasure checker proved no input reaches
+# it, 0.
+def bottom(inert: Bool) -> X:
   match inert:
     case True{}:
       XZero{}
     case False{}:
-      XPair{XDefer{Co.step.w(), abort.with(AtRecursion{tok}, XRight{XEnv{}})},
-            XPair{XZero{}, int.u32(tok)}}
+      XPair{XDefer{Co.step.w(), app(var(3n), var(0n))}, XLeft{XEnv{}}}
 
 # n links over a bottom: each runs one approximant step, recurring into the
 # next.
@@ -224,8 +231,8 @@ def chain.over(n: Nat, bot: X) -> X:
 
 # A recursion sized to n iterations: n links over its bottom
 # (sizedRecursionChain).
-def sized.chain(+tok: U32, n: U32, +inert: Bool) -> X:
-  chain.over(U32.to_nat(n), bottom(tok, inert))
+def sized.chain(n: U32, +inert: Bool) -> X:
+  chain.over(U32.to_nat(n), bottom(inert))
 
 # Unbounded recursion (--fast)
 # ----------------------------
@@ -271,27 +278,32 @@ def check.left(left: Maybe<&2, Set()>, +site: U32) -> Bool:
     case Some{s}:
       Pair.snd(Set(), Bool, Set.has(s, U32.show(site)))
 
-# A check left to run time (refinementCheckB): `let r = tc c in (if r then
-# abort r else id) c`. The outer defer (environment (tc, c)) computes r
-# once and hands (r, c) to the gate, whose branches have the strict
-# gate-switch shape; a passing check builds an aborted value and drops it.
+# A check left to run time (refinementCheckB): `let r = tc c in (if r then id
+# else abort (1, c)) c`: it passes where the predicate gives anything but 0,
+# and a failing check aborts with the value that failed it. The outer defer
+# (environment (tc, c)) computes r once and hands (r, c) to the gate, whose
+# branches have the strict gate-switch shape; a passing check builds an
+# aborted value and drops it, so that value's message is itself gated: 0 where
+# the check passes, which is how the check analysis (Plan.bend) tells a failing
+# run from a passing one.
 def check.of(here: Bool, +site: U32, tc: X, c: X) -> X:
   match here:
     case True{}:
       fill(XDefer{Co.refinement.tc(),
              XSetEnv{XPair{XDefer{Co.refinement.gate.ind(),
-                             XSetEnv{XPair{gate.switch(XDefer{Co.refinement.pass.ind(), XEnv{}},
-                                                       abort.with(AtCheck{site}, XLeft{XEnv{}}), XLeft{XEnv{}}),
+                             XSetEnv{XPair{gate.switch(abort.with(AtCheck{site},
+                                                         gate.switch(XPair{XPair{XZero{}, XZero{}}, XRight{XEnv{}}}, XZero{}, XLeft{XEnv{}})),
+                                                       XDefer{Co.refinement.pass.ind(), XEnv{}}, XLeft{XEnv{}}),
                                            XRight{XEnv{}}}}},
                            XPair{app(XLeft{XEnv{}}, XRight{XEnv{}}), XRight{XEnv{}}}}}},
            XPair{tc, c})
     case False{}:
       c
 
-# A refinement check left to run time becomes: apply the check, abort with
-# its answer if that is not 0, else the value (removeRefinementWrappers). A
-# check sizing discharged becomes its value (DESIGN §10). left: the checks
-# left to run time, or None for every check.
+# A refinement check left to run time becomes: apply the predicate, the value
+# if that is not 0, else abort with the value (removeRefinementWrappers). A
+# check erased becomes its value (DESIGN §10). left: the checks left to run
+# time, or None for every check.
 def resolve.checks(+left: Maybe<&2, Set()>, t: X) -> X:
   match t:
     case XCheck{+site, tc, c}:
@@ -363,7 +375,7 @@ def site.origin(at: Site) -> L.Origin:
     case AtAbort{o}:
       o
     case AtRecursion{tok}:
-      L.recursion.origin()
+      L.sizing.origin()
     case AtCheck{n}:
       L.unknown.origin()
 
@@ -372,7 +384,7 @@ def origin.of(+os: Map<&2, L.Origin>, at: Site) -> L.Origin:
     case AtCheck{+n}:
       Pair.snd(Map<&2, L.Origin>, L.Origin, Map.get(L.Origin, L.unknown.origin(), os, U32.show(n)))
     case AtRecursion{tok}:
-      L.recursion.origin()
+      L.sizing.origin()
     case AtAbort{o}:
       o
 

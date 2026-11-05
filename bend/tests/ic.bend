@@ -117,60 +117,39 @@ def all(bs: List<&2, Bool>) -> Bool:
 # Sessions
 # --------
 
-# Main, and the guard, prepared under the layouts compiling gives it
+# Main, and its prologue, prepared under the layouts compiling gives them
 # (certifiedProgramFrom).
-def layouts.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +pl: Co.V) -> Map<&2, Lf.Shape>:
+def layouts.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +checks: Sz.Checks, +pl: Co.V, +pro: Maybe<&2, Co.V>) -> Map<&2, Lf.Shape>:
   match guided:
     case True{}:
-      Ss.layouts.from(run, counts, pl)
+      Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro))
     case False{}:
       Map.new(&2, Lf.Shape)
 
-def prepared.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, +pl: Co.V) -> IC.Prog:
-  IC.prepare(expr, layouts.main(guided, run, counts, pl))
-
-def guard.sized(guided: Bool, +t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, IC.Prog>:
-  match r:
-    case Fail{f}:
-      None{}
-    case Done{s}:
-      match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
-          Some{prepared.main(guided, t, counts, expr, pl)}
-
-def guard.of(guided: Bool, m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
-  match m:
-    case None{}:
-      None{}
-    case Some{+t}:
-      guard.sized(guided, t, Sz.size(65536, True{}, t))
-
-def sized(guided: Bool, +run: T.C, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def sized(guided: Bool, +run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
-          Ss.replay(Ss.session(expr, layouts.main(guided, run, counts, pl), g, pl), Ss.Sized{}, lines)
+        case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
+          Ss.replay(Ss.session(expr, layouts.main(guided, run, counts, checks, pl, pro), pro), Ss.Sized{}, lines)
 
-def compiled(+guided: Bool, r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
+def compiled(+guided: Bool, r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], Ss.cost.none()}
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, +g, +boundary}:
-          sized(guided, run, guard.of(guided, g), Sz.size.guarded(65536, boundary, g, run), lines)
+    case Done{+run}:
+      sized(guided, run, Sz.size(65536, True{}, run), lines)
 
-# A session as the command runs it: main's input refinements run first, by
-# the guard, and both are guided by EAL.
+# A session as the command runs it: main's input prologue runs first, and both
+# are guided by EAL.
 def session(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
-  compiled(True{}, Fr.compile.program(srcs, entry), lines)
+  compiled(True{}, Fr.compile(srcs, entry), lines)
 
 # The same session unguided: the same displays, sooner (no EAL).
 def plain(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Ss.Replay:
-  compiled(False{}, Fr.compile.program(srcs, entry), lines)
+  compiled(False{}, Fr.compile(srcs, entry), lines)
 
 def spent(r: Ss.Replay) -> U32:
   match r:
@@ -236,6 +215,8 @@ def ran(x: IC.Code) -> IC.Code:
       IC.CdLeft{ran(a)}
     case IC.CdRight{a}:
       IC.CdRight{ran(a)}
+    case IC.CdAbort{o, m}:
+      IC.CdAbort{o, ran(m)}
     case other:
       other
 
@@ -268,7 +249,7 @@ def usage.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
       False{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, pl}:
+        case Sz.Sized{counts, expr, checks, pl, pro}:
           wired(expr)
 
 def usage.term(r: Result<&2, &2, String, T.C>) -> Bool:
@@ -326,27 +307,24 @@ def case.nonexhaustive() -> String:
 def pattern.lambda() -> String:
   unlines(["import Prelude", "main = \\input -> let f = \\(a, b) -> b", "                 in (f (0, \"pat\"), 0)"])
 
-# UDTTests: the Prelude's Rational, and NatUDTTests' Nat.
+# What UDTTests and NatUDTTests ran, now that the language has no UDTs: rational
+# arithmetic, and a tagged natural behind a predicate.
 def rational() -> String:
   unlines(["import Prelude",
-    "main = \\input -> (if dEqual (left (right (rPlus (fromRational 1 2) (fromRational 1 2)))) 1 then \"ok\" else \"bad\", 0)"])
+    "fromRational = \\n d -> if dEqual d 0",
+    "                        then abort \"Denominator cannot be zero\"",
+    "                        else let g = gcd n d",
+    "                             in (dDiv n g, dDiv d g)",
+    "rPlus = \\a b -> fromRational (dPlus (dTimes (left a) (right b)) (dTimes (left b) (right a)))",
+    "                              (dTimes (right a) (right b))",
+    "main = \\input -> (if dEqual (left (rPlus (fromRational 1 2) (fromRational 1 2))) 1 then \"ok\" else \"bad\", 0)"])
 
 def nat() -> String:
   unlines(["import Prelude",
-    "[Nat, toNat, fromNat, nPlus, nMinus] = \\h ->",
-    "  [ \\x -> (h, x)",
-    "  , \\x -> Nat x",
-    "  , \\a b -> let aa = Nat a",
-    "                bb = Nat b",
-    "            in (h, d2c aa succ bb)",
-    "  , \\a b ->",
-    "      let aa = Nat a",
-    "          bb = Nat b",
-    "          sLeft = \\x -> case x of",
-    "                          (l, _) -> l",
-    "                          y      -> abort \"can't subtract larger number from smaller one\"",
-    "      in (h, d2c bb sLeft aa)",
-    "  ]",
+    "natTag = 1",
+    "Nat = \\v -> left v",
+    "toNat = \\x -> (natTag, x)",
+    "nPlus = \\(a : Nat) (b : Nat) -> (natTag, d2c (right a) succ (right b))",
     "main = \\input -> (if dEqual (right (nPlus (toNat 2) (toNat 3))) 5 then \"ok\" else \"bad\", 0)"])
 
 # UDTTests' natural arithmetic, a digit per case.
@@ -455,23 +433,23 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, arithmetic(), "11111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 13458),
+      costs(prelude, case.nonexhaustive(), 25640),
       costs(prelude, pattern.lambda(), 2702),
-      costs(prelude, rational(), 78846),
-      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 635)])))
-    IO.print(verdict("ic-guard", all([
+      costs(prelude, rational(), 37335),
+      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 573)])))
+    IO.print(verdict("ic-prologue", all([
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", [""])),
         "got a line|start|"),
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", ["a"])), "got a line|start|")])))
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
-      146)))
+      118)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      44390)))
+      35173)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      5454169)))
+      4895725)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

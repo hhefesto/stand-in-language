@@ -57,6 +57,28 @@ def data(v: V) -> Maybe<&2, D>:
     case _:
       None{}
 
+def origin.or(a: Maybe<&2, L.Origin>, b: Maybe<&2, L.Origin>) -> Maybe<&2, L.Origin>:
+  Maybe.or(&2, L.Origin, a, b)
+
+# The origin of a compiled refinement check's outer body: the one abort in it
+# (refinementCheckOrigin).
+def check.origin(v: V) -> Maybe<&2, L.Origin>:
+  match v:
+    case VAbort{o, m}:
+      Some{o}
+    case VPair{a, b}:
+      origin.or(check.origin(a), check.origin(b))
+    case VSetEnv{x}:
+      check.origin(x)
+    case VDefer{fi, x}:
+      check.origin(x)
+    case VLeft{x}:
+      check.origin(x)
+    case VRight{x}:
+      check.origin(x)
+    case _:
+      None{}
+
 # Numbers and strings (intB, b2i, s2b, b2s)
 # -----------------------------------------
 
@@ -173,16 +195,20 @@ def refinement.pass.ind() -> U32:
 def abort.ind() -> U32:
   neg(11)
 
-# From -13 down, the step of an unbounded recursion (--fast): -13 less its
+# main's input prologue (inputPrologueInd).
+def prologue.ind() -> U32:
+  neg(13)
+
+# From -14 down, the step of an unbounded recursion (--fast): -14 less its
 # site's token.
 def limit.ind(+tok: U32) -> U32:
-  neg((13 + tok : U32))
+  neg((14 + tok : U32))
 
 def is.limit(+fi: U32) -> Bool:
-  U32.is_ge(fi, 2147483648) && U32.is_le(fi, neg(13))
+  U32.is_ge(fi, 2147483648) && U32.is_le(fi, neg(14))
 
 def limit.tok(+fi: U32) -> U32:
-  (neg(fi) - 13 : U32)
+  (neg(fi) - 14 : U32)
 
 # Builders (IR.Builder)
 # ---------------------

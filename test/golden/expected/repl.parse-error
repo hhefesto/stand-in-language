@@ -5,34 +5,34 @@ telomare> Parse error: 1:1:
 1 | )
   | ^
 unexpected ')'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 
 telomare> Parse error: 1:1:
   |
 1 | _tmp_ = 9
   | ^^^^
 unexpected "_tmp"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 
 telomare> Parse error: 1:8:
   |
 1 | [a, b] = [1, 2]
   |        ^
 unexpected '='
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 
 telomare> Parse error: 1:5:
   |
 1 | x = 
   |     ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 
 telomare> Parse error: 1:1:
   |
 1 | <empty line>
   | ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 
 telomare> --- stderr

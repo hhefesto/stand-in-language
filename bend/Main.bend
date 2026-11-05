@@ -34,9 +34,9 @@ import ./Fast.bend as Fs
 # iteration counts sizing inferred and the structural nesting reading; the
 # meter, what the session spent: the reference evaluator's steps and nodes
 # built, as master counts them, or with `--ic` the net's interactions. A
-# plain run evaluates master's program (Bend/Reference.bend, every check in
-# it); `--ic` runs the port's (sizing's erasures made, the session's guard
-# before main, master's program answering a line the guard refuses), under
+# plain run evaluates master's program (Bend/Reference.bend), its input
+# prologue first; `--ic` runs the port's (the chains' bottoms erased where the
+# erasure checker proves it, the same prologue first), under
 # the capture layouts master's EAL gives after sizing (EALm.bend); a main
 # with none is refused, as master's withICPlan refuses it. `--ic
 # --certificate` is the static report and the port's checks section.
@@ -606,10 +606,11 @@ def play(~rt: Ss.Runner(), +p: Ss.Prog, +r: Run, meter: Bool) -> IO(Unit):
 # evalLoopCore over the reference evaluator (plainEval, and evalMeter for
 # `--meter`): main on 0, then on each line read and the state the last
 # iteration left, until the state is 0 or the run fails. Its program is
-# master's (every check and chain bottom in it), so it has no guard, and
-# what it prints and counts is master's.
+# master's, so what it prints and counts is master's: an iteration runs main's
+# input prologue first, if it has one, except the first, which has no input.
 type RS is Type:
   RTurn{i: Tx.In, st: Rf.St, cost: Rf.Cost}
+  RPro{i: Tx.In, st: Rf.St, input: Co.D, cost: Rf.Cost}
   RLine{state: Co.D, cost: Rf.Cost, l: Tx.Line}
   REnd{cost: Rf.Cost}
 
@@ -636,12 +637,36 @@ def ref.turned(i: Tx.In, cost: Rf.Cost, st: Rf.St) -> IO(RS):
     case _:
       IO.die(RS, 1, "telomare: the reference evaluator stopped early")
 
-def ref.got(+main: Co.V, state: Co.D, cost: Rf.Cost, l: Tx.Line) -> IO(RS):
+# The prologue's run: an abort there ends the iteration before main starts.
+def ref.passed(i: Tx.In, +cost: Rf.Cost, +main: Co.V, +input: Co.D, f: Maybe<&2, Ss.Fired>) -> IO(RS):
+  match f:
+    case Some{x}:
+      ref.shown(i, cost, Ss.Stop{"runtime error:\n" ++ Ss.fired.text(x)})
+    case None{}:
+      IO.pure(RS, RTurn{i, Rf.iteration(main, input), cost})
+
+def ref.checked(i: Tx.In, cost: Rf.Cost, +main: Co.V, +input: Co.D, st: Rf.St) -> IO(RS):
+  match st:
+    case Rf.SDone{+v, c}:
+      ref.passed(i, Rf.cost.plus(cost, c), main, input, Ss.fired(v))
+    case Rf.SErr{msg, c}:
+      IO.die(RS, 1, "telomare: Telomare.Meter: " ++ msg)
+    case _:
+      IO.die(RS, 1, "telomare: the reference evaluator stopped early")
+
+def ref.line(+main: Co.V, p: Maybe<&2, Co.V>, i: Tx.In, +input: Co.D, cost: Rf.Cost) -> IO(RS):
+  match p:
+    case None{}:
+      IO.pure(RS, RTurn{i, Rf.iteration(main, input), cost})
+    case Some{+v}:
+      IO.pure(RS, RPro{i, Rf.iteration(v, input), input, cost})
+
+def ref.got(+main: Co.V, p: Maybe<&2, Co.V>, state: Co.D, cost: Rf.Cost, l: Tx.Line) -> IO(RS):
   match l:
     case Tx.Line{i, g}:
       match g:
         case Tx.GLine{text}:
-          IO.pure(RS, RTurn{i, Rf.iteration(main, Co.DPair{Co.of.string(text), state}), cost})
+          ref.line(main, p, i, Co.DPair{Co.of.string(text), state}, cost)
         case Tx.GEnd{}:
           IO.die(RS, 1, "telomare: <stdin>: hGetLine: end of file")
         case Tx.GErr{msg}:
@@ -655,7 +680,7 @@ def ref.metered(meter: Bool, c: Rf.Cost) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
-def ref.session(fuel: Nat, +main: Co.V, +meter: Bool, s: RS) -> IO(Unit):
+def ref.session(fuel: Nat, +main: Co.V, +p: Maybe<&2, Co.V>, +meter: Bool, s: RS) -> IO(Unit):
   match fuel:
     case 0n:
       IO.die(Unit, 1, "telomare: too many iterations")
@@ -664,16 +689,20 @@ def ref.session(fuel: Nat, +main: Co.V, +meter: Bool, s: RS) -> IO(Unit):
         case RTurn{i, st, cost}:
           do IO<Unit>:
             next : RS <- ref.turned(i, cost, st)
-            ref.session(k, main, meter, next)
+            ref.session(k, main, p, meter, next)
+        case RPro{i, st, input, cost}:
+          do IO<Unit>:
+            next : RS <- ref.checked(i, cost, main, input, st)
+            ref.session(k, main, p, meter, next)
         case RLine{state, cost, l}:
           do IO<Unit>:
-            next : RS <- ref.got(main, state, cost, l)
-            ref.session(k, main, meter, next)
+            next : RS <- ref.got(main, p, state, cost, l)
+            ref.session(k, main, p, meter, next)
         case REnd{cost}:
           ref.metered(meter, cost)
 
-def ref.play(+main: Co.V, +meter: Bool) -> IO(Unit):
-  ref.session(U32.to_nat(4294967295), main, meter, RTurn{Tx.Closed{}, Rf.iteration(main, Co.DZero{}), Rf.Cost{0, 0}})
+def ref.play(+main: Co.V, +p: Maybe<&2, Co.V>, +meter: Bool) -> IO(Unit):
+  ref.session(U32.to_nat(4294967295), main, p, meter, RTurn{Tx.Closed{}, Rf.iteration(main, Co.DZero{}), Rf.cost.none()})
 
 # The pipeline (compileModules, then the action)
 # ----------------------------------------------
@@ -704,129 +733,59 @@ def failed(f: Failure) -> String:
     case Unrunnable{form}:
       "telomare: --fast left " ++ form ++ " in the program (a bug)"
 
-# The session's guard: its Term3 as written (run, for its layouts'
-# derivation, as main's) and sized.
-type Guard is Data:
-  Guard{+run: T.C, +sized: Sz.Sized}
-
 # The program compiled: main's Term3 as run (for locating its recursion
-# sites), main sized, and the session's guard, if main has input
-# refinements.
+# sites), and main sized.
 type Compiled is Data:
-  Compiled{+run: T.C, +sized: Sz.Sized, +guard: Maybe<&2, Guard>}
+  Compiled{+run: T.C, +sized: Sz.Sized}
 
-def guard.sized(+g: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Maybe<&2, Guard>>:
-  match r:
-    case Fail{f}:
-      Fail{Unsizable{f, g}}
-    case Done{gs}:
-      Done{Some{Guard{g, gs}}}
-
-# The guard is certified and sized as main is: it runs on the IC too.
-def guard.certified(+g: T.C, c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, Maybe<&2, Guard>>:
-  match c:
-    case Some{e}:
-      Fail{Uncertified{e}}
-    case None{}:
-      guard.sized(g, Sz.size(budget(), True{}, g))
-
-# The session's guard, compiled, if main has input refinements.
-def guard.compiled(g: Maybe<&2, T.C>) -> Result<&2, &2, Failure, Maybe<&2, Guard>>:
-  match g:
-    case None{}:
-      Done{None{}}
-    case Some{+t}:
-      guard.certified(t, EM.certify(Lf.defer.lift(t)))
-
-# Main sized, and its guard; a failure to size main is reported before the
-# guard's.
-def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, g: Result<&2, &2, Failure, Maybe<&2, Guard>>) -> Result<&2, &2, Failure, Compiled>:
+def sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{f}:
       Fail{Unsizable{f, run}}
     case Done{s}:
-      match g:
-        case Fail{e}:
-          Fail{e}
-        case Done{gs}:
-          Done{Compiled{run, s, gs}}
-
-def guard.expr(g: Maybe<&2, Guard>) -> Maybe<&2, Co.V>:
-  match g:
-    case None{}:
-      None{}
-    case Some{x}:
-      match x:
-        case Guard{run, s}:
-          match s:
-            case Sz.Sized{counts, expr, checks, pl}:
-              Some{expr}
-
-# The guard's checks, for the report.
-def guard.checks(g: Maybe<&2, Guard>) -> Maybe<&2, Sz.Checks>:
-  match g:
-    case None{}:
-      None{}
-    case Some{x}:
-      match x:
-        case Guard{run, s}:
-          match s:
-            case Sz.Sized{counts, expr, checks, pl}:
-              Some{checks}
-
-# Main is sized after its guard is, since the erasure checker runs main
-# only on the inputs the guard passes (SIZING-PROOF.md §4). check: whether
-# the erasure checker runs (not for a plain run, which runs main with
-# every check).
-def guarded(+run: T.C, +boundary: Set(), g: Result<&2, &2, Failure, Maybe<&2, Guard>>, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
-  match g:
-    case Fail{e}:
-      sized(run, Sz.size.at.checked(budget(), True{}, boundary, None{}, run, check), Fail{e})
-    case Done{+gs}:
-      sized(run, Sz.size.at.checked(budget(), True{}, boundary, guard.expr(gs), run, check), Done{gs})
+      Done{Compiled{run, s}}
 
 # certifyMain gates the program before its sizing does (Driver's
-# compileMainReporting), whatever the action. It certifies the term that is
+# compileMainProgram), whatever the action. It certifies the term that is
 # sized and run, where haskell-final certified the let-inlined one (DESIGN
-# §3, §11.4). Certification runs first and
-# sizing after it, never side by side: EAL forks over the bodies, and run
-# alongside sizing the two would split the lanes and starve those forks.
-# So the guard is compiled, certified and sized, before main is sized.
-def certified(+run: T.C, g: Maybe<&2, T.C>, +boundary: Set(), c: Maybe<&2, EM.Err>, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
+# §3, §11.4). Certification runs first and sizing after it, never side by
+# side: EAL forks over the bodies, and run alongside sizing the two would split
+# the lanes and starve those forks.
+def certified(+run: T.C, c: Maybe<&2, EM.Err>, +want: Sz.Want) -> Result<&2, &2, Failure, Compiled>:
   match c:
     case Some{e}:
       Fail{Uncertified{e}}
     case None{}:
-      guarded(run, boundary, guard.compiled(g), check)
+      sized(run, Sz.size.checked(budget(), True{}, run, want))
 
-def resolved(r: Result<&2, &2, Fr.Err, Fr.Program>, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
+def resolved(r: Result<&2, &2, Fr.Err, T.C>, +want: Sz.Want) -> Result<&2, &2, Failure, Compiled>:
   match r:
     case Fail{e}:
       Fail{Refused{e}}
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, g, +boundary}:
-          certified(run, g, boundary, EM.certify(Lf.defer.lift(run)), check)
+    case Done{+run}:
+      certified(run, EM.certify(Lf.defer.lift(run)), want)
 
-# The parsed modules compiled: resolved, certified, sized (the erasure
-# checker run when check says so).
-def compile(m: Fr.Mods, +entry: String, +check: Bool) -> Result<&2, &2, Failure, Compiled>:
-  resolved(Fr.program(m, entry), check)
+# The parsed modules compiled: resolved, certified, sized.
+def compile(m: Fr.Mods, +entry: String, +want: Sz.Want) -> Result<&2, &2, Failure, Compiled>:
+  resolved(Fr.term(m, entry), want)
 
-# Whether an action uses the erasures: a run on the net, the report, the
-# artifact; a plain run or its meter does not.
-def checks.erasures(ic: Bool, act: Act) -> Bool:
+# What an action reads of the compile: a run on the net, the net's report and the
+# artifact read it all; a plain run or its meter reads master's program; the
+# plain report, the counts.
+def wants(ic: Bool, act: Act) -> Sz.Want:
   match ic:
     case True{}:
-      True{}
+      Sz.WantNet{}
     case False{}:
       match act:
         case Play{}:
-          False{}
+          Sz.WantPlain{}
         case Meter{}:
-          False{}
-        case _:
-          True{}
+          Sz.WantPlain{}
+        case Report{}:
+          Sz.WantCounts{}
+        case Compile{}:
+          Sz.WantNet{}
 
 # Compiling (--compile)
 # ---------------------
@@ -840,22 +799,10 @@ def out.path(o: Out, +file: String) -> String:
     case _:
       Bool.pick(String, String.ends_with(file, ".tel"), file ++ "c", file ++ ".telc")
 
-def guard.stored(g: Maybe<&2, Guard>) -> Maybe<&2, Tc.Guard>:
-  match g:
-    case None{}:
-      None{}
-    case Some{x}:
-      match x:
-        case Guard{+run, s}:
-          match s:
-            case Sz.Sized{+counts, +expr, checks, +pl}:
-              Some{Tc.guard.of(expr, Ss.layouts.from(run, counts, pl))}
-
-# The sized program as an artifact: haskell-final's `--ic --compile`, less
-# the IC certificate, and with the session's guard (version 5) if main has
-# input refinements.
-def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, checks: Sz.Checks, +g: Maybe<&2, Guard>, +plain: Co.V) -> Tc.Telc:
-  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks, guard.checks(g)), budget(), Ss.layouts.from(run, counts, plain), plain, guard.stored(g))
+# The sized program as an artifact: master's `--compile`, less the IC
+# certificate.
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, +checks: Sz.Checks, +plain: Co.V, +p: Maybe<&2, Co.V>, ls: Map<&2, Lf.Shape>) -> Tc.Telc:
+  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks), budget(), ls, plain, p)
 
 def prefix(n: Nat, s: String) -> String:
   match n:
@@ -877,68 +824,52 @@ def wrote(+path: String, +n: U32, +hash: String, r: Result<&1, &1, String, Unit>
 
 def written(+path: String, t: Tc.Telc) -> IO(Unit):
   match t:
-    case Tc.Telc{entry, +hash, cert, counts, places, budget, expr, layouts, +plain, guard}:
+    case Tc.Telc{entry, +hash, cert, counts, places, budget, expr, layouts, +plain, prologue}:
       do IO<Unit>:
-        r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, guard}))
+        r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, prologue}))
         wrote(path, Tc.nodes(plain), hash, r)
-
-# The guard prepared under the layouts its derivation gives (Ss.guard.from).
-def guard.prog(g: Maybe<&2, Guard>) -> Maybe<&2, IC.Prog>:
-  match g:
-    case None{}:
-      None{}
-    case Some{x}:
-      match x:
-        case Guard{+run, s}:
-          match s:
-            case Sz.Sized{+counts, +expr, checks, +pl}:
-              Some{Ss.guard.from(run, counts, expr, pl)}
-
-# What the session runs: main, and its guard if it has one, each prepared.
-def session.of(+expr: Co.V, +ls: Map<&2, Lf.Shape>, g: Maybe<&2, Guard>, +plain: Co.V) -> Ss.Prog:
-  Ss.session(expr, ls, guard.prog(g), plain)
 
 # withICPlan: a session on the net only under the layouts compiling gave
 # main; a main that does not certify after sizing is refused, as master's
 # `die`s with the refusal.
-def admitted(~rt: Ss.Runner(), r: Result<&2, &2, String, Map<&2, Lf.Shape>>, +expr: Co.V, g: Maybe<&2, Guard>, +plain: Co.V, +meter: Bool) -> IO(Unit):
+def admitted(~rt: Ss.Runner(), r: Result<&2, &2, String, Map<&2, Lf.Shape>>, +expr: Co.V, +p: Maybe<&2, Co.V>, +meter: Bool) -> IO(Unit):
   match r:
     case Fail{why}:
       IO.die(Unit, 1, why)
     case Done{+ls}:
-      play(~rt, session.of(expr, ls, g, plain), Sized{}, meter)
+      play(~rt, Ss.session(expr, ls, p), Sized{}, meter)
 
-# A run on the reference evaluator, as master runs one, or with `--ic` on
-# the net, the port's program and its guard.
-def played(~rt: Ss.Runner(), ic: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, g: Maybe<&2, Guard>, +plain: Co.V, +meter: Bool) -> IO(Unit):
+# A run on the reference evaluator, as master runs one, or with `--ic` on the
+# net.
+def played(~rt: Ss.Runner(), ic: Bool, +run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, +checks: Sz.Checks, +plain: Co.V, +p: Maybe<&2, Co.V>, +meter: Bool) -> IO(Unit):
   match ic:
     case True{}:
-      admitted(~rt, Ss.plan.from(run, counts, plain), expr, g, plain, meter)
+      admitted(~rt, Ss.plan.from(run, counts, Sz.checks.keep(checks), plain, p), expr, p, meter)
     case False{}:
-      ref.play(plain, meter)
+      ref.play(plain, p, meter)
 
-# The action, on the compiled program. Running prepares it (and its guard)
-# under the EAL capture layouts of the sized term, so closures are copied
-# as EAL planned; the static report needs neither, and reads the modules
-# as written. Compiling writes the artifact to path.
+# The action, on the compiled program. Running prepares it under the EAL capture
+# layouts of the sized term, so closures are copied as EAL planned; the static
+# report needs neither, and reads the modules as written. Compiling writes the
+# artifact to path.
 def acted(~rt: Ss.Runner(), ic: Bool, r: Result<&2, &2, Failure, Compiled>, act: Act, +mods: List<&2, Rs.Mod>, +entry: String, srcs: List<&2, Fr.Src>, +path: String) -> IO(Unit):
   match r:
     case Fail{f}:
       IO.die(Unit, 1, failed(f))
     case Done{c}:
       match c:
-        case Compiled{+run, s, +g}:
+        case Compiled{+run, s}:
           match s:
-            case Sz.Sized{+counts, +expr, +checks, +pl}:
+            case Sz.Sized{+counts, +expr, +checks, +pl, +p}:
               match act:
                 case Play{}:
-                  played(~rt, ic, run, counts, expr, g, pl, False{})
+                  played(~rt, ic, run, counts, expr, checks, pl, p, False{})
                 case Meter{}:
-                  played(~rt, ic, run, counts, expr, g, pl, True{})
+                  played(~rt, ic, run, counts, expr, checks, pl, p, True{})
                 case Report{}:
-                  IO.write(Ct.report.of(ic, counts, run, budget(), Lv.info(mods, entry), checks, guard.checks(g)))
+                  IO.write(Ct.report.of(ic, counts, run, budget(), Lv.info(mods, entry), checks))
                 case Compile{}:
-                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks, g, pl))
+                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks, pl, p, Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, p))))
 
 # Unsized (--fast)
 # ----------------
@@ -957,14 +888,12 @@ def unbounded(+run: T.C, c: Maybe<&2, EM.Err>) -> Result<&2, &2, Failure, T.C>:
     case None{}:
       Done{run}
 
-def fast.resolved(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Result<&2, &2, Failure, T.C>:
+def fast.resolved(r: Result<&2, &2, Fr.Err, T.C>) -> Result<&2, &2, Failure, T.C>:
   match r:
     case Fail{e}:
       Fail{Refused{e}}
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, g, boundary}:
-          unbounded(run, EM.certify(Lf.defer.lift(run)))
+    case Done{+run}:
+      unbounded(run, EM.certify(Lf.defer.lift(run)))
 
 # runFastLoop: main on 0, then on each line read and the state the last
 # iteration left, while there is a line to read; a run that breaks says
@@ -1018,7 +947,7 @@ def fast.shown(i: Tx.In, +m: Fs.Meter, v: Fs.FV, f: Maybe<&2, Fs.Found>) -> IO(F
       match x:
         case Fs.Found{o, msg}:
           do IO<FS>:
-            IO.print("runtime error:\nAborted, " ++ Ss.abort.message(msg) ++ L.origin.suffix(o))
+            IO.print("runtime error:\nAborted, " ++ Ss.abort.text(o, msg))
             return FEnd{m}
     case None{}:
       fast.value(i, m, v)
@@ -1115,7 +1044,7 @@ def fast.reported(+entry: String, m: Fr.Mods) -> IO(Unit):
 def fast.ran(~rt: Ss.Runner(), +meter: Bool, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
   match m:
     case Fr.Mods{+mods, errs}:
-      fast.acted(~rt, fast.resolved(Fr.program(Fr.Mods{mods, errs}, entry)), meter, fuel, mods)
+      fast.acted(~rt, fast.resolved(Fr.term(Fr.Mods{mods, errs}, entry)), meter, fuel, mods)
 
 def fast.parsed(~rt: Ss.Runner(), act: Act, +fuel: U32, +entry: String, m: Fr.Mods) -> IO(Unit):
   match act:
@@ -1176,31 +1105,21 @@ def stale(+entry: String, +hash: String, +path: String) -> IO(Unit):
 def stored(+expr: Co.V, ls: List<&2, Tc.Layout>) -> IC.Prog:
   IC.prepare(expr, Tc.shapes(ls, Map.new(&2, Lf.Shape)))
 
-def stored.guard(g: Maybe<&2, Tc.Guard>) -> Maybe<&2, IC.Prog>:
-  match g:
-    case None{}:
-      None{}
-    case Some{x}:
-      match x:
-        case Tc.Guard{+expr, layouts}:
-          Some{stored(expr, layouts)}
-
-# A compiled program run, and its guard, under the capture layouts it
-# stores.
+# A compiled program run under the capture layouts it stores.
 def telc.play(~rt: Ss.Runner(), ic: Bool, t: Tc.Telc, +meter: Bool) -> IO(Unit):
   match ic:
     case True{}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, guard}:
-          play(~rt, Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), stored.guard(guard), plain), Sized{}, meter)
+        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, p}:
+          play(~rt, Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), p), Sized{}, meter)
     case False{}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, +plain, guard}:
-          ref.play(plain, meter)
+        case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, +plain, +p}:
+          ref.play(plain, p, meter)
 
 def telc.cert(t: Tc.Telc) -> IO(Unit):
   match t:
-    case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, guard}:
+    case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, p}:
       IO.write(cert)
 
 def telc.acted(~rt: Ss.Runner(), act: Act, ic: Bool, +path: String, t: Tc.Telc) -> IO(Unit):
@@ -1249,7 +1168,7 @@ def parsed(~rt: Ss.Runner(), +act: Act, +ic: Bool, h: Ss.How, +entry: String, +p
     case Ss.Sized{}:
       match m:
         case Fr.Mods{+mods, errs}:
-          acted(~rt, ic, compile(Fr.Mods{mods, errs}, entry, checks.erasures(ic, act)), act, mods, entry, srcs, path)
+          acted(~rt, ic, compile(Fr.Mods{mods, errs}, entry, wants(ic, act)), act, mods, entry, srcs, path)
     case Ss.Fast{fuel}:
       fast.parsed(~rt, act, fuel, entry, m)
 

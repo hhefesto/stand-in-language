@@ -7,17 +7,15 @@ import ./Term.bend as T
 import ./Expr.bend as E
 import ./IC.bend as IC
 import ./Meter.bend as Mt
+import ./Show.bend as Sh
+import ./Reference.bend as Rf
 
-# One iteration's outcome, as the session prints it (haskell-final's
-# Driver.funWrapWith and evalSessionCore, with IC.icRuntimeResult and
-# IR.Base.convertAbortMessage). A program is run on 0 first, then on
-# (line, state) for each line read, while it answers (display, state) and
-# the state is not 0. Before main sees a line, the session runs main's
-# input refinements on it, if main has any (Front's guard). When they
-# pass, main runs as sizing left it, without the checks the guard ran;
-# when one fails, master's program runs instead, every check in it, so the
-# line is answered as master answers it (a refinement whose value main
-# never uses does not end the session).
+# One iteration's outcome, as the session prints it (master's
+# Driver.funWrapWith and evalLoopCore, with IC.icRuntimeResult and
+# IR.Base.describeAbort). A program is run on 0 first, then on (line, state)
+# for each line read, while it answers (display, state) and the state is not
+# 0. Before main sees a line, its input prologue runs on it, if it has one
+# (Plan.bend): an abort there ends the iteration before main starts.
 
 # Print the display and go on with the state; print it and end; or fail
 # as the Haskell did with `error`.
@@ -43,6 +41,8 @@ def user.abort(+s: Co.D, m: Maybe<&2, String>) -> String:
 # convertAbortMessage
 def abort.message(+x: Co.D) -> String:
   match x:
+    case Co.DPair{Co.DPair{Co.DPair{Co.DPair{Co.DPair{Co.DZero{}, Co.DZero{}}, Co.DZero{}}, Co.DZero{}}, Co.DZero{}}, Co.DZero{}}:
+      "a step the evaluator would be stuck on"
     case Co.DPair{Co.DZero{}, t}:
       "recursion overflow (should be caught by other means) for rt: " ++ maybe.int(Co.to.int(t))
     case Co.DPair{Co.DPair{Co.DZero{}, Co.DZero{}}, +s}:
@@ -51,6 +51,41 @@ def abort.message(+x: Co.D) -> String:
       "user abort of all possible abort reasons (non-deterministic input)"
     case other:
       "unexpected abort: " ++ Co.show.data(other)
+
+def value.string(+v: Co.D, s: Maybe<&2, String>) -> String:
+  match s:
+    case Some{t}:
+      Sh.string(t)
+    case None{}:
+      Co.show.data(v)
+
+# A failing check's value, as it reports it (renderValue).
+def value.render(+v: Co.D, i: Maybe<&2, U32>) -> String:
+  match i:
+    case Some{n}:
+      U32.show(n)
+    case None{}:
+      value.string(v, Co.to.string.d(v))
+
+# A failing check aborts with the value that failed it, as `abort` does with a
+# message.
+def check.message(+x: Co.D) -> String:
+  match x:
+    case Co.DPair{Co.DPair{Co.DZero{}, Co.DZero{}}, +v}:
+      "check failed on " ++ value.render(v, Co.to.int(v))
+    case other:
+      abort.message(other)
+
+def message.of(k: L.AbortKind, +m: Co.D) -> String:
+  match k:
+    case L.KRefine{}:
+      check.message(m)
+    case _:
+      abort.message(m)
+
+# An abort's message and what raised it (describeAbort).
+def abort.text(+o: L.Origin, +m: Co.D) -> String:
+  message.of(L.Origin.kind(o), m) ++ L.origin.suffix(o)
 
 # An abort that fired: what raised it and its message.
 type Fired is Data:
@@ -93,8 +128,29 @@ def fired(x: Co.V) -> Maybe<&2, Fired>:
 # "Aborted, " and what the abort says (AbortRunTime's show, describeAbort).
 def fired.text(f: Fired) -> String:
   match f:
-    case Fired{o, m}:
-      "Aborted, " ++ abort.message(m) ++ L.origin.suffix(o)
+    case Fired{+o, +m}:
+      "Aborted, " ++ abort.text(o, m)
+
+def static.text(m: Maybe<&2, Fired>) -> Maybe<&2, String>:
+  match m:
+    case None{}:
+      None{}
+    case Some{f}:
+      match f:
+        case Fired{+o, +m2}:
+          Some{"StaticCheckError " ++ Sh.string(abort.text(o, m2))}
+
+def static.of(st: Rf.St) -> Maybe<&2, String>:
+  match st:
+    case Rf.SDone{+v, c}:
+      static.text(fired(v))
+    case _:
+      None{}
+
+# What compiling an expression rejects (runStaticChecks, evalStaticCheck): an
+# abort that fires evaluating it.
+def static.check(+x: Co.V) -> Maybe<&2, String>:
+  static.of(Rf.run(x))
 
 # A state of 0 ends the session after this display.
 def next(+text: String, st: Co.D) -> Outcome:
@@ -169,22 +225,21 @@ def failed.how(h: How, f: IC.Fault) -> Outcome:
     case Fast{n}:
       failed.fast(f)
 
-def guard.aborted(m: Maybe<&2, Fired>) -> Maybe<&2, Outcome>:
+def prologue.aborted(m: Maybe<&2, Fired>) -> Maybe<&2, Outcome>:
   match m:
     case Some{f}:
       Some{Stop{"runtime error:\n" ++ fired.text(f)}}
     case None{}:
       None{}
 
-# What the guard's run says: nothing when main's input refinements pass,
-# else how the session ends: with the leftmost one's abort, as main
-# would have ended it, or the runtime's failure.
-def guard.verdict(h: How, r: IC.RB) -> Maybe<&2, Outcome>:
+# What the prologue's run says: nothing when the line passes, else how the
+# session ends: with the first failing check's abort, or the runtime's failure.
+def prologue.verdict(h: How, r: IC.RB) -> Maybe<&2, Outcome>:
   match r:
     case IC.RBErr{f}:
       Some{failed.how(h, f)}
     case IC.RBOk{x}:
-      guard.aborted(fired(x))
+      prologue.aborted(fired(x))
 
 # What an iteration's result means for the session.
 def outcome(h: How, r: IC.RB) -> Outcome:
@@ -199,75 +254,71 @@ def outcome(h: How, r: IC.RB) -> Outcome:
 def layouts(+expr: Co.V) -> Map<&2, Lf.Shape>:
   EM.lr.layouts(EM.lr.of(False{}, Lf.defer.lift.expr(expr)))
 
-# The capture layouts compiling gives a sized program (certifiedProgramFrom),
-# read off master's sized program (plain: Size's Sized.plain, every check
-# and chain bottom in it): derived from the faithful certificate of the
-# program it was sized from (run, sized with counts), since plain is that
-# program under the sizing substitution, else inferred over plain. The
-# session runs Sized.expr, plain with what sizing discharged erased: its
-# bodies that plain shares (by hash) run under these layouts, the erased
-# ones under none. (Deriving over expr itself never matches once a check
-# is erased, and inferring over a sized program is what the faithful
-# certificate exists to avoid: natudt's ran out of 10G.)
-def layouts.from(+run: T.C, +counts: List<&2, E.TS>, +plain: Co.V) -> Map<&2, Lf.Shape>:
-  EM.lr.layouts(EM.certified.program(Lf.defer.lift(run), counts, plain))
+# The input prologue's certificate: a program of its own, certified on its own,
+# its guidance added to main's and its refusal named (programWith).
+def prologue.plan(p: Maybe<&2, Co.V>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
+  match p:
+    case None{}:
+      Done{Map.new(&2, Lf.Shape)}
+    case Some{+v}:
+      EM.lr.plan(EM.lr.full(False{}, Lf.defer.lift.expr(v)))
 
-# programPlan of certifiedProgramFrom: those layouts, or, when the sized
-# main does not certify, the refusal (renderRefusal) the IC runtime gives
-# instead of a session.
-def plan.from(+run: T.C, +counts: List<&2, E.TS>, +plain: Co.V) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
-  EM.lr.plan(EM.certified.program(Lf.defer.lift(run), counts, plain))
+def plans(m: Result<&2, &2, String, Map<&2, Lf.Shape>>, p: Result<&2, &2, String, Map<&2, Lf.Shape>>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
+  match m:
+    case Fail{e}:
+      Fail{e}
+    case Done{a}:
+      match p:
+        case Fail{e}:
+          Fail{"input prologue: " ++ e}
+        case Done{b}:
+          Done{Map.union(&2, Lf.Shape, a, b)}
+
+# programPlan of certifiedProgramFrom: the capture layouts compiling gives a
+# sized program (plain: Size's Sized.plain), derived from the faithful
+# certificate of the program it was sized from (run, sized with counts, with
+# the checks the analysis erased gone), since plain is that program under the
+# sizing substitution, else inferred over plain; or, when the sized main or
+# its prologue does not certify, the refusal the IC runtime gives instead of a
+# session. The session runs Sized.expr, plain with what the erasure checker
+# proved erased: its bodies that plain shares (by hash) run under these
+# layouts, the erased ones under none.
+def plan.from(+run: T.C, +counts: List<&2, E.TS>, +keep: Maybe<&2, Set()>, +plain: Co.V, +prologue: Maybe<&2, Co.V>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
+  plans(EM.lr.plan(EM.certified.program(Lf.defer.lift(run), counts, keep, plain)), prologue.plan(prologue))
+
+# A compile's layouts; a program that does not certify has none.
+def layouts.of(r: Result<&2, &2, String, Map<&2, Lf.Shape>>) -> Map<&2, Lf.Shape>:
+  match r:
+    case Done{ls}:
+      ls
+    case Fail{why}:
+      Map.new(&2, Lf.Shape)
 
 # prepareEntry: the sized program prepared for runs under EAL's capture
 # layouts for it, so closures are copied as EAL planned.
 def prepared(+expr: Co.V) -> IC.Prog:
   IC.prepare(expr, layouts(expr))
 
-# master's program, unprepared: a third of a `.telc`'s start, for a line
-# most sessions never see. A refused line prepares it, and only it, so no
-# line pays for EAL.
-type Full is Data:
-  Full{+expr: Co.V, +ls: Map<&2, Lf.Shape>}
-
-def full.prog(f: Full) -> IC.Prog:
-  match f:
-    case Full{+expr, +ls}:
-      IC.prepare(expr, ls)
-
-# What the session runs: main, and the guard it runs on each line before
-# main, if main has input refinements.
+# What the session runs: main, and the input prologue it runs on each line
+# before main, if main has one.
 type Prog is Data:
-  Prog{+main: IC.Prog, +guard: Maybe<&2, IC.Prog>, +full: Maybe<&2, Full>}
+  Prog{+main: IC.Prog, +prologue: Maybe<&2, IC.Prog>}
 
-# A program no guard comes before.
+# A program no prologue comes before.
 def alone(p: IC.Prog) -> Prog:
-  Prog{p, None{}, None{}}
+  Prog{p, None{}}
 
-# The guard (a port extension) prepared as main is: its sized program
-# (expr) under the capture layouts its derivation gives, from the faithful
-# certificate of the guard as written (run, sized with counts), read off
-# its plain program. (It was inferred over the sized guard, which the
-# faithful certificate exists to avoid.)
-def guard.from(+run: T.C, +counts: List<&2, E.TS>, +expr: Co.V, +plain: Co.V) -> IC.Prog:
-  IC.prepare(expr, layouts.from(run, counts, plain))
-
-# master's program, for the lines the guard refuses, if there is a guard:
-# master's sized program (plain), under the layouts compiling gave it,
-# which are main's. Its layouts are fixed here: inferring them over a sized
-# program at the session's boundary (inferEALCompiled) can run for
-# minutes (tictactoe's) or out of memory.
-def full.if(g: Maybe<&2, IC.Prog>, +full: Co.V, +ls: Map<&2, Lf.Shape>) -> Maybe<&2, Full>:
-  match g:
+def prologue.prog(p: Maybe<&2, Co.V>, +ls: Map<&2, Lf.Shape>) -> Maybe<&2, IC.Prog>:
+  match p:
     case None{}:
       None{}
-    case Some{x}:
-      Some{Full{full, ls}}
+    case Some{+v}:
+      Some{IC.prepare(v, ls)}
 
-# What the session runs, from main's sized program (under the layouts
-# compiling gave it) and the guard, prepared (guard.from), and master's
-# program.
-def session(+main: Co.V, +ls: Map<&2, Lf.Shape>, +g: Maybe<&2, IC.Prog>, +full: Co.V) -> Prog:
-  Prog{IC.prepare(main, ls), g, full.if(g, full, ls)}
+# What the session runs, from main's sized program and its prologue, under the
+# layouts compiling gave them.
+def session(+main: Co.V, +ls: Map<&2, Lf.Shape>, p: Maybe<&2, Co.V>) -> Prog:
+  Prog{IC.prepare(main, ls), prologue.prog(p, ls)}
 
 # The session (evalSessionCore)
 # -----------------------------
@@ -326,56 +377,40 @@ def turn(h: How, r: IC.Run, before: Cost) -> Turn:
     case IC.Run{net, out, +spent, unrolls}:
       turn.of(net, outcome(h, out), cost.plus(before, spent, unrolls))
 
-# A run of master's program in main's place: its net is its own, so main's
-# goes on.
-def turn.kept(net: IC.Net, h: How, r: IC.Run, before: Cost) -> Turn:
-  match r:
-    case IC.Run{fnet, out, +spent, unrolls}:
-      turn.of(net, outcome(h, out), cost.plus(before, spent, unrolls))
-
-# The line the guard refused, answered by master's program.
-def full.run(f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
-  match f:
-    case None{}:
-      turn(h, IC.run(m, net, input, fuel(h)), cost)
-    case Some{+fl}:
-      +fp = full.prog(fl)
-      turn.kept(net, h, IC.run(fp, IC.net.new(fp), input, fuel(h)), cost)
-
-# The first iteration runs on 0, unguarded.
+# The first iteration runs on 0, with no prologue.
 def start(p: Prog, +h: How) -> Turn:
   match p:
-    case Prog{+m, g, f}:
+    case Prog{+m, g}:
       turn(h, IC.run(m, IC.net.new(m), Co.DZero{}, fuel(h)), cost.none())
 
-def checked(v: Maybe<&2, Outcome>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> Turn:
+def checked(v: Maybe<&2, Outcome>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> Turn:
   match v:
     case None{}:
       turn(h, IC.run(m, net, input, fuel(h)), cost)
     case Some{o}:
-      full.run(f, h, m, net, input, cost)
+      turn.of(net, o, cost)
 
-# Main on input, once the guard's run r passes it. The guard's
-# interactions count; its unrolls do not, since its recursion sites are
-# its own and the meter's table locates main's.
-def guarded(r: IC.Run, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+# Main on input, once the prologue's run r passes it. The prologue's
+# interactions count; its unrolls do not, since its recursion sites are its own
+# and the meter's table locates main's.
+def guarded(r: IC.Run, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
   match r:
     case IC.Run{gnet, out, +spent, unrolls}:
-      checked(guard.verdict(h, out), f, h, m, net, input, cost.plus(cost, spent, []))
+      checked(prologue.verdict(h, out), h, m, net, input, cost.plus(cost, spent, []))
 
-def answered(g: Maybe<&2, IC.Prog>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
+def answered(g: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> Turn:
   match g:
     case None{}:
       turn(h, IC.run(m, net, input, fuel(h)), cost)
     case Some{+gp}:
-      guarded(IC.run(gp, IC.net.new(gp), input, fuel(h)), f, h, m, net, input, cost)
+      guarded(IC.run(gp, IC.net.new(gp), input, fuel(h)), h, m, net, input, cost)
 
 # The next iteration runs on the line read and the state the last one left,
-# once the guard passes them.
+# once the prologue passes them.
 def answer(p: Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> Turn:
   match p:
-    case Prog{+m, g, f}:
-      answered(g, f, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
+    case Prog{+m, g}:
+      answered(g, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
 
 # The same iterations as the command runs them, in IO: the IC run by ~rt,
 # IC.run itself (run.pure) or bend/Native.bend's, whose loop is C
@@ -394,44 +429,34 @@ def turn.by(~rt: Runner(), +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost
 
 def start.by(~rt: Runner(), p: Prog, +h: How) -> IO(Turn):
   match p:
-    case Prog{+m, g, f}:
+    case Prog{+m, g}:
       turn.by(~rt, h, m, IC.net.new(m), Co.DZero{}, cost.none())
 
-def full.by(~rt: Runner(), f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
-  match f:
-    case None{}:
-      turn.by(~rt, h, m, net, input, cost)
-    case Some{+fl}:
-      +fp = full.prog(fl)
-      do IO<Turn>:
-        r : IC.Run <- rt(fp, IC.net.new(fp), input, fuel(h))
-        return turn.kept(net, h, r, cost)
-
-def checked.by(~rt: Runner(), v: Maybe<&2, Outcome>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> IO(Turn):
+def checked.by(~rt: Runner(), v: Maybe<&2, Outcome>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, +cost: Cost) -> IO(Turn):
   match v:
     case None{}:
       turn.by(~rt, h, m, net, input, cost)
     case Some{o}:
-      full.by(~rt, f, h, m, net, input, cost)
+      IO.pure(Turn, turn.of(net, o, cost))
 
-def guarded.by(~rt: Runner(), r: IC.Run, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+def guarded.by(~rt: Runner(), r: IC.Run, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
   match r:
     case IC.Run{gnet, out, +spent, unrolls}:
-      checked.by(~rt, guard.verdict(h, out), f, h, m, net, input, cost.plus(cost, spent, []))
+      checked.by(~rt, prologue.verdict(h, out), h, m, net, input, cost.plus(cost, spent, []))
 
-def answered.by(~rt: Runner(), g: Maybe<&2, IC.Prog>, f: Maybe<&2, Full>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
+def answered.by(~rt: Runner(), g: Maybe<&2, IC.Prog>, +h: How, +m: IC.Prog, net: IC.Net, +input: Co.D, cost: Cost) -> IO(Turn):
   match g:
     case None{}:
       turn.by(~rt, h, m, net, input, cost)
     case Some{+gp}:
       do IO<Turn>:
         r : IC.Run <- rt(gp, IC.net.new(gp), input, fuel(h))
-        guarded.by(~rt, r, f, h, m, net, input, cost)
+        guarded.by(~rt, r, h, m, net, input, cost)
 
 def answer.by(~rt: Runner(), p: Prog, +h: How, net: IC.Net, +line: String, st: Co.D, cost: Cost) -> IO(Turn):
   match p:
-    case Prog{+m, g, f}:
-      answered.by(~rt, g, f, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
+    case Prog{+m, g}:
+      answered.by(~rt, g, h, m, net, Co.DPair{Co.of.string(line), st}, cost)
 
 # A session on given lines, for the tests: the displays, newest first, and
 # what it spent. It ends where the session would, or where the lines run

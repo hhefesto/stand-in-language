@@ -7,8 +7,8 @@ iterations: not inferred, because this program was not sized.
 
 recursion nesting (structural, approximate):
   triple         function             levels
-  Prelude:25:17  Prelude.d2c          0, 1
-  Prelude:58:32  Prelude.foldr.fixed  0, 1
+  Prelude:23:17  Prelude.d2c          0, 1
+  Prelude:56:32  Prelude.foldr.fixed  0, 1
 
 maximum nesting depth: 2
 
@@ -18,7 +18,6 @@ bindings used below the level they were bound at:
   Prelude.dMinus.a          !  (1 level below its binding)
   Prelude.foldr.f           !  (1 level below its binding)
   simpleplus.main.inString  !  (1 level below its binding)
-  simpleplus.main.input     !  (1 level below its binding)
   simpleplus.main.r         !  (1 level below its binding)
   simpleplus.main.x         !  (1 level below its binding)
   simpleplus.main.y         !  (1 level below its binding)

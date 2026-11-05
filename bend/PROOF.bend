@@ -127,9 +127,9 @@ law checked_val:
 def checked_val(site, w, c, c2):
   match w:
     case Sm.WZero{}:
-      ihc => done => ihc(done)
-    case Sm.WPair{a, b}:
       ihc => done => {==}
+    case Sm.WPair{a, b}:
+      ihc => done => ihc(done)
     case Sm.WCode{fi, b}:
       ihc => done => {==}
     case Sm.WGate{}:
@@ -982,13 +982,13 @@ def checked_rel(site, tw, cw, cm):
   match tw:
     case Sm.Val{w}:
       match w:
-        case Sm.WZero{}:
+        case Sm.WPair{a, b}:
           h => h
         case Sm.WHole{p}:
           h => {==}
         case Sm.WMark{at}:
           h => mark_any(at, cm)
-        case Sm.WPair{a, b}:
+        case Sm.WZero{}:
           h => mark_any(E.AtCheck{site}, cm)
         case Sm.WCode{fi, y}:
           h => mark_any(E.AtCheck{site}, cm)
@@ -1532,9 +1532,9 @@ def checked_nobs(site, t, c):
     case Sm.Val{w}:
       match w:
         case Sm.WZero{}:
-          ht => hc => hc
-        case Sm.WPair{a, b}:
           ht => hc => Unit{}
+        case Sm.WPair{a, b}:
+          ht => hc => hc
         case Sm.WCode{fi, y}:
           ht => hc => Unit{}
         case Sm.WGate{}:
@@ -3389,9 +3389,9 @@ def watch_pr(es, site, rt, rc, ct, cc):
     case Sm.Val{w}:
       match w:
         case Sm.WZero{}:
-          ht => hc => hv => (%Equal.sym(Sm.R, ct, Sm.Val{Sm.WZero{}}, ht) : {Sm.checked(site, _, cc) == pr(es, rc) : Sm.R}; hc(hv))
+          ht => hc => hv => (%Equal.sym(Sm.R, ct, Sm.Val{Sm.WZero{}}, ht) : {Sm.checked(site, _, cc) == pr(es, Sm.checked(site, Sm.Val{Sm.WZero{}}, rc)) : Sm.R}; {==})
         case Sm.WPair{a, b}:
-          ht => hc => hv => (%Equal.sym(Sm.R, ct, pr(es, Sm.Val{Sm.WPair{a, b}}), ht) : {Sm.checked(site, _, cc) == pr(es, Sm.checked(site, Sm.Val{Sm.WPair{a, b}}, rc)) : Sm.R}; {==})
+          ht => hc => hv => (%Equal.sym(Sm.R, ct, pr(es, Sm.Val{Sm.WPair{a, b}}), ht) : {Sm.checked(site, _, cc) == pr(es, rc) : Sm.R}; hc(hv))
         case Sm.WCode{fi, y}:
           ht => hc => hv => (%Equal.sym(Sm.R, ct, pr(es, Sm.Val{Sm.WCode{fi, y}}), ht) : {Sm.checked(site, _, cc) == pr(es, Sm.checked(site, Sm.Val{Sm.WCode{fi, y}}, rc)) : Sm.R}; {==})
         case Sm.WGate{}:
@@ -5410,28 +5410,29 @@ law checked_ph:
   for +b: Sm.W
   for v: Sm.W
   for +cd: Sm.R
-  {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{hf(Sm.WPair{a, b}, v)}, cd)) == Sm.checked(site, Sm.Val{hf(Sm.WPair{a, b}, v)}, cd) : Sm.R}
+  for +cp: Sm.R
+  {rhf(cp, cd) == cd : Sm.R} -> {rhf(cp, Sm.checked(site, Sm.Val{hf(Sm.WPair{a, b}, v)}, cd)) == Sm.checked(site, Sm.Val{hf(Sm.WPair{a, b}, v)}, cd) : Sm.R}
 
-def checked_ph(site, a, b, v, cd):
+def checked_ph(site, a, b, v, cd, cp):
   match v:
     case Sm.WZero{}:
-      {==}
+      h => h
     case Sm.WPair{c, d}:
-      {==}
+      h => h
     case Sm.WCode{fi2, y2}:
-      {==}
+      h => h
     case Sm.WGate{}:
-      {==}
+      h => h
     case Sm.WAbort{at2}:
-      {==}
+      h => h
     case Sm.WAborted{at2, m2}:
-      {==}
+      h => h
     case Sm.WStuck{}:
-      {==}
+      h => h
     case Sm.WHole{q}:
-      {==}
+      h => h
     case Sm.WMark{at2}:
-      {==}
+      h => h
 
 law checked_abh:
   for +site: U32
@@ -5478,13 +5479,13 @@ def checked_h(site, td, tp, cd, cp):
         case Sm.Val{w}:
           match w:
             case Sm.WZero{}:
-              h1 => h2 => (%val_inj(Sm.WZero{}, v, h1) : {rhf(cp, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; h2)
+              h1 => h2 => (%val_inj(Sm.WZero{}, v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; {==})
             case Sm.WHole{p}:
               h1 => h2 => {==}
             case Sm.WMark{+at}:
               h1 => h2 => (%val_inj(Sm.WMark{at}, v, h1) : {rhf(Sm.Val{Sm.WMark{at}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; {==})
             case Sm.WPair{+a, +b}:
-              h1 => h2 => (%val_inj(hf(Sm.WPair{a, b}, v), v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; checked_ph(site, a, b, v, cd))
+              h1 => h2 => (%val_inj(hf(Sm.WPair{a, b}, v), v, h1) : {rhf(cp, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; checked_ph(site, a, b, v, cd, cp)(h2))
             case Sm.WAborted{+at, +m}:
               h1 => h2 => (%val_inj(hf(Sm.WAborted{at, m}, v), v, h1) : {rhf(Sm.Val{Sm.WMark{E.AtCheck{site}}}, Sm.checked(site, Sm.Val{_}, cd)) == Sm.checked(site, Sm.Val{_}, cd) : Sm.R}; checked_abh(site, at, m, v, cd))
             case Sm.WCode{+fi, +y}:
@@ -6223,9 +6224,9 @@ def checked_nofi(site, t, c):
     case Sm.Val{w}:
       match w:
         case Sm.WZero{}:
-          ht => hc => hc
-        case Sm.WPair{a, b}:
           ht => hc => Unit{}
+        case Sm.WPair{a, b}:
+          ht => hc => hc
         case Sm.WCode{fi, y}:
           ht => hc => Unit{}
         case Sm.WGate{}:

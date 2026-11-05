@@ -17,6 +17,7 @@ import ./Split.bend as Sp
 import ./Lift.bend as Lf
 import ./EALm.bend as EM
 import ./Partial.bend as Pe
+import ./Session.bend as Ss
 
 # The REPL (master's app/Repl.hs, `telomare-repl`). Its bindings are the
 # Prelude's definitions, then those of each assignment and loaded file in
@@ -101,23 +102,28 @@ def evaluated(st: Rf.St) -> String:
 def value(+x: Co.V) -> String:
   evaluated(Rf.run(Co.VSetEnv{Co.VPair{Co.VDefer{Co.neg(1), no.abort(x)}, Co.VZero{}}}))
 
+def static.or(m: Maybe<&2, String>, +plain: Co.V) -> String:
+  match m:
+    case Some{e}:
+      e
+    case None{}:
+      value(plain)
+
 def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
   match r:
     case Fail{f}:
       "error: the expression did not size"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, +plain}:
-          value(plain)
+        case Sz.Sized{counts, expr, checks, +plain, p}:
+          static.or(Ss.static.check(plain), plain)
 
-def compiled(r: Result<&2, &2, String, Fr.Program>) -> String:
+def compiled(r: Result<&2, &2, String, T.C>) -> String:
   match r:
     case Fail{e}:
       e
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, g, boundary}:
-          sized(Sz.size(65536, False{}, run))
+    case Done{+run}:
+      sized(Sz.size(65536, False{}, run))
 
 # `:t`
 # ----
@@ -141,8 +147,8 @@ def typed.term(r: Result<&2, &2, Rs.ResErr, T.Term2()>) -> String:
     case Done{t}:
       verdict(EM.lifted.main(Lf.defer.lift(Sp.split(t))))
 
-def program.text(r: Result<&2, &2, Fr.Err, Fr.Program>) -> String:
-  compiled(Fr.rendered.program(r))
+def program.text(r: Result<&2, &2, Fr.Err, T.C>) -> String:
+  compiled(Fr.rendered(r))
 
 # Reading a line (runReplParser)
 # ------------------------------
@@ -287,7 +293,14 @@ def bind(+bs: List<&2, Rs.NB>, new: List<&2, Rs.NB>) -> List<&2, Rs.NB>:
 # printLastExpr: the expression under a let of every binding (those it
 # reaches), compiled as a unit test is, run, and printed.
 def run.expr(+bs: List<&2, Rs.NB>, +x: S.Expanded()) -> String:
-  program.text(Fr.program.of(D.desugar(Rs.main.let(x, Rs.prune(x, bs), S.loc(Empty, Unit, Empty, x)))))
+  program.text(Fr.term.of(D.desugar(Rs.main.let(x, Rs.prune(x, bs), S.loc(Empty, Unit, Empty, x)))))
+
+def alone.checked(m: Maybe<&2, String>, +x: Co.V) -> Maybe<&2, Co.V>:
+  match m:
+    case Some{f}:
+      None{}
+    case None{}:
+      Some{no.abort(x)}
 
 def alone.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Co.V>:
   match r:
@@ -295,19 +308,17 @@ def alone.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Co.V>:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, x, checks, plain}:
-          Some{no.abort(x)}
+        case Sz.Sized{counts, +x, checks, plain, p}:
+          alone.checked(Ss.static.check(x), x)
 
 # `:d`, `:p`, `:t`: the expression alone (resolveBinding: `_tmp_`, with no
 # other binding).
-def alone(r: Result<&2, &2, Fr.Err, Fr.Program>) -> Maybe<&2, Co.V>:
+def alone(r: Result<&2, &2, Fr.Err, T.C>) -> Maybe<&2, Co.V>:
   match r:
     case Fail{e}:
       None{}
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, g, boundary}:
-          alone.sized(Sz.size(65536, False{}, run))
+    case Done{+run}:
+      alone.sized(Sz.size(65536, False{}, run))
 
 def dumped(m: Maybe<&2, Co.V>) -> String:
   match m:
@@ -335,14 +346,14 @@ type Cmd is Data:
 def dump.of(r: RS) -> String:
   match r:
     case RExpr{x}:
-      dumped(alone(Fr.program.of(D.desugar(x))))
+      dumped(alone(Fr.term.of(D.desugar(x))))
     case _:
       "parse error"
 
 def partial.of(r: RS) -> String:
   match r:
     case RExpr{x}:
-      partial.shown(alone(Fr.program.of(D.desugar(x))))
+      partial.shown(alone(Fr.term.of(D.desugar(x))))
     case _:
       "parse error"
 

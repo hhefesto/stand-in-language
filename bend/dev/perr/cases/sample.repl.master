@@ -4,7 +4,7 @@
 1 | )
   | ^
 unexpected ')'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 1
 1:3:
   |
@@ -34,7 +34,12 @@ expecting ')' or ','
 unexpected '('
 expecting ')' or ','
 == 5
-OK
+1:16:
+  |
+1 | \input -> (map (\x -> dP#lus x 48) (quicksort (take 1 [])), 0)
+  |                ^
+unexpected '('
+expecting ')' or ','
 == 6
 1:35:
   |
@@ -55,7 +60,7 @@ expecting ')' or ','
 1 | \input -> (map> dPlus x 48) [(dDiv (dMinus 5 1) (succ (dMinus 3 1)))], 0)
   |               ^
 unexpected '>'
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+expecting '"', '$', '(', ')', ',', '[', '{', integer, letter, or variable
 == 9
 2:5:
   |
@@ -87,7 +92,7 @@ OK
 1 | \input -> (map (\x -> dPlus x 48) [(dMod (dFactorial 3) (succ 1))], )0
   |                                                                     ^^
 unexpected ")0"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 15
 OK
 == 16
@@ -246,7 +251,7 @@ OK
 1 | \input -> (map (\x -> dPlus x 48) succ [4, 4]), 0)
   |                                               ^
 unexpected ','
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 42
 1:16:
   |
@@ -276,7 +281,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus x 48dFactorial 2)], 0)
   |                                              ^
 unexpected ']'
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 47
 OK
 == 48
@@ -285,7 +290,7 @@ OK
 1 | \input -> (map (\x -> dPlus x 48) (range 2 0), =)
   |                                                ^^
 unexpected "=)"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 49
 OK
 == 50
@@ -303,7 +308,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus x 48) [(let y = (succ (gcd (succ 2) (succ 2))) in dPlus y y)], 0)   ,
   |                                                                                                 ^
 unexpected ','
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 53
 OK
 == 54
@@ -340,7 +345,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus x 4tLength (concat [(map succ [3, 3, 6]), (if 1 then [4, 0, 1] else [1, 4, 2])]))], 0)
   |                                                                                                              ^
 unexpected ']'
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 59
 OK
 == 60
@@ -381,7 +386,7 @@ expecting ')' or ','
 1 | input -> (map (\x -> dPlus x 48) [(if (or 1 1) then (if 1 then 0 else 0) else (dFactorial 0))], 0)
   |       ^
 unexpected '-'
-expecting '"', '#', '$', '(', ':', '[', '{', assignment =, end of input, integer, or letter
+expecting '"', '$', '(', ':', '[', '{', assignment =, end of input, integer, or letter
 == 67
 1:35:
   |
@@ -404,7 +409,7 @@ OK
 1 | \input -> (map (\x -> dPlus8) (map (\x -> dPlus x (dMinus (gcd (succ 1) (succ 2)        )) (dTimes 2 3))) (zipWith dPlus (concat [[6], []]) (range 0 0))), 0)
   |                                                                                                                                                          ^
 unexpected ','
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 71
 OK
 == 72
@@ -451,7 +456,7 @@ OK
 1 | \input -> (map (\x -> dPlus x 48) p (\x -> dPlus x 3) (foldr (\x l -> (x, l)) 0 (range (dMinus 0 0) 0))), 0)
   |                                                                                                         ^
 unexpected ','
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 82
 1:35:
   |
@@ -472,7 +477,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus x 48 [(c2d $0)], 0)
   |                                                ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 85
 1:35:
   |
@@ -525,7 +530,7 @@ expecting '"', '(', '_', annotated pattern, integer, or letter
 1 | \input -> (map (\x -> dPlus x 48) [(dPlus (dMinus (foldl (\a x -> dPlus a x) (min 2 4) (filter (\x -> dEqual x 3) [4, 1])) (dPlus 1 (if 0 then 5 else 0))) (dPlus (if (toBool 0) then (dMinus 4 0) else ((\f -> f (f 5)) (\z -> (dPlus z 3)))) (succ (dDiv 2 (succ 2)))))],
   |                                                                                                                                                                                                                                                                            ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 94
 1:4:
   |

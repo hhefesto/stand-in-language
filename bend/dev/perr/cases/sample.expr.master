@@ -4,7 +4,7 @@
 1 | \input -> (map (\x -> dPlus x 48)
   |                                  ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 1
 1:16:
   |
@@ -61,7 +61,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus x 48) range 2 0), 0)
   |                                             ^
 unexpected ','
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 12
 2:26:
   |
@@ -77,7 +77,12 @@ expecting ')' or ','
 unexpected '('
 expecting ')' or ','
 == 14
-OK
+1:35:
+  |
+1 | \input -> (map (\x -> dPlus x 48) [(dDiv #a(dMinus 5 1) (succ (dMinus 3 1)))], 0)
+  |                                   ^
+unexpected '['
+expecting ')' or ','
 == 15
 OK
 == 16
@@ -130,7 +135,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus x 48) (concat [(zipWith dPlus [5] (if 0 then [2] else [2, 1])), (map succ [1, 3, 3])]), 
   |                                                                                                                     ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 24
 OK
 == 25
@@ -181,21 +186,21 @@ expecting ')' or ','
 1 | \input -> (m'p (\x -> dPlus x 48) [(dFactorial 2)], 0)
   |             ^
 unexpected '''
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+expecting '"', '$', '(', ')', ',', '[', '{', integer, letter, or variable
 == 32
 1:35:
   |
 1 | \input -> (map (\x -> dPlus x 48) 
   |                                   ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 33
 1:106:
   |
 1 | \input -> (map (\x -> dPlus x 48) [(min (min (dTimes 1 3) (foldr (\x a -> dPlus x a) 0 [])) (c2d $2))], 0,
   |                                                                                                          ^
 unexpected ','
-expecting '"', '#', '$', '(', ')', '[', '{', digit, integer, or letter
+expecting '"', '$', '(', ')', '[', '{', digit, integer, or letter
 == 34
 1:35:
   |
@@ -249,7 +254,7 @@ OK
 1 | \input -> (map (\x -> dPlus x 48) [((\f -> f (f (gcd (succ 0) (succ 2)))) (\z -> (succ z)))], )
   |                                                                                               ^
 unexpected ')'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 44
 OK
 == 45
@@ -294,7 +299,7 @@ OK
 1 | \input -> (map (\x -> dPlus x 48) Div (dPlus (if 1 then 0 else 3) (foldr (\x a -> dPlus x a) 0 [0, 0, 5])) (succ 0))], 0)
   |                                                                                                                     ^
 unexpected ']'
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 54
 2:28:
   |
@@ -326,7 +331,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus) x 48) [(c2d (plus $2 $1))], 0)
   |                                                        ^
 unexpected ','
-expecting '"', '#', '$', '(', '[', '{', end of input, integer, or letter
+expecting '"', '$', '(', '[', '{', end of input, integer, or letter
 == 60
 1:35:
   |
@@ -347,7 +352,7 @@ expecting ')' or ','
 1 | \input -> (--map (\x -> dPlus x 48) [(max 5 5)], 0)
   |                                                    ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 63
 1:16:
   |
@@ -375,7 +380,7 @@ expecting ')' or ','
 1 | \input -> (>map (\x -> dPlus x 48) [(dFactorial 2)], 0)
   |            ^^^^
 unexpected ">map"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 67
 1:51:
   |
@@ -400,7 +405,7 @@ expecting ')' or ','
 1 | \input -> (map (\x -> dPlus x  [(dFactorial 2)], 0)
   |                                                    ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 72
 1:35:
   |
@@ -421,18 +426,18 @@ expecting ')', ',', or variable
 1 | \input -> (map (\x -> dPlus x 48) [(listLength (take 1 [2]))], 
   |                                                                ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 75
 1:1:
   |
 1 | )
   | ^
 unexpected ')'
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 76
 1:7:
   |
 1 | \x -> 
   |       ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter

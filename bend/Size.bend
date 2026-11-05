@@ -5,8 +5,9 @@ import ./Term.bend as T
 import ./Loc.bend as L
 import ./Sem.bend as Sm
 import ./Check.bend as Ck
+import ./Plan.bend as Pl
 
-# Sizing (haskell-final's Telomare.Size, Size.IR and the sizing half of
+# Sizing (master's Telomare.Size, Size.IR and the sizing half of
 # Telomare.Machine). One abstract run of main over a symbolic input finds
 # how deep each recursion can go:
 #
@@ -15,16 +16,18 @@ import ./Check.bend as Ck
 #    input positions must be 0 (zeroes) and which must be pairs.
 # 2. The main run: input positions stand for unknown data; a gate on one
 #    explores both branches as a superposition (EitherPF); each recursion
-#    unrolls one step at a time, recording the depth where its test says
-#    stop (SizeStageF). A test that depends on input nothing bounds, or a
+#    unrolls one step at a time, recording every depth whose test it reaches
+#    (SizeStageF). A test that depends on input nothing bounds, or a
 #    recursion past the budget, fails sizing.
 # 3. Each recursion site becomes a chain of that many steps
 #    (sizedRecursionChain), over the program as written.
+# 4. Where the checks go (Plan.bend): those that can never fail are erased,
+#    and those decided by main's input alone move into its input prologue.
 #
 # The evaluator is Haskell's transformNoDeferM over its step chain: children
 # first (not under a Defer), then the step on the node; applying a closure
-# evaluates its body with Env replaced by the argument. The three runs are
-# one machine with a mode.
+# evaluates its body with Env replaced by the argument. The runs of 1 and 2
+# are one machine with a mode.
 
 # Which run: the main sizing run, the input limits pass, or a refinement
 # check inside it.
@@ -37,11 +40,10 @@ type Mode is Data:
 type Cfg is Data:
   Cfg{+mode: Mode, +zeros: Set(), +max: U32}
 
-# A result: the value, the counts found (SizedRecursion), the input
-# restrictions found (zeroes, pairs), the checks they came from, by number,
-# and whether each restriction is exactly what its check needs.
+# A result: the value, the counts found (SizedRecursion), and the input
+# restrictions found (zeroes, pairs).
 type R is Data:
-  R{+v: E.X, +s: List<&2, E.TS>, +z: Set(), +p: Set(), +c: Set(), +e: Bool}
+  R{+v: E.X, +s: List<&2, E.TS>, +z: Set(), +p: Set()}
 
 type Job is Data:
   JEval{+t: E.X, +env: E.X}
@@ -71,40 +73,31 @@ type SizeFail is Data:
   Internal{+msg: String}
   Leftover{+form: String}
 
-# Whether the erasures sizing proved are sound (SIZING-PROOF.md
-# §4): Unproven, when sizing proved nothing to erase; Checked, the erasure
-# checker's verdict on main's witness, and the runs it had left. Only a
-# Proven verdict erases: the theorem in PROOF.bend covers exactly that.
+# Whether the erasures past the check analysis's are sound (SIZING-PROOF.md
+# §4): Unproven, when the checker did not run; Checked, its verdict on main's
+# witness, and the runs it had left. Only a Proven verdict erases: the theorem
+# in PROOF.bend covers exactly that.
 type Erasure is Data:
   Unproven{}
   Checked{+seen: Ck.Seen}
 
-# What sizing proved of the refinement checks, by number (DESIGN §10).
-# validating: the checks the input restrictions came from, which the main
-# run therefore assumed passed; boundary: main's input refinements, which
-# the session runs before main on each line it reads; reaching: the checks
-# whose abort reaches the result on some input the main run explored;
-# opening: those whose abort reaches main's result on 0, the session's
-# opening call; proven: whether every other check is discharged. It is
-# when the main run explored every input main is called on: only the
-# boundary validates the input, with restrictions exactly what its checks
-# need, and the results are data, as a session's must be. erasure: what the
-# erasure checker made of what sizing proved.
+# What became of the refinement checks. keep: those main still makes, by origin
+# key, or None when analyzing them was over budget and all stay; hoisted: those
+# its input prologue makes; erasure: what the erasure checker made of the rest.
 type Checks is Data:
-  Checks{+validating: Set(), +boundary: Set(), +reaching: Set(), +opening: Set(), +proven: Bool, +erasure: Erasure}
+  Checks{+keep: Maybe<&2, Set()>, +hoisted: Set(), +erasure: Erasure}
 
-# Main as sizing received it, and its guard as the session runs it (as Sem
-# reads it, None if it has none): what the erasure checker runs; and
-# whether to run it (a plain run, on the reference evaluator, runs main
-# with every check, so it needs no erasure: the checker's runs are most of
-# a small program's sizing, simpleplus's 6 s of 7.7).
-type Watched is Data:
-  Watched{+x: E.X, +g: Maybe<&2, E.X>, +check: Bool}
-
-# The sized program, as the runnable core, the counts that sized it, and
-# what sizing proved of its checks.
+# The sized program, as the runnable core: the counts that sized it; expr, what
+# the net runs (plain with every chain's bottom erased, where the erasure
+# checker proves that); what became of its checks; plain, master's program; and
+# master's input prologue, which runs before main on every line.
 type Sized is Data:
-  Sized{+counts: List<&2, E.TS>, +expr: Co.V, +checks: Checks, +plain: Co.V}
+  Sized{+counts: List<&2, E.TS>, +expr: Co.V, +checks: Checks, +plain: Co.V, +prologue: Maybe<&2, Co.V>}
+
+def checks.keep(c: Checks) -> Maybe<&2, Set()>:
+  match c:
+    case Checks{keep, h, e}:
+      keep
 
 type InSt is Data:
   InSt{+split: Bool, +p: String}
@@ -154,37 +147,37 @@ def ts.merge(xs: List<&2, E.TS>, ys: List<&2, E.TS>) -> List<&2, E.TS>:
       ts.merge(rest, ts.insert(ys, x))
 
 def ret(v: E.X) -> R:
-  R{v, [], Set.new(), Set.new(), Set.new(), True{}}
+  R{v, [], Set.new(), Set.new()}
 
 def r.v(r: R) -> E.X:
   match r:
-    case R{v, s, z, p, c, e}:
+    case R{v, s, z, p}:
       v
 
 # r's findings added to q's result.
 def plus(r: R, q: R) -> R:
   match r:
-    case R{v1, s1, z1, p1, c1, e1}:
+    case R{v1, s1, z1, p1}:
       match q:
-        case R{v2, s2, z2, p2, c2, e2}:
-          R{v2, ts.merge(s1, s2), union(z1, z2), union(p1, p2), union(c1, c2), e1 && e2}
+        case R{v2, s2, z2, p2}:
+          R{v2, ts.merge(s1, s2), union(z1, z2), union(p1, p2)}
 
 def with.value(r: R, +v: E.X) -> R:
   match r:
-    case R{v1, s, z, p, c, e}:
-      R{v, s, z, p, c, e}
+    case R{v1, s, z, p}:
+      R{v, s, z, p}
 
 def pair.of(ra: R, rb: R) -> R:
   match ra:
-    case R{va, sa, za, pa, ca, ea}:
+    case R{va, sa, za, pa}:
       match rb:
-        case R{vb, sb, zb, pb, cb, eb}:
-          R{E.XPair{va, vb}, ts.merge(sa, sb), union(za, zb), union(pa, pb), union(ca, cb), ea && eb}
+        case R{vb, sb, zb, pb}:
+          R{E.XPair{va, vb}, ts.merge(sa, sb), union(za, zb), union(pa, pb)}
 
 def staged(sr: List<&2, E.TS>, r: R) -> R:
   match r:
-    case R{v, s, z, p, c, e}:
-      R{v, ts.merge(sr, s), z, p, c, e}
+    case R{v, s, z, p}:
+      R{v, ts.merge(sr, s), z, p}
 
 def bad(msg: String) -> R:
   ret(E.XError{msg})
@@ -258,9 +251,28 @@ def data.eq(a: E.X, b: E.X) -> Bool:
     case _:
       False{}
 
+def is.sizing(at: E.Site) -> Bool:
+  match at:
+    case E.AtRecursion{t}:
+      True{}
+    case _:
+      False{}
+
+def aborted.pick(a: Bool, +sb: E.Site, ma: E.X, mb: E.X) -> Bool:
+  match a:
+    case True{}:
+      is.sizing(sb) && data.eq(ma, mb)
+    case False{}:
+      Bool.not(is.sizing(sb))
+
+def aborted.eq(+sa: E.Site, +sb: E.Site, ma: E.X, mb: E.X) -> Bool:
+  aborted.pick(is.sizing(sa), sb, ma, mb)
+
 # The same outcome at the top (ShallowEq1): a superposition of two equal
-# outcomes is just the outcome. Aborts are equal only from the same site,
-# so merging keeps every site.
+# outcomes is just the outcome. The program's own aborts are all alike to
+# sizing, which only cares that a path aborts; the sizing analysis's aborts
+# carry its verdict in their messages, so two of them are the same only when
+# the messages are.
 def shallow.eq(a: E.X, b: E.X) -> Bool:
   match a:
     case E.XZero{}:
@@ -275,16 +287,10 @@ def shallow.eq(a: E.X, b: E.X) -> Bool:
           U32.is_eq(fa, fb)
         case _:
           False{}
-    case E.XAborted{sa, ma}:
+    case E.XAborted{+sa, ma}:
       match b:
-        case E.XAborted{sb, mb}:
-          E.site.eq(sa, sb) && data.eq(ma, mb)
-        case _:
-          False{}
-    case E.XAbort{sa}:
-      match b:
-        case E.XAbort{sb}:
-          E.site.eq(sa, sb)
+        case E.XAborted{+sb, mb}:
+          aborted.eq(sa, sb, ma, mb)
         case _:
           False{}
     case _:
@@ -297,16 +303,39 @@ def merge.pick(same: Bool, n: Maybe<&2, String>, a: E.X, b: E.X) -> E.X:
     case False{}:
       E.XEither{n, a, b}
 
-# mergeShallow
+# A sizing run's AbortStuck.
+def is.stuck(x: E.X) -> Bool:
+  match x:
+    case E.XAborted{E.AtRecursion{t}, E.XPair{E.XPair{E.XPair{E.XPair{E.XPair{E.XZero{}, E.XZero{}}, E.XZero{}}, E.XZero{}}, E.XZero{}}, E.XZero{}}}:
+      True{}
+    case _:
+      False{}
+
+def merge.bs(stuck: Bool, n: Maybe<&2, String>, +a: E.X, +b: E.X) -> E.X:
+  match stuck:
+    case True{}:
+      a
+    case False{}:
+      merge.pick(shallow.eq(a, b), n, a, b)
+
+def merge.as(stuck: Bool, n: Maybe<&2, String>, +a: E.X, +b: E.X) -> E.X:
+  match stuck:
+    case True{}:
+      b
+    case False{}:
+      merge.bs(is.stuck(b), n, a, b)
+
+# mergeShallow. A stuck path has no value to contribute: it does not exist, or
+# the run stops there.
 def merge.shallow(n: Maybe<&2, String>, +a: E.X, +b: E.X) -> E.X:
-  merge.pick(shallow.eq(a, b), n, a, b)
+  merge.as(is.stuck(a), n, a, b)
 
 def merge2(n: Maybe<&2, String>, ra: R, rb: R) -> R:
   match ra:
-    case R{va, sa, za, pa, ca, ea}:
+    case R{va, sa, za, pa}:
       match rb:
-        case R{vb, sb, zb, pb, cb, eb}:
-          R{merge.shallow(n, va, vb), ts.merge(sa, sb), union(za, zb), union(pa, pb), union(ca, cb), ea && eb}
+        case R{vb, sb, zb, pb}:
+          R{merge.shallow(n, va, vb), ts.merge(sa, sb), union(za, zb), union(pa, pb)}
 
 def is.gate.selector(x: E.X) -> Bool:
   match x:
@@ -314,6 +343,19 @@ def is.gate.selector(x: E.X) -> Bool:
       U32.is_eq(fi, Co.left.gate.ind()) || U32.is_eq(fi, Co.right.gate.ind())
     case _:
       False{}
+
+# A gate's result once gates distribute over superpositions: a branch selector,
+# or a superposition of them (an aborted gate stays aborted). Choosing a branch
+# with one runs no code, so it needs no environment restricted to the inputs
+# that make each choice (isSelectorTree).
+def is.selector.tree(x: E.X) -> Bool:
+  match x:
+    case E.XEither{n, a, b}:
+      is.selector.tree(a) && is.selector.tree(b)
+    case E.XAborted{at, m}:
+      True{}
+    case other:
+      is.gate.selector(other)
 
 def gr.outcome(n: Maybe<&2, String>, oa: Maybe<&2, E.X>, ob: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
   match oa:
@@ -530,9 +572,158 @@ def gate.var(m: Mode, +p: String) -> E.X:
 def gate.any(m: Mode) -> E.X:
   match m:
     case MCheck{}:
-      E.XError{"unexpected gate on an unsized value in a check"}
+      E.XBarrier{E.fill(E.XGate{}, E.XAny{})}
     case _:
       E.XAny{}
+
+# A step the real evaluator is stuck on (stuckSizingStepM): the sizing analysis's
+# AbortStuck, which needs no recursion counted after it. The other runs never
+# meet one (master throws).
+def stuck.or(m: Mode, +msg: String) -> E.X:
+  match m:
+    case MSize{}:
+      E.XAborted{E.AtRecursion{0}, E.abort.stuck()}
+    case _:
+      E.XError{msg}
+
+# Structural equality, code by its function index.
+def x.eq(a: E.X, b: E.X) -> Bool:
+  match a:
+    case E.XZero{}:
+      match b:
+        case E.XZero{}:
+          True{}
+        case _:
+          False{}
+    case E.XPair{a1, a2}:
+      match b:
+        case E.XPair{b1, b2}:
+          x.eq(a1, b1) && x.eq(a2, b2)
+        case _:
+          False{}
+    case E.XEnv{}:
+      match b:
+        case E.XEnv{}:
+          True{}
+        case _:
+          False{}
+    case E.XSetEnv{x}:
+      match b:
+        case E.XSetEnv{y}:
+          x.eq(x, y)
+        case _:
+          False{}
+    case E.XDefer{fa, x}:
+      match b:
+        case E.XDefer{fb, y}:
+          U32.is_eq(fa, fb)
+        case _:
+          False{}
+    case E.XGate{}:
+      match b:
+        case E.XGate{}:
+          True{}
+        case _:
+          False{}
+    case E.XLeft{x}:
+      match b:
+        case E.XLeft{y}:
+          x.eq(x, y)
+        case _:
+          False{}
+    case E.XRight{x}:
+      match b:
+        case E.XRight{y}:
+          x.eq(x, y)
+        case _:
+          False{}
+    case E.XAborted{sa, ma}:
+      match b:
+        case E.XAborted{sb, mb}:
+          E.site.eq(sa, sb) && x.eq(ma, mb)
+        case _:
+          False{}
+    case E.XVar{p}:
+      match b:
+        case E.XVar{q}:
+          String.eq(p, q)
+        case _:
+          False{}
+    case E.XAny{}:
+      match b:
+        case E.XAny{}:
+          True{}
+        case _:
+          False{}
+    case E.XBarrier{x}:
+      match b:
+        case E.XBarrier{y}:
+          x.eq(x, y)
+        case _:
+          False{}
+    case E.XLefts{n, x}:
+      match b:
+        case E.XLefts{m, y}:
+          U32.is_eq(n, m) && x.eq(x, y)
+        case _:
+          False{}
+    case E.XRights{n, x}:
+      match b:
+        case E.XRights{m, y}:
+          U32.is_eq(n, m) && x.eq(x, y)
+        case _:
+          False{}
+    case _:
+      False{}
+
+def abort.free(x: E.X) -> Bool:
+  match x:
+    case E.XAbort{at}:
+      False{}
+    case E.XAborted{at, m}:
+      False{}
+    case E.XPair{a, b}:
+      abort.free(a) && abort.free(b)
+    case E.XSetEnv{a}:
+      abort.free(a)
+    case E.XDefer{fi, a}:
+      abort.free(a)
+    case E.XLeft{a}:
+      abort.free(a)
+    case E.XRight{a}:
+      abort.free(a)
+    case E.XEither{n, a, b}:
+      abort.free(a) && abort.free(b)
+    case E.XBarrier{a}:
+      abort.free(a)
+    case E.XLefts{n, a}:
+      abort.free(a)
+    case E.XRights{n, a}:
+      abort.free(a)
+    case _:
+      True{}
+
+def switch.pick(same: Bool, +l: E.X, +r: E.X, +s: E.X) -> E.X:
+  match same:
+    case True{}:
+      l
+    case False{}:
+      E.XBarrier{E.gate.switch(l, r, s)}
+
+# An undecided gate over its evaluated branches. A gate whose branches are the
+# same is that branch, unless its scrutinee can abort: a nested check that
+# passes whichever way an input bit goes then reduces to 0 rather than staying a
+# residual.
+def switch(+l: E.X, +r: E.X, +s: E.X) -> E.X:
+  switch.pick(x.eq(l, r) && abort.free(s), l, r, s)
+
+# A gate's own result, flattened (gateSuper): the gate on a where position n is
+# 0, and on b where it is a pair, each side flattened to the choices it can make
+# under an unknown tag. Flattening the whole superposition under n, as this once
+# did, says the left branch is taken where n is 0, which is wrong when a goes
+# right or both ways.
+def gate.side(+x: E.X) -> E.X:
+  fold.gate(None{}, gate.result(x))
 
 def gate.on(+cfg: Cfg, e: E.X) -> E.X:
   match e:
@@ -546,35 +737,27 @@ def gate.on(+cfg: Cfg, e: E.X) -> E.X:
       gate.any(mode.of(cfg))
     case E.XVar{p}:
       gate.var(mode.of(cfg), p)
-    case E.XEither{+n, a, b}:
-      fold.gate(n, gate.result(E.XEither{n, a, b}))
+    case E.XEither{+n, +a, +b}:
+      merge.shallow(n, gate.side(a), gate.side(b))
     case E.XBarrier{s}:
-      E.XBarrier{E.fill(E.XGate{}, s)}
+      match s:
+        case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, +s2}}, E.XPair{l, r}}}:
+          switch(gate.on(cfg, l), gate.on(cfg, r), s2)
+        case other:
+          E.XBarrier{E.fill(E.XGate{}, other)}
+    case E.XDefer{fi, x}:
+      stuck.or(mode.of(cfg), "sizeTermM unhandled gate")
     case _:
       E.XError{"sizeTermM unhandled gate"}
 
-def abort.var(m: Mode, at: E.Site) -> E.X:
-  match m:
-    case MSize{}:
-      E.XAborted{at, E.abort.any()}
-    case _:
-      E.XError{"unexpected abort on input in a check"}
-
-# An abort from site at, applied to e.
-def abort.on(+cfg: Cfg, +at: E.Site, e: E.X) -> E.X:
+# An abort node, its message evaluated (abortStep): an abort in the message is
+# the one that counts, and an aborted value keeps only its message's data.
+def abort.on(+at: E.Site, e: E.X) -> E.X:
   match e:
     case E.XAborted{at2, m}:
       E.XAborted{at2, m}
-    case E.XZero{}:
-      E.XDefer{Co.abort.ind(), E.XEnv{}}
-    case E.XPair{a, b}:
-      E.XAborted{at, trunc(E.XPair{a, b})}
-    case E.XVar{p}:
-      abort.var(mode.of(cfg), at)
-    case E.XBarrier{x}:
-      E.XBarrier{E.fill(E.XAbort{at}, x)}
-    case _:
-      E.XError{"sizeTermM unhandled abort"}
+    case other:
+      E.XAborted{at, trunc(other)}
 
 def any.on(m: Mode) -> E.X:
   match m:
@@ -582,6 +765,26 @@ def any.on(m: Mode) -> E.X:
       E.XError{"unexpected unsized value applied in a check"}
     case _:
       E.XAny{}
+
+# A barrier applied to e (sameBranchStep, deferredEvalStep): a gate whose
+# branches are the same is that branch.
+def bar.pick(same: Bool, +l: E.X, +c: E.X, +e: E.X) -> E.X:
+  match same:
+    case True{}:
+      l
+    case False{}:
+      E.XBarrier{E.fill(c, e)}
+
+def bar.fill(+e: E.X, +c: E.X) -> E.X:
+  match e:
+    case E.XPair{+l, +r}:
+      match c:
+        case E.XSetEnv{E.XPair{E.XGate{}, +s}}:
+          bar.pick(x.eq(l, r) && abort.free(s), l, c, e)
+        case _:
+          E.XBarrier{E.fill(c, e)}
+    case _:
+      E.XBarrier{E.fill(c, e)}
 
 # Refinement checks while finding limits
 # --------------------------------------
@@ -687,7 +890,17 @@ def irx.var(expected: Maybe<&2, Bool>, +p: String) -> Maybe<&2, IRX>:
     case None{}:
       Some{IRX{Set.new(), Set.new(), E.XZero{}}}
 
-# extractInputRestrictions' walk.
+# A function value is neither impossible nor restricting.
+def irx.defer(expected: Maybe<&2, Bool>) -> Maybe<&2, IRX>:
+  match expected:
+    case None{}:
+      Some{IRX{Set.new(), Set.new(), E.XZero{}}}
+    case _:
+      None{}
+
+# extractInputRestrictions' walk. An abort never yields a value, so a gate path
+# ending in one is ruled out: a check `if r then c else abort (1, c)` restricts
+# r to a pair.
 def extract(+fuel: Nat, x: E.X, +expected: Maybe<&2, Bool>) -> Maybe<&2, IRX>:
   match fuel:
     case 0n:
@@ -700,8 +913,8 @@ def extract(+fuel: Nat, x: E.X, +expected: Maybe<&2, Bool>) -> Maybe<&2, IRX>:
           irx.pair(expected)
         case E.XVar{p}:
           irx.var(expected, p)
-        case E.XSetEnv{E.XPair{E.XAbort{at}, i}}:
-          extract(f, i, Some{False{}})
+        case E.XDefer{fi, b}:
+          irx.defer(expected)
         case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, s}}, E.XPair{l, r}}}:
           +nl = extract(f, l, expected)
           +nr = extract(f, r, expected)
@@ -709,75 +922,40 @@ def extract(+fuel: Nat, x: E.X, +expected: Maybe<&2, Bool>) -> Maybe<&2, IRX>:
         case _:
           None{}
 
-def none(s: Set()) -> Bool:
-  List.is_empty(&2, String, Set.to_list(s))
-
-def free(m: IRX) -> Bool:
-  match m:
-    case IRX{z, p, v}:
-      none(z) && none(p)
-
-# At a gate, at most one branch gives the expected answer under a
-# restriction of its own. When both can, combining adds both branches'
-# restrictions, which a passing input need not meet.
-def one.restricted(nl: Maybe<&2, IRX>, nr: Maybe<&2, IRX>) -> Bool:
-  match nl:
-    case Some{a}:
-      match nr:
-        case Some{b}:
-          free(a) && free(b)
-        case None{}:
-          True{}
-    case None{}:
-      True{}
-
-# Whether extract's restrictions are exactly what the answer needs: every
-# shape on the way understood (extract reads one it does not as an answer
-# it cannot give), and one.restricted at every gate. Then an input that
-# passes the check meets them, and the main run explored it.
-def exact(+fuel: Nat, x: E.X, +expected: Maybe<&2, Bool>) -> Bool:
-  match fuel:
-    case 0n:
-      False{}
-    case 1n+f:
-      match x:
-        case E.XZero{}:
-          True{}
-        case E.XPair{a, b}:
-          True{}
-        case E.XVar{p}:
-          True{}
-        case E.XSetEnv{E.XPair{E.XAbort{at}, i}}:
-          exact(f, i, Some{False{}})
-        case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, s}}, E.XPair{+l, +r}}}:
-          +nl = extract(f, l, expected)
-          +nr = extract(f, r, expected)
-          one.restricted(nl, nr) && exact(f, l, expected) && exact(f, r, expected) && exact(f, s, irx.expect(nl, nr))
-        case _:
-          False{}
-
-# The check site, if it restricted the input.
-def validating(+site: U32, nothing: Bool) -> Set():
-  match nothing:
-    case True{}:
-      Set.new()
-    case False{}:
-      Set.add(Set.new(), U32.show(site))
-
-def irx.result(+site: U32, m: Maybe<&2, IRX>, +precise: Bool, +c: E.X) -> R:
+def irx.result(m: Maybe<&2, IRX>, +c: E.X) -> R:
   match m:
     case Some{r}:
       match r:
-        case IRX{+z, +p, v}:
-          +nothing = none(z) && none(p)
-          R{c, [], z, p, validating(site, nothing), nothing || precise}
+        case IRX{z, p, v}:
+          R{c, [], z, p}
     case None{}:
       ret(c)
 
-# Check site's test applied to its value, over the symbolic input
-# (performTC).
-def perform.tc(+site: U32, tc: E.X, c: E.X) -> E.X:
-  E.fill(E.XAbort{E.AtCheck{site}}, E.app(tc, c))
+# `if r then c else abort (1, c)` over an evaluated check result r and value c:
+# what a check reduces to once its predicate has run (refinementGate). An
+# undecided r leaves a barrier-wrapped gate switch with r itself as the
+# scrutinee.
+def refinement.gate(+site: U32, r: E.X, +c: E.X) -> E.X:
+  match r:
+    case E.XZero{}:
+      E.XAborted{E.AtCheck{site}, E.XPair{E.XPair{E.XZero{}, E.XZero{}}, trunc(c)}}
+    case E.XAborted{at, m}:
+      E.XAborted{at, m}
+    case E.XPair{a, b}:
+      c
+    case other:
+      E.XBarrier{E.gate.switch(E.XAborted{E.AtCheck{site}, E.XPair{E.XPair{E.XZero{}, E.XZero{}}, trunc(c)}}, c, other)}
+
+# A check met while finding limits reports the zeros and pairs it needs in order
+# to pass, and its value goes on unchanged (checkResultStepM); one nested inside
+# a check reduces in place, so its restrictions apply only on the gate paths
+# where it runs.
+def check.result(m: Mode, +site: U32, +r: E.X, +c: E.X) -> R:
+  match m:
+    case MCheck{}:
+      ret(refinement.gate(site, r, c))
+    case _:
+      irx.result(extract(fuel(), strip(refinement.gate(site, r, E.XZero{})), None{}), c)
 
 # The evaluator
 # -------------
@@ -821,8 +999,9 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
             case E.XCheck{+site, tc, c}:
               +rtc = eval(f, cfg, JEval{tc, env})
               +rc = eval(f, cfg, JEval{c, env})
-              +answer = strip(r.v(eval(f, cfg.check(cfg), JEval{perform.tc(site, r.v(rtc), r.v(rc)), E.XZero{}})))
-              plus(rtc, plus(rc, irx.result(site, extract(fuel(), answer, None{}), exact(fuel(), answer, None{}), r.v(rc))))
+              +tw = eval(f, cfg.check(cfg), JStep{E.fill(E.twiddle(), E.XPair{r.v(rc), r.v(rtc)})})
+              +ans = eval(f, cfg.check(cfg), JStep{E.XSetEnv{r.v(tw)}})
+              plus(rtc, plus(rc, check.result(mode.of(cfg), site, r.v(ans), r.v(rc))))
             case E.XEither{n, a, b}:
               merge2(n, eval(f, cfg, JEval{a, env}), eval(f, cfg, JEval{b, env}))
             case E.XBarrier{x}:
@@ -849,19 +1028,24 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                     case E.XAborted{at, m}:
                       ret(E.XAborted{at, m})
                     case E.XAbort{+at}:
-                      match e:
-                        case E.XEither{n, a, b}:
-                          merge2(n, eval(f, cfg, JStep{E.fill(E.XAbort{at}, a)}),
-                                    eval(f, cfg, JStep{E.fill(E.XAbort{at}, b)}))
-                        case other:
-                          ret(abort.on(cfg, at, other))
+                      ret(abort.on(at, e))
                     case E.XAny{}:
                       ret(any.on(mode.of(cfg)))
                     case E.XEither{+n, +sca, +scb}:
-                      merge2(n, eval(f, cfg, JStep{E.fill(sca, filter.side(n, is.gate.selector(sca), True{}, e))}),
-                                eval(f, cfg, JStep{E.fill(scb, filter.side(n, is.gate.selector(scb), False{}, e))}))
+                      merge2(n, eval(f, cfg, JStep{E.fill(sca, filter.side(n, is.selector.tree(sca), True{}, e))}),
+                                eval(f, cfg, JStep{E.fill(scb, filter.side(n, is.selector.tree(scb), False{}, e))}))
                     case E.XBarrier{c2}:
-                      ret(E.XBarrier{E.fill(c2, e)})
+                      match c2:
+                        case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, +s}}, E.XPair{l, r}}}:
+                          ret(switch(r.v(eval(f, cfg, JStep{E.fill(l, e)})), r.v(eval(f, cfg, JStep{E.fill(r, e)})), s))
+                        case other:
+                          ret(bar.fill(e, other))
+                    case E.XZero{}:
+                      ret(stuck.or(mode.of(cfg), "sizeTermM unhandled application"))
+                    case E.XPair{a, b}:
+                      ret(stuck.or(mode.of(cfg), "sizeTermM unhandled application"))
+                    case E.XVar{p}:
+                      ret(stuck.or(mode.of(cfg), "sizeTermM unhandled application"))
                     case _:
                       bad("sizeTermM unhandled application")
                 case E.XAborted{at, m}:
@@ -871,7 +1055,15 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                 case E.XEither{n, a, b}:
                   merge2(n, eval(f, cfg, JStep{E.XSetEnv{a}}), eval(f, cfg, JStep{E.XSetEnv{b}}))
                 case E.XBarrier{x}:
-                  ret(E.XBarrier{E.XSetEnv{x}})
+                  match x:
+                    case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, +s}}, E.XPair{l, r}}}:
+                      ret(switch(r.v(eval(f, cfg, JStep{E.XSetEnv{l}})), r.v(eval(f, cfg, JStep{E.XSetEnv{r}})), s))
+                    case other:
+                      ret(E.XBarrier{E.XSetEnv{other}})
+                case E.XZero{}:
+                  ret(stuck.or(mode.of(cfg), "sizeTermM unhandled SetEnv"))
+                case E.XDefer{fi, d}:
+                  ret(stuck.or(mode.of(cfg), "sizeTermM unhandled SetEnv"))
                 case _:
                   bad("sizeTermM unhandled SetEnv")
             case E.XLeft{v}:
@@ -888,10 +1080,16 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                   ret(E.XAny{})
                 case E.XEither{n, a, b}:
                   merge2(n, eval(f, cfg, JStep{E.XLeft{a}}), eval(f, cfg, JStep{E.XLeft{b}}))
-                case E.XBarrier{E.XLefts{k, x}}:
-                  ret(E.XBarrier{E.XLefts{(k + 1 : U32), x}})
                 case E.XBarrier{x}:
-                  ret(E.XBarrier{E.XLefts{1, x}})
+                  match x:
+                    case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, +s}}, E.XPair{l, r}}}:
+                      ret(switch(r.v(eval(f, cfg, JStep{E.XLeft{l}})), r.v(eval(f, cfg, JStep{E.XLeft{r}})), s))
+                    case E.XLefts{k, y}:
+                      ret(E.XBarrier{E.XLefts{(k + 1 : U32), y}})
+                    case other:
+                      ret(E.XBarrier{E.XLefts{1, other}})
+                case E.XDefer{fi, d}:
+                  ret(stuck.or(mode.of(cfg), "sizeTermM unhandled Left"))
                 case _:
                   bad("sizeTermM unhandled Left")
             case E.XRight{v}:
@@ -908,10 +1106,16 @@ def eval(+fuel: Nat, +cfg: Cfg, job: Job) -> R:
                   ret(E.XAny{})
                 case E.XEither{n, a, b}:
                   merge2(n, eval(f, cfg, JStep{E.XRight{a}}), eval(f, cfg, JStep{E.XRight{b}}))
-                case E.XBarrier{E.XRights{k, x}}:
-                  ret(E.XBarrier{E.XRights{(k + 1 : U32), x}})
                 case E.XBarrier{x}:
-                  ret(E.XBarrier{E.XRights{1, x}})
+                  match x:
+                    case E.XSetEnv{E.XPair{E.XSetEnv{E.XPair{E.XGate{}, +s}}, E.XPair{l, r}}}:
+                      ret(switch(r.v(eval(f, cfg, JStep{E.XRight{l}})), r.v(eval(f, cfg, JStep{E.XRight{r}})), s))
+                    case E.XRights{k, y}:
+                      ret(E.XBarrier{E.XRights{(k + 1 : U32), y}})
+                    case other:
+                      ret(E.XBarrier{E.XRights{1, other}})
+                case E.XDefer{fi, d}:
+                  ret(stuck.or(mode.of(cfg), "sizeTermM unhandled Right"))
                 case _:
                   bad("sizeTermM unhandled Right")
             case E.XTest{tok, v}:
@@ -1040,12 +1244,21 @@ def fail.or(a: Maybe<&2, SizeFail>, b: Maybe<&2, SizeFail>) -> Maybe<&2, SizeFai
         case Some{y}:
           Some{fail.pick(x, y)}
 
+# Only the sizing analysis's own aborts say anything about sizing; the program's
+# are just one of the outcomes some inputs have.
+def fail.at(at: E.Site, m: E.X) -> Maybe<&2, SizeFail>:
+  match at:
+    case E.AtRecursion{t}:
+      fail.of.abort(m)
+    case _:
+      None{}
+
 # The first failure left in the run's result (foldAborted). Code under a
 # Defer holds none.
 def fold.aborted(v: E.X) -> Maybe<&2, SizeFail>:
   match v:
     case E.XAborted{at, m}:
-      fail.of.abort(m)
+      fail.at(at, m)
     case E.XError{msg}:
       Some{Internal{msg}}
     case E.XPair{a, b}:
@@ -1055,68 +1268,6 @@ def fold.aborted(v: E.X) -> Maybe<&2, SizeFail>:
     case _:
       None{}
 
-# The checks left to run time
-# ---------------------------
-
-def site.add(at: E.Site, acc: Set()) -> Set():
-  match at:
-    case E.AtCheck{n}:
-      Set.add(acc, U32.show(n))
-    case _:
-      acc
-
-# The checks whose abort is in the result, on some path through the input.
-def reaching(v: E.X, acc: Set()) -> Set():
-  match v:
-    case E.XAborted{at, m}:
-      site.add(at, acc)
-    case E.XPair{a, b}:
-      reaching(b, reaching(a, acc))
-    case E.XEither{n, a, b}:
-      reaching(b, reaching(a, acc))
-    case _:
-      acc
-
-# The result is data on every path (or aborted, or input): it holds no
-# code a session would print.
-def data.only(v: E.X) -> Bool:
-  match v:
-    case E.XZero{}:
-      True{}
-    case E.XPair{a, b}:
-      data.only(a) && data.only(b)
-    case E.XEither{n, a, b}:
-      data.only(a) && data.only(b)
-    case E.XAborted{at, m}:
-      True{}
-    case E.XVar{p}:
-      True{}
-    case _:
-      False{}
-
-def within(xs: List<&2, String>, +s: Set()) -> Bool:
-  match xs:
-    case Nil{}:
-      True{}
-    case Con{x, rest}:
-      Pair.snd(Set(), Bool, Set.has(s, x)) && within(rest, s)
-
-def no.fail(m: Maybe<&2, SizeFail>) -> Bool:
-  match m:
-    case None{}:
-      True{}
-    case Some{f}:
-      False{}
-
-# What the opening call left: no check reaching its result, and data, or
-# not run (the session has no boundary).
-def opened(m: Maybe<&2, E.X>) -> Set() & Bool:
-  match m:
-    case None{}:
-      (Set.new(), True{})
-    case Some{+v}:
-      (reaching(v, Set.new()), data.only(v) && no.fail(fold.aborted(v)))
-
 # The erasure checker's budget: the evaluation steps its runs may take in
 # all (Check.bend), and how deep its input tree may grow.
 def check.work() -> Nat:
@@ -1125,24 +1276,15 @@ def check.work() -> Nat:
 def check.depth() -> Nat:
   U32.to_nat(100000)
 
+# The erasure checker on main's witness, watching the sites the net's program
+# erases (every check main no longer makes, and every chain's bottom), on the
+# inputs the prologue passes.
 def erasure.run(check: Bool, +left: Set(), +counts: List<&2, E.TS>, +x: E.X, g: Maybe<&2, E.X>) -> Erasure:
   match check:
     case True{}:
       Checked{Ck.check(check.depth(), Sm.fuel(), Sm.Pol{Sm.Watch{}, Ck.erasable(x, left)}, Ck.witness(counts, x), g, check.work())}
     case False{}:
       Unproven{}
-
-# The erasure checker on main's witness, watching the sites sizing would
-# erase (every check not in left, and every chain's bottom), when sizing
-# proved main.
-def erasure.of(proven: Bool, +left: Set(), +counts: List<&2, E.TS>, w: Watched) -> Erasure:
-  match proven:
-    case False{}:
-      Unproven{}
-    case True{}:
-      match w:
-        case Watched{+x, g, check}:
-          erasure.run(check, left, counts, x, g)
 
 # Whether the checker proved the erasures: then, and only then, they are made.
 def erased(e: Erasure) -> Bool:
@@ -1158,42 +1300,12 @@ def erased(e: Erasure) -> Bool:
     case Unproven{}:
       False{}
 
-def minus(xs: List<&2, String>, +t: Set(), +acc: Set()) -> Set():
-  match xs:
-    case Nil{}:
-      acc
-    case Con{+x, rest}:
-      minus(rest, t, Bool.pick(Set(), Pair.snd(Set(), Bool, Set.has(t, x)), acc, Set.add(acc, x)))
-
-# The checks left to run time when sizing proves main: those whose abort
-# reaches the result, a boundary check only if it does on the opening call.
-def left.of(+boundary: Set(), +reaching: Set(), +opening: Set()) -> Set():
-  minus(Set.to_list(reaching), boundary, opening)
-
-def checks.proved(+validating: Set(), +boundary: Set(), +reaching: Set(), +opening: Set(), +proven: Bool, +counts: List<&2, E.TS>, w: Watched) -> Checks:
-  Checks{validating, boundary, reaching, opening, proven, erasure.of(proven, left.of(boundary, reaching, opening), counts, w)}
-
-def checks.of(+validating: Set(), +exact: Bool, +boundary: Set(), +v: E.X, r: Set() & Bool, +counts: List<&2, E.TS>, w: Watched) -> Checks:
-  (opening, fine) = r
-  checks.proved(validating, boundary, reaching(v, Set.new()), opening,
-    within(Set.to_list(validating), boundary) && (none(validating) || exact) && data.only(v) && fine, counts, w)
-
-# What the main run proved of the checks (DESIGN §10's split): a check
-# whose abort reaches the result is left to run time; so is one that
-# validates the input, since the main run explored only input that passes
-# it, unless the session runs it at the boundary. Every other check is
-# discharged, if the main run explored every input main is called on, and
-# the erasure checker proves it.
-def checks(+validating: Set(), +exact: Bool, +boundary: Set(), +v: E.X, m0: Maybe<&2, E.X>, +counts: List<&2, E.TS>, w: Watched) -> Checks:
-  checks.of(validating, exact, boundary, v, opened(m0), counts, w)
-
-# Each recursion site becomes a chain of its count plus one steps
-# (setSizes); one never reached gets one. inert: the chains' bottoms are
-# proven dead.
+# Each recursion site becomes a chain of its count of steps (setSizes); one
+# never reached gets one. inert: the chains' bottoms are proven dead.
 def set.sizes(+counts: List<&2, E.TS>, +inert: Bool, x: E.X) -> E.X:
   match x:
     case E.XStub{+tok, y}:
-      E.sized.chain(tok, E.count.of(counts, tok), inert)
+      E.sized.chain(E.count.of(counts, tok), inert)
     case E.XPair{a, b}:
       E.XPair{set.sizes(counts, inert, a), set.sizes(counts, inert, b)}
     case E.XSetEnv{a}:
@@ -1217,42 +1329,18 @@ def uncap(x: E.X) -> E.X:
 
 def r.s(r: R) -> List<&2, E.TS>:
   match r:
-    case R{v, s, z, p, c, e}:
+    case R{v, s, z, p}:
       s
 
 def r.z(r: R) -> Set():
   match r:
-    case R{v, s, z, p, c, e}:
+    case R{v, s, z, p}:
       z
 
 def r.p(r: R) -> Set():
   match r:
-    case R{v, s, z, p, c, e}:
+    case R{v, s, z, p}:
       p
-
-def r.c(r: R) -> Set():
-  match r:
-    case R{v, s, z, p, c, e}:
-      c
-
-def r.e(r: R) -> Bool:
-  match r:
-    case R{v, s, z, p, c, e}:
-      e
-
-# The sized program handed on as the runnable core (H1: the runtime cannot
-# be given a sizing form), and master's program, every check and chain
-# bottom in it: what the reference evaluator runs, as master runs it.
-def cored(+counts: List<&2, E.TS>, cs: Checks, r: Result<&2, &2, String, Co.V>, p: Result<&2, &2, String, Co.V>) -> Result<&2, &2, SizeFail, Sized>:
-  match r:
-    case Done{v}:
-      match p:
-        case Done{pv}:
-          Done{Sized{counts, v, cs, pv}}
-        case Fail{form}:
-          Fail{Leftover{form}}
-    case Fail{form}:
-      Fail{Leftover{form}}
 
 # The sized program, from cm (main applied to the input): each recursion
 # its chain, and the checks left to run time (left; None for every check)
@@ -1264,65 +1352,120 @@ def program(+counts: List<&2, E.TS>, +left: Maybe<&2, Set()>, +inert: Bool, +cm:
     case False{}:
       set.sizes(counts, inert, E.resolve.checks(left, cm))
 
-# What sizing proved, made true of the program (DESIGN §10's split). When
-# the main run explored every input main is called on, main keeps only the
-# checks whose abort reaches its result (a boundary check only if it does
-# on the opening call: on any other input the session ran it first), and
-# the rest become their values. The chains' bottoms then become inert: the
-# counts are sizing's certificate that no input reaches one (§10: "provably
-# dead if the certificate is right"), and the erasure checker proves the
-# certificate right. Otherwise the program keeps every check and every
-# bottom.
-def discharged.if(+os: Map<&2, L.Origin>, erase: Bool, +cs: Checks, +counts: List<&2, E.TS>, +left: Set(), +cm: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
-  match erase:
-    case False{}:
-      +plain = E.core(os, program(counts, None{}, False{}, cm, cap))
-      cored(counts, cs, plain, plain)
-    case True{}:
-      cored(counts, cs, E.core(os, program(counts, Some{left}, True{}, cm, cap)), E.core(os, program(counts, None{}, False{}, cm, cap)))
+# The sites of the checks main still makes.
+def left.of(kvs: List<&2, Sigma<&2, &2, String, _ => L.Origin>>, +keep: Maybe<&2, Set()>, +acc: Set()) -> Set():
+  match kvs:
+    case Nil{}:
+      acc
+    case Con{kv, rest}:
+      match kv:
+        case (+site, +o):
+          left.of(rest, keep, Bool.pick(Set(), Pl.kept(keep, o), Set.add(acc, site), acc))
 
-def discharged(+os: Map<&2, L.Origin>, +cs: Checks, +counts: List<&2, E.TS>, +cm: E.X, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
-  match cs:
-    case Checks{v, +boundary, +reaching, +opening, proven, erasure}:
-      discharged.if(os, erased(erasure), cs, counts, left.of(boundary, reaching, opening), cm, cap)
+def plan.keep(p: Pl.Plan) -> Maybe<&2, Set()>:
+  match p:
+    case Pl.Plan{keep, h, g}:
+      keep
 
-# The opening call, run as the main run runs.
-def opening.run(+cfg: Cfg, m0: Maybe<&2, E.X>) -> Maybe<&2, E.X>:
-  match m0:
+def plan.hoisted(p: Pl.Plan) -> Set():
+  match p:
+    case Pl.Plan{keep, h, g}:
+      h
+
+def plan.prologue(p: Pl.Plan) -> Maybe<&2, Co.V>:
+  match p:
+    case Pl.Plan{keep, h, g}:
+      g
+
+# The prologue as the erasure checker runs it.
+def guard.sem(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
+  match g:
     case None{}:
       None{}
-    case Some{x0}:
-      Some{r.v(eval(fuel(), cfg, JEval{E.remove.checks(x0), E.XZero{}}))}
+    case Some{v}:
+      Some{Sm.of.core(v)}
 
-def tidy(+os: Map<&2, L.Origin>, m: Maybe<&2, SizeFail>, +run: R, +cfg: Cfg, +m0: Maybe<&2, E.X>, +cm: E.X, +lim: R, +boundary: Set(), w: Watched, cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+# Where the erasure checker proves the net's program, its core; else master's.
+def net.expr(proven: Bool, +os: Map<&2, L.Origin>, +counts: List<&2, E.TS>, +left: Set(), +cm: E.X, +cap: Bool, +plain: Co.V) -> Result<&2, &2, String, Co.V>:
+  match proven:
+    case True{}:
+      E.core(os, program(counts, Some{left}, True{}, cm, cap))
+    case False{}:
+      Done{plain}
+
+def cored(+counts: List<&2, E.TS>, cs: Checks, r: Result<&2, &2, String, Co.V>, +plain: Co.V, +g: Maybe<&2, Co.V>) -> Result<&2, &2, SizeFail, Sized>:
+  match r:
+    case Done{v}:
+      Done{Sized{counts, v, cs, plain, g}}
+    case Fail{form}:
+      Fail{Leftover{form}}
+
+def with.erasure(+e: Erasure, +p: Pl.Plan, +plain: Co.V, +os: Map<&2, L.Origin>, +counts: List<&2, E.TS>, +left: Set(), +cm: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  cored(counts, Checks{plan.keep(p), plan.hoisted(p), e}, net.expr(erased(e), os, counts, left, cm, cap, plain), plain, plan.prologue(p))
+
+def with.left(+left: Set(), +p: Pl.Plan, +plain: Co.V, +os: Map<&2, L.Origin>, +counts: List<&2, E.TS>, +cm: E.X, +x: E.X, +cap: Bool, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  with.erasure(erasure.run(cap && check, left, counts, x, guard.sem(plan.prologue(p))), p, plain, os, counts, left, cm, cap)
+
+def with.plan(+p: Pl.Plan, +v0: Co.V, +os: Map<&2, L.Origin>, +counts: List<&2, E.TS>, +cm: E.X, +x: E.X, +cap: Bool, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  with.left(left.of(Map.to_list(&2, L.Origin, os), plan.keep(p), Set.new()), p, Pl.erased(p, v0), os, counts, cm, x, cap, check)
+
+# The analysis is of a main, so of a capped term, and only when something reads
+# its answer: `--certificate` needs the counts alone (master's laziness).
+def plan.if(cap: Bool, +v: Co.V) -> Pl.Plan:
+  match cap:
+    case True{}:
+      Pl.plan(v)
+    case False{}:
+      Pl.plan.none()
+
+# What a compile will read: the counts alone (`--certificate`); master's program
+# too (a plain run); or the net's as well, which is what the erasure checker is
+# for.
+type Want is Data:
+  WantCounts{}
+  WantPlain{}
+  WantNet{}
+
+def wants.plan(w: Want) -> Bool:
+  match w:
+    case WantCounts{}:
+      False{}
+    case _:
+      True{}
+
+def wants.check(w: Want) -> Bool:
+  match w:
+    case WantNet{}:
+      True{}
+    case _:
+      False{}
+
+# Master's program, every check in it, then where the checks go, and what the
+# net runs.
+def planned(r: Result<&2, &2, String, Co.V>, +os: Map<&2, L.Origin>, +counts: List<&2, E.TS>, +cm: E.X, +x: E.X, +cap: Bool, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
+  match r:
+    case Fail{form}:
+      Fail{Leftover{form}}
+    case Done{+v}:
+      with.plan(plan.if(cap, v), v, os, counts, cm, x, cap, check)
+
+def tidy(+os: Map<&2, L.Origin>, m: Maybe<&2, SizeFail>, +run: R, +cm: E.X, +x: E.X, +cap: Bool, +want: Want) -> Result<&2, &2, SizeFail, Sized>:
   match m:
     case Some{fail}:
       Fail{fail}
     case None{}:
-      discharged(os, checks(r.c(lim), r.e(lim), boundary, r.v(run), opening.run(cfg, m0), r.s(run), w), r.s(run), cm, cap)
+      planned(E.core(os, program(r.s(run), None{}, False{}, cm, cap)), os, r.s(run), cm, x, cap && wants.plan(want), wants.check(want))
 
-def main.run.from(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +boundary: Set(), +lim: R, +mx: E.X, +m0: Maybe<&2, E.X>, w: Watched, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
-  +cfg = {Cfg{MSize{}, r.z(lim), max} : Cfg}
-  +run = eval(fuel(), cfg, JEval{E.remove.checks(mx), E.XZero{}})
-  tidy(os, fold.aborted(r.v(run)), run, cfg, m0, cm, lim, boundary, w, cap)
+def main.run.from(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +lim: R, +mx: E.X, +x: E.X, +cap: Bool, +want: Want) -> Result<&2, &2, SizeFail, Sized>:
+  +run = eval(fuel(), {Cfg{MSize{}, r.z(lim), max} : Cfg}, JEval{E.remove.checks(mx), E.XZero{}})
+  tidy(os, fold.aborted(r.v(run)), run, cm, x, cap, want)
 
-# The session's opening call, main on 0, which sizing runs only when the
-# session also guards main: otherwise main is proven only if the main run
-# explored every input, 0 among them.
-def opening.of(unguarded: Bool, +x: E.X) -> Maybe<&2, E.X>:
-  match unguarded:
-    case True{}:
-      None{}
-    case False{}:
-      Some{E.app(x, E.XZero{})}
-
-def main.run(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +boundary: Set(), +lim: R, +x: E.X, g: Maybe<&2, E.X>, +cap: Bool, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
+def main.run(+os: Map<&2, L.Origin>, +max: U32, +cm: E.X, +lim: R, +x: E.X, +cap: Bool, +want: Want) -> Result<&2, &2, SizeFail, Sized>:
   match cap:
     case True{}:
-      main.run.from(os, max, cm, boundary, lim, E.app(x, initial.input(fuel(), Set.to_list(r.p(lim)), in.st(Set.to_list(r.p(lim)), ""))),
-                    opening.of(none(boundary), x), Watched{x, g, check}, cap)
+      main.run.from(os, max, cm, lim, E.app(x, initial.input(fuel(), Set.to_list(r.p(lim)), in.st(Set.to_list(r.p(lim)), ""))), x, cap, want)
     case False{}:
-      main.run.from(os, max, cm, boundary, lim, naked.envs(x), None{}, Watched{x, g, check}, cap)
+      main.run.from(os, max, cm, lim, naked.envs(x), x, cap, want)
 
 def capped(+x: E.X, cap: Bool) -> E.X:
   match cap:
@@ -1331,52 +1474,16 @@ def capped(+x: E.X, cap: Bool) -> E.X:
     case False{}:
       x
 
-# The guard as the erasure checker runs it.
-def guard.sem(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
-  match g:
-    case None{}:
-      None{}
-    case Some{v}:
-      Some{Sm.of.core(v)}
-
-# sizeTermM: size every recursion in t, cap it (apply it to the symbolic
-# input) as main is, and give the sized program, at a budget of max
-# unrollings per site. boundary: the checks, by number, the session runs
-# before main; g: the guard that runs them, sized, if main has one.
-# size.at, the erasure checker run when check says so (otherwise nothing
-# is erased: expr is plain).
-def size.at.checked(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +t: T.C, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
+# sizeTermM and checkPlan: size every recursion in t, cap it (apply it to the
+# symbolic input) as main is, and give the sized program, at a budget of max
+# unrollings per site, as far as want says.
+def size.checked(+max: U32, +cap: Bool, +t: T.C, +want: Want) -> Result<&2, &2, SizeFail, Sized>:
   +x = E.of.term3(t)
   +cm = capped(x, cap)
-  main.run(E.origins(t), max, cm, boundary,
-           eval(fuel(), Cfg{MLimits{}, Set.new(), max}, JEval{convert.is(cm), E.XZero{}}),
-           x, guard.sem(g), cap, check)
+  main.run(E.origins(t), max, cm, eval(fuel(), Cfg{MLimits{}, Set.new(), max}, JEval{convert.is(cm), E.XZero{}}), x, cap, want)
 
-def size.at(+max: U32, +cap: Bool, +boundary: Set(), g: Maybe<&2, Co.V>, +t: T.C) -> Result<&2, &2, SizeFail, Sized>:
-  size.at.checked(max, cap, boundary, g, t, True{})
-
-# A term no session guards.
 def size(+max: U32, +cap: Bool, +t: T.C) -> Result<&2, &2, SizeFail, Sized>:
-  size.at(max, cap, Set.new(), None{}, t)
-
-# The core of a sized guard, if it sized.
-def guard.core(r: Result<&2, &2, SizeFail, Sized>) -> Maybe<&2, Co.V>:
-  match r:
-    case Fail{f}:
-      None{}
-    case Done{s}:
-      match s:
-        case Sized{counts, expr, checks, plain}:
-          Some{expr}
-
-# Main sized as the compiler sizes it, its guard g (if it has one) sized
-# first: the tools' and tests' way to the program the compiler runs.
-def size.guarded(+max: U32, +boundary: Set(), g: Maybe<&2, T.C>, +x: T.C) -> Result<&2, &2, SizeFail, Sized>:
-  match g:
-    case None{}:
-      size.at(max, True{}, boundary, None{}, x)
-    case Some{t}:
-      size.at(max, True{}, boundary, guard.core(size(max, True{}, t)), x)
+  size.checked(max, cap, t, WantNet{})
 
 # Failures, as the command reports them
 # -------------------------------------
@@ -1433,7 +1540,7 @@ def render(f: SizeFail, t: T.C, +max: U32) -> String:
       "could not size " ++ site.render(tok, site.loc(t, tok)) ++ ":\n"
         ++ "  its test depends on input that nothing bounds, so no finite iteration\n"
         ++ "  count can be proven for it. Constrain that input with a refinement\n"
-        ++ "  (`x : someValidator`) or an `assert` before recursing on it."
+        ++ "  (`x : somePredicate`) before recursing on it."
     case AbortAny{}:
       "sizeTermM AbortAny hit"
     case Internal{msg}:

@@ -54,7 +54,6 @@ type Surf<-P: Data, -C: Data, -N: Data> is Data:
   SIte{+loc: L.Loc, +i: Surf<P, C, N>, +t: Surf<P, C, N>, +e: Surf<P, C, N>}
   SLeft{+loc: L.Loc, +x: Surf<P, C, N>}
   SRight{+loc: L.Loc, +x: Surf<P, C, N>}
-  SHash{+loc: L.Loc, +x: Surf<P, C, N>}
   SChurch{+loc: L.Loc, +n: U32}
   SRec{+loc: L.Loc, +t: Surf<P, C, N>, +r: Surf<P, C, N>, +b: Surf<P, C, N>}
   SLet{+loc: L.Loc, +binds: List<&2, Bind<P, C, N>>, +body: Surf<P, C, N>}
@@ -90,6 +89,9 @@ def ParsedPat() -> Data:
 
 def ExpandedPat() -> Data:
   Pat<Empty, Unit, Empty>
+
+def DesugaredPat() -> Data:
+  Pat<Empty, Empty, Empty>
 
 def ExpandedBind() -> Data:
   Bind<Empty, Unit, Empty>
@@ -151,8 +153,6 @@ def loc(-P: Data, -C: Data, -N: Data, t: Surf<P, C, N>) -> L.Loc:
       loc
     case SRight{loc, x}:
       loc
-    case SHash{loc, x}:
-      loc
     case SChurch{loc, n}:
       loc
     case SRec{loc, t, r, b}:
@@ -172,9 +172,9 @@ def loc(-P: Data, -C: Data, -N: Data, t: Surf<P, C, N>) -> L.Loc:
     case SLamN{loc, n, v, body, w}:
       loc
 
-# An abort with message msg (abortTerm): a check that always fails, its
-# answer (1, msg). Generated code and the `abort` builtin build it in place
-# rather than call a shared function, so each abort carries its own kind
-# and location.
+# An abort with message msg (abortTerm): a check of msg whose predicate never
+# holds, so it fails with (1, msg) like any failing check. Generated code and
+# the `abort` builtin build it in place rather than call a shared function,
+# so each abort carries its own kind and location.
 def abort.term(-P: Data, -C: Data, -N: Data, +kind: L.AbortKind, +loc: L.Loc, msg: Surf<P, C, N>) -> Surf<P, C, N>:
-  SCheck{loc, kind, SLam{loc, L.Name{loc, "__abort_checked"}, SPair{loc, SInt{loc, 1}, msg}}, SInt{loc, 1}}
+  SCheck{loc, kind, SLam{loc, L.Name{loc, "__abort_checked"}, SInt{loc, 0}}, msg}

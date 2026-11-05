@@ -1,41 +1,38 @@
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:32:17 (#0)   <= 3
-  Prelude:36:18 (#1)   <= 3
-  Prelude:44:18 (#2)   <= 5
-  Prelude:81:42 (#3)   <= 4
-  Prelude:148:36 (#4)  <= 2
-  Prelude:163:29 (#5)  <= 3
-  Prelude:164:29 (#6)  <= 1
-  Prelude:164:39 (#7)  <= 2
+  Prelude:30:17 (#1)   <= 3
+  Prelude:34:18 (#3)   <= 3
+  Prelude:42:18 (#5)   <= 5
+  Prelude:79:42 (#7)   <= 4
+  Prelude:144:36 (#9)  <= 2
+  Ratio:6:37 (#10)     <= 3
+  Ratio:7:33 (#11)     <= 1
+  Ratio:7:43 (#12)     <= 2
 
 sizing budget in force: 65536 unrollings
 
 recursion nesting (structural, approximate):
   triple         function      levels
-  Prelude:25:17  Prelude.d2c   0, 1, 2
-  Prelude:87:18  Prelude.dDiv  0, 1
-  Prelude:151:3  Prelude.gcd   0
+  Prelude:23:17  Prelude.d2c   0, 1, 2, 3, 4, 5
+  Prelude:85:18  Prelude.dDiv  0, 1, 2, 3, 4
+  Prelude:147:3  Prelude.gcd   0, 2, 3
 
-maximum nesting depth: 3
+maximum nesting depth: 6
 
 bindings used below the level they were bound at:
-  Prelude.rPlus.a           !!!  (3 levels below its binding)
-  Prelude.rPlus.rNum        !!!  (3 levels below its binding)
-  Prelude.dMod.b            !!  (2 levels below its binding)
-  Prelude.dTimes.a          !!  (2 levels below its binding)
-  Prelude.gcd.p             !!  (2 levels below its binding)
-  Prelude.rPlus.b           !!  (2 levels below its binding)
-  Prelude.rPlus.rDen        !!  (2 levels below its binding)
-  Prelude.__udt_Rational.h  !  (1 level below its binding)
-  Prelude.d2c.b             !  (1 level below its binding)
-  Prelude.d2c.f             !  (1 level below its binding)
-  Prelude.dDiv.p            !  (1 level below its binding)
-  Prelude.dEqual.b          !  (1 level below its binding)
-  Prelude.dMinus.a          !  (1 level below its binding)
-  Prelude.dMod.a            !  (1 level below its binding)
-  Prelude.dPlus.a           !  (1 level below its binding)
+  Ratio.rPlus.a     !!!  (3 levels below its binding)
+  Prelude.dMod.b    !!  (2 levels below its binding)
+  Prelude.dTimes.a  !!  (2 levels below its binding)
+  Prelude.gcd.p     !!  (2 levels below its binding)
+  Ratio.rPlus.b     !!  (2 levels below its binding)
+  Prelude.d2c.b     !  (1 level below its binding)
+  Prelude.d2c.f     !  (1 level below its binding)
+  Prelude.dDiv.p    !  (1 level below its binding)
+  Prelude.dEqual.b  !  (1 level below its binding)
+  Prelude.dMinus.a  !  (1 level below its binding)
+  Prelude.dMod.a    !  (1 level below its binding)
+  Prelude.dPlus.a   !  (1 level below its binding)
 
 The two lists index differently: a count above is per instantiation (a
 recursion reached from two places is sized separately at each), while a

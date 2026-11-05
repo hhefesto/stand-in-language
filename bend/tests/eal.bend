@@ -213,7 +213,7 @@ def after(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, pl}:
+        case Sz.Sized{counts, expr, checks, pl, pro}:
           main.outcome(Lf.of.expr(expr))
 
 # Its verdicts before and after sizing (compileUnitTest: no cap).
@@ -230,7 +230,7 @@ def gated.after(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Bool:
       False{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, pl}:
+        case Sz.Sized{counts, expr, checks, pl, pro}:
           +bs = bodies(Lf.defer.lift(Lf.of.expr(expr)))
           U32.is_eq(certified(bs), U32.from_nat(Map.size(&2, Lf.Body, bs)))
 
@@ -261,7 +261,7 @@ def layouts.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> String:
       "sizing failed"
     case Done{s}:
       match s:
-        case Sz.Sized{counts, expr, checks, pl}:
+        case Sz.Sized{counts, expr, checks, pl, pro}:
           layouts.text(EAL.layouts(Lf.defer.lift(Lf.of.expr(expr))))
 
 # The digest of a program's capture layouts, sized as the command sizes it.
@@ -372,19 +372,19 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
         "main = let g = {id, \\recur l -> \\accum -> recur (right l) accum, \\l -> \\accum -> accum} in g [1] 0")), "/ok"),
       String.ends_with(sized(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]")), "/ok"),
       sized.all(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]"))])))
-    # The digest of the term that runs: master's (liftedBodyHash of
-    # deferLift's main, 98de497c), since an application's span reaches its
+    # The digest of the term that runs (liftedBodyHash of deferLift's main):
+    # master's up to 98de497c, the port's own record since 1cfcb3de, since an application's span reaches its
     # end as megaparsec's captureSourceSpan does.
     IO.print(verdict("eal-lift-udt", String.eq(
       main.hash(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"rat",
-        "import Prelude\nmain = \\input -> (if dEqual (left (right (rPlus (fromRational 1 2) (fromRational 1 2)))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
-      "c39805f1ef2e0286ec97fb89f6aca8dd5b5cbf3395a2e9bc0832421129b4d81d")))
+        "import Prelude\nfromRational = \\n d -> if dEqual d 0 then abort \"Denominator cannot be zero\" else let g = gcd n d in (dDiv n g, dDiv d g)\nrPlus = \\a b -> fromRational (dPlus (dTimes (left a) (right b)) (dTimes (left b) (right a))) (dTimes (right a) (right b))\nmain = \\input -> (if dEqual (left (rPlus (fromRational 1 2) (fromRational 1 2))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
+      "3521248034365eeecbb7c460bb712c3166fb8b68bbe4bb64361fbbe2724b6497")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
-      "627da040c4dc4096affc8f8f3db1077d99218f4a09dfca65b05dc35eb3842b97")))
+      "d992f91d1f0ed4450acaddaf31698601d2126a3fc690232d3a2853a915617cb7")))
     IO.print(verdict("eal-layouts-simpleplus", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus")),
-      "df61eecc88845c32d7d83152abc0ab3f8e335f8fdddbfb2dae5629bb671218e8")))
+      "6f10652ac9a1867c2dcef6e8a1cf478d7e9ebcc1aef83ffc8ea3055b73a97b87")))
 
 def main() -> IO(Unit):
   do IO<Unit>:

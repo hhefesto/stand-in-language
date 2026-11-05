@@ -106,28 +106,27 @@ def run(+main: E.X, input: Co.D) -> IC.RB:
 # ---------------------
 
 type Prog is Data:
-  Prog{+main: E.X, +guard: Maybe<&2, E.X>, +full: E.X}
+  Prog{+main: E.X, +prologue: Maybe<&2, E.X>}
 
-# A line the guard refuses is answered by master's program, as the IC's
-# session answers it.
-def checked(v: Maybe<&2, Ss.Outcome>, +m: E.X, +f: E.X, +input: Co.D) -> Ss.Outcome:
+# A line the prologue refuses ends the session there, as the IC's session ends.
+def checked(v: Maybe<&2, Ss.Outcome>, +m: E.X, +input: Co.D) -> Ss.Outcome:
   match v:
     case None{}:
       Ss.outcome(Ss.Sized{}, run(m, input))
     case Some{o}:
-      Ss.outcome(Ss.Sized{}, run(f, input))
+      o
 
-def answered(g: Maybe<&2, E.X>, +m: E.X, +f: E.X, +input: Co.D) -> Ss.Outcome:
+def answered(g: Maybe<&2, E.X>, +m: E.X, +input: Co.D) -> Ss.Outcome:
   match g:
     case None{}:
       Ss.outcome(Ss.Sized{}, run(m, input))
     case Some{+gx}:
-      checked(Ss.guard.verdict(Ss.Sized{}, run(gx, input)), m, f, input)
+      checked(Ss.prologue.verdict(Ss.Sized{}, run(gx, input)), m, input)
 
 def answer(p: Prog, +line: String, st: Co.D) -> Ss.Outcome:
   match p:
-    case Prog{+m, g, +f}:
-      answered(g, m, f, Co.DPair{Co.of.string(line), st})
+    case Prog{+m, g}:
+      answered(g, m, Co.DPair{Co.of.string(line), st})
 
 def ended(o: Ss.Outcome, +shown: List<&2, String>) -> List<&2, String>:
   match o:
@@ -151,7 +150,7 @@ def replay.go(lines: List<&2, String>, +p: Prog, o: Ss.Outcome, +shown: List<&2,
 
 def start(p: Prog) -> Ss.Outcome:
   match p:
-    case Prog{+m, g, f}:
+    case Prog{+m, g}:
       Ss.outcome(Ss.Sized{}, run(m, Co.DZero{}))
 
 def replay(+p: Prog, lines: List<&2, String>) -> List<&2, String>:
@@ -175,8 +174,8 @@ def shown(r: Ss.Replay) -> List<&2, String>:
     case Ss.Replay{s, cost}:
       s
 
-def ic.replay(+main: Co.V, g: Maybe<&2, Co.V>, +full: Co.V, lines: List<&2, String>) -> List<&2, String>:
-  shown(Ss.replay(Ss.Prog{ic.prog(main), ic.guard(g), Some{Ss.Full{full, Map.new(&2, Lf.Shape)}}}, Ss.Sized{}, lines))
+def ic.replay(+main: Co.V, g: Maybe<&2, Co.V>, lines: List<&2, String>) -> List<&2, String>:
+  shown(Ss.replay(Ss.Prog{ic.prog(main), ic.guard(g)}, Ss.Sized{}, lines))
 
 def sem.guard(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
   match g:
@@ -186,48 +185,30 @@ def sem.guard(g: Maybe<&2, Co.V>) -> Maybe<&2, E.X>:
       Some{Sm.of.core(x)}
 
 # Both sessions agree.
-def agree(+main: Co.V, +g: Maybe<&2, Co.V>, +full: Co.V, +lines: List<&2, String>) -> Bool:
-  same(replay(Prog{Sm.of.core(main), sem.guard(g), Sm.of.core(full)}, lines), ic.replay(main, g, full, lines))
+def agree(+main: Co.V, +g: Maybe<&2, Co.V>, +lines: List<&2, String>) -> Bool:
+  same(replay(Prog{Sm.of.core(main), sem.guard(g)}, lines), ic.replay(main, g, lines))
 
 # Compiling, as the command does
 # ------------------------------
 
-def guard.sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Co.V>:
-  match r:
-    case Fail{f}:
-      None{}
-    case Done{s}:
-      match s:
-        case Sz.Sized{counts, expr, checks, pl}:
-          Some{expr}
-
-def guard.of(m: Maybe<&2, T.C>) -> Maybe<&2, Co.V>:
-  match m:
-    case None{}:
-      None{}
-    case Some{t}:
-      guard.sized(Sz.size(65536, True{}, t))
-
-def sized(g: Maybe<&2, Co.V>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, +lines: List<&2, String>) -> Bool:
+def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, +lines: List<&2, String>) -> Bool:
   match r:
     case Fail{f}:
       False{}
     case Done{s}:
       match s:
-        case Sz.Sized{counts, +expr, checks, +pl}:
-          agree(expr, g, pl, lines)
+        case Sz.Sized{counts, +expr, checks, pl, +g}:
+          agree(expr, g, lines)
 
-def compiled(r: Result<&2, &2, String, Fr.Program>, +lines: List<&2, String>) -> Bool:
+def compiled(r: Result<&2, &2, String, T.C>, +lines: List<&2, String>) -> Bool:
   match r:
     case Fail{e}:
       False{}
-    case Done{p}:
-      match p:
-        case Fr.Program{run, +g, +boundary}:
-          sized(guard.of(g), Sz.size.guarded(65536, boundary, g, run), lines)
+    case Done{+run}:
+      sized(Sz.size(65536, True{}, run), lines)
 
 def agrees(srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:
-  compiled(Fr.compile.program(srcs, entry), lines)
+  compiled(Fr.compile(srcs, entry), lines)
 
 def report(+prelude: String, +plus: String, +tc: String, +ttt: String) -> IO(Unit):
   do IO<Unit>:

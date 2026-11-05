@@ -9,23 +9,19 @@ import ./Term.bend as T
 import ./Expr.bend as E
 import ./Certificate.bend as Ct
 
-# Compiled programs (haskell-final's Telomare.Artifact): a sized program
-# with what a run and `--certificate` need, so neither needs the sources
-# again. The bytes are haskell-final's version 4 layout, with master's
-# abort node (98de497c: tag 8, its origin, its message), so the port
-# numbers its own versions, 6 and 7: "TELC", the version, the
-# entry module, the sources' hash, the static report as rendered, the
-# sizing report (each site's count and location, and the budget), the
-# sized program, haskell-final's IC certificate (the port writes none, and
-# skips one it reads), the capture layouts the program runs under, and
-# master's program (every check and chain bottom in it), which a plain run
-# evaluates.
+# Compiled programs (master's Telomare.Artifact): a sized program with what a
+# run and `--certificate` need, so neither needs the sources again. The bytes
+# are master's layout up to its program, so the port numbers its own version,
+# 9 (master's is 8): "TELC", the version, the entry module, the sources' hash,
+# the static report as rendered, the sizing report (each site's count and
+# location, and the budget), the program the net runs, haskell-final's IC
+# certificate (the port writes none, and skips one it reads), the capture
+# layouts the program runs under, master's program, which a plain run
+# evaluates, and master's input prologue, with its layouts, if main has one.
 # Integers are int64 little-endian; a string is its UTF-8 length, then its
 # UTF-8; a Maybe is byte 0, or 1 and the value; a map is its length, then
-# its entries in ascending key order. A program whose session is guarded
-# (Front's guard) is a port extension, version 7: version 6's bytes, then
-# the guard's program and layouts as main's are written. A Haskell
-# telomare refuses both by their version.
+# its entries in ascending key order. A Haskell telomare refuses it by its
+# version.
 
 # A site's count (None: not sized) and a site's location, by token.
 type Count is Data:
@@ -38,20 +34,17 @@ type Place is Data:
 type Layout is Data:
   Layout{+digest: String, +shape: Lf.Shape}
 
-# The session's guard: its sized program and its capture layouts.
-type Guard is Data:
-  Guard{+expr: Co.V, +layouts: List<&2, Layout>}
+# A program and its capture layouts.
+type Stored is Data:
+  Stored{+expr: Co.V, +layouts: List<&2, Layout>}
 
 type Telc is Data:
   Telc{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
-       +budget: U32, +expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +guard: Maybe<&2, Guard>}
+       +budget: U32, +expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +prologue: Maybe<&2, Co.V>}
 
-# The port's version, and its version for a guarded session.
+# The port's version.
 def version() -> U32:
-  6
-
-def version.guarded() -> U32:
-  7
+  9
 
 # The sources' hash (sourcesHash): SHA-256 of every module's name and text
 # with their lengths, the modules sorted by name, in lowercase hex.
@@ -145,12 +138,8 @@ def layouts.of(m: Map<&2, Lf.Shape>) -> List<&2, Layout>:
 # A sized program as an artifact: its entry, the sources' hash, the static
 # report as rendered, each site's count and location, the budget, the
 # program and its capture layouts.
-def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, ls: Map<&2, Lf.Shape>, plain: Co.V, guard: Maybe<&2, Guard>) -> Telc:
-  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, expr, layouts.of(ls), plain, guard}
-
-# A guard's sized program and its layouts, as stored.
-def guard.of(expr: Co.V, ls: Map<&2, Lf.Shape>) -> Guard:
-  Guard{expr, layouts.of(ls)}
+def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, ls: Map<&2, Lf.Shape>, plain: Co.V, prologue: Maybe<&2, Co.V>) -> Telc:
+  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, expr, layouts.of(ls), plain, prologue}
 
 # The layouts as the IC looks them up.
 def shapes(ls: List<&2, Layout>, acc: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
@@ -293,28 +282,19 @@ def put.report(+cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, rest: L
 def put.program(expr: Co.V, +ls: List<&2, Layout>, rest: List<&2, U32>) -> List<&2, U32>:
   put.expr(expr, 0 <> put.int(count(Layout, ls), put.layouts(ls, rest)))
 
-def put.guard(g: Maybe<&2, Guard>) -> List<&2, U32>:
+def put.prologue(g: Maybe<&2, Co.V>) -> List<&2, U32>:
   match g:
     case None{}:
-      []
-    case Some{x}:
-      match x:
-        case Guard{expr, layouts}:
-          put.program(expr, layouts, [])
-
-def version.of(g: Maybe<&2, Guard>) -> U32:
-  match g:
-    case None{}:
-      version()
-    case Some{x}:
-      version.guarded()
+      [0]
+    case Some{v}:
+      1 <> put.expr(v, [])
 
 def encode(t: Telc) -> List<&2, U32>:
   match t:
-    case Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, +guard}:
-      84 <> 69 <> 76 <> 67 <> put.int(version.of(guard),
+    case Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, prologue}:
+      84 <> 69 <> 76 <> 67 <> put.int(version(),
         put.string(entry, put.string(hash, put.string(cert,
-          put.report(counts, places, budget, put.program(expr, layouts, put.expr(plain, put.guard(guard))))))))
+          put.report(counts, places, budget, put.program(expr, layouts, put.expr(plain, put.prologue(prologue))))))))
 
 # Reading
 # -------
@@ -653,23 +633,14 @@ def ic.cert(+m: U32) -> G(Unit):
         b1 : Unit <- bound()
         bound()
 
-def program() -> G(Guard):
-  do G<Guard>:
-    x : Co.V <- expr(fuel())
-    m : U32 <- byte()
-    c : Unit <- ic.cert(m)
-    nl : U32 <- int()
-    ls : List<&2, Layout> <- layouts(U32.to_nat(nl))
-    return Guard{x, ls}
-
-def guard.read(guarded: Bool) -> G(Maybe<&2, Guard>):
-  match guarded:
+def prologue.if(none: Bool) -> G(Maybe<&2, Co.V>):
+  match none:
     case True{}:
-      G.bind(Guard, Maybe<&2, Guard>, program(), g => G.pure(Maybe<&2, Guard>, Some{g}))
+      G.pure(Maybe<&2, Co.V>, None{})
     case False{}:
-      G.pure(Maybe<&2, Guard>, None{})
+      G.bind(Co.V, Maybe<&2, Co.V>, expr(fuel()), v => G.pure(Maybe<&2, Co.V>, Some{v}))
 
-def fields(+entry: String, +v: U32) -> G(Telc):
+def fields(+entry: String) -> G(Telc):
   do G<Telc>:
     hash : String <- string()
     cert : String <- string()
@@ -684,7 +655,8 @@ def fields(+entry: String, +v: U32) -> G(Telc):
     nl : U32 <- int()
     ls : List<&2, Layout> <- layouts(U32.to_nat(nl))
     p : Co.V <- expr(fuel())
-    g : Maybe<&2, Guard> <- guard.read(U32.is_eq(v, version.guarded()))
+    b : U32 <- byte()
+    g : Maybe<&2, Co.V> <- prologue.if(U32.is_zero(b))
     return Telc{entry, hash, cert, cs, ps, budget, x, ls, p, g}
 
 # What a file holds: an artifact, or why it is none (the magic or the
@@ -696,13 +668,13 @@ type Read is Data:
 def versioned.if(ok: Bool, +v: U32) -> G(Read):
   match ok:
     case True{}:
-      G.bind(String, Read, string(), entry => G.bind(Telc, Read, fields(entry, v), t => G.pure(Read, Read{t})))
+      G.bind(String, Read, string(), entry => G.bind(Telc, Read, fields(entry), t => G.pure(Read, Read{t})))
     case False{}:
-      G.pure(Read, Refused{"this artifact is version " ++ U32.show(v) ++ ", but this telomare reads versions "
-        ++ U32.show(version()) ++ " and " ++ U32.show(version.guarded()) ++ "; recompile it from source"})
+      G.pure(Read, Refused{"this artifact is version " ++ U32.show(v) ++ ", but this telomare reads version "
+        ++ U32.show(version()) ++ "; recompile it from source"})
 
 def versioned(+v: U32) -> G(Read):
-  versioned.if(U32.is_eq(v, version()) || U32.is_eq(v, version.guarded()), v)
+  versioned.if(U32.is_eq(v, version()), v)
 
 def magic(bs: List<&2, U32>) -> Bool:
   match bs:

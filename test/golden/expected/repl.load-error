@@ -5,7 +5,7 @@ telomare> Error from loaded file: 1:7:
 1 | foo = )
   |       ^^
 unexpected ")<newline>"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 
 telomare> 2
 telomare> --- stderr

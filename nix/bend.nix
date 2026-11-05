@@ -114,7 +114,7 @@ let
       "ic-case"
       "ic-udt"
       "ic-meter-case-udt"
-      "ic-guard"
+      "ic-prologue"
       "ic-meter-tc_ultra_minimal"
       "ic-meter-simpleplus"
       "ic-meter-tictactoe"
@@ -182,7 +182,7 @@ let
     telc = [
       "telc-round-trip"
       "telc-runs"
-      "telc-guard"
+      "telc-prologue"
       "telc-magic"
       "telc-hash"
       "telc-nodes"
@@ -203,8 +203,8 @@ let
       "size-over-budget"
       "size-budget-exhausted"
       "size-unbounded-input"
-      "size-checks"
-      "size-boundary"
+      "size-mislabeled"
+      "size-where-checks-go"
       "size-filter"
       "size-erased"
     ];

@@ -8,5 +8,5 @@ status 0
 Player 2's turn
 please input number of square: 
 runtime error:
-Generic Runtime Error: IC runtime: ICFuelExhausted 10000000 -- Fix "ZeroSF"
+Aborted, check failed on "10" (from refinement check at tictactoe:71:24)
 --- stderr

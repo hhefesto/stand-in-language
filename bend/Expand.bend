@@ -1,19 +1,16 @@
 import Base
 import ./Loc.bend as L
 import ./Syntax.bend as S
-import ./Show.bend as Sh
 
 # Expansion (Telomare.Expand): multi-pattern lambdas become single-binder
 # lambdas over case destructuring, let definitions become plain bindings, a
 # refinement `x : T = v` becomes a check, as does a lambda parameter
-# `(x : T)`, and list assignments and UDT declarations become their
-# per-slot bindings.
+# `(x : T)`, and list assignments become their per-slot bindings.
 
 type ExpErr is Data:
   ListArityMismatch{+loc: L.Loc, +names: Nat, +slots: Nat}
-  UDTBodyNotList{+loc: L.Loc, +tname: String, +desc: String}
-  UDTArityMismatch{+loc: L.Loc, +tname: String, +names: Nat, +slots: Nat}
-  MisplacedPatternAnnotation{+loc: L.Loc}
+  DuplicatePatternVariable{+loc: L.Loc, +name: String}
+  GuardUsesOwnBinder{+loc: L.Loc, +name: String}
   MissingMain{}
 
 # The lets and lambdas a list assignment's list literal sits under, outermost
@@ -27,12 +24,6 @@ type Layer is Data:
 type Slots is Data:
   Slots{+xs: List<&2, S.Expanded()>, +layers: List<&2, Layer>}
   NoSlots{}
-
-# A UDT body's slots: lets around a list literal (udtSlots). Anything else is
-# an error naming what was found instead.
-type USlots is Data:
-  USlots{+xs: List<&2, S.Expanded()>, +layers: List<&2, Layer>}
-  UNotList{+desc: String}
 
 # What the walk expands (parsed), and what it gives back (expanded).
 type EN is Data:
@@ -103,45 +94,12 @@ def render(e: ExpErr) -> String:
     case ListArityMismatch{loc, names, slots}:
       "list assignment arity mismatch: " ++ Nat.show(names) ++ " names for "
         ++ Nat.show(slots) ++ " values" ++ at.loc(loc)
-    case UDTBodyNotList{loc, tname, desc}:
-      "UDT body for [" ++ tname ++ "] must reduce to a list literal; got: "
-        ++ desc ++ at.loc(loc)
-    case UDTArityMismatch{loc, tname, names, slots}:
-      "UDT declaration for [" ++ tname ++ "] has " ++ Nat.show(names)
-        ++ " names for " ++ Nat.show(slots) ++ " value slots; expected one type name "
-        ++ "plus one name per slot" ++ at.loc(loc)
-    case MisplacedPatternAnnotation{loc}:
-      "refinement annotations (p : T) are only supported at the top of a "
-        ++ "lambda parameter" ++ at.loc(loc)
+    case DuplicatePatternVariable{loc, name}:
+      "pattern binds " ++ name ++ " more than once" ++ at.loc(loc)
+    case GuardUsesOwnBinder{loc, name}:
+      "a guard mentions " ++ name ++ ", which its own pattern binds" ++ at.loc(loc)
     case MissingMain{}:
       "missing 'main' definition"
-
-# A few words for what a UDT body turned out to be (Haskell shows the node).
-def describe(t: S.Expanded()) -> String:
-  match t:
-    case S.SInt{loc, n}:
-      "IntUPF " ++ U32.show(n)
-    case S.SStr{loc, s}:
-      "StringUPF " ++ Sh.string(s)
-    case S.SVar{loc, name}:
-      "UnprocessedParsedTermL (VarF " ++ Sh.string(name) ++ ")"
-    case S.SPair{loc, a, b}:
-      "UnprocessedParsedTermB (PairSF () ())"
-    case S.SApp{loc, f, x}:
-      "UnprocessedParsedTermL (AppF () ())"
-    case S.SLam{loc, v, b}:
-      "UnprocessedParsedTermL (LamF " ++ Sh.string(L.Name.text(v)) ++ " ())"
-    case _:
-      "a term that is not a list literal"
-
-def uslots(t: S.Expanded(), acc: List<&2, Layer>) -> USlots:
-  match t:
-    case S.SList{loc, xs}:
-      USlots{xs, List.reverse(&2, Layer, acc)}
-    case S.SLet{loc, binds, inner}:
-      uslots(inner, WLet{loc, binds} <> acc)
-    case other:
-      UNotList{describe(other)}
 
 # Accessors
 # ---------
@@ -200,7 +158,7 @@ def plain.none(+loc: L.Loc, names: List<&2, L.Name>, body: S.Expanded()) -> R(Li
   Done{S.Bind{L.Name{L.GenIn{"listAssignmentIntermediate", loc}, name}, body}
        <> accessors(names, loc, 0n, S.SVar{loc, name})}
 
-# `[a, b, c] = e` where e is not a UDT (expandPlainListAssignment).
+# `[a, b, c] = e` (expandPlainListAssignment).
 def plain(+loc: L.Loc, +names: List<&2, L.Name>, +body: S.Expanded(), s: Slots) -> R(List<&2, S.ExpandedBind()>):
   match s:
     case Slots{+xs, ls}:
@@ -209,120 +167,9 @@ def plain(+loc: L.Loc, +names: List<&2, L.Name>, +body: S.Expanded(), s: Slots) 
     case NoSlots{}:
       plain.none(loc, names, body)
 
-# UDT declarations
-# ----------------
-
-# \__udt_v -> if dEqual (left __udt_v) h then right __udt_v else abort "not T"
-def validator(+loc: L.Loc, tname: String, +h: String) -> S.Expanded():
-  S.SLam{loc, L.Name{L.GenIn{"UDT validator", loc}, "__udt_v"},
-    S.SIte{loc,
-      S.SApp{loc, S.SApp{loc, S.SVar{loc, "dEqual"}, S.SLeft{loc, S.SVar{loc, "__udt_v"}}},
-             S.SVar{loc, h}},
-      S.SRight{loc, S.SVar{loc, "__udt_v"}},
-      S.abort.term(Empty, Unit, Empty, L.KValidator{}, loc, S.SStr{loc, "not " ++ tname})}}
-
-def generated(+parent: L.Loc, +name: String) -> L.Name:
-  L.Name{L.GenIn{name, parent}, name}
-
-def udt.core(names: List<&2, L.Name>, +loc: L.Loc, +i: Nat, +src: S.Expanded()) -> List<&2, S.ExpandedBind()>:
-  accessors(names, loc, i, src)
-
-def udt.hoisted(names: List<&2, L.Name>, +loc: L.Loc, +h: L.Name, +tname: String,
-                +ls: List<&2, Layer>, slots: List<&2, S.Expanded()>) -> List<&2, S.ExpandedBind()>:
-  match names:
-    case Nil{}:
-      []
-    case Con{n, rest}:
-      match slots:
-        case Nil{}:
-          []
-        case Con{x, xrest}:
-          S.Bind{n, S.SLet{loc,
-                  [S.Bind{h, S.SVar{loc, "__udt_" ++ tname ++ "_hash"}},
-                   S.Bind{L.Name{loc, tname}, validator(loc, tname, L.Name.text(h))}],
-                  wrap(ls, x)}}
-            <> udt.hoisted(rest, loc, h, tname, ls, xrest)
-
-def udt.build(+loc: L.Loc, +names: List<&2, L.Name>, +tname: String, +h: L.Name,
-              +xs: List<&2, S.Expanded()>, +ls: List<&2, Layer>) -> List<&2, S.ExpandedBind()>:
-  +inter = "__udt_" ++ tname
-  +core = List.take(&2, S.Expanded(), xs, 2n)
-  +ncore = {1n+List.length(&2, S.Expanded(), core) : Nat}
-  +wrapper = {S.SLam{loc, h,
-    S.SLet{loc, [S.Bind{L.Name{loc, tname}, validator(loc, tname, L.Name.text(h))}],
-      wrap(ls, S.SList{loc, S.SVar{loc, L.Name.text(h)} <> S.SVar{loc, tname} <> core})}} : S.Expanded()}
-  S.Bind{generated(loc, inter), S.SApp{loc, wrapper, S.SHash{loc, wrapper}}}
-    <> S.Bind{generated(loc, inter ++ "_hash"), access(loc, 0n, S.SVar{loc, inter})}
-    <> List.append(&2, S.ExpandedBind(),
-         udt.core(List.take(&2, L.Name, names, ncore), loc, 1n, S.SVar{loc, inter}),
-         udt.hoisted(List.drop(&2, L.Name, names, ncore), loc, h, tname, ls,
-                     List.drop(&2, S.Expanded(), xs, 2n)))
-
-def udt.check(+loc: L.Loc, +names: List<&2, L.Name>, +tname: String, +h: L.Name,
-              +xs: List<&2, S.Expanded()>, +ls: List<&2, Layer>, ok: Bool) -> R(List<&2, S.ExpandedBind()>):
-  match ok:
-    case True{}:
-      Done{udt.build(loc, names, tname, h, xs, ls)}
-    case False{}:
-      Fail{UDTArityMismatch{loc, tname, List.length(&2, L.Name, names), List.length(&2, S.Expanded(), xs)}}
-
-def udt.slots(+loc: L.Loc, +names: List<&2, L.Name>, +tname: String, +h: L.Name, s: USlots) ->
-  R(List<&2, S.ExpandedBind()>):
-  match s:
-    case USlots{+xs, ls}:
-      udt.check(loc, names, tname, h, xs, ls,
-                Nat.is_eq(List.length(&2, L.Name, names), 1n+List.length(&2, S.Expanded(), xs)))
-    case UNotList{desc}:
-      Fail{UDTBodyNotList{loc, tname, desc}}
-
-def udt.plain(names: List<&2, L.Name>, +loc: L.Loc, +i: Nat, +body: S.Expanded()) -> List<&2, S.ExpandedBind()>:
-  accessors(names, loc, i, body)
-
-def udt.body(+loc: L.Loc, +names: List<&2, L.Name>, +tname: String, body: S.Expanded()) -> R(List<&2, S.ExpandedBind()>):
-  match body:
-    case S.SLam{l, h, inner}:
-      udt.slots(loc, names, tname, h, uslots(inner, []))
-    case +other:
-      Done{udt.plain(names, loc, 0n, other)}
-
-# `[T, mk, unT, ops...] = \h -> lets [s0, s1, ...]` (expandUDTLocated).
-def udt(+loc: L.Loc, +names: List<&2, L.Name>, body: S.Expanded()) -> R(List<&2, S.ExpandedBind()>):
-  match names:
-    case Nil{}:
-      Done{[]}
-    case Con{first, rest}:
-      udt.body(loc, names, L.Name.text(first), body)
-
-def is.upper.first(s: String) -> Bool:
-  match s:
-    case SNil{}:
-      False{}
-    case SCon{c, t}:
-      Char.is_upper(c)
-
-# A list definition is a UDT when its first name is capitalised and its body
-# a lambda.
-def is.udt(names: List<&2, L.Name>, body: S.Expanded()) -> Bool:
-  match names:
-    case Nil{}:
-      False{}
-    case Con{first, rest}:
-      match body:
-        case S.SLam{loc, v, b}:
-          is.upper.first(L.Name.text(first))
-        case _:
-          False{}
-
-def list.def(+loc: L.Loc, +names: List<&2, L.Name>, +body: S.Expanded(), isudt: Bool) -> R(List<&2, S.ExpandedBind()>):
-  match isudt:
-    case True{}:
-      udt(loc, names, body)
-    case False{}:
-      plain(loc, names, body, slots(body, []))
-
 # A list definition, its body already expanded (expandDef's ListDefF).
 def expand.list(+loc: L.Loc, +names: List<&2, L.Name>, +body: S.Expanded()) -> R(List<&2, S.ExpandedBind()>):
-  list.def(loc, names, body, is.udt(names, body))
+  plain(loc, names, body, slots(body, []))
 
 # Multi-pattern lambdas
 # ---------------------
@@ -349,8 +196,9 @@ def lam.names(ps: List<&2, S.ExpandedLPat()>, +i: Nat) -> List<&2, L.Name>:
 # lambda's location lt; the parameter starts at loc. A refinement `(p : T)`
 # binds the checked value: `\(x : T) -> body` is `\v -> let x = T checks v
 # in body`, as `let x : T = v` would be, and an annotated pattern that is no
-# variable is destructured from that binding. Only the top of a parameter
-# is annotated (lpats.ok).
+# variable is destructured from that binding. Annotations further in are
+# guards of the parameter's destructuring case, whose fallback aborts, so a
+# parameter's guard that fails aborts as a refinement does.
 def destructure(+lt: L.Loc, +loc: L.Loc, p: S.ExpandedPat(), +v: String, inner: S.Expanded()) -> S.Expanded():
   match p:
     case S.PVar{name}:
@@ -367,7 +215,7 @@ def destructure(+lt: L.Loc, +loc: L.Loc, p: S.ExpandedPat(), +v: String, inner: 
       S.SCase{lt, S.SVar{lt, v},
         [S.Alt{other, inner},
          S.Alt{S.PIgnore{}, S.abort.term(Empty, Unit, Empty, L.KCase{}, loc,
-                                   S.SStr{loc, "buildMultiLambda: pattern not reached"})}], Unit{}}
+                                   S.SStr{loc, "lambda argument does not match its pattern"})}], Unit{}}
 
 def destructure.all(ps: List<&2, S.ExpandedLPat()>, +lt: L.Loc, names: List<&2, L.Name>, body: S.Expanded()) -> S.Expanded():
   match ps:
@@ -398,40 +246,199 @@ def multi.lambda(+lt: L.Loc, +pats: List<&2, S.ExpandedLPat()>, body: S.Expanded
   +names = lam.names(pats, 0n)
   multi.lambda.go(names, destructure.all(pats, lt, names, body))
 
-# Where a refinement annotation may stand
-# ---------------------------------------
+# What a pattern may not do
+# -------------------------
 
-def has.ann(p: S.ExpandedPat()) -> Bool:
+# The names a pattern binds, left to right, ahead of acc (patternBinders).
+def binders(p: S.ExpandedPat(), acc: List<&2, String>) -> List<&2, String>:
+  match p:
+    case S.PVar{name}:
+      L.Name.text(name) <> acc
+    case S.PAnn{q, t}:
+      binders(q, acc)
+    case S.PPair{a, b}:
+      binders(a, binders(b, acc))
+    case _:
+      acc
+
+# The pattern's guards, a guard after the pattern it annotates, ahead of acc.
+def guards(p: S.ExpandedPat(), acc: List<&2, S.Expanded()>) -> List<&2, S.Expanded()>:
   match p:
     case S.PAnn{q, t}:
-      True{}
+      guards(q, t <> acc)
     case S.PPair{a, b}:
-      has.ann(a) || has.ann(b)
+      guards(a, guards(b, acc))
     case _:
-      False{}
+      acc
 
-def plain.if(ann: Bool, +loc: L.Loc, p: S.ExpandedPat()) -> R(S.ExpandedPat()):
-  match ann:
+def named(xs: List<&2, String>, +n: String) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{x, rest}:
+      String.eq(x, n) || named(rest, n)
+
+def first.dup.if(dup: Bool, +n: String, later: Maybe<&2, String>) -> Maybe<&2, String>:
+  match dup:
     case True{}:
-      Fail{MisplacedPatternAnnotation{loc}}
+      Some{n}
     case False{}:
+      later
+
+# The first name that comes twice.
+def first.dup(xs: List<&2, String>) -> Maybe<&2, String>:
+  match xs:
+    case Nil{}:
+      None{}
+    case Con{+x, +rest}:
+      first.dup.if(named(rest, x), x, first.dup(rest))
+
+def first.in.if(yes: Bool, +n: String, later: Maybe<&2, String>) -> Maybe<&2, String>:
+  match yes:
+    case True{}:
+      Some{n}
+    case False{}:
+      later
+
+# The first of xs among names.
+def first.in(xs: List<&2, String>, +names: List<&2, String>) -> Maybe<&2, String>:
+  match xs:
+    case Nil{}:
+      None{}
+    case Con{+x, rest}:
+      first.in.if(named(names, x), x, first.in(rest, names))
+
+# What a free-variable walk visits.
+type FN is Data:
+  FT{+t: S.Expanded()}
+  FTs{+xs: List<&2, S.Expanded()>}
+  FBs{+bs: List<&2, S.ExpandedBind()>}
+  FAs{+alts: List<&2, S.ExpandedAlt()>}
+  FP{+p: S.ExpandedPat()}
+
+def set.minus(xs: List<&2, String>, s: Set()) -> Set():
+  match xs:
+    case Nil{}:
+      s
+    case Con{x, rest}:
+      set.minus(rest, Set.del(s, x))
+
+def bind.names(bs: List<&2, S.ExpandedBind()>) -> List<&2, String>:
+  match bs:
+    case Nil{}:
+      []
+    case Con{b, rest}:
+      match b:
+        case S.Bind{name, val}:
+          L.Name.text(name) <> bind.names(rest)
+
+def set.plus(a: Set(), b: Set()) -> Set():
+  Map.union(&2, Unit, a, b)
+
+# The names a term uses without binding them (freeVars), through
+# foldMapScoped's scopes: a lambda's body, a let's values and body, a case
+# alternative's body, and the terms in its pattern's annotations with no
+# extra binders.
+def free(+fuel: Nat, n: FN) -> Set():
+  match fuel:
+    case 0n:
+      Set.new()
+    case 1n+f:
+      match n:
+        case FT{t}:
+          match t:
+            case S.SVar{loc, name}:
+              Set.add(Set.new(), name)
+            case S.SApp{loc, a, b}:
+              set.plus(free(f, FT{a}), free(f, FT{b}))
+            case S.SLam{loc, v, body}:
+              Set.del(free(f, FT{body}), L.Name.text(v))
+            case S.SPair{loc, a, b}:
+              set.plus(free(f, FT{a}), free(f, FT{b}))
+            case S.SCheck{loc, k, a, b}:
+              set.plus(free(f, FT{a}), free(f, FT{b}))
+            case S.SIte{loc, a, b, c}:
+              set.plus(free(f, FT{a}), set.plus(free(f, FT{b}), free(f, FT{c})))
+            case S.SLeft{loc, x}:
+              free(f, FT{x})
+            case S.SRight{loc, x}:
+              free(f, FT{x})
+            case S.SRec{loc, a, b, c}:
+              set.plus(free(f, FT{a}), set.plus(free(f, FT{b}), free(f, FT{c})))
+            case S.SLet{loc, +binds, body}:
+              set.minus(bind.names(binds), set.plus(free(f, FBs{binds}), free(f, FT{body})))
+            case S.SList{loc, xs}:
+              free(f, FTs{xs})
+            case S.SCase{loc, scrut, alts, w}:
+              set.plus(free(f, FT{scrut}), free(f, FAs{alts}))
+            case _:
+              Set.new()
+        case FTs{xs}:
+          match xs:
+            case Nil{}:
+              Set.new()
+            case Con{x, rest}:
+              set.plus(free(f, FT{x}), free(f, FTs{rest}))
+        case FBs{bs}:
+          match bs:
+            case Nil{}:
+              Set.new()
+            case Con{b, rest}:
+              match b:
+                case S.Bind{name, val}:
+                  set.plus(free(f, FT{val}), free(f, FBs{rest}))
+        case FAs{alts}:
+          match alts:
+            case Nil{}:
+              Set.new()
+            case Con{alt, rest}:
+              match alt:
+                case S.Alt{+p, body}:
+                  set.plus(free(f, FP{p}),
+                    set.plus(set.minus(binders(p, []), free(f, FT{body})), free(f, FAs{rest})))
+        case FP{p}:
+          match p:
+            case S.PAnn{q, t}:
+              set.plus(free(f, FP{q}), free(f, FT{t}))
+            case S.PPair{a, b}:
+              set.plus(free(f, FP{a}), free(f, FP{b}))
+            case _:
+              Set.new()
+
+def fuel() -> Nat:
+  U32.to_nat(4294967295)
+
+# The first name a guard uses that the pattern binds, in guard order and
+# each guard's names ascending.
+def own.binder(gs: List<&2, S.Expanded()>, +names: List<&2, String>) -> Maybe<&2, String>:
+  match gs:
+    case Nil{}:
+      None{}
+    case Con{g, rest}:
+      Maybe.or(&2, String, first.in(Set.to_list(free(fuel(), FT{g})), names), own.binder(rest, names))
+
+def pat.guarded(m: Maybe<&2, String>, +loc: L.Loc, p: S.ExpandedPat()) -> R(S.ExpandedPat()):
+  match m:
+    case Some{n}:
+      Fail{GuardUsesOwnBinder{loc, n}}
+    case None{}:
       Done{p}
 
-# A pattern with no annotation anywhere (checkPlainPattern): a case
-# alternative's, or a lambda parameter's under its annotations.
-def plain.ok(+loc: L.Loc, +p: S.ExpandedPat()) -> R(S.ExpandedPat()):
-  plain.if(has.ann(p), loc, p)
+def pat.dup(m: Maybe<&2, String>, +loc: L.Loc, +names: List<&2, String>, +p: S.ExpandedPat()) -> R(S.ExpandedPat()):
+  match m:
+    case Some{n}:
+      Fail{DuplicatePatternVariable{loc, n}}
+    case None{}:
+      pat.guarded(own.binder(guards(p, []), names), loc, p)
 
-# A lambda parameter: annotations at its top, a plain pattern under them
-# (checkLambdaPattern).
-def lpat.ok(+loc: L.Loc, p: S.ExpandedPat()) -> R(S.ExpandedPat()):
-  match p:
-    case S.PAnn{q, t}:
-      do Result<&2, &2, ExpErr, S.ExpandedPat()>:
-        q2 : S.ExpandedPat() <- lpat.ok(loc, q)
-        return S.PAnn{q2, t}
-    case other:
-      plain.ok(loc, other)
+def pat.names(+names: List<&2, String>, +loc: L.Loc, +p: S.ExpandedPat()) -> R(S.ExpandedPat()):
+  pat.dup(first.dup(names), loc, names, p)
+
+# What a pattern may not do while the scoping of its guards is undecided
+# (checkPattern): bind one name twice, or mention in a guard a name the same
+# pattern binds.
+def pat.ok(+loc: L.Loc, +p: S.ExpandedPat()) -> R(S.ExpandedPat()):
+  pat.names(binders(p, []), loc, p)
 
 def lpats.ok(ps: List<&2, S.ExpandedLPat()>) -> R(List<&2, S.ExpandedLPat()>):
   match ps:
@@ -439,9 +446,9 @@ def lpats.ok(ps: List<&2, S.ExpandedLPat()>) -> R(List<&2, S.ExpandedLPat()>):
       Done{[]}
     case Con{lp, rest}:
       match lp:
-        case S.LPat{+loc, p}:
+        case S.LPat{+loc, +p}:
           do Result<&2, &2, ExpErr, List<&2, S.ExpandedLPat()>>:
-            p2 : S.ExpandedPat() <- lpat.ok(loc, p)
+            p2 : S.ExpandedPat() <- pat.ok(loc, p)
             r2 : List<&2, S.ExpandedLPat()> <- lpats.ok(rest)
             return S.LPat{loc, p2} <> r2
 
@@ -547,10 +554,6 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
               do Result<&2, &2, ExpErr, EV>:
                 x2 : EV <- ex(f, ETerm{x})
                 return VT{S.SRight{loc, vt(x2)}}
-            case S.SHash{loc, x}:
-              do Result<&2, &2, ExpErr, EV>:
-                x2 : EV <- ex(f, ETerm{x})
-                return VT{S.SHash{loc, vt(x2)}}
             case S.SRec{loc, a, b, c}:
               do Result<&2, &2, ExpErr, EV>:
                 a2 : EV <- ex(f, ETerm{a})
@@ -671,13 +674,10 @@ def ex(+fuel: Nat, n: EN) -> R(EV):
                 case S.Alt{p, body}:
                   do Result<&2, &2, ExpErr, EV>:
                     p2 : EV <- ex(f, EPat{p})
-                    q : S.ExpandedPat() <- plain.ok(loc, vp(p2))
+                    q : S.ExpandedPat() <- pat.ok(loc, vp(p2))
                     b2 : EV <- ex(f, ETerm{body})
                     r2 : EV <- ex(f, EAlts{loc, rest})
                     return VAs{S.Alt{q, vt(b2)} <> vas(r2)}
-
-def fuel() -> Nat:
-  U32.to_nat(4294967295)
 
 def term(t: S.Parsed()) -> R(S.Expanded()):
   do Result<&2, &2, ExpErr, S.Expanded()>:

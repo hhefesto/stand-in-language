@@ -1,0 +1,15 @@
+import Prelude
+rNum = \x -> left x
+rDen = \x -> right x
+fromRational = \n d -> if dEqual d 0
+                       then abort "Denominator cannot be zero"
+                       else let g = gcd n d
+                            in (dDiv n g, dDiv d g)
+rPlus = \a b -> fromRational (dPlus (dTimes (rNum a) (rDen b)) (dTimes (rNum b) (rDen a)))
+                             (dTimes (rDen a) (rDen b))
+rTimes = \a b -> fromRational (dTimes (rNum a) (rNum b))
+                              (dTimes (rDen a) (rDen b))
+rMinus = \a b -> fromRational (dMinus (dTimes (rNum a) (rDen b)) (dTimes (rNum b) (rDen a)))
+                              (dTimes (rDen a) (rDen b))
+rDiv = \a b -> fromRational (dTimes (rNum a) (rDen b))
+                            (dTimes (rDen a) (rNum b))

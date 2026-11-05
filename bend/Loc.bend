@@ -133,8 +133,6 @@ type AbortKind is Data:
   KRefine{}
   KUser{}
   KCase{}
-  KValidator{}
-  KRecursion{}
   KSizing{}
   KUnknown{}
 
@@ -143,10 +141,6 @@ type Origin is Data:
 
 def unknown.origin() -> Origin:
   Origin{KUnknown{}, Unknown{}}
-
-# The abort at the bottom of every sized recursion chain.
-def recursion.origin() -> Origin:
-  Origin{KRecursion{}, Gen{"sized recursion chain"}}
 
 # The aborts the sizing analysis makes up.
 def sizing.origin() -> Origin:
@@ -171,7 +165,8 @@ def kind.is.unknown(k: AbortKind) -> Bool:
     case _:
       False{}
 
-# The kind's number in an artifact (Artifact's putOrigin).
+# The kind's number in an artifact (Artifact's putOrigin); 3 was the UDT
+# validator abort, retired with UDTs.
 def kind.tag(k: AbortKind) -> U32:
   match k:
     case KRefine{}:
@@ -180,14 +175,121 @@ def kind.tag(k: AbortKind) -> U32:
       1
     case KCase{}:
       2
-    case KValidator{}:
-      3
-    case KRecursion{}:
-      4
     case KSizing{}:
-      5
+      4
     case KUnknown{}:
-      6
+      5
+
+# Origin's derived order: Haskell's constructor order, field by field.
+def cmp.then(c: Cmp, d: Cmp) -> Cmp:
+  match c:
+    case EQ{}:
+      d
+    case other:
+      other
+
+def pos.cmp(a: Pos, b: Pos) -> Cmp:
+  match a:
+    case Pos{+l1, +c1, +o1}:
+      match b:
+        case Pos{+l2, +c2, +o2}:
+          cmp.then(U32.cmp(l1, l2), cmp.then(U32.cmp(c1, c2), U32.cmp(o1, o2)))
+
+def loc.rank(l: Loc) -> U32:
+  match l:
+    case Src{f, s, e}:
+      0
+    case GenIn{r, p}:
+      1
+    case Gen{r}:
+      1
+    case Builtin{n}:
+      2
+    case RuntimeLoc{}:
+      3
+    case DecompiledLoc{}:
+      4
+    case Unknown{}:
+      5
+
+def loc.cmp(a: Loc, +b: Loc) -> Cmp:
+  match a:
+    case Src{f, s, e}:
+      match b:
+        case Src{f2, s2, e2}:
+          cmp.then(String.order(f, f2), cmp.then(pos.cmp(s, s2), pos.cmp(e, e2)))
+        case _:
+          U32.cmp(0, loc.rank(b))
+    case GenIn{r, p}:
+      match b:
+        case GenIn{r2, p2}:
+          cmp.then(String.order(r, r2), loc.cmp(p, p2))
+        case Gen{r2}:
+          cmp.then(String.order(r, r2), GT{})
+        case _:
+          U32.cmp(1, loc.rank(b))
+    case Gen{r}:
+      match b:
+        case GenIn{r2, p2}:
+          cmp.then(String.order(r, r2), LT{})
+        case Gen{r2}:
+          String.order(r, r2)
+        case _:
+          U32.cmp(1, loc.rank(b))
+    case Builtin{n}:
+      match b:
+        case Builtin{n2}:
+          String.order(n, n2)
+        case _:
+          U32.cmp(2, loc.rank(b))
+    case RuntimeLoc{}:
+      U32.cmp(3, loc.rank(b))
+    case DecompiledLoc{}:
+      U32.cmp(4, loc.rank(b))
+    case Unknown{}:
+      U32.cmp(5, loc.rank(b))
+
+def not.gt(c: Cmp) -> Bool:
+  match c:
+    case GT{}:
+      False{}
+    case _:
+      True{}
+
+def origin.le(a: Origin, b: Origin) -> Bool:
+  match a:
+    case Origin{ka, la}:
+      match b:
+        case Origin{kb, lb}:
+          not.gt(cmp.then(U32.cmp(kind.tag(ka), kind.tag(kb)), loc.cmp(la, lb)))
+
+def pos.key(p: Pos) -> String:
+  match p:
+    case Pos{l, c, o}:
+      U32.show(l) ++ "." ++ U32.show(c) ++ "." ++ U32.show(o)
+
+def loc.key(l: Loc) -> String:
+  match l:
+    case Src{f, s, e}:
+      "S" ++ f ++ ":" ++ pos.key(s) ++ ":" ++ pos.key(e)
+    case GenIn{r, p}:
+      "G" ++ r ++ "(" ++ loc.key(p) ++ ")"
+    case Gen{r}:
+      "g" ++ r
+    case Builtin{n}:
+      "B" ++ n
+    case RuntimeLoc{}:
+      "R"
+    case DecompiledLoc{}:
+      "D"
+    case Unknown{}:
+      "U"
+
+# An origin as a map's key: two origins have the same key when they are equal.
+def origin.key(o: Origin) -> String:
+  match o:
+    case Origin{k, l}:
+      U32.show(kind.tag(k)) ++ loc.key(l)
 
 def kind.eq(a: AbortKind, b: AbortKind) -> Bool:
   U32.is_eq(kind.tag(a), kind.tag(b))
@@ -200,13 +302,9 @@ def kind.of.tag(+n: U32) -> Maybe<&2, AbortKind>:
       Some{KUser{}}
     case 2:
       Some{KCase{}}
-    case 3:
-      Some{KValidator{}}
     case 4:
-      Some{KRecursion{}}
-    case 5:
       Some{KSizing{}}
-    case 6:
+    case 5:
       Some{KUnknown{}}
     case _:
       None{}
@@ -220,10 +318,6 @@ def kind.show(k: AbortKind) -> String:
       "UserAbort"
     case KCase{}:
       "CaseAbort"
-    case KValidator{}:
-      "ValidatorAbort"
-    case KRecursion{}:
-      "RecursionAbort"
     case KSizing{}:
       "SizingAbort"
     case KUnknown{}:
@@ -237,10 +331,6 @@ def kind.describe(k: AbortKind) -> String:
       "abort"
     case KCase{}:
       "pattern match"
-    case KValidator{}:
-      "type validator"
-    case KRecursion{}:
-      "recursion limit"
     case KSizing{}:
       "sizing analysis"
     case KUnknown{}:

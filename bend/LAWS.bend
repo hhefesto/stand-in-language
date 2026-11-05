@@ -14,7 +14,7 @@
 #   recursion, and each refinement check is an XCheck.
 # - A policy, Sm.Pol{mode, checks}, says what the erasable sites mean: the
 #   checks numbered in `checks`, and every chain's bottom. Watch: a bottom,
-#   and a check whose test does not give 0, are a mark, which travels as an
+#   and a check whose test gives 0, are a mark, which travels as an
 #   aborted value does and ends the run with Fired if it reaches the
 #   result. Erase: a check is its value and a bottom is 0, as the program
 #   that runs has them. Limit: a check is its value and a bottom is the

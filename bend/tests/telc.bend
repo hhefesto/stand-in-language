@@ -17,7 +17,7 @@ import ../Sha256.bend as Sha
 
 # Compiled programs (.telc), haskell-final's version 4 artifacts
 # (RunModeTests "compiled artifacts"): a round trip keeps every field, a
-# decoded program runs as its source does, a program with a session guard
+# decoded program runs as its source does, a program with an input prologue
 # is written as the port's version 5 and one without as version 4, garbage
 # is refused by its magic number, the sources' hash follows their content
 # and not their order, and the node counts, the port's (sizing erased what
@@ -52,71 +52,27 @@ def mods(m: Fr.Mods) -> List<&2, Rs.Mod>:
     case Fr.Mods{ms, errs}:
       ms
 
-def guard.sized.prog(+t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, IC.Prog>:
+def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Tc.Telc>:
   match r:
     case Fail{f}:
       None{}
     case Done{s}:
       match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
-          Some{Ss.guard.from(t, counts, expr, pl)}
-
-def guard.sized(+t: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Tc.Guard>:
-  match r:
-    case Fail{f}:
-      None{}
-    case Done{s}:
-      match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
-          Some{Tc.guard.of(expr, Ss.layouts.from(t, counts, pl))}
-
-def guard.stored(m: Maybe<&2, T.C>) -> Maybe<&2, Tc.Guard>:
-  match m:
-    case None{}:
-      None{}
-    case Some{+t}:
-      guard.sized(t, Sz.size(65536, True{}, t))
-
-# The guard's checks, for the report.
-def guard.checks.of(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Sz.Checks>:
-  match r:
-    case Fail{f}:
-      None{}
-    case Done{s}:
-      match s:
-        case Sz.Sized{counts, expr, checks, pl}:
-          Some{checks}
-
-def guard.checks(m: Maybe<&2, T.C>) -> Maybe<&2, Sz.Checks>:
-  match m:
-    case None{}:
-      None{}
-    case Some{t}:
-      guard.checks.of(Sz.size(65536, True{}, t))
-
-def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, g: Maybe<&2, Tc.Guard>, gc: Maybe<&2, Sz.Checks>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> Maybe<&2, Tc.Telc>:
-  match r:
-    case Fail{f}:
-      None{}
-    case Done{s}:
-      match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
+        case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
           +ms = mods(Fr.all(srcs))
-          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks, gc), 65536,
-                     Ss.layouts.from(run, counts, pl), pl, g)}
+          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks), 65536,
+                     Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro)), pl, pro)}
 
-def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, Fr.Program>) -> Maybe<&2, Tc.Telc>:
+def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, T.C>) -> Maybe<&2, Tc.Telc>:
   match r:
     case Fail{e}:
       None{}
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, +g, +boundary}:
-          sized(entry, srcs, run, guard.stored(g), guard.checks(g), Sz.size.guarded(65536, boundary, g, run))
+    case Done{+run}:
+      sized(entry, srcs, run, Sz.size(65536, True{}, run))
 
-# The program as --compile writes it: main, and its guard.
+# The program as --compile writes it: main, and its prologue.
 def artifact(+srcs: List<&2, Fr.Src>, +entry: String) -> Maybe<&2, Tc.Telc>:
-  compiled(entry, srcs, Fr.compile.program(srcs, entry))
+  compiled(entry, srcs, Fr.compile(srcs, entry))
 
 def read.back(r: Result<&2, &2, String, Tc.Telc>) -> Maybe<&2, Tc.Telc>:
   match r:
@@ -185,14 +141,12 @@ def layouts.text(ls: List<&2, Tc.Layout>) -> String:
         case Tc.Layout{digest, shape}:
           digest ++ " " ++ Lf.shape.show(shape, False{}) ++ ";" ++ layouts.text(rest)
 
-def guard.text(g: Maybe<&2, Tc.Guard>) -> String:
+def prologue.text(g: Maybe<&2, Co.V>) -> String:
   match g:
     case None{}:
-      "unguarded"
+      "no prologue"
     case Some{x}:
-      match x:
-        case Tc.Guard{expr, layouts}:
-          Co.show(expr) ++ "\n" ++ layouts.text(layouts)
+      Co.show(x)
 
 def fields(m: Maybe<&2, Tc.Telc>) -> String:
   match m:
@@ -202,7 +156,7 @@ def fields(m: Maybe<&2, Tc.Telc>) -> String:
       match t:
         case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, guard}:
           entry ++ "\n" ++ hash ++ "\n" ++ cert ++ "\n" ++ counts.text(counts) ++ "\n" ++ places.text(places)
-            ++ "\n" ++ U32.show(budget) ++ "\n" ++ Co.show(expr) ++ "\n" ++ layouts.text(layouts) ++ "\n" ++ guard.text(guard)
+            ++ "\n" ++ U32.show(budget) ++ "\n" ++ Co.show(expr) ++ "\n" ++ layouts.text(layouts) ++ "\n" ++ prologue.text(guard)
 
 def round.trip(+m: Maybe<&2, Tc.Telc>) -> Bool:
   String.eq(fields(again(m)), fields(m)) && Bool.not(String.eq(fields(m), "none"))
@@ -213,23 +167,14 @@ def round.trip(+m: Maybe<&2, Tc.Telc>) -> Bool:
 def stored(+expr: Co.V, ls: List<&2, Tc.Layout>) -> IC.Prog:
   IC.prepare(expr, Tc.shapes(ls, Map.new(&2, Lf.Shape)))
 
-def stored.guard(g: Maybe<&2, Tc.Guard>) -> Maybe<&2, IC.Prog>:
-  match g:
-    case None{}:
-      None{}
-    case Some{x}:
-      match x:
-        case Tc.Guard{+expr, layouts}:
-          Some{stored(expr, layouts)}
-
 def run.of(m: Maybe<&2, Tc.Telc>, lines: List<&2, String>) -> Ss.Replay:
   match m:
     case None{}:
       Ss.Replay{["no artifact"], Ss.cost.none()}
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, guard}:
-          Ss.replay(Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), stored.guard(guard), plain), Ss.Sized{}, lines)
+        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, pro}:
+          Ss.replay(Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), pro), Ss.Sized{}, lines)
 
 def replay.text(r: Ss.Replay) -> String:
   match r:
@@ -240,35 +185,26 @@ def replay.text(r: Ss.Replay) -> String:
         case Nil{}:
           "nothing"
 
-def guard.prog(m: Maybe<&2, T.C>) -> Maybe<&2, IC.Prog>:
-  match m:
-    case None{}:
-      None{}
-    case Some{+t}:
-      guard.sized.prog(t, Sz.size(65536, True{}, t))
-
-def source.sized(+run: T.C, g: Maybe<&2, IC.Prog>, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
+def source.sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{f}:
       Ss.Replay{["sizing failed"], Ss.cost.none()}
     case Done{s}:
       match s:
-        case Sz.Sized{+counts, +expr, checks, +pl}:
-          Ss.replay(Ss.session(expr, Ss.layouts.from(run, counts, pl), g, pl), Ss.Sized{}, lines)
+        case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
+          Ss.replay(Ss.session(expr, Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro)), pro), Ss.Sized{}, lines)
 
-def source.run(r: Result<&2, &2, String, Fr.Program>, lines: List<&2, String>) -> Ss.Replay:
+def source.run(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
   match r:
     case Fail{e}:
       Ss.Replay{[e], Ss.cost.none()}
-    case Done{p}:
-      match p:
-        case Fr.Program{+run, +g, +boundary}:
-          source.sized(run, guard.prog(g), Sz.size.guarded(65536, boundary, g, run), lines)
+    case Done{+run}:
+      source.sized(run, Sz.size(65536, True{}, run), lines)
 
 # What a decoded program shows, and what it spends, as its source does.
 def runs.alike(+srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:
   String.eq(replay.text(run.of(again(artifact(srcs, entry)), lines)),
-            replay.text(source.run(Fr.compile.program(srcs, entry), lines)))
+            replay.text(source.run(Fr.compile(srcs, entry), lines)))
 
 # Refusing garbage, hashing, counting
 # -----------------------------------
@@ -311,6 +247,22 @@ def version.of(m: Maybe<&2, Tc.Telc>) -> U32:
     case Some{t}:
       fifth(Tc.encode(t))
 
+def prologue.some(g: Maybe<&2, Co.V>) -> Bool:
+  match g:
+    case None{}:
+      False{}
+    case Some{x}:
+      True{}
+
+def has.prologue(m: Maybe<&2, Tc.Telc>) -> Bool:
+  match m:
+    case None{}:
+      False{}
+    case Some{t}:
+      match t:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, pro}:
+          prologue.some(pro)
+
 def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
   do IO<Unit>:
     +sp : Maybe<&2, Tc.Telc> = artifact(with.prelude(prelude, "simpleplus", plus), "simpleplus")
@@ -319,9 +271,10 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       runs.alike([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", []),
       runs.alike(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["3 4"]),
       runs.alike(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["9 a"])])))
-    IO.print(verdict("telc-guard", all([
-      U32.is_eq(version.of(sp), 7),
-      U32.is_eq(version.of(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 6)])))
+    IO.print(verdict("telc-prologue", all([
+      U32.is_eq(version.of(sp), 9),
+      has.prologue(sp),
+      Bool.not(has.prologue(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")))])))
     IO.print(verdict("telc-magic", refused(Tc.decode(Sha.utf8("not a telomare artifact at all")), "magic")))
     IO.print(verdict("telc-hash", all([
       Bool.not(String.eq(Tc.sources.hash(with.prelude(prelude, "simpleplus", plus)),
@@ -329,8 +282,8 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       String.eq(Tc.sources.hash([Fr.Src{"simpleplus", plus}, Fr.Src{"Prelude", prelude}]),
                 Tc.sources.hash(with.prelude(prelude, "simpleplus", plus)))])))
     IO.print(verdict("telc-nodes", all([
-      U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 875),
-      U32.is_eq(nodes(sp), 41627)])))
+      U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 798),
+      U32.is_eq(nodes(sp), 20884)])))
 
 def main() -> IO(Unit):
   do IO<Unit>:

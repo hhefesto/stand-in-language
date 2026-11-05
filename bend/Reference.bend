@@ -25,10 +25,38 @@ type K is Data:
   KLeft{}
   KRight{}
   KSetEnv{}
+  KChecked{+o: L.Origin, +entry: U32, +outer: U32}
 
-# What a run cost (Meter): evaluation steps, and term nodes built.
+# What one refinement check (one origin) cost over a run (CheckCost): how many
+# times it ran, and the steps spent running it, less those of the checks nested
+# in it, so the costs of all checks add up to their share of the steps.
+type CheckCost is Data:
+  CheckCost{+o: L.Origin, +runs: U32, +steps: U32}
+
+# What a run cost (Meter): evaluation steps, term nodes built, what the checks
+# cost, and the steps of the checks finished inside the check now running.
 type Cost is Data:
-  Cost{+steps: U32, +built: U32}
+  Cost{+steps: U32, +built: U32, +checks: List<&2, CheckCost>, +nested: U32}
+
+def cost.none() -> Cost:
+  Cost{0, 0, [], 0}
+
+def cc.keep(same: Bool, +o: L.Origin, +r: U32, +s: U32, +xr: U32, +xs: U32, rest: List<&2, CheckCost>, later: List<&2, CheckCost>) -> List<&2, CheckCost>:
+  match same:
+    case True{}:
+      CheckCost{o, (xr + r : U32), (xs + s : U32)} <> rest
+    case False{}:
+      CheckCost{o, xr, xs} <> later
+
+# What r more runs and s more steps of origin o come to.
+def cc.add(xs: List<&2, CheckCost>, +key: String, +o: L.Origin, +r: U32, +s: U32) -> List<&2, CheckCost>:
+  match xs:
+    case Nil{}:
+      [CheckCost{o, r, s}]
+    case Con{x, +rest}:
+      match x:
+        case CheckCost{+oo, +xr, +xs2}:
+          cc.keep(String.eq(L.origin.key(oo), key), oo, r, s, xr, xs2, rest, cc.add(rest, key, o, r, s))
 
 # The machine: a term to evaluate in an environment, or a value to hand to
 # the continuation; the run's value; or why it broke (master's `error`).
@@ -40,20 +68,35 @@ type St is Data:
 
 def step(c: Cost) -> Cost:
   match c:
-    case Cost{+s, +b}:
-      Cost{(s + 1 : U32), b}
+    case Cost{+s, b, k, n}:
+      Cost{(s + 1 : U32), b, k, n}
 
 def built(c: Cost) -> Cost:
   match c:
-    case Cost{+s, +b}:
-      Cost{s, (b + 1 : U32)}
+    case Cost{s, +b, k, n}:
+      Cost{s, (b + 1 : U32), k, n}
 
+def cost.steps(c: Cost) -> U32:
+  match c:
+    case Cost{s, b, k, n}:
+      s
+
+def cc.merge(xs: List<&2, CheckCost>, ys: List<&2, CheckCost>) -> List<&2, CheckCost>:
+  match xs:
+    case Nil{}:
+      ys
+    case Con{x, rest}:
+      match x:
+        case CheckCost{+o, +r, +t}:
+          cc.merge(rest, cc.add(ys, L.origin.key(o), o, r, t))
+
+# Across a session all the totals accumulate.
 def cost.plus(a: Cost, b: Cost) -> Cost:
   match a:
-    case Cost{+s, +n}:
+    case Cost{+s, +n, ka, x}:
       match b:
-        case Cost{+t, +m}:
-          Cost{(s + t : U32), (n + m : U32)}
+        case Cost{+t, +m, kb, y}:
+          Cost{(s + t : U32), (n + m : U32), cc.merge(ka, kb), 0}
 
 # The branch-selector functions a gate applied to 0 or a pair gives
 # (doLeft, doRight).
@@ -120,6 +163,30 @@ def apply.gate(e: Co.V, ks: List<&2, K>, c: Cost) -> St:
     case _:
       SErr{"application of something that is not a function", c}
 
+def enter.check(+o: L.Origin, +body: Co.V, +e: Co.V, ks: List<&2, K>, c: Cost) -> St:
+  match c:
+    case Cost{+s, b, k, +n}:
+      SEval{body, Some{e}, KChecked{o, s, n} <> ks, Cost{s, b, k, 0}}
+
+def enter.if(m: Maybe<&2, L.Origin>, +body: Co.V, +e: Co.V, ks: List<&2, K>, c: Cost) -> St:
+  match m:
+    case Some{+o}:
+      enter.check(o, body, e, ks, step(c))
+    case None{}:
+      SEval{body, Some{e}, ks, step(c)}
+
+def origin.of(check: Bool, +body: Co.V) -> Maybe<&2, L.Origin>:
+  match check:
+    case True{}:
+      Co.check.origin(body)
+    case False{}:
+      None{}
+
+# A function runs its body with e as its Env. A refinement check charges its
+# steps to where it was written.
+def enter(+fi: U32, +body: Co.V, +e: Co.V, ks: List<&2, K>, c: Cost) -> St:
+  enter.if(origin.of(U32.is_eq(fi, Co.refinement.tc()), body), body, e, ks, c)
+
 # f applied to e: an abort on either side is what is left; a gate gives
 # the branch selector; a function runs its body with e as its Env.
 def apply(f: Co.V, +e: Co.V, ks: List<&2, K>, c: Cost) -> St:
@@ -132,12 +199,12 @@ def apply(f: Co.V, +e: Co.V, ks: List<&2, K>, c: Cost) -> St:
           SRet{Co.VAbort{o, m}, ks, step(c)}
         case other:
           apply.gate(other, ks, c)
-    case Co.VDefer{fi, body}:
+    case Co.VDefer{+fi, +body}:
       match e:
         case Co.VAbort{o, m}:
           SRet{Co.VAbort{o, m}, ks, step(c)}
-        case other:
-          SEval{body, Some{other}, ks, step(c)}
+        case +other:
+          enter(fi, body, other, ks, c)
     case _:
       match e:
         case Co.VAbort{o, m}:
@@ -174,6 +241,14 @@ def chose(s: Co.V, l: Co.V, r: Co.V, +env: Maybe<&2, Co.V>, ks: List<&2, K>, c: 
     case _:
       SErr{"gate on a non-data scrutinee", step(c)}
 
+# A check run: its origin charged the steps it took, less those of the checks
+# nested in it (checking).
+def checked(+o: L.Origin, +entry: U32, +outer: U32, c: Cost) -> Cost:
+  match c:
+    case Cost{+s, b, k, +n}:
+      +inclusive = (s - entry : U32)
+      Cost{s, b, cc.add(k, L.origin.key(o), o, 1, (inclusive - n : U32)), (outer + inclusive : U32)}
+
 # A value v for the continuation.
 def ret(+v: Co.V, ks: List<&2, K>, c: Cost) -> St:
   match ks:
@@ -195,6 +270,8 @@ def ret(+v: Co.V, ks: List<&2, K>, c: Cost) -> St:
           project(v, False{}, rest, c)
         case KSetEnv{}:
           setenv(v, rest, c)
+        case KChecked{o, entry, outer}:
+          SRet{v, rest, checked(o, entry, outer, c)}
 
 def run.go(fuel: Nat, st: St) -> St:
   match fuel:
@@ -221,14 +298,85 @@ def run.go(fuel: Nat, st: St) -> St:
 
 # The value of a closed term, or why evaluation broke, and what it cost.
 def run(x: Co.V) -> St:
-  run.go(U32.to_nat(4294967295), SEval{x, None{}, [], Cost{0, 0}})
+  run.go(U32.to_nat(4294967295), SEval{x, None{}, [], cost.none()})
 
 # One iteration: main applied to its input (funWrap's `app fun input`).
 def iteration(+main: Co.V, input: Co.D) -> St:
   run(Co.app(main, Co.of.data(input)))
 
+# (a * 100) / s, for a at most s and s under 2^31, in words.
+def percent.go(k: Nat, +a: U32, +s: U32, +r: U32, +q: U32) -> U32:
+  match k:
+    case 0n:
+      q
+    case 1n+j:
+      +t = (r + a : U32)
+      percent.go(j, a, s, Bool.pick(U32, U32.is_ge(t, s), (t - s : U32), t), Bool.pick(U32, U32.is_ge(t, s), (q + 1 : U32), q))
+
+def percent.if(zero: Bool, +n: U32, +steps: U32) -> String:
+  match zero:
+    case True{}:
+      "-"
+    case False{}:
+      U32.show(percent.go(100n, n, steps, 0, 0)) ++ "%"
+
+def percent(+n: U32, +steps: U32) -> String:
+  percent.if(U32.is_zero(steps), n, steps)
+
+def cc.steps(c: CheckCost) -> U32:
+  match c:
+    case CheckCost{o, r, s}:
+      s
+
+def cc.runs(c: CheckCost) -> U32:
+  match c:
+    case CheckCost{o, r, s}:
+      r
+
+# Most steps first, then by origin.
+def cc.le(a: CheckCost, b: CheckCost) -> Bool:
+  match a:
+    case CheckCost{oa, ra, +sa}:
+      match b:
+        case CheckCost{ob, rb, +sb}:
+          U32.is_gt(sa, sb) || (U32.is_eq(sa, sb) && L.origin.le(oa, ob))
+
+def cc.total.runs(xs: List<&2, CheckCost>) -> U32:
+  match xs:
+    case Nil{}:
+      0
+    case Con{x, rest}:
+      (cc.runs(x) + cc.total.runs(rest) : U32)
+
+def cc.total.steps(xs: List<&2, CheckCost>) -> U32:
+  match xs:
+    case Nil{}:
+      0
+    case Con{x, rest}:
+      (cc.steps(x) + cc.total.steps(rest) : U32)
+
+def cc.lines(xs: List<&2, CheckCost>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{x, rest}:
+      match x:
+        case CheckCost{o, r, s}:
+          "\n  " ++ L.origin.render(o) ++ ": " ++ U32.show(r) ++ " runs, " ++ U32.show(s) ++ " steps" ++ cc.lines(rest)
+
+def cc.report(xs: List<&2, CheckCost>, +steps: U32) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{x, rest}:
+      +all = {x <> rest : List<&2, CheckCost>}
+      +t = cc.total.steps(all)
+      "\nrefinement checks (measured): " ++ U32.show(cc.total.runs(all)) ++ " runs, " ++ U32.show(t)
+        ++ " steps (" ++ percent(t, steps) ++ " of all steps)" ++ cc.lines(all)
+
 # What master's `--meter` prints for a run that cost c (renderMeter).
 def render(c: Cost) -> String:
   match c:
-    case Cost{s, b}:
+    case Cost{+s, b, k, n}:
       "steps (measured): " ++ U32.show(s) ++ "\nnodes built (measured): " ++ U32.show(b)
+        ++ cc.report(List.sort(~CheckCost, ~cc.le, k), s)

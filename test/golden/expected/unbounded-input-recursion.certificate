@@ -4,4 +4,4 @@ status 1
 could not size recursion #0 at unbounded-input-recursion:27:34:
   its test depends on input that nothing bounds, so no finite iteration
   count can be proven for it. Constrain that input with a refinement
-  (`x : someValidator`) or an `assert` before recursing on it.
+  (`x : somePredicate`) before recursing on it.

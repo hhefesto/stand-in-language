@@ -4,7 +4,7 @@ t:1:22:
 1 | main = \input -> (0, )
   |                      ^^
 unexpected ")<newline>"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 1
 OK
 == 2
@@ -29,12 +29,12 @@ t:2:1:
 unexpected '9'
 expecting "import", end of input, letter, or list assignment names
 == 5
-t:2:9:
+t:2:6:
   |
 2 | bar =#z \x -> (x, foo)
-  |         ^
-unexpected '\'
-expecting "import", '"', '#', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
+  |      ^^^^
+unexpected "#z \"
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 6
 t:51:9:
    |
@@ -189,7 +189,7 @@ t:1:18:
 1 | main = \input -> 
   |                  ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 38
 t:1:42:
   |
@@ -203,7 +203,7 @@ t:1:41:
 1 | main = \input -> (map (\x -> dPlus x 48)
   |                                         ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 40
 OK
 == 41
@@ -244,7 +244,7 @@ t:1:166:
 1 | main = \input -> (map (\x -> dPlus x 48) (mapdPlus x (dMinus (dTimes 2 3) (dMod (if 0 then 0 else 2) (succ (dMinus 5 3))))) (take 1 (filter (\x -> dEqual x 0) [1]))), 0)
   |                                                                                                                                                                      ^
 unexpected ','
-expecting "import", '"', '#', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
+expecting "import", '"', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
 == 48
 t:1:42:
   |
@@ -276,7 +276,7 @@ t:1:59:
 1 | main = \input -> (map (\x -> dPlus x 48) (map succ [6]), 0=
   |                                                           ^
 unexpected '='
-expecting '"', '#', '$', '(', ')', '[', '{', digit, integer, or letter
+expecting '"', '$', '(', ')', '[', '{', digit, integer, or letter
 == 54
 OK
 == 55
@@ -346,7 +346,7 @@ t:1:20:
 1 | main = \input -> (m->$ap (\x -> dPlus x 48) [(dTimes 1 1)], 0)
   |                    ^
 unexpected '-'
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+expecting '"', '$', '(', ')', ',', '[', '{', integer, letter, or variable
 == 69
 t:1:42:
   |
@@ -374,7 +374,7 @@ t:1:22:
 1 | main = \input -> (map
   |                      ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+expecting '"', '$', '(', ')', ',', '[', '{', integer, letter, or variable
 == 73
 OK
 == 74
@@ -413,7 +413,7 @@ t:1:41:
 1 | main = \input -> (map (\x -> dPlus x 48)
   |                                         ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 80
 t:1:42:
   |
@@ -427,14 +427,14 @@ t:1:23:
 1 | main = \input -> (map 
   |                       ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', ',', '[', '{', integer, or letter
 == 82
 t:1:7:
   |
 1 | main =
   |       ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 83
 OK
 == 84
@@ -445,7 +445,7 @@ t:1:68:
 1 | main = \input -> (mif ,ap (\x -> dPlus x 48) (map succ (range 2 2)), 0)
   |                                                                    ^
 unexpected ','
-expecting '"', '#', '$', '(', ')', '[', '{', integer, or letter
+expecting '"', '$', '(', ')', '[', '{', integer, or letter
 == 86
 OK
 == 87
@@ -468,7 +468,7 @@ t:1:19:
 1 | main = \input -> (]map (\x -> dPlus x 48) [(if 0 then 5 else 1)], 0)
   |                   ^^^^
 unexpected "]map"
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 90
 t:1:42:
   |
@@ -482,7 +482,7 @@ t:1:21:
 1 | main = \input -> (ma
   |                     ^
 unexpected end of input
-expecting '"', '#', '$', '(', ')', ',', '[', '{', integer, letter, or variable
+expecting '"', '$', '(', ')', ',', '[', '{', integer, letter, or variable
 == 92
 t:1:11:
   |
@@ -502,14 +502,14 @@ t:1:122:
 1 | main = \input -> (map (\x -> dPlus x 48) [(dDiv (min (foldr (\x a -> dPlus x a) 0 [0, 5]) (dDiv 3 (succ 0))) (succ 2))], 
   |                                                                                                                          ^
 unexpected end of input
-expecting "case", "if", "let", '"', '#', '$', '(', '[', '\', '{', integer, or letter
+expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 == 95
 t:1:63:
   |
 1 | main = \input ->  (\x -> dPlus x 48) [(dTimes (dMinus 5 2) 1)], 0)
   |                                                               ^
 unexpected ','
-expecting "import", '"', '#', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
+expecting "import", '"', '$', '(', '[', '{', end of input, integer, letter, or list assignment names
 == 96
 t:1:42:
   |
