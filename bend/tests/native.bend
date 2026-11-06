@@ -102,6 +102,13 @@ def church.two() -> Co.V:
 def succ.c() -> Co.V:
   p(d(22, p(z(), Co.var(0n))), z())
 
+def num(n: Nat) -> Co.V:
+  match n:
+    case 0n:
+      z()
+    case 1n+k:
+      p(z(), num(k))
+
 def omega() -> Co.V:
   d(1, se(p(left(env()), env())))
 
@@ -234,6 +241,15 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       both(se(z()), IC.default.fuel()),
       both(Co.gate.switch(d(105, env()), z(), p(z(), z())), IC.default.fuel()),
       both(Co.VRight{z()}, IC.default.fuel()),
+      both(Co.VRight{num(40n)}, IC.default.fuel()),
+      both(left(p(num(3n), num(4n))), IC.default.fuel()),
+      both(se(p(d(130, p(env(), env())), num(40n))), IC.default.fuel()),
+      both(se(p(d(131, z()), num(40n))), IC.default.fuel()),
+      both(se(p(d(132, Co.VRight{env()}), num(3n))), IC.default.fuel()),
+      both(Co.gate.switch(num(4n), z(), num(2n)), IC.default.fuel()),
+      both(Co.VAbort{Lc.unknown.origin(), num(3n)}, IC.default.fuel()),
+      both(Co.app(num(3n), z()), IC.default.fuel()),
+      both(se(num(3n)), IC.default.fuel()),
       both(Co.app(Co.app(church.two(), succ.c()), z()), 3),
       both(omega.applied(), 100000)])
     IO.print(verdict("native-terms", terms))

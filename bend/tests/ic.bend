@@ -107,6 +107,29 @@ def aborts(t: Co.V, m: Co.V) -> Bool:
 def runs.dry(t: Co.V, +fuel: U32) -> Bool:
   String.starts_with(eval(t, fuel), "error ICFuelExhausted")
 
+def spent.of(r: IC.Run) -> U32:
+  match r:
+    case IC.Run{net, out, spent, unrolls}:
+      spent
+
+# The interactions a closed term spends: one is always erasing the input
+# it never looks at.
+def cost(t: Co.V) -> U32:
+  +prog = IC.prepare.closed(t)
+  spent.of(IC.run(prog, IC.net.new(prog), Co.DZero{}, IC.default.fuel()))
+
+def spends(t: Co.V, +n: U32) -> Bool:
+  U32.is_eq(cost(t), n)
+
+def store.of(p: IC.Prog) -> U32:
+  match p:
+    case IC.Prog{entry, bodies, words, maxk, os}:
+      U32.from_nat(List.length(&2, U32, words))
+
+# The words of a closed term's store.
+def store.size(t: Co.V) -> U32:
+  store.of(IC.prepare.closed(t))
+
 def all(bs: List<&2, Bool>) -> Bool:
   match bs:
     case Nil{}:
@@ -419,6 +442,36 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       gives(se(p(d(201, se(p(se(p(Co.VGate{}, p(z(), z()))), p(omega.applied(), left(env()))))), p(z(), z()))), z()),
       gives(se(p(d(202, se(p(se(p(Co.VGate{}, p(z(), z()))), p(se(p(p(z(), z()), z())), left(env()))))), p(z(), z()))), z())])))
     IO.print(verdict("ic-omega", runs.dry(omega.applied(), 100000)))
+    # ICTests' constants: closed data is one agent, copied and erased whole,
+    # opened one layer per use. Its counts here are by hand: the input erased
+    # (1), then what the comment on each says.
+    IO.print(verdict("ic-constants", all([
+      # the branch not taken is never built, so it costs the same at 40 as at 2
+      gives(Co.gate.switch(z(), num(40n), z()), z()),
+      U32.is_eq(cost(Co.gate.switch(z(), num(40n), z())), cost(Co.gate.switch(z(), num(2n), z()))),
+      # the branch taken is one constant, and so is its store's 2 words a pair
+      gives(Co.gate.switch(num(40n), z(), z()), num(40n)),
+      U32.is_eq(store.size(Co.gate.switch(z(), num(40n), z())), (store.size(Co.gate.switch(z(), num(2n), z())) + 76 : U32)),
+      U32.is_eq(cost(Co.gate.switch(num(40n), z(), z())), cost(Co.gate.switch(num(2n), z(), z()))),
+      # open (1), project (1), erase the 0 kept out (1)
+      gives(Co.VRight{num(40n)}, num(39n)),
+      spends(Co.VRight{num(40n)}, 4),
+      # setenv-pair (1), apply-ref (1), dup-leaf (1): the data is not walked
+      gives(se(p(d(2, p(env(), env())), num(40n))), p(num(40n), num(40n))),
+      spends(se(p(d(2, p(env(), env())), num(40n))), 4),
+      # erased whole: setenv-pair, apply-ref, era-leaf
+      gives(se(p(d(3, z()), num(40n))), z()),
+      spends(se(p(d(3, z()), num(40n))), 4),
+      # reads back as its data, beside code too
+      gives(p(num(3n), d(5, num(2n))), p(num(3n), d(5, num(2n)))),
+      gives(num(40n), num(40n)),
+      # equal data shares its words: only the outer pair is new
+      U32.is_eq(store.size(p(num(40n), num(40n))), (store.size(num(40n)) + 2 : U32)),
+      # data and code in one pair: the data side is still a constant
+      gives(left(p(num(3n), d(6, env()))), num(3n)),
+      # applied, it is the stuck value a pair was, down to its message
+      String.eq(eval(Co.app(p(p(p(p(z(), z()), z()), z()), z()), z()), IC.default.fuel()),
+        "error ICStuck \"applied value is ICPair, not a function: (((0,0),0),0)\"")])))
     IO.print(verdict("ic-case", all([
       shows(prelude, case.ints(), "True"),
       shows(prelude, case.strings(), "True"),
@@ -433,10 +486,10 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, arithmetic(), "11111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 25640),
-      costs(prelude, pattern.lambda(), 2702),
-      costs(prelude, rational(), 37335),
-      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 573)])))
+      costs(prelude, case.nonexhaustive(), 1024),
+      costs(prelude, pattern.lambda(), 78),
+      costs(prelude, rational(), 36271),
+      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 552)])))
     IO.print(verdict("ic-prologue", all([
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", [""])),
         "got a line|start|"),
@@ -446,10 +499,10 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       118)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      35173)))
+      16042)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      4895725)))
+      2293968)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

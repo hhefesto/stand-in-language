@@ -318,9 +318,8 @@ port's tree as before. What each became:
   `Expand.bend` has `DuplicatePatternVariable` and `GuardUsesOwnBinder`.
 - `Sem.checked` follows the new polarity; `PROOF.bend` needed its `checked_*`
   lemmas swapped between the `WZero` and `WPair` arms and nothing else. All six
-  laws still check. **`LAWS.bend`'s header comment now misstates Watch:** it says
-  "a check whose test does not give 0" is a mark, and it should say "a check
-  whose predicate gives 0". That file is the user's, so it is left as it is.
+  laws still check. `LAWS.bend`'s header comment follows it too, since `c063208a`:
+  a check whose test gives 0 is a mark.
 
 **The guard is gone.** Master's prologue does what the session guard did, found
 by analysis where the guard read `main`'s first `let`: `Fr.Program`,
@@ -333,10 +332,17 @@ erased. A line the prologue refuses ends as master's does, so `port/*.ic-abort`
 is gone. `Sz.Want` says how far a compile goes: a plain `--certificate` reads the
 counts alone, as master's laziness has it.
 
-**Not ported:** the IC half of `1ac8cc74` (closed data as one constant agent). It
-changes interaction counts and speed, not what a program displays, and the port's
-net has its own counts anyway (section 7). It would touch `IC.bend` and
-`effs/ic.c` word for word.
+**The IC half of `1ac8cc74`** (closed data as one constant agent, 2026-11-05):
+`KConst`/`NT_CONST` (kind 6), `ROpen`/`NT_OPEN`, and the pass `consts` in
+`IC.bend`, on the bodies once they are hashed and keyed. Where master holds the
+expression in the agent, the port holds its word in the template store: two
+words per pair, each part 0 or another pair's word, equal data sharing its words.
+A run's input stays pairs, since the store is made once (master's is a constant
+too). `describe` prints a constant as its data, so stuck messages read as they did
+for pairs (master would show `ICConst ...`). Only the counts change: tictactoe `1 4
+2 5 3` 4,895,725 → 2,293,968 interactions (0.42 → 0.33 s from a `.telc`),
+simpleplus `3 4` 35,173 → 16,042, `tests/ic.bend`'s `ic-constants` being master's
+constant tests, and `tests/native.bend`'s terms run the new rule both ways.
 
 **Cost:** the check analysis is budgeted at 100M steps, and tic-tac-toe spends
 all of them on master as well, so main keeps every check. In the port that is
@@ -1595,9 +1601,11 @@ Two things are not local and need design first: guided copying
 (`region`, dup-closure) walks a whole region of the net in one rule, and
 the free list and label counter are global.
 
-**Next, in order (not started):**
-- N2: profile the C (perf) and the Bend left around it; move what costs
-  (net reuse for the guard, readback) before touching assembly.
+**Next, in order:**
+- N2 (first profile only, 2026-11-05: tictactoe from a `.telc`, the C loop
+  16.6% of the run, `term_drop` 21%): profile the C (perf) and the Bend left
+  around it; move what costs (net reuse for the prologue, readback) before
+  touching assembly.
 - N3: x86-64 assembly where the profile says the C loop is the cost: the
   dispatch and the hot rules (split-pair, setenv-pair, apply-ref
   instantiation, dup copying), from the same rule table, checked by

@@ -11,12 +11,13 @@ import ./Lift.bend as Lf
 #
 # The net is one Array<U32>, eight words per agent: kind, the peers of its
 # ports 0-2 (a port is agent*4+slot), and two payload words (a Dup's label;
-# a Ref's template and function index; a StuckV's message number). Agent 0
-# is never used, so 0 ends the free list. Active pairs sit on a LIFO stack,
-# as in Haskell, and every rule consumes the pair it fires, so the count of
-# interactions does not depend on the order they fire in. The stack lives
-# in the agents' last two words, which no agent uses: entry k is words 6
-# and 7 of slot k, whatever agent is there.
+# a Ref's template and function index; a StuckV's message number; where a
+# constant is in the template store). Agent 0 is never used, so 0 ends the
+# free list. Active pairs sit on a LIFO stack, as in Haskell, and every rule
+# consumes the pair it fires, so the count of interactions does not depend
+# on the order they fire in. The stack lives in the agents' last two words,
+# which no agent uses: entry k is words 6 and 7 of slot k, whatever agent is
+# there.
 
 # A closure body as the net compiles it: the runnable core with every
 # closure taken out into its template, a reference (template, function
@@ -26,6 +27,8 @@ import ./Lift.bend as Lf
 # how EAL reads and hashes it, and how it runs: the gate chooses one of
 # their templates, el or er, and only that branch is built, on the parts of
 # the environment the branches use, captured as a list (DESIGN §11.3).
+# Closed data ends as a constant, where it is in the store (see `consts`,
+# which runs after everything that hashes a body or keys it).
 type Code is Data:
   CdZero{}
   CdPair{+a: Code, +b: Code}
@@ -37,6 +40,7 @@ type Code is Data:
   CdAbort{+o: U32, +m: Code}
   CdRef{+tid: U32, +fi: U32}
   CdIte{+s: Code, +l: Code, +r: Code, +el: Code, +er: Code, +cap: Code}
+  CdConst{+at: U32}
 
 # The strict if (Co.gate.switch): both branches built, one chosen.
 def ite.strict(s: Code, l: Code, r: Code) -> Code:
@@ -95,6 +99,7 @@ type AK is Data:
   KEra{}
   KZero{}
   KGate{}
+  KConst{}
   KRef{}
   KPair{}
   KAborted{}
@@ -136,11 +141,13 @@ type Rule is Data:
   RDupAborted{}
   RDupDup{}
   RDupLeaf{}
+  ROpen{}
 
 # A step of describe: an agent to look at, or what was read of it.
 type DJ is Data:
   DNode{+n: U32, +d: Nat}
   DAt{+i: NI, +src: U32, +d: Nat}
+  DWord{none: Bool, +w: U32, +d: Nat}
 
 type Ids is Data:
   Ids{+x: U32, +y: U32, +z: U32, +w: U32}
@@ -197,6 +204,7 @@ type RJ is Data:
   RMkPair{}
   RMkAborted{+o: U32}
   RMessage{+p: U32, +o: U32}
+  RConst{+w: U32}
 
 # Why a run failed (ICError): the fuel ran out after so many interactions,
 # the result holds a stuck value that was demanded, or the runtime broke.
@@ -245,6 +253,9 @@ def zero() -> U32:
 
 def gate() -> U32:
   5
+
+def konst() -> U32:
+  6
 
 def ref() -> U32:
   7
@@ -298,7 +309,8 @@ def ak.low(+k: U32) -> AK:
 
 def ak.lmid(+k: U32) -> AK:
   Bool.pick(AK, U32.is_eq(k, 7), KRef{},
-    Bool.pick(AK, U32.is_eq(k, 8), KPair{}, Bool.pick(AK, U32.is_eq(k, 9), KAborted{}, KNone{})))
+    Bool.pick(AK, U32.is_eq(k, 8), KPair{}, Bool.pick(AK, U32.is_eq(k, 9), KAborted{},
+    Bool.pick(AK, U32.is_eq(k, 6), KConst{}, KNone{}))))
 
 def ak.upper(high: Bool, +k: U32) -> AK:
   match high:
@@ -357,6 +369,8 @@ def is.value(k: AK) -> Bool:
     case KZero{}:
       True{}
     case KGate{}:
+      True{}
+    case KConst{}:
       True{}
     case KRef{}:
       True{}
@@ -589,6 +603,9 @@ def n.peer(+p: U32) -> N(U32):
 def n.info(+n: U32) -> N(NI):
   net => info(net, n)
 
+def n.trd(+i: U32) -> N(U32):
+  net => trd(net, i)
+
 # How Haskell shows an agent's kind (Show ICKind).
 def show.kind(k: U32, +a: U32, +b: U32) -> String:
   match k:
@@ -603,7 +620,7 @@ def show.kind(k: U32, +a: U32, +b: U32) -> String:
     case 5:
       "ICGate"
     case 6:
-      "ICAbort"
+      "ICConst"
     case 7:
       "ICRef " ++ U32.show(a) ++ " (FunctionIndex {unFunctionIndex = " ++ signed(b) ++ "})"
     case 8:
@@ -636,7 +653,8 @@ def show.ni(i: NI) -> String:
     case NI{k, a, b, p1, p2}:
       show.kind(k, a, b)
 
-# A value's shape to depth d, for messages (describeValue).
+# A value's shape to depth d, for messages (describeValue): a constant's
+# as its data, so that a message reads as it does for pairs.
 def describe(+fuel: Nat, j: DJ) -> N(String):
   match fuel:
     case 0n:
@@ -652,10 +670,31 @@ def describe(+fuel: Nat, j: DJ) -> N(String):
                 i : NI <- n.info(n)
                 src : U32 <- n.peer((n * 4 : U32))
                 describe(f, DAt{i, src, e})
+        case DWord{none, +w, d}:
+          match none:
+            case True{}:
+              match d:
+                case 0n:
+                  N.pure(String, "...")
+                case 1n+e:
+                  N.pure(String, "0")
+            case False{}:
+              match d:
+                case 0n:
+                  N.pure(String, "...")
+                case 1n+e:
+                  do N<String>:
+                    +wl : U32 <- n.trd(w)
+                    +wr : U32 <- n.trd((w + 1 : U32))
+                    sa : String <- describe(f, DWord{U32.is_zero(wl), wl, e})
+                    sb : String <- describe(f, DWord{U32.is_zero(wr), wr, e})
+                    return "(" ++ sa ++ "," ++ sb ++ ")"
         case DAt{i, src, e}:
           match i:
             case NI{4, a, b, p1, p2}:
               N.pure(String, "0")
+            case NI{6, +a, b, p1, p2}:
+              describe(f, DWord{False{}, a, 1n+e})
             case NI{8, a, b, p1, p2}:
               do N<String>:
                 sa : String <- describe(f, DNode{node.of(p1), e})
@@ -746,13 +785,16 @@ def rule.pass(+kb: AK, r: Rule) -> Rule:
       rule.if(is.value(kb), r)
 
 # Which rule applies when an agent of kind ka meets one of kind kb, ka
-# first.
+# first. A constant meeting anything but a copier or an eraser (which treat
+# it as a leaf) is asked for its shape: it opens one layer.
 def rule.of(ka: AK, +kb: AK) -> Rule:
   match ka:
     case KSetEnv{}:
       match kb:
         case KPair{}:
           RSetEnvPair{}
+        case KConst{}:
+          ROpen{}
         case _:
           rule.pass(kb, RSetEnvNonPair{})
     case KApply{}:
@@ -761,6 +803,8 @@ def rule.of(ka: AK, +kb: AK) -> Rule:
           RApplyRef{}
         case KGate{}:
           RAwaitGate{}
+        case KConst{}:
+          ROpen{}
         case KAborted{}:
           RPassApp{}
         case KStuck{}:
@@ -773,6 +817,8 @@ def rule.of(ka: AK, +kb: AK) -> Rule:
           RSelectGate{}
         case KPair{}:
           RScrutPair{}
+        case KConst{}:
+          ROpen{}
         case _:
           rule.pass(kb, RNonDataGate{})
     case KLeft{}:
@@ -781,6 +827,8 @@ def rule.of(ka: AK, +kb: AK) -> Rule:
           RPass{}
         case KPair{}:
           RProjectLeft{}
+        case KConst{}:
+          ROpen{}
         case _:
           rule.pass(kb, RNonPair{})
     case KRight{}:
@@ -789,6 +837,8 @@ def rule.of(ka: AK, +kb: AK) -> Rule:
           RPass{}
         case KPair{}:
           RProjectRight{}
+        case KConst{}:
+          ROpen{}
         case _:
           rule.pass(kb, RNonPair{})
     case KSplit{}:
@@ -801,6 +851,8 @@ def rule.of(ka: AK, +kb: AK) -> Rule:
           RSplitAborted{}
         case KStuck{}:
           RSplitStuck{}
+        case KConst{}:
+          ROpen{}
         case _:
           rule.if(is.value(kb), RSplitNonPair{})
     case KEra{}:
@@ -1464,6 +1516,39 @@ def r.dup.dup(net: Net, +n: U32, +i: NI, +m: U32, +j: NI, same: Bool) -> Net:
 def r.dup.leaf(net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
   r.two.leaves(i, alloc2(del2(spend(net), n, m), ni.k(j), ni.a(j), ni.b(j), ni.k(j), ni.a(j), ni.b(j)))
 
+# A constant's part, word w: 0 as itself, a pair as a constant.
+def const.node(none: Bool, net: Net, +w: U32) -> Net & U32:
+  match none:
+    case True{}:
+      alloc(net, zero(), 0, 0)
+    case False{}:
+      alloc(net, konst(), w, 0)
+
+def open.wire(+n: U32, +v: U32, +cl: U32, r: Net & U32) -> Net:
+  (net, +cr) = r
+  connect(connect(connect(net, port(v, 1), port(cl, 0)), port(v, 2), port(cr, 0)), port(v, 0), port(n, 0))
+
+def open.parts(+n: U32, +v: U32, +wr: U32, r: Net & U32) -> Net:
+  (net, +cl) = r
+  open.wire(n, v, cl, const.node(U32.is_zero(wr), net, wr))
+
+def open.right(+n: U32, +v: U32, +wl: U32, r: Net & U32) -> Net:
+  (net, +wr) = r
+  open.parts(n, v, wr, const.node(U32.is_zero(wl), net, wl))
+
+def open.left(+n: U32, +v: U32, +at: U32, r: Net & U32) -> Net:
+  (net, +wl) = r
+  open.right(n, v, wl, trd(net, (at + 1 : U32)))
+
+def open.pair(+n: U32, +at: U32, r: Net & U32) -> Net:
+  (net, +v) = r
+  open.left(n, v, at, trd(net, at))
+
+# Constant m, asked for its shape by n (openConst): its outermost pair over
+# its parts, facing n, and that pair then fires as any other does.
+def r.open(net: Net, +n: U32, +m: U32, +j: NI) -> Net:
+  open.pair(n, ni.a(j), alloc(delete(spend(net), m), pair(), 0, 0))
+
 # Guided copying (dupPlanFor, dupRegion)
 # --------------------------------------
 
@@ -1482,10 +1567,11 @@ def rg.how(material: Bool, +t: U32, +k: U32) -> How:
     case False{}:
       HFront{}
     case True{}:
-      Bool.pick(How, U32.is_eq(t, 1),
-        Bool.pick(How, U32.is_eq(k, zero()), HLeaf{}, how.if(U32.is_eq(k, pair()), HData{})),
-        Bool.pick(How, U32.is_eq(t, 2), how.if(U32.is_eq(k, ref()), HLeaf{}),
-          how.if(U32.is_eq(t, 4) && U32.is_eq(k, pair()), HPair{})))
+      Bool.pick(How, U32.is_eq(k, konst()), HLeaf{},
+        Bool.pick(How, U32.is_eq(t, 1),
+          Bool.pick(How, U32.is_eq(k, zero()), HLeaf{}, how.if(U32.is_eq(k, pair()), HData{})),
+          Bool.pick(How, U32.is_eq(t, 2), how.if(U32.is_eq(k, ref()), HLeaf{}),
+            how.if(U32.is_eq(t, 4) && U32.is_eq(k, pair()), HPair{}))))
 
 def rg.leaf(rest: List<&2, RG>, vals: List<&2, U32>, r: Net & Ids) -> RgSt:
   (net, +ids) = r
@@ -1539,9 +1625,9 @@ def rg.step(net: Net, +l: U32, j: RG, rest: List<&2, RG>, vals: List<&2, U32>) -
           RgSt{fail(net, "dupRegion: nothing to pair"), [], vals}
 
 # dupRegion: copy what the shapes vouch for and is materialized (pairs, 0s
-# and code pointers), agent by agent, as notes, not interactions; a Dup of
-# label l at every frontier. Any shape is correct: it only picks where
-# copying is tried.
+# and code pointers; a constant by any shape, whole), agent by agent, as
+# notes, not interactions; a Dup of label l at every frontier. Any shape is
+# correct: it only picks where copying is tried.
 def region(fuel: Nat, +l: U32, st: RgSt) -> Net & List<&2, U32>:
   match fuel:
     case 0n:
@@ -1614,13 +1700,15 @@ def r.dup.planned(net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
 # The template store: word 0 the number of templates T, word 1 where the
 # scratch map begins (a template agent's number -> the agent copied from
 # it), then each template's offset, then where each template's plan is (0:
-# none), then the templates: K agents, the index of its boundary (Ext), its
-# labels, W wires, then K (kind, a, b) and W (p, q) wires in the order
-# Haskell connects them (a port is agent*4+slot, numbered within the
-# template); then the plans: the shape of the template's closures, a code
-# pointer and the capture EAL published for its code, as tags: 1 CapData,
-# 2 CapCode, 3 CapOther, 4 CapPair followed by where its second part is,
-# then its first part.
+# none), then the constants: two words per pair, its left and right parts,
+# each 0 for 0 or where that pair is in the store (so a constant's word is
+# never 0, and equal data shares its words); then the templates: K agents,
+# the index of its boundary (Ext), its labels, W wires, then K (kind, a, b)
+# and W (p, q) wires in the order Haskell connects them (a port is
+# agent*4+slot, numbered within the template); then the plans: the shape of
+# the template's closures, a code pointer and the capture EAL published for
+# its code, as tags: 1 CapData, 2 CapCode, 3 CapOther, 4 CapPair followed by
+# where its second part is, then its first part.
 
 def inst.node.b(+i: U32, +base: U32, +map: U32, +k: U32, +a: U32, r: Net & U32) -> Net:
   (net, +b) = r
@@ -1771,6 +1859,8 @@ def apply.rule(r: Rule, net: Net, +n: U32, +i: NI, +m: U32, +j: NI) -> Net:
       r.dup.dup(net, n, i, m, j, U32.is_eq(ni.a(i), ni.a(j)))
     case RDupLeaf{}:
       r.dup.leaf(net, n, i, m, j)
+    case ROpen{}:
+      r.open(net, n, m, j)
     case RNone{}:
       fail(net, "no rule")
 
@@ -2018,6 +2108,8 @@ def compile(+fuel: Nat, j: CJ) -> M(U32):
                 return (a * 4 : U32)
             case CdRef{tid, fi}:
               value(ref(), tid, fi)
+            case CdConst{at}:
+              value(konst(), at, 0)
             case CdIte{s, l, r, el, er, cap}:
               compile(f, CTerm{ite.run(s, el, er, cap)})
         case CProj{path, +k, c}:
@@ -2084,6 +2176,8 @@ def lifted(+hs: Map<&2, String>, +os: Map<&2, Lc.Origin>, x: Code) -> Lf.L:
       Lf.LRight{Lc.Unknown{}, lifted(hs, os, a)}
     case CdRef{tid, fi}:
       Lf.LRef{Lc.Unknown{}, Pair.snd(Map<&2, String>, String, Map.get(String, "", hs, U32.show(tid)))}
+    case CdConst{at}:
+      Lf.LZero{Lc.Unknown{}}
     case CdAbort{+o, m}:
       Lf.LAborted{Lc.Unknown{}, Pair.snd(Map<&2, Lc.Origin>, Lc.Origin, Map.get(Lc.Origin, Lc.unknown.origin(), os, U32.show(o))), lifted(hs, os, m)}
     case CdIte{s, l, r, el, er, cap}:
@@ -2132,6 +2226,8 @@ def key.of(c: Code, acc: String) -> String:
       "A" ++ U32.show(o) ++ ";" ++ key.of(m, acc)
     case CdRef{tid, fi}:
       "T" ++ U32.show(tid) ++ "," ++ U32.show(fi) ++ ";" ++ acc
+    case CdConst{at}:
+      "K" ++ U32.show(at) ++ ";" ++ acc
     case CdIte{s, l, r, el, er, cap}:
       "I" ++ key.of(s, key.of(cap, key.of(el, key.of(er, acc))))
 
@@ -2347,6 +2443,143 @@ def collect(x: Co.V) -> C(Code):
         n : U32 <- c.origin(o)
         return CdAbort{n, m2}
 
+# Constants
+# ---------
+#
+# Closed data compiles to one agent rather than a tree of pairs (master's
+# ICConst): copying or erasing it is one interaction, and it opens one layer
+# at a time when a consumer needs its shape. Its words are in the store, so
+# a template holding one is one agent long, however long the data.
+#
+# The pass runs last, on the collected bodies: hashes and keys read them as
+# written, so EAL's plans still find their code. A run's input stays pairs,
+# since the store is made once.
+
+# The word the next new pair gets, each pair's word by its parts' words, and
+# the words so far, newest first.
+type Konsts is Data:
+  Konsts{+at: U32, +seen: Map<&2, U32>, +words: List<&2, U32>}
+
+# A term after the pass: closed data (its word), or code.
+type Closed is Data:
+  IsData{+w: U32}
+  IsCode{+x: Code}
+
+def Kn(-A: Data) -> Type:
+  Konsts -> A & Konsts
+
+def Kn.pure(-A: Data, x: A) -> Kn(A):
+  k => (x, k)
+
+def Kn.run(-A: Data, -B: Data, f: A -> Kn(B), r: A & Konsts) -> B & Konsts:
+  (a, k) = r
+  f(a)(k)
+
+def Kn.bind(-A: Data, -B: Data, m: Kn(A), f: A -> Kn(B)) -> Kn(B):
+  k => Kn.run(A, B, f, m(k))
+
+def closed.word(none: Bool, +w: U32) -> Code:
+  match none:
+    case True{}:
+      CdZero{}
+    case False{}:
+      CdConst{w}
+
+def closed.code(c: Closed) -> Code:
+  match c:
+    case IsData{+w}:
+      closed.word(U32.is_zero(w), w)
+    case IsCode{x}:
+      x
+
+def k.seen(k: Konsts) -> Map<&2, U32>:
+  match k:
+    case Konsts{at, seen, words}:
+      seen
+
+def k.found(r: Map<&2, U32> & Maybe<&2, U32>, k: Konsts, +wl: U32, +wr: U32, +key: String) -> Closed & Konsts:
+  (seen, old) = r
+  match old:
+    case Some{at}:
+      (IsData{at}, k)
+    case None{}:
+      match k:
+        case Konsts{+at, s, words}:
+          (IsData{at}, Konsts{(at + 2 : U32), Map.set(&2, U32, seen, key, at), wr <> wl <> words})
+
+# The word of the pair (wl, wr): the one equal data already has, or the
+# next.
+def k.word(+wl: U32, +wr: U32, +k: Konsts) -> Closed & Konsts:
+  +key = U32.show(wl) ++ "," ++ U32.show(wr)
+  k.found(Map.pop(&2, U32, k.seen(k), key), k, wl, wr, key)
+
+# A pair of terms after the pass: closed data if both sides are.
+def k.pair.data(+wl: U32, b: Closed) -> Kn(Closed):
+  match b:
+    case IsData{+wr}:
+      k => k.word(wl, wr, k)
+    case IsCode{y}:
+      Kn.pure(Closed, IsCode{CdPair{closed.word(U32.is_zero(wl), wl), y}})
+
+def k.pair(a: Closed, b: Closed) -> Kn(Closed):
+  match a:
+    case IsData{+wl}:
+      k.pair.data(wl, b)
+    case IsCode{x}:
+      Kn.pure(Closed, IsCode{CdPair{x, closed.code(b)}})
+
+# The pass over a body. An if's branches as written are only read by hashes,
+# and its el and er are references.
+def consts(x: Code) -> Kn(Closed):
+  match x:
+    case CdZero{}:
+      Kn.pure(Closed, IsData{0})
+    case CdPair{a, b}:
+      do Kn<Closed>:
+        ca : Closed <- consts(a)
+        cb : Closed <- consts(b)
+        k.pair(ca, cb)
+    case CdSetEnv{a}:
+      do Kn<Closed>:
+        c : Closed <- consts(a)
+        return IsCode{CdSetEnv{closed.code(c)}}
+    case CdLeft{a}:
+      do Kn<Closed>:
+        c : Closed <- consts(a)
+        return IsCode{CdLeft{closed.code(c)}}
+    case CdRight{a}:
+      do Kn<Closed>:
+        c : Closed <- consts(a)
+        return IsCode{CdRight{closed.code(c)}}
+    case CdAbort{+o, m}:
+      do Kn<Closed>:
+        c : Closed <- consts(m)
+        return IsCode{CdAbort{o, closed.code(c)}}
+    case CdIte{s, +l, +r, +el, +er, cap}:
+      do Kn<Closed>:
+        s2 : Closed <- consts(s)
+        c2 : Closed <- consts(cap)
+        return IsCode{CdIte{closed.code(s2), l, r, el, er, closed.code(c2)}}
+    case other:
+      Kn.pure(Closed, IsCode{other})
+
+def consts.src(s: Src) -> Kn(Src):
+  match s:
+    case Src{+tid, +fi, body, +orig, +code}:
+      do Kn<Src>:
+        c : Closed <- consts(body)
+        return Src{tid, fi, closed.code(c), orig, code}
+
+def consts.srcs(srcs: List<&2, Src>) -> Kn(List<&2, Src>):
+  match srcs:
+    case Nil{}:
+      Kn.pure(List<&2, Src>, [])
+    case Con{s, rest}:
+      do Kn<List<&2, Src>>:
+        s2 : Src <- consts.src(s)
+        r2 : List<&2, Src> <- consts.srcs(rest)
+        return s2 <> r2
+
 def selector(+tid: U32, +fi: U32, +body: Code, orig: Co.V) -> Src:
   Src{tid, fi, body, orig, code.of(Map.new(&2, String), Map.new(&2, Lc.Origin), body)}
 
@@ -2561,15 +2794,17 @@ def plan.words(ps: List<&2, Maybe<&2, Lf.Shape>>, +at: U32) -> List<&2, U32>:
             plan.words(rest, (at + 3 + shape.size(s) : U32)))
 
 # The store's words: count, map base, template offsets, plan offsets,
-# templates, plans.
-def store(+ws: List<&2, List<&2, U32>>, +ps: List<&2, Maybe<&2, Lf.Shape>>) -> List<&2, U32>:
+# constants, templates, plans.
+def store(+ws: List<&2, List<&2, U32>>, +ps: List<&2, Maybe<&2, Lf.Shape>>, +ks: List<&2, U32>) -> List<&2, U32>:
   +t = U32.from_nat(List.length(&2, List<&2, U32>, ws))
   +flat = List.concat(&2, U32, ws)
-  +at = (2 + 2 * t + U32.from_nat(List.length(&2, U32, flat)) : U32)
+  +first = (2 + 2 * t + U32.from_nat(List.length(&2, U32, ks)) : U32)
+  +at = (first + U32.from_nat(List.length(&2, U32, flat)) : U32)
   +pw = plan.words(ps, at)
   t <> (at + U32.from_nat(List.length(&2, U32, pw)) : U32)
-    <> List.append(&2, U32, lens(ws, (2 + 2 * t : U32)),
-         List.append(&2, U32, plan.offs(ps, at), List.append(&2, U32, flat, pw)))
+    <> List.append(&2, U32, lens(ws, first),
+         List.append(&2, U32, plan.offs(ps, at),
+           List.append(&2, U32, ks, List.append(&2, U32, flat, pw))))
 
 def bodies(srcs: List<&2, Src>, acc: Map<&2, Co.V>) -> Map<&2, Co.V>:
   match srcs:
@@ -2586,10 +2821,34 @@ def depth.of(+n: U32) -> Nat:
 def scratch() -> Net:
   Net{Array.new(U32, 16n, 0), Array.new(U32, 2n, 0), Ctl{0, cold.none(0), 1, 0, 0, 0, 0, 8192}}
 
-def prepared.with(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>, os: Map<&2, Lc.Origin>) -> Prog:
+def prepared.ready(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>, os: Map<&2, Lc.Origin>, ks: List<&2, U32>) -> Prog:
   +ws = tpls(srcs, (CS{scratch(), Map.new(&2, List<&2, U32>)}, []), [])
   Prog{entry, bodies(srcs, Map.new(&2, Co.V)),
-       store(List.drop(&2, List<&2, U32>, ws, 1n), plans(g, srcs)), max.k(ws, 0), os}
+       store(List.drop(&2, List<&2, U32>, ws, 1n), plans(g, srcs), List.reverse(&2, U32, ks)), max.k(ws, 0), os}
+
+# The entry and the templates' bodies after the pass.
+type Passed is Data:
+  Passed{+entry: Code, +srcs: List<&2, Src>}
+
+def consts.prog(entry: Code, srcs: List<&2, Src>) -> Kn(Passed):
+  do Kn<Passed>:
+    c : Closed <- consts(entry)
+    s2 : List<&2, Src> <- consts.srcs(srcs)
+    return Passed{closed.code(c), s2}
+
+def prepared.passed(+g: Map<&2, Lf.Shape>, os: Map<&2, Lc.Origin>, r: Passed & Konsts) -> Prog:
+  (p, k) = r
+  match p:
+    case Passed{entry, +srcs}:
+      match k:
+        case Konsts{at, seen, words}:
+          prepared.ready(g, entry, srcs, os, words)
+
+# The constants come right after the store's offsets, so their words are
+# known from how many templates there are.
+def prepared.with(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>, os: Map<&2, Lc.Origin>) -> Prog:
+  prepared.passed(g, os, consts.prog(entry, srcs)(
+    Konsts{(2 + 2 * U32.from_nat(List.length(&2, Src, srcs)) : U32), Map.new(&2, U32), []}))
 
 def prepared(+g: Map<&2, Lf.Shape>, r: Code & Coll) -> Prog:
   (entry, c) = r
@@ -2698,6 +2957,22 @@ def message.at(+p: U32, +o: U32, rest: List<&2, RJ>, vals: List<&2, Co.V>, r: Ne
   (net, +k) = r
   RLoop{net, message.jobs(U32.is_eq(k, aborted()), p, o, rest), vals}
 
+def const.right(+wl: U32, rest: List<&2, RJ>, vals: List<&2, Co.V>, r: Net & U32) -> RSt:
+  (net, +wr) = r
+  RLoop{net, RConst{wl} <> RConst{wr} <> RMkPair{} <> rest, vals}
+
+def const.left(+at: U32, rest: List<&2, RJ>, vals: List<&2, Co.V>, r: Net & U32) -> RSt:
+  (net, +wl) = r
+  const.right(wl, rest, vals, trd(net, (at + 1 : U32)))
+
+# A constant read back, word w: its data, read from the store.
+def const.read(none: Bool, net: Net, +w: U32, rest: List<&2, RJ>, vals: List<&2, Co.V>) -> RSt:
+  match none:
+    case True{}:
+      RLoop{net, rest, Co.VZero{} <> vals}
+    case False{}:
+      const.left(w, rest, vals, trd(net, w))
+
 def rb.first(vals: List<&2, Co.V>) -> RB:
   match vals:
     case Con{x, rest}:
@@ -2726,6 +3001,8 @@ def readback(fuel: Nat, +bodies: Read, st: RSt) -> Net & RB:
               readback(f, bodies, RSeen{data, info(net, node.of(p)), rest, vals})
             case Con{RMessage{+p, +o}, rest}:
               readback(f, bodies, message.at(p, o, rest, vals, rd(net, (node.of(p) * 8 : U32))))
+            case Con{RConst{+w}, rest}:
+              readback(f, bodies, const.read(U32.is_zero(w), net, w, rest, vals))
             case Con{RMkPair{}, rest}:
               match vals:
                 case Con{b, Con{a, more}}:
@@ -2747,6 +3024,8 @@ def readback(fuel: Nat, +bodies: Read, st: RSt) -> Net & RB:
                   readback(f, bodies, RLoop{net, RVisit{p1, True{}} <> RVisit{p2, True{}} <> RMkPair{} <> jobs, vals})
                 case NI{4, a, b, p1, p2}:
                   readback(f, bodies, RLoop{net, jobs, Co.VZero{} <> vals})
+                case NI{6, a, b, p1, p2}:
+                  readback(f, bodies, RLoop{net, RConst{a} <> jobs, vals})
                 case _:
                   readback(f, bodies, RLoop{net, jobs, Co.VZero{} <> vals})
             case False{}:
@@ -2756,6 +3035,8 @@ def readback(fuel: Nat, +bodies: Read, st: RSt) -> Net & RB:
                   readback(f, bodies, RLoop{net, jobs, Co.VZero{} <> vals})
                 case NI{8, a, b, p1, p2}:
                   readback(f, bodies, RLoop{net, RVisit{p1, False{}} <> RVisit{p2, False{}} <> RMkPair{} <> jobs, vals})
+                case NI{6, a, b, p1, p2}:
+                  readback(f, bodies, RLoop{net, RConst{a} <> jobs, vals})
                 case NI{7, a, b, p1, p2}:
                   readback(f, bodies, RLoop{net, jobs, Co.VDefer{b, body.of(bodies, a)} <> vals})
                 case NI{5, a, b, p1, p2}:

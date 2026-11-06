@@ -111,6 +111,7 @@ let
       "ic-fuel"
       "ic-laziness"
       "ic-omega"
+      "ic-constants"
       "ic-case"
       "ic-udt"
       "ic-meter-case-udt"

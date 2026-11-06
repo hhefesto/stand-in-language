@@ -22,7 +22,7 @@
 #define NT_ERA     3
 #define NT_ZERO    4
 #define NT_GATE    5
-#define NT_UNUSED6 6   // haskell-final's abort function, gone since master's 98de497c
+#define NT_CONST   6   // closed data: its word in the store (IC.bend's Constants)
 #define NT_REF     7
 #define NT_PAIR    8
 #define NT_ABORTED 9
@@ -47,7 +47,7 @@ enum {
   NT_PASS_APP, NT_SELECT_GATE, NT_SCRUT_PAIR, NT_PROJECT_LEFT, NT_PROJECT_RIGHT,
   NT_SPLIT_PAIR, NT_SPLIT_ZERO, NT_SPLIT_ABORTED, NT_SPLIT_STUCK,
   NT_ERA_PAIR, NT_ERA_ABORTED, NT_ERA_LEAF, NT_DUP_PLANNED, NT_DUP_ABORTED,
-  NT_DUP_DUP, NT_DUP_LEAF
+  NT_DUP_DUP, NT_DUP_LEAF, NT_OPEN
 };
 
 // Internal errors (IC.bend's `fail` messages), for Bend to name.
@@ -70,7 +70,7 @@ static u8 nt_rule[NT_KINDS][NT_KINDS];
 
 // is.value
 static bool nt_value(u32 k) {
-  return k == NT_ZERO || k == NT_GATE || k == NT_REF
+  return k == NT_ZERO || k == NT_GATE || k == NT_REF || k == NT_CONST
       || k == NT_PAIR || k == NT_ABORTED || k == NT_STUCK;
 }
 
@@ -82,14 +82,17 @@ static u8 nt_pass(u32 kb, u8 r) {
   return nt_value(kb) ? r : NT_NONE;
 }
 
-// rule.of, for ka first. The stuck-making rules are left to Bend.
+// rule.of, for ka first. The stuck-making rules are left to Bend. A
+// constant meeting anything but a copier or an eraser opens one layer.
 static u8 nt_rule_of(u32 ka, u32 kb) {
   bool v = nt_value(kb);
   switch (ka) {
     case NT_SETENV:
+      if (kb == NT_CONST) return NT_OPEN;
       return kb == NT_PAIR ? NT_SETENV_PAIR : nt_pass(kb, NT_BEND);
     case NT_APPLY:
       switch (kb) {
+        case NT_CONST:   return NT_OPEN;
         case NT_REF:     return NT_APPLY_REF;
         case NT_GATE:    return NT_AWAIT_GATE;
         case NT_ABORTED: return NT_PASS_APP;
@@ -97,16 +100,19 @@ static u8 nt_rule_of(u32 ka, u32 kb) {
         default:         return v ? NT_BEND : NT_NONE;
       }
     case NT_SCRUT:
+      if (kb == NT_CONST) return NT_OPEN;
       if (kb == NT_ZERO) return NT_SELECT_GATE;
       if (kb == NT_PAIR) return NT_SCRUT_PAIR;
       return nt_pass(kb, NT_BEND);
     case NT_LEFT:
     case NT_RIGHT:
+      if (kb == NT_CONST) return NT_OPEN;
       if (kb == NT_ZERO) return NT_PASS;
       if (kb == NT_PAIR) return ka == NT_LEFT ? NT_PROJECT_LEFT : NT_PROJECT_RIGHT;
       return nt_pass(kb, NT_BEND);
     case NT_SPLIT:
       switch (kb) {
+        case NT_CONST:   return NT_OPEN;
         case NT_PAIR:    return NT_SPLIT_PAIR;
         case NT_ZERO:    return NT_SPLIT_ZERO;
         case NT_ABORTED: return NT_SPLIT_ABORTED;
@@ -319,7 +325,7 @@ static void nt_region(Nt* x, u32 l) {
     u32 n   = p >> 2;
     u32 k   = NT_K(x, n);
     bool material = (p & 3) == 0;
-    if (material && ((tag == 1 && k == NT_ZERO) || (tag == 2 && k == NT_REF))) {
+    if (material && (k == NT_CONST || (tag == 1 && k == NT_ZERO) || (tag == 2 && k == NT_REF))) {
       u32 a = NT_A(x, n);
       u32 b = NT_B(x, n);
       nt_delete(x, n);
@@ -399,8 +405,24 @@ static void nt_dup_closure(Nt* x, u32 s, u32 n, NtI i, u32 m) {
   nt_connect(x, c2, i.p2);
 }
 
+// A constant's part, word w: 0 as itself, a pair as a constant.
+static inline u32 nt_const_node(Nt* x, u32 w) {
+  return w == 0 ? nt_alloc(x, NT_ZERO, 0, 0) : nt_alloc(x, NT_CONST, w, 0);
+}
+
 static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
   switch (r) {
+    case NT_OPEN: {
+      nt_spend(x);
+      nt_delete(x, m);
+      u32 v  = nt_alloc(x, NT_PAIR, 0, 0);
+      u32 cl = nt_const_node(x, x->t[j.a]);
+      u32 cr = nt_const_node(x, x->t[j.a + 1]);
+      nt_connect(x, v * 4 + 1, cl * 4);
+      nt_connect(x, v * 4 + 2, cr * 4);
+      nt_connect(x, v * 4, n * 4);
+      return;
+    }
     case NT_SETENV_PAIR: {
       nt_spend(x);
       nt_del2(x, n, m);
