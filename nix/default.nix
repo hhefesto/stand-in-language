@@ -57,6 +57,7 @@ let
     inherit telomare;
     bend-check = project.check;
     bend-proof = project.proof;
+    ic-generated = project.icGenerated;
     bend-tests = project.tests;
     goldens = project.goldens;
     lsp = project.lsp;

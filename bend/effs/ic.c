@@ -16,39 +16,72 @@
 // with IC.bend's own code (Native.bend's loop), then calls this again.
 // An internal error comes back as a code (`why`) that Bend turns into
 // IC.bend's message.
+//
+// The parts between `// <generated NAME>` and `// </generated>` are printed
+// by bend/dev/genic.bend: the dispatch from IC.bend's rule.of, the rules from
+// bend/Rules.bend's table. Change them there. What is written here by hand is
+// the machine under them: the net's words, instantiation, guided copying and
+// the loop.
 
-#define NT_ROOT    1
-#define NT_EXT     2
-#define NT_ERA     3
-#define NT_ZERO    4
-#define NT_GATE    5
-#define NT_CONST   6   // closed data: its word in the store (IC.bend's Constants)
-#define NT_REF     7
-#define NT_PAIR    8
+// <generated dispatch>
+#define NT_ROOT 1
+#define NT_EXT 2
+#define NT_ERA 3
+#define NT_ZERO 4
+#define NT_GATE 5
+#define NT_CONST 6
+#define NT_REF 7
+#define NT_PAIR 8
 #define NT_ABORTED 9
-#define NT_DUP     10
-#define NT_SPLIT   11
-#define NT_SETENV  12
-#define NT_APPLY   13
-#define NT_SCRUT   14
-#define NT_UNUSED15 15
-#define NT_LEFT    16
-#define NT_RIGHT   17
-#define NT_STUCK   18
-#define NT_KINDS   19
-
-// Core.bend's function indices of the selectors (neg(2), neg(3)).
-#define NT_LEFT_GATE  0xFFFFFFFEu
-#define NT_RIGHT_GATE 0xFFFFFFFDu
+#define NT_DUP 10
+#define NT_SPLIT 11
+#define NT_SETENV 12
+#define NT_APPLY 13
+#define NT_SCRUT 14
+#define NT_LEFT 16
+#define NT_RIGHT 17
+#define NT_STUCK 18
+#define NT_KINDS 19
 
 // The rules, as IC.bend's type Rule names them. NT_BEND: left to Bend.
 enum {
-  NT_NONE, NT_BEND, NT_SETENV_PAIR, NT_PASS, NT_APPLY_REF, NT_AWAIT_GATE,
-  NT_PASS_APP, NT_SELECT_GATE, NT_SCRUT_PAIR, NT_PROJECT_LEFT, NT_PROJECT_RIGHT,
-  NT_SPLIT_PAIR, NT_SPLIT_ZERO, NT_SPLIT_ABORTED, NT_SPLIT_STUCK,
-  NT_ERA_PAIR, NT_ERA_ABORTED, NT_ERA_LEAF, NT_DUP_PLANNED, NT_DUP_ABORTED,
-  NT_DUP_DUP, NT_DUP_LEAF, NT_OPEN
+  NT_NONE,
+  NT_BEND,
+  NT_SETENV_PAIR,
+  NT_PASS,
+  NT_APPLY_REF,
+  NT_AWAIT_GATE,
+  NT_PASS_APP,
+  NT_SELECT_GATE,
+  NT_SCRUT_PAIR,
+  NT_PROJECT_LEFT,
+  NT_PROJECT_RIGHT,
+  NT_SPLIT_PAIR,
+  NT_SPLIT_ZERO,
+  NT_SPLIT_ABORTED,
+  NT_SPLIT_STUCK,
+  NT_ERA_PAIR,
+  NT_ERA_ABORTED,
+  NT_ERA_LEAF,
+  NT_DUP_PLANNED,
+  NT_DUP_ABORTED,
+  NT_DUP_DUP,
+  NT_DUP_LEAF,
+  NT_OPEN,
 };
+
+// IC.bend's rule.of, for the first kind then the second.
+static const u8 nt_rule[NT_KINDS][NT_KINDS] = {
+  [NT_ERA] = {[NT_ZERO] = NT_ERA_LEAF, [NT_GATE] = NT_ERA_LEAF, [NT_CONST] = NT_ERA_LEAF, [NT_REF] = NT_ERA_LEAF, [NT_PAIR] = NT_ERA_PAIR, [NT_ABORTED] = NT_ERA_ABORTED, [NT_STUCK] = NT_ERA_LEAF, },
+  [NT_DUP] = {[NT_ZERO] = NT_DUP_LEAF, [NT_GATE] = NT_DUP_LEAF, [NT_CONST] = NT_DUP_LEAF, [NT_REF] = NT_DUP_LEAF, [NT_PAIR] = NT_DUP_PLANNED, [NT_ABORTED] = NT_DUP_ABORTED, [NT_DUP] = NT_DUP_DUP, [NT_STUCK] = NT_DUP_LEAF, },
+  [NT_SPLIT] = {[NT_ZERO] = NT_SPLIT_ZERO, [NT_GATE] = NT_BEND, [NT_CONST] = NT_OPEN, [NT_REF] = NT_BEND, [NT_PAIR] = NT_SPLIT_PAIR, [NT_ABORTED] = NT_SPLIT_ABORTED, [NT_STUCK] = NT_SPLIT_STUCK, },
+  [NT_SETENV] = {[NT_ZERO] = NT_BEND, [NT_GATE] = NT_BEND, [NT_CONST] = NT_OPEN, [NT_REF] = NT_BEND, [NT_PAIR] = NT_SETENV_PAIR, [NT_ABORTED] = NT_PASS, [NT_STUCK] = NT_PASS, },
+  [NT_APPLY] = {[NT_ZERO] = NT_BEND, [NT_GATE] = NT_AWAIT_GATE, [NT_CONST] = NT_OPEN, [NT_REF] = NT_APPLY_REF, [NT_PAIR] = NT_BEND, [NT_ABORTED] = NT_PASS_APP, [NT_STUCK] = NT_PASS_APP, },
+  [NT_SCRUT] = {[NT_ZERO] = NT_SELECT_GATE, [NT_GATE] = NT_BEND, [NT_CONST] = NT_OPEN, [NT_REF] = NT_BEND, [NT_PAIR] = NT_SCRUT_PAIR, [NT_ABORTED] = NT_PASS, [NT_STUCK] = NT_PASS, },
+  [NT_LEFT] = {[NT_ZERO] = NT_PASS, [NT_GATE] = NT_BEND, [NT_CONST] = NT_OPEN, [NT_REF] = NT_BEND, [NT_PAIR] = NT_PROJECT_LEFT, [NT_ABORTED] = NT_PASS, [NT_STUCK] = NT_PASS, },
+  [NT_RIGHT] = {[NT_ZERO] = NT_PASS, [NT_GATE] = NT_BEND, [NT_CONST] = NT_OPEN, [NT_REF] = NT_BEND, [NT_PAIR] = NT_PROJECT_RIGHT, [NT_ABORTED] = NT_PASS, [NT_STUCK] = NT_PASS, },
+};
+// </generated>
 
 // Internal errors (IC.bend's `fail` messages), for Bend to name.
 #define NT_WHY_PAIR   1  // "dupRegion: nothing to pair"
@@ -65,81 +98,6 @@ typedef struct {
   u32* vs;   // and its copies
   u32  vn, vcap;
 } Nt;
-
-static u8 nt_rule[NT_KINDS][NT_KINDS];
-
-// is.value
-static bool nt_value(u32 k) {
-  return k == NT_ZERO || k == NT_GATE || k == NT_REF || k == NT_CONST
-      || k == NT_PAIR || k == NT_ABORTED || k == NT_STUCK;
-}
-
-// rule.pass: aborted and stuck values pass to the consumer's result.
-static u8 nt_pass(u32 kb, u8 r) {
-  if (kb == NT_ABORTED || kb == NT_STUCK) {
-    return NT_PASS;
-  }
-  return nt_value(kb) ? r : NT_NONE;
-}
-
-// rule.of, for ka first. The stuck-making rules are left to Bend. A
-// constant meeting anything but a copier or an eraser opens one layer.
-static u8 nt_rule_of(u32 ka, u32 kb) {
-  bool v = nt_value(kb);
-  switch (ka) {
-    case NT_SETENV:
-      if (kb == NT_CONST) return NT_OPEN;
-      return kb == NT_PAIR ? NT_SETENV_PAIR : nt_pass(kb, NT_BEND);
-    case NT_APPLY:
-      switch (kb) {
-        case NT_CONST:   return NT_OPEN;
-        case NT_REF:     return NT_APPLY_REF;
-        case NT_GATE:    return NT_AWAIT_GATE;
-        case NT_ABORTED: return NT_PASS_APP;
-        case NT_STUCK:   return NT_PASS_APP;
-        default:         return v ? NT_BEND : NT_NONE;
-      }
-    case NT_SCRUT:
-      if (kb == NT_CONST) return NT_OPEN;
-      if (kb == NT_ZERO) return NT_SELECT_GATE;
-      if (kb == NT_PAIR) return NT_SCRUT_PAIR;
-      return nt_pass(kb, NT_BEND);
-    case NT_LEFT:
-    case NT_RIGHT:
-      if (kb == NT_CONST) return NT_OPEN;
-      if (kb == NT_ZERO) return NT_PASS;
-      if (kb == NT_PAIR) return ka == NT_LEFT ? NT_PROJECT_LEFT : NT_PROJECT_RIGHT;
-      return nt_pass(kb, NT_BEND);
-    case NT_SPLIT:
-      switch (kb) {
-        case NT_CONST:   return NT_OPEN;
-        case NT_PAIR:    return NT_SPLIT_PAIR;
-        case NT_ZERO:    return NT_SPLIT_ZERO;
-        case NT_ABORTED: return NT_SPLIT_ABORTED;
-        case NT_STUCK:   return NT_SPLIT_STUCK;
-        default:         return v ? NT_BEND : NT_NONE;
-      }
-    case NT_ERA:
-      if (kb == NT_PAIR) return NT_ERA_PAIR;
-      if (kb == NT_ABORTED) return NT_ERA_ABORTED;
-      return v ? NT_ERA_LEAF : NT_NONE;
-    case NT_DUP:
-      if (kb == NT_PAIR) return NT_DUP_PLANNED;
-      if (kb == NT_ABORTED) return NT_DUP_ABORTED;
-      if (kb == NT_DUP) return NT_DUP_DUP;
-      return v ? NT_DUP_LEAF : NT_NONE;
-    default:
-      return NT_NONE;
-  }
-}
-
-static void __attribute__((constructor)) nt_rules(void) {
-  for (u32 a = 0; a < NT_KINDS; a += 1) {
-    for (u32 b = 0; b < NT_KINDS; b += 1) {
-      nt_rule[a][b] = nt_rule_of(a, b);
-    }
-  }
-}
 
 // The net
 // -------
@@ -364,30 +322,6 @@ static inline NtI nt_info(Nt* x, u32 n) {
   return i;
 }
 
-static inline void nt_two(Nt* x, NtI i, u32 k, u32 a, u32 b) {
-  u32 c1 = nt_alloc(x, k, a, b);
-  u32 c2 = nt_alloc(x, k, a, b);
-  nt_connect(x, c1 * 4, i.p1);
-  nt_connect(x, c2 * 4, i.p2);
-}
-
-static void nt_dup_pair(Nt* x, u32 n, NtI i, u32 m, NtI j) {
-  nt_spend(x);
-  nt_del2(x, n, m);
-  u32 p1 = nt_alloc(x, NT_PAIR, 0, 0);
-  u32 p2 = nt_alloc(x, NT_PAIR, 0, 0);
-  u32 dl = nt_alloc(x, NT_DUP, i.a, 0);
-  u32 dr = nt_alloc(x, NT_DUP, i.a, 0);
-  nt_connect(x, dl * 4, j.p1);
-  nt_connect(x, dr * 4, j.p2);
-  nt_connect(x, p1 * 4 + 1, dl * 4 + 1);
-  nt_connect(x, p1 * 4 + 2, dr * 4 + 1);
-  nt_connect(x, p2 * 4 + 1, dl * 4 + 2);
-  nt_connect(x, p2 * 4 + 2, dr * 4 + 2);
-  nt_connect(x, p1 * 4, i.p1);
-  nt_connect(x, p2 * 4, i.p2);
-}
-
 static void nt_dup_closure(Nt* x, u32 s, u32 n, NtI i, u32 m) {
   nt_spend(x);
   nt_delete(x, n);
@@ -410,21 +344,38 @@ static inline u32 nt_const_node(Nt* x, u32 w) {
   return w == 0 ? nt_alloc(x, NT_ZERO, 0, 0) : nt_alloc(x, NT_CONST, w, 0);
 }
 
+// plan.of: where the plan of a pair headed at port p is, when p is a
+// materialized code pointer whose code has one; else 0.
+static inline u32 nt_plan_of(Nt* x, u32 p) {
+  u32 h = p >> 2;
+  if ((p & 3) == 0 && NT_K(x, h) == NT_REF) {
+    return x->t[2 + x->t[0] + NT_A(x, h)];
+  }
+  return 0;
+}
+
+// <generated rules>
+static void nt_dup_pair(Nt* x, u32 n, NtI i, u32 m, NtI j) {
+  nt_spend(x);
+  nt_del2(x, n, m);
+  u32 p1 = nt_alloc(x, NT_PAIR, 0, 0);
+  u32 p2 = nt_alloc(x, NT_PAIR, 0, 0);
+  u32 dl = nt_alloc(x, NT_DUP, i.a, 0);
+  u32 dr = nt_alloc(x, NT_DUP, i.a, 0);
+  nt_connect(x, dl * 4, j.p1);
+  nt_connect(x, dr * 4, j.p2);
+  nt_connect(x, p1 * 4 + 1, dl * 4 + 1);
+  nt_connect(x, p1 * 4 + 2, dr * 4 + 1);
+  nt_connect(x, p2 * 4 + 1, dl * 4 + 2);
+  nt_connect(x, p2 * 4 + 2, dr * 4 + 2);
+  nt_connect(x, p1 * 4, i.p1);
+  nt_connect(x, p2 * 4, i.p2);
+}
+
 // Inlined into its one caller: passed on the stack, the two infos cost a
 // store-forwarding stall each (P8 N2: 15% of a run).
 static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
   switch (r) {
-    case NT_OPEN: {
-      nt_spend(x);
-      nt_delete(x, m);
-      u32 v  = nt_alloc(x, NT_PAIR, 0, 0);
-      u32 cl = nt_const_node(x, x->t[j.a]);
-      u32 cr = nt_const_node(x, x->t[j.a + 1]);
-      nt_connect(x, v * 4 + 1, cl * 4);
-      nt_connect(x, v * 4 + 2, cr * 4);
-      nt_connect(x, v * 4, n * 4);
-      return;
-    }
     case NT_SETENV_PAIR: {
       nt_spend(x);
       nt_del2(x, n, m);
@@ -434,16 +385,18 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
       nt_connect(x, ap * 4 + 2, i.p1);
       return;
     }
-    case NT_PASS:
+    case NT_PASS: {
       nt_spend(x);
       nt_delete(x, n);
       nt_connect(x, m * 4, i.p1);
       return;
-    case NT_APPLY_REF:
+    }
+    case NT_APPLY_REF: {
       nt_spend(x);
       nt_del2(x, n, m);
       nt_instantiate(x, j.a, i.p1, i.p2);
       return;
+    }
     case NT_AWAIT_GATE: {
       nt_spend(x);
       nt_del2(x, n, m);
@@ -463,7 +416,7 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
     case NT_SELECT_GATE: {
       nt_spend(x);
       nt_del2(x, n, m);
-      u32 sel = nt_alloc(x, NT_REF, 0, NT_LEFT_GATE);
+      u32 sel = nt_alloc(x, NT_REF, 0, 4294967294u);
       nt_connect(x, sel * 4, i.p1);
       return;
     }
@@ -474,40 +427,50 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
       u32 er = nt_alloc(x, NT_ERA, 0, 0);
       nt_connect(x, el * 4, j.p1);
       nt_connect(x, er * 4, j.p2);
-      u32 sel = nt_alloc(x, NT_REF, 1, NT_RIGHT_GATE);
+      u32 sel = nt_alloc(x, NT_REF, 1, 4294967293u);
       nt_connect(x, sel * 4, i.p1);
       return;
     }
-    case NT_PROJECT_LEFT:
-    case NT_PROJECT_RIGHT: {
-      u32 kept    = r == NT_PROJECT_LEFT ? j.p1 : j.p2;
-      u32 dropped = r == NT_PROJECT_LEFT ? j.p2 : j.p1;
+    case NT_PROJECT_LEFT: {
       nt_spend(x);
       nt_del2(x, n, m);
       u32 e = nt_alloc(x, NT_ERA, 0, 0);
-      nt_connect(x, e * 4, dropped);
-      nt_connect(x, kept, i.p1);
+      nt_connect(x, e * 4, j.p2);
+      nt_connect(x, j.p1, i.p1);
       return;
     }
-    case NT_SPLIT_PAIR:
+    case NT_PROJECT_RIGHT: {
+      nt_spend(x);
+      nt_del2(x, n, m);
+      u32 e = nt_alloc(x, NT_ERA, 0, 0);
+      nt_connect(x, e * 4, j.p1);
+      nt_connect(x, j.p2, i.p1);
+      return;
+    }
+    case NT_SPLIT_PAIR: {
       nt_spend(x);
       nt_del2(x, n, m);
       nt_connect(x, j.p1, i.p1);
       nt_connect(x, j.p2, i.p2);
       return;
-    case NT_SPLIT_ZERO:
+    }
+    case NT_SPLIT_ZERO: {
       nt_spend(x);
       nt_del2(x, n, m);
-      nt_two(x, i, NT_ZERO, 0, 0);
+      u32 c1 = nt_alloc(x, NT_ZERO, 0, 0);
+      u32 c2 = nt_alloc(x, NT_ZERO, 0, 0);
+      nt_connect(x, c1 * 4, i.p1);
+      nt_connect(x, c2 * 4, i.p2);
       return;
+    }
     case NT_SPLIT_ABORTED: {
       nt_spend(x);
       nt_del2(x, n, m);
-      u32 l  = x->label;
+      u32 l = x->label;
       x->label += 1;
       u32 dm = nt_alloc(x, NT_DUP, l, 0);
       nt_connect(x, dm * 4, j.p1);
-      u32 a1 = nt_alloc(x, NT_ABORTED, j.a, 0);  // both halves keep the origin
+      u32 a1 = nt_alloc(x, NT_ABORTED, j.a, 0);
       u32 a2 = nt_alloc(x, NT_ABORTED, j.a, 0);
       nt_connect(x, a1 * 4 + 1, dm * 4 + 1);
       nt_connect(x, a1 * 4, i.p1);
@@ -515,11 +478,15 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
       nt_connect(x, a2 * 4, i.p2);
       return;
     }
-    case NT_SPLIT_STUCK:
+    case NT_SPLIT_STUCK: {
       nt_spend(x);
       nt_del2(x, n, m);
-      nt_two(x, i, NT_STUCK, j.a, 0);
+      u32 c1 = nt_alloc(x, NT_STUCK, j.a, 0);
+      u32 c2 = nt_alloc(x, NT_STUCK, j.a, 0);
+      nt_connect(x, c1 * 4, i.p1);
+      nt_connect(x, c2 * 4, i.p2);
       return;
+    }
     case NT_ERA_PAIR: {
       nt_spend(x);
       nt_del2(x, n, m);
@@ -536,17 +503,13 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
       nt_connect(x, e * 4, j.p1);
       return;
     }
-    case NT_ERA_LEAF:
+    case NT_ERA_LEAF: {
       nt_spend(x);
       nt_del2(x, n, m);
       return;
+    }
     case NT_DUP_PLANNED: {
-      // plan.of: a materialized code pointer whose code has a plan
-      u32 h = j.p1 >> 2;
-      u32 s = 0;
-      if ((j.p1 & 3) == 0 && NT_K(x, h) == NT_REF) {
-        s = x->t[2 + x->t[0] + NT_A(x, h)];
-      }
+      u32 s = nt_plan_of(x, j.p1);
       if (s == 0) {
         nt_dup_pair(x, n, i, m, j);
       } else {
@@ -560,7 +523,7 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
       u32 a1 = nt_alloc(x, NT_ABORTED, j.a, 0);
       u32 a2 = nt_alloc(x, NT_ABORTED, j.a, 0);
       u32 dm = nt_alloc(x, NT_DUP, i.a, 0);
-      nt_alloc(x, NT_ZERO, 0, 0);  // as IC.bend's alloc4 makes it: a fourth, unused
+      nt_alloc(x, NT_ZERO, 0, 0);
       nt_connect(x, dm * 4, j.p1);
       nt_connect(x, a1 * 4 + 1, dm * 4 + 1);
       nt_connect(x, a2 * 4 + 1, dm * 4 + 2);
@@ -568,7 +531,7 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
       nt_connect(x, a2 * 4, i.p2);
       return;
     }
-    case NT_DUP_DUP:
+    case NT_DUP_DUP: {
       nt_spend(x);
       nt_del2(x, n, m);
       if (i.a == j.a) {
@@ -589,13 +552,30 @@ static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, N
         nt_connect(x, m2 * 4 + 2, n2 * 4 + 2);
       }
       return;
-    case NT_DUP_LEAF:
+    }
+    case NT_DUP_LEAF: {
       nt_spend(x);
       nt_del2(x, n, m);
-      nt_two(x, i, j.k, j.a, j.b);
+      u32 c1 = nt_alloc(x, j.k, j.a, j.b);
+      u32 c2 = nt_alloc(x, j.k, j.a, j.b);
+      nt_connect(x, c1 * 4, i.p1);
+      nt_connect(x, c2 * 4, i.p2);
       return;
+    }
+    case NT_OPEN: {
+      nt_spend(x);
+      nt_delete(x, m);
+      u32 v = nt_alloc(x, NT_PAIR, 0, 0);
+      u32 cl = nt_const_node(x, x->t[j.a]);
+      u32 cr = nt_const_node(x, x->t[j.a + 1]);
+      nt_connect(x, v * 4 + 1, cl * 4);
+      nt_connect(x, v * 4 + 2, cr * 4);
+      nt_connect(x, v * 4, n * 4);
+      return;
+    }
   }
 }
+// </generated>
 
 // Is fi the step of an unbounded recursion (Core.bend's is.limit)?
 static inline bool nt_limit(u32 fi) {

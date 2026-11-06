@@ -28,6 +28,7 @@ import ./Rat.bend as Rat
 import ./Linear.bend as Linear
 import ./EALm.bend as EALm
 import ./IC.bend as IC
+import ./Rules.bend as Rules
 import ./Session.bend as Session
 import ./Levels.bend as Levels
 import ./Certificate.bend as Certificate

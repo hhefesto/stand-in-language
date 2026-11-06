@@ -140,6 +140,42 @@ def both(t: Co.V, +fuel: U32) -> IO(Bool):
     s : IC.Run <- Nt.run(prog, IC.net.new(prog), Co.DZero{}, fuel)
     return both.got(IC.run(prog, IC.net.new(prog), Co.DZero{}, fuel), s)
 
+# A closed term and the fuel to run it at. Closed terms cover the rules C
+# leaves to Bend (stuck values, an abort's message, fuel running out).
+type Case is Data:
+  Case{t: Co.V, +fuel: U32}
+
+def closed() -> List<&2, Case>:
+  [Case{Co.app(Co.app(church.two(), Co.app(church.two(), succ.c())), z()), IC.default.fuel()},
+   Case{se(p(d(102, p(env(), env())), d(103, env()))), IC.default.fuel()},
+   Case{Co.gate.switch(z(), p(z(), z()), se(p(d(113, env()), p(z(), z())))), IC.default.fuel()},
+   Case{Co.VAbort{Lc.unknown.origin(), p(z(), z())}, IC.default.fuel()},
+   Case{left(Co.VAbort{Lc.unknown.origin(), Co.VAbort{Lc.unknown.origin(), z()}}), IC.default.fuel()},
+   Case{se(p(z(), z())), IC.default.fuel()},
+   Case{se(z()), IC.default.fuel()},
+   Case{Co.gate.switch(d(105, env()), z(), p(z(), z())), IC.default.fuel()},
+   Case{Co.VRight{z()}, IC.default.fuel()},
+   Case{Co.VRight{num(40n)}, IC.default.fuel()},
+   Case{left(p(num(3n), num(4n))), IC.default.fuel()},
+   Case{se(p(d(130, p(env(), env())), num(40n))), IC.default.fuel()},
+   Case{se(p(d(131, z()), num(40n))), IC.default.fuel()},
+   Case{se(p(d(132, Co.VRight{env()}), num(3n))), IC.default.fuel()},
+   Case{Co.gate.switch(num(4n), z(), num(2n)), IC.default.fuel()},
+   Case{Co.VAbort{Lc.unknown.origin(), num(3n)}, IC.default.fuel()},
+   Case{Co.app(num(3n), z()), IC.default.fuel()},
+   Case{se(num(3n)), IC.default.fuel()},
+   Case{Co.app(Co.app(church.two(), succ.c()), z()), 3},
+   Case{omega.applied(), 100000}]
+
+def cases.io(cs: List<&2, Case>) -> List<&1, IO(Bool)>:
+  match cs:
+    case Nil{}:
+      []
+    case Con{c, rest}:
+      match c:
+        case Case{t, +fuel}:
+          Con{both(t, fuel), cases.io(rest)}
+
 def all.io(xs: List<&1, IO(Bool)>) -> IO(Bool):
   match xs:
     case Nil{}:
@@ -149,6 +185,120 @@ def all.io(xs: List<&1, IO(Bool)>) -> IO(Bool):
         a : Bool <- x
         b : Bool <- all.io(rest)
         return a && b
+
+# One pair of every two kinds
+# ---------------------------
+
+# The sessions leave some rules unfired, so every two kinds meet here, alone
+# on a net, their other ports wired to ext agents. Kinds that would read the
+# store (a closure's code applied, a constant opened) are the sessions' to
+# cover. `a` and `c`: their first words.
+type Meet is Data:
+  Meet{+ka: U32, +a: U32, +kb: U32, +c: U32}
+
+def store.rule(r: IC.Rule) -> Bool:
+  match r:
+    case IC.RApplyRef{}:
+      True{}
+    case IC.ROpen{}:
+      True{}
+    case _:
+      False{}
+
+def meet.kinds() -> List<&2, U32>:
+  [IC.era(), IC.zero(), IC.gate(), IC.konst(), IC.ref(), IC.pair(), IC.aborted(), IC.dup(),
+   IC.split(), IC.setenv(), IC.apply(), IC.scrut(), IC.left(), IC.right(), IC.stuck()]
+
+def meet.keep(skip: Bool, +m: Meet, acc: List<&2, Meet>) -> List<&2, Meet>:
+  match skip:
+    case True{}:
+      acc
+    case False{}:
+      Con{m, acc}
+
+def meet.row(+ka: U32, ks: List<&2, U32>, acc: List<&2, Meet>) -> List<&2, Meet>:
+  match ks:
+    case Nil{}:
+      acc
+    case Con{+kb, rest}:
+      meet.row(ka, rest, meet.keep(
+        store.rule(IC.rule.of(IC.ak.of(ka), IC.ak.of(kb))) || store.rule(IC.rule.of(IC.ak.of(kb), IC.ak.of(ka))),
+        Meet{ka, 5, kb, 6}, acc))
+
+def meet.rows(ks: List<&2, U32>, acc: List<&2, Meet>) -> List<&2, Meet>:
+  match ks:
+    case Nil{}:
+      acc
+    case Con{+ka, rest}:
+      meet.rows(rest, meet.row(ka, meet.kinds(), acc))
+
+# Every two kinds, and two Dups of one label.
+def meets() -> List<&2, Meet>:
+  meet.rows(meet.kinds(), [Meet{IC.dup(), 5, IC.dup(), 5}])
+
+def aux.one(has: Bool, net: IC.Net, +p: U32, +q: U32) -> IC.Net:
+  match has:
+    case True{}:
+      IC.connect(net, p, q)
+    case False{}:
+      net
+
+# Agent x of kind k's auxiliary ports, wired to ext agents e and f.
+def aux(net: IC.Net, +k: U32, +x: U32, +e: U32, +f: U32) -> IC.Net:
+  aux.one(U32.is_ge(IC.arity(k), 3),
+          aux.one(U32.is_ge(IC.arity(k), 2), net, IC.port(x, 1), IC.port(e, 0)),
+          IC.port(x, 2), IC.port(f, 0))
+
+def meet.wired(+ka: U32, +kb: U32, +n: U32, +m: U32, +e1: U32, +e2: U32, +e3: U32, r: IC.Net & U32) -> IC.Net:
+  (net, +e4) = r
+  IC.connect(aux(aux(net, ka, n, e1, e2), kb, m, e3, e4), IC.port(n, 0), IC.port(m, 0))
+
+def meet.e3(+ka: U32, +kb: U32, +n: U32, +m: U32, +e1: U32, +e2: U32, r: IC.Net & U32) -> IC.Net:
+  (net, +e3) = r
+  meet.wired(ka, kb, n, m, e1, e2, e3, IC.alloc(net, IC.ext(), 0, 0))
+
+def meet.e2(+ka: U32, +kb: U32, +n: U32, +m: U32, +e1: U32, r: IC.Net & U32) -> IC.Net:
+  (net, +e2) = r
+  meet.e3(ka, kb, n, m, e1, e2, IC.alloc(net, IC.ext(), 0, 0))
+
+def meet.e1(+ka: U32, +kb: U32, +n: U32, +m: U32, r: IC.Net & U32) -> IC.Net:
+  (net, +e1) = r
+  meet.e2(ka, kb, n, m, e1, IC.alloc(net, IC.ext(), 0, 0))
+
+def meet.m(+ka: U32, +kb: U32, +n: U32, r: IC.Net & U32) -> IC.Net:
+  (net, +m) = r
+  meet.e1(ka, kb, n, m, IC.alloc(net, IC.ext(), 0, 0))
+
+def meet.n(+kb: U32, +c: U32, +ka: U32, r: IC.Net & U32) -> IC.Net:
+  (net, +n) = r
+  meet.m(ka, kb, n, IC.alloc(net, kb, c, 0))
+
+# The net of a meeting, its one active pair stacked.
+def meet.net(+prog: IC.Prog, m: Meet) -> IC.Net:
+  match m:
+    case Meet{+ka, +a, +kb, +c}:
+      meet.n(kb, c, ka, IC.alloc(IC.reset(IC.net.new(prog), IC.default.fuel()), ka, a, 0))
+
+def meet.prog() -> IC.Prog:
+  IC.prepare.closed(z())
+
+def most() -> Nat:
+  U32.to_nat(4294967295)
+
+def meet.ok(r: IC.Net & IC.Net & Bool) -> Bool:
+  ok.of(r)
+
+def meet.both(+prog: IC.Prog, +m: Meet) -> IO(Bool):
+  do IO<Bool>:
+    y : IC.Net <- Nt.loop(most(), Nt.Firing{meet.net(prog, m)})
+    return meet.ok(same(IC.reduce(most(), IC.pop(meet.net(prog, m))), y))
+
+def meets.io(+prog: IC.Prog, ms: List<&2, Meet>) -> List<&1, IO(Bool)>:
+  match ms:
+    case Nil{}:
+      []
+    case Con{+m, rest}:
+      Con{meet.both(prog, m), meets.io(prog, rest)}
 
 # Sessions
 # --------
@@ -231,28 +381,10 @@ def text(r: Result<&1, &1, String, String>) -> String:
 
 def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
   do IO<Unit>:
-    terms : Bool <- all.io([
-      both(Co.app(Co.app(church.two(), Co.app(church.two(), succ.c())), z()), IC.default.fuel()),
-      both(se(p(d(102, p(env(), env())), d(103, env()))), IC.default.fuel()),
-      both(Co.gate.switch(z(), p(z(), z()), se(p(d(113, env()), p(z(), z())))), IC.default.fuel()),
-      both(Co.VAbort{Lc.unknown.origin(), p(z(), z())}, IC.default.fuel()),
-      both(left(Co.VAbort{Lc.unknown.origin(), Co.VAbort{Lc.unknown.origin(), z()}}), IC.default.fuel()),
-      both(se(p(z(), z())), IC.default.fuel()),
-      both(se(z()), IC.default.fuel()),
-      both(Co.gate.switch(d(105, env()), z(), p(z(), z())), IC.default.fuel()),
-      both(Co.VRight{z()}, IC.default.fuel()),
-      both(Co.VRight{num(40n)}, IC.default.fuel()),
-      both(left(p(num(3n), num(4n))), IC.default.fuel()),
-      both(se(p(d(130, p(env(), env())), num(40n))), IC.default.fuel()),
-      both(se(p(d(131, z()), num(40n))), IC.default.fuel()),
-      both(se(p(d(132, Co.VRight{env()}), num(3n))), IC.default.fuel()),
-      both(Co.gate.switch(num(4n), z(), num(2n)), IC.default.fuel()),
-      both(Co.VAbort{Lc.unknown.origin(), num(3n)}, IC.default.fuel()),
-      both(Co.app(num(3n), z()), IC.default.fuel()),
-      both(se(num(3n)), IC.default.fuel()),
-      both(Co.app(Co.app(church.two(), succ.c()), z()), 3),
-      both(omega.applied(), 100000)])
+    terms : Bool <- all.io(cases.io(closed()))
     IO.print(verdict("native-terms", terms))
+    pairs : Bool <- all.io(meets.io(meet.prog(), meets()))
+    IO.print(verdict("native-pairs", pairs))
     sessions : Bool <- all.io([
       session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", []),
       session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"]),

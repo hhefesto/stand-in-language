@@ -191,7 +191,13 @@ let
     ];
     native = [
       "native-terms"
+      "native-pairs"
       "native-sessions"
+    ];
+    rules = [
+      "rules-terms"
+      "rules-pairs"
+      "rules-sessions"
     ];
     sem = [
       "sem-tc_ultra_minimal"
@@ -297,6 +303,14 @@ in
   proof = bendCommand "bend-proof" bendSrc ''
     BENDTT=${bendtt}/bin/bendtt bend bend/PROOF.bend --verdict | tee result
     grep -qx "ALL PROOFS CHECK" result
+    touch $out
+  '';
+
+  # bend/effs/ic.c's generated parts are what bend/dev/genic.bend prints, from
+  # IC.bend's dispatch and bend/Rules.bend's table.
+  icGenerated = bendCommand "ic-generated" bendSrc ''
+    bend bend/dev/genic.bend > ic.c.generated
+    diff bend/effs/ic.c ic.c.generated
     touch $out
   '';
 

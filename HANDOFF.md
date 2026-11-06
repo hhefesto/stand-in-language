@@ -1601,15 +1601,49 @@ Two things are not local and need design first: guided copying
 (`region`, dup-closure) walks a whole region of the net in one rule, and
 the free list and label counter are global.
 
+**N2, the first round done (2026-11-06).** A tictactoe `--ic` from a `.telc`
+spent 60% of its time rebuilding the net's templates (collect, constants,
+templates), so `.telc` version 10 stores them prepared, and a run decodes only
+what it needs (the file grows, 265 → 458 KB for tictactoe); nets start at 2^15
+words and grow, so a prologue's net per line costs almost nothing; `nt_apply`
+is inlined, which removes a store-forwarding stall. tictactoe `--ic` 346 → 92 ms,
+simpleplus 82 → 13 ms, the counts unchanged. The C loop is now about 70% of a
+tictactoe `--ic` run, at about 30 ns per interaction.
+
+**The rule table (2026-11-06): one description, as the shape above asks.**
+Until now `ic.c` was a second copy of the rules, written by hand and checked,
+and assembly and the GPU would have been two more.
+- `bend/Rules.bend`: `act`, a total match on IC.bend's `Rule`, gives each rule
+  as data (spend, delete, new agent, new label, wire, in IC.bend's order), and
+  `apply`/`run` run it on IC.bend's net. Being total, a new rule in IC.bend fails
+  to check until the table has it.
+- `bend/dev/genic.bend` prints `ic.c` with its marked parts regenerated: the
+  kinds and the dispatch (a literal table, from IC.bend's own `rule.of`) and
+  the rules' bodies (from the table). The flake's `ic-generated` check and
+  gate.sh's tests step fail when the file differs. To change them:
+  `bend bend/dev/genic.bend > ic.c.new && mv ic.c.new bend/effs/ic.c`.
+- `bend/tests/rules.bend` holds the table to IC.bend's rules: the runs of
+  `tests/native.bend` (its closed terms and its sessions), made both ways, must
+  leave the same net word for word. So the chain is table = IC.bend (rules
+  test), generated C = IC.bend (native test). This is testing, not proof: nothing
+  proves `apply` equal to `apply.rule`, and the C stays outside the proof gate.
+- What stays by hand in `ic.c`, because it is a machine and not a rule: the net's
+  words (`alloc`, `delete`, `connect`, `grow`), `instantiate`, guided copying
+  (`region`, one walk of a whole region), and the loop (which also holds the
+  `--fast` step test, `nt_limit`, by hand). The table only names those. A new
+  back end writes them once and is printed the rest.
+- Cost: the printed C takes about 3% more cycles than the hand-written one
+  (339M against 328M on tictactoe, under load) and 1% more instructions; why
+  isn't known. `nt_dup_pair` stays out of line because inlining it added 5%
+  instructions.
+- `low-level-runtime.html` documents all this for a reader.
+
 **Next, in order:**
-- N2 (first profile only, 2026-11-05: tictactoe from a `.telc`, the C loop
-  16.6% of the run, `term_drop` 21%): profile the C (perf) and the Bend left
-  around it; move what costs (net reuse for the prologue, readback) before
-  touching assembly.
 - N3: x86-64 assembly where the profile says the C loop is the cost: the
   dispatch and the hot rules (split-pair, setenv-pair, apply-ref
-  instantiation, dup copying), from the same rule table, checked by
-  tests/native.bend.
+  instantiation, dup copying), printed from Rules.bend's table by a printer
+  beside genic.bend's, checked by tests/native.bend. A turn is capped at 10M
+  interactions (about 0.3 s), so today's programs gain little per turn.
 - N4: many cores, HVM2-style: per-thread pair stacks, atomic linking,
   per-thread free lists and label ranges; counts stay exact, the net's
   words then need not be IC.bend's (the test would compare readback and
@@ -2727,6 +2761,8 @@ empty.
   `V`, data `D`, the reserved function indices.
 - `Sha256`, `Lift` (deferLift, CapShape), `EAL`.
 - `IC`, `Session`, `Main`.
+- `Rules`: the IC's rules as data, which `dev/genic.bend` prints as `effs/ic.c`'s
+  rules (P8).
 - `Levels` and `Certificate`: the static report.
 - `Text`, `Show`, `Loc`.
 - The sizing proof's: `Sem` (the meaning) and `Check` (the erasure checker),

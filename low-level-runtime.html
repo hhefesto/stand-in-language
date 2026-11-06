@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telomare's Low-Level Runtime</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground: #F6F7F4;
+  --panel: #EEF0EA;
+  --ink: #20281F;
+  --muted: #5F6B60;
+  --wire: #1E6E58;
+  --hot: #C25A2E;
+  --hot-soft: #E8D3C6;
+  --wire-soft: #CFE3DA;
+  --rule: #CDD3C9;
+  --code-bg: #E9ECE4;
+  --display: 'Spectral', Georgia, serif;
+  --body: 'Source Serif 4', Georgia, serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #131917; --panel: #1B2320; --ink: #E5EAE3; --muted: #96A399;
+    --wire: #4BAE8F; --hot: #E07A47; --hot-soft: #4A342A; --wire-soft: #1F3B31;
+    --rule: #2E3A33; --code-bg: #1D2622;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--ground); color: var(--ink);
+  font-family: var(--body); font-size: 17px; line-height: 1.65;
+  margin: 0; padding: 0 20px;
+}
+article { max-width: 46rem; margin: 0 auto; padding: 3.5rem 0 5rem; }
+.eyebrow {
+  font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--hot); margin: 0 0 .8rem;
+}
+h1 {
+  font-family: var(--display); font-weight: 700; font-size: 2.35rem;
+  line-height: 1.12; margin: 0 0 .6rem; text-wrap: balance;
+}
+.dek { font-size: 1.06rem; color: var(--muted); font-style: italic; margin: 0 0 2rem; max-width: 38rem; }
+h2 {
+  font-family: var(--display); font-weight: 600; font-size: 1.42rem;
+  line-height: 1.25; margin: 3rem 0 .9rem; text-wrap: balance;
+}
+h2 .no {
+  font-family: var(--mono); font-weight: 400; font-size: .85rem;
+  color: var(--hot); margin-right: .7em; letter-spacing: .05em;
+}
+h3 { font-family: var(--display); font-weight: 600; font-size: 1.08rem; margin: 1.8rem 0 .5rem; }
+p { margin: 0 0 1.05rem; }
+ul, ol { margin: 0 0 1.05rem; padding-left: 1.3rem; }
+li { margin-bottom: .3rem; }
+strong { font-weight: 600; }
+a { color: var(--wire); }
+code, .m {
+  font-family: var(--mono); font-size: .84em;
+  background: var(--code-bg); padding: .08em .32em; border-radius: 3px;
+}
+pre {
+  font-family: var(--mono); font-size: .76rem; line-height: 1.55;
+  background: var(--code-bg); border-radius: 6px; padding: .9rem 1.05rem;
+  overflow-x: auto; margin: 0 0 1.2rem;
+}
+pre code { background: none; padding: 0; font-size: 1em; }
+figure { margin: 1.8rem 0 2rem; }
+figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+figcaption {
+  font-size: .82rem; color: var(--muted); line-height: 1.5;
+  border-top: 1px solid var(--rule); padding-top: .55rem; margin-top: .9rem;
+}
+.wide { overflow-x: auto; margin: 1.4rem 0 1.8rem; }
+table {
+  border-collapse: collapse; width: 100%; font-size: .86rem;
+  margin: 1.4rem 0 1.8rem;
+}
+.wide table { margin: 0; }
+th {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); font-weight: 600;
+  text-align: left; padding: .35rem .6rem .35rem 0; border-bottom: 1px solid var(--ink);
+  vertical-align: bottom;
+}
+td { padding: .42rem .6rem .42rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.status {
+  background: var(--panel); border-left: 3px solid var(--hot);
+  border-radius: 0 6px 6px 0; padding: .7rem 1.1rem; margin: 1.4rem 0;
+  font-size: .92rem;
+}
+.status p:last-child, .status ul:last-child { margin-bottom: .2rem; }
+.note { font-size: .88rem; color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); gap: .8rem; margin: 1.6rem 0 2rem; }
+.card { background: var(--panel); border-radius: 6px; padding: .75rem .9rem; }
+.card b { display: block; font-family: var(--display); font-size: 1.55rem; line-height: 1.15; }
+.card span { font-size: .8rem; color: var(--muted); line-height: 1.35; display: block; margin-top: .25rem; }
+.matrix { font-family: var(--mono); font-size: .68rem; min-width: 41rem; }
+.matrix th, .matrix td { padding: .3rem .3rem; text-align: center; border: 1px solid var(--rule); }
+.matrix th { letter-spacing: .04em; }
+.matrix td:first-child, .matrix th:first-child { text-align: left; font-weight: 600; }
+.matrix .c { background: var(--wire-soft); }
+.matrix .b { background: var(--hot-soft); }
+.matrix .x { color: var(--muted); }
+.bar { display: inline-block; height: .62rem; background: var(--wire); border-radius: 2px; vertical-align: baseline; }
+.ok { color: var(--wire); font-weight: 600; }
+.warn { color: var(--hot); font-weight: 600; }
+.duo { display: flex; gap: .8rem; flex-wrap: wrap; align-items: stretch; margin: 0 0 1.2rem; }
+.duo > div { flex: 1 1 19rem; min-width: 0; }
+.duo pre { margin: 0; height: calc(100% - 1.3rem); }
+.tag { font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: .3rem; }
+svg text { font-family: var(--mono); font-size: 11px; fill: var(--ink); }
+svg text.dim { fill: var(--muted); font-size: 10px; }
+svg text.hotl { fill: var(--hot); }
+svg .box { fill: var(--panel); stroke: var(--ink); stroke-width: 1.2; }
+svg .hotbox { fill: var(--hot-soft); stroke: var(--hot); stroke-width: 1.2; }
+svg .wirebox { fill: var(--wire-soft); stroke: var(--wire); stroke-width: 1.2; }
+svg .arrow { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+svg .arrowhead { fill: var(--muted); stroke: none; }
+</style>
+
+<article>
+<p class="eyebrow">Telomare · branch bend · 2026-11-06</p>
+<h1>Telomare&rsquo;s Low-Level Runtime</h1>
+<p class="dek">A loop in C that fires the interaction net&rsquo;s rules on a flat array
+of words: what it is, how it stays faithful to the Bend definition, what it
+gains, and what is still on paper. A companion to
+<a href="interaction-nets.html">The Net That Counts Itself</a>, the primer on the
+net itself.</p>
+
+<div class="status">
+<p><strong>In short.</strong> The low-level runtime today is one thing: the C
+loop behind <code>--ic</code>, in <code>bend/effs/ic.c</code>. It exists only in the
+Bend port; Haskell master has no low-level code at all. Assembly, many cores
+and the GPU are designed but not started. A plain run and <code>--fast</code>, where
+long programs actually run, don&rsquo;t use it.</p>
+<p><strong>State of this document.</strong> It describes branch <code>rt</code>, which
+is local and unpushed. Section&nbsp;9 says which part is where.</p>
+</div>
+
+<div class="cards">
+  <div class="card"><b>92&nbsp;ms</b><span>tic-tac-toe <code>--ic</code>, from a <code>.telc</code>. Haskell master: 19.9&nbsp;s</span></div>
+  <div class="card"><b>4.9×</b><span>fewer instructions than the same run in pure Bend</span></div>
+  <div class="card"><b>~30&nbsp;ns</b><span>per interaction in the loop, measured with other jobs running</span></div>
+  <div class="card"><b>21 of 26</b><span>rules fired in C. The other 5 make a stuck value and go back to Bend</span></div>
+</div>
+
+<h2><span class="no">1</span>Where it sits</h2>
+<p>The <code>telomare</code> command has three runtimes, as master does. Only one runs on
+the net, and only that one has low-level code.</p>
+<table>
+<tr><th>Mode</th><th>Runs on</th><th>Low-level code</th></tr>
+<tr><td>plain, <code>--meter</code></td><td><code>bend/Reference.bend</code>, the reference evaluator</td><td>None</td></tr>
+<tr><td><code>--fast</code></td><td><code>bend/Fast.bend</code>, the unsized interpreter</td><td>None</td></tr>
+<tr><td><code>--ic</code></td><td><code>bend/IC.bend</code>&rsquo;s net</td><td><strong>The C loop</strong></td></tr>
+</table>
+<p>The C is a <em>Bend foreign effect</em>, <code>nt.reduce</code>, declared in
+<code>bend/Native.bend</code>. A def with a foreign body fails Bend&rsquo;s proof gate, so
+the code is split in two. <code>Main.bend</code> holds the whole command and takes its runner as a
+template. <code>Main.main</code> passes the pure <code>IC.run</code> and stays proof-checked;
+<code>Native.main</code> passes the C loop, and that is the binary the flake ships.
+<code>Everything.bend</code>, which checks every module, does not import
+<code>Native.bend</code>. On the JavaScript target <code>ic.js</code> fires nothing and hands
+every pair back, so Bend does all the work.</p>
+
+<h2><span class="no">2</span>The machine: a net as words</h2>
+<p>The net is one <code>Array&lt;U32&gt;</code>, the same array in Bend and in C, so
+crossing the boundary copies nothing. Each agent is eight words. A port is
+<code>agent*4 + slot</code>, so <code>p = 41</code> is agent 10, slot 1, and its peer is in
+word <code>10*8 + 1 + 1 = 82</code>. Agent 0 is never used, so 0 ends the free list.</p>
+
+<figure>
+<svg viewBox="0 0 640 158" role="img" aria-label="The eight words of an agent">
+  <g>
+    <rect class="hotbox" x="10" y="26" width="76" height="46"/>
+    <rect class="box" x="86" y="26" width="76" height="46"/>
+    <rect class="box" x="162" y="26" width="76" height="46"/>
+    <rect class="box" x="238" y="26" width="76" height="46"/>
+    <rect class="wirebox" x="314" y="26" width="76" height="46"/>
+    <rect class="wirebox" x="390" y="26" width="76" height="46"/>
+    <rect class="hotbox" x="466" y="26" width="76" height="46" opacity=".55"/>
+    <rect class="hotbox" x="542" y="26" width="76" height="46" opacity=".55"/>
+  </g>
+  <text class="dim" x="48" y="18" text-anchor="middle">word 0</text>
+  <text class="dim" x="124" y="18" text-anchor="middle">1</text>
+  <text class="dim" x="200" y="18" text-anchor="middle">2</text>
+  <text class="dim" x="276" y="18" text-anchor="middle">3</text>
+  <text class="dim" x="352" y="18" text-anchor="middle">4</text>
+  <text class="dim" x="428" y="18" text-anchor="middle">5</text>
+  <text class="dim" x="504" y="18" text-anchor="middle">6</text>
+  <text class="dim" x="580" y="18" text-anchor="middle">7</text>
+  <text x="48" y="53" text-anchor="middle">kind</text>
+  <text x="124" y="53" text-anchor="middle">port 0</text>
+  <text x="200" y="53" text-anchor="middle">port 1</text>
+  <text x="276" y="53" text-anchor="middle">port 2</text>
+  <text x="352" y="53" text-anchor="middle">a</text>
+  <text x="428" y="53" text-anchor="middle">b</text>
+  <text x="504" y="53" text-anchor="middle">pair a</text>
+  <text x="580" y="53" text-anchor="middle">pair b</text>
+  <text class="dim" x="124" y="88" text-anchor="middle">its peer; when free,</text>
+  <text class="dim" x="124" y="101" text-anchor="middle">next on the free list</text>
+  <text class="dim" x="238" y="88" text-anchor="middle">their peers</text>
+  <text class="dim" x="390" y="118" text-anchor="middle">a Dup's label; a Ref's template and function;</text>
+  <text class="dim" x="390" y="131" text-anchor="middle">a stuck value's message; a constant's place</text>
+  <text class="dim" x="618" y="88" text-anchor="end">stack entry k lives in slot k,</text><text class="dim" x="618" y="101" text-anchor="end">whatever agent is there</text>
+</svg>
+<figcaption>One agent. Kind 0 marks a free slot. The stack of active pairs is threaded through words 6 and 7, which no agent uses.</figcaption>
+</figure>
+
+<p>A second array, the <strong>template store</strong>, holds what never changes during a
+run: each closure&rsquo;s code as a template (agents and wires, instantiated
+when the closure is applied), the constants (closed data, two words per pair,
+with equal data shared), and the plans that guide copying. The rest of the state is a few
+words: stack pointer, bump, free-list head, next label, fuel and error.</p>
+
+<h3>Allocation is part of the meaning</h3>
+<p><code>alloc</code> takes the last agent freed, else the next unused one, and doubles
+the array when it is full. The C must do this in exactly IC.bend&rsquo;s order, because the test
+compares whole nets word for word. That is also why <code>DUP_ABORTED</code> allocates a fourth agent
+nothing uses: IC.bend&rsquo;s <code>alloc4</code> does, and so the net has to match.</p>
+
+<h2><span class="no">3</span>The loop</h2>
+<p>This is the whole of it, slightly trimmed from <code>nt_reduce</code>. Pop a pair, skip
+it if it went stale, look up the rule, try the other order if there is none,
+fire.</p>
+<pre><code>while (x-&gt;err == 0 &amp;&amp; x-&gt;sp != 0) {
+  u32 top = x-&gt;sp - 1;
+  u32 a = x-&gt;m[top * 8 + 6], b = x-&gt;m[top * 8 + 7];
+  u32 ka = x-&gt;m[a * 8],      kb = x-&gt;m[b * 8];
+  if (ka == 0 || kb == 0 || x-&gt;m[a * 8 + 1] != b * 4 || x-&gt;m[b * 8 + 1] != a * 4) {
+    x-&gt;sp = top;               // stale: one of them is gone or rewired
+    continue;
+  }
+  u8 r = nt_rule[ka][kb];      // n first, as IC.bend tries it
+  if (r == NT_NONE) { r = nt_rule[kb][ka]; /* n and m swap */ }
+  if (r == NT_NONE || r == NT_BEND) return;      // Bend's to fire
+  if (r == NT_APPLY_REF &amp;&amp; nt_limit(j.b)) return; // a --fast step: Bend counts it
+  x-&gt;sp = top;
+  nt_apply(x, r, n, i, m, j);  // the rule
+}</code></pre>
+
+<p>The loop stops at the first pair it won&rsquo;t fire, and leaves that pair on the stack.
+<code>Native.bend</code> pops it, fires it with IC.bend&rsquo;s own <code>fire</code>, and calls the C
+again. Three things go back to Bend:</p>
+<ul>
+<li>the five rules that make a <strong>stuck value</strong>, because the message is a Bend
+<code>String</code>;</li>
+<li>an applied <strong>unbounded-recursion step</strong>, because <code>--fast</code>&rsquo;s unroll count lives in
+Bend&rsquo;s cold state;</li>
+<li>a pair with <strong>no rule</strong>, because the error message is built in Bend.</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 640 142" role="img" aria-label="The loop between Bend and C">
+  <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0,0 L8,4 L0,8 z"/></marker></defs>
+  <rect class="box" x="10" y="44" width="130" height="52" rx="4"/>
+  <text x="75" y="66" text-anchor="middle">Native.loop</text>
+  <text class="dim" x="75" y="81" text-anchor="middle">Bend</text>
+  <rect class="wirebox" x="240" y="8" width="170" height="52" rx="4"/>
+  <text x="325" y="30" text-anchor="middle">nt.reduce</text>
+  <text class="dim" x="325" y="45" text-anchor="middle">C: every pair it can</text>
+  <rect class="hotbox" x="240" y="82" width="170" height="52" rx="4"/>
+  <text x="325" y="104" text-anchor="middle">IC.fire</text>
+  <text class="dim" x="325" y="119" text-anchor="middle">Bend: the pair C left</text>
+  <rect class="box" x="510" y="44" width="120" height="52" rx="4"/>
+  <text x="570" y="66" text-anchor="middle">IC.finish</text>
+  <text class="dim" x="570" y="81" text-anchor="middle">read back</text>
+  <path class="arrow" marker-end="url(#ah)" d="M140,58 C180,50 200,38 238,34"/>
+  <text class="dim" x="150" y="32">the same net</text>
+  <path class="arrow" marker-end="url(#ah)" d="M325,60 L325,80"/>
+  <text class="dim" x="332" y="74">a pair left</text>
+  <path class="arrow" marker-end="url(#ah)" d="M238,108 C200,104 180,92 142,82"/>
+  <text class="dim" x="120" y="124">then C again</text>
+  <path class="arrow" marker-end="url(#ah)" d="M412,34 C450,38 480,50 508,58"/>
+  <text class="dim" x="440" y="34">no pair left</text>
+</svg>
+<figcaption>A run alternates. In a normal game C does nearly all the firing, and most of the Bend time goes to reading the program and reading the result back.</figcaption>
+</figure>
+
+<h2><span class="no">4</span>The rules</h2>
+<p>An interaction fires when two agents meet at their principal ports. Agents of
+eight kinds consume; seven kinds are values. This matrix is the
+<code>nt_rule</code> table, printed from IC.bend&rsquo;s own <code>rule.of</code>: 57 pairs have a rule, and any
+pair not listed is tried in the other order and then fails.</p>
+
+<div class="wide">
+<table class="matrix">
+<tr><th>meets →</th><th>Zero</th><th>Gate</th><th>Const</th><th>Ref</th><th>Pair</th><th>Aborted</th><th>Stuck</th><th>Dup</th></tr>
+<tr><td>Era</td><td class="c">leaf</td><td class="c">leaf</td><td class="c">leaf</td><td class="c">leaf</td><td class="c">pair</td><td class="c">aborted</td><td class="c">leaf</td><td class="x">–</td></tr>
+<tr><td>Dup</td><td class="c">leaf</td><td class="c">leaf</td><td class="c">leaf</td><td class="c">leaf</td><td class="c">planned</td><td class="c">aborted</td><td class="c">leaf</td><td class="c">dup</td></tr>
+<tr><td>Split</td><td class="c">zero</td><td class="b">Bend</td><td class="c">open</td><td class="b">Bend</td><td class="c">pair</td><td class="c">aborted</td><td class="c">stuck</td><td class="x">–</td></tr>
+<tr><td>SetEnv</td><td class="b">Bend</td><td class="b">Bend</td><td class="c">open</td><td class="b">Bend</td><td class="c">pair</td><td class="c">pass</td><td class="c">pass</td><td class="x">–</td></tr>
+<tr><td>Apply</td><td class="b">Bend</td><td class="c">await</td><td class="c">open</td><td class="c">ref</td><td class="b">Bend</td><td class="c">pass-app</td><td class="c">pass-app</td><td class="x">–</td></tr>
+<tr><td>Scrut</td><td class="c">select</td><td class="b">Bend</td><td class="c">open</td><td class="b">Bend</td><td class="c">pair</td><td class="c">pass</td><td class="c">pass</td><td class="x">–</td></tr>
+<tr><td>Left</td><td class="c">pass</td><td class="b">Bend</td><td class="c">open</td><td class="b">Bend</td><td class="c">project</td><td class="c">pass</td><td class="c">pass</td><td class="x">–</td></tr>
+<tr><td>Right</td><td class="c">pass</td><td class="b">Bend</td><td class="c">open</td><td class="b">Bend</td><td class="c">project</td><td class="c">pass</td><td class="c">pass</td><td class="x">–</td></tr>
+</table>
+</div>
+<p class="note">Green: fired in C. Orange: makes a stuck value, so it goes back to Bend. Those orange
+cells are five rules of IC.bend (<code>RSetEnvNonPair</code>, <code>RApplyNonFunction</code>,
+<code>RNonDataGate</code>, <code>RNonPair</code>, <code>RSplitNonPair</code>).</p>
+
+<h3>What each does, and how often it fires</h3>
+<p>The counts are every firing in C during <code>tests/native.bend</code>. That is a test&rsquo;s mix
+(closed terms, every two kinds, and the tc, simpleplus and tictactoe sessions), not a
+benchmark, but it does show which rules are hot.</p>
+<table>
+<tr><th>Rule</th><th>What it does</th><th class="n">Fires</th><th></th></tr>
+<tr><td><code>ERA_LEAF</code></td><td>Erase a leaf value: both agents go</td><td class="n">703,603</td><td><span class="bar" style="width:5rem"></span></td></tr>
+<tr><td><code>ERA_PAIR</code></td><td>Erase a pair: an eraser for each half</td><td class="n">629,092</td><td><span class="bar" style="width:4.47rem"></span></td></tr>
+<tr><td><code>DUP_PLANNED</code></td><td>Copy a pair: by its plan if it is a closure whose code has one, else generically</td><td class="n">390,924</td><td><span class="bar" style="width:2.78rem"></span></td></tr>
+<tr><td><code>DUP_LEAF</code></td><td>Copy a leaf: two of it</td><td class="n">274,082</td><td><span class="bar" style="width:1.95rem"></span></td></tr>
+<tr><td><code>SPLIT_PAIR</code></td><td>Split a pair: its halves go to the two results</td><td class="n">189,246</td><td><span class="bar" style="width:1.34rem"></span></td></tr>
+<tr><td><code>SETENV_PAIR</code></td><td>Apply a pair&rsquo;s function to its environment</td><td class="n">103,791</td><td><span class="bar" style="width:.74rem"></span></td></tr>
+<tr><td><code>APPLY_REF</code></td><td>A closure&rsquo;s code applied: instantiate its template</td><td class="n">96,803</td><td><span class="bar" style="width:.69rem"></span></td></tr>
+<tr><td><code>AWAIT_GATE</code></td><td>Apply meets a gate: wait for the scrutinee</td><td class="n">6,983</td><td></td></tr>
+<tr><td><code>OPEN</code></td><td>A constant asked for its shape: open one layer</td><td class="n">5,408</td><td></td></tr>
+<tr><td><code>SCRUT_PAIR</code></td><td>Scrutinee is a pair: erase it, select the right branch</td><td class="n">4,327</td><td></td></tr>
+<tr><td><code>SELECT_GATE</code></td><td>Scrutinee is 0: select the left branch</td><td class="n">2,658</td><td></td></tr>
+<tr><td><code>SPLIT_ZERO</code></td><td>Split 0: two 0s</td><td class="n">1,207</td><td></td></tr>
+<tr><td><code>PROJECT_LEFT</code>, <code>_RIGHT</code></td><td>Keep one half, erase the other</td><td class="n">274, 8</td><td></td></tr>
+<tr><td><code>PASS</code>, <code>PASS_APP</code></td><td>An aborted or stuck value passes to the consumer&rsquo;s result</td><td class="n">22, 4</td><td></td></tr>
+<tr><td><code>DUP_DUP</code></td><td>Same label annihilates, different labels commute</td><td class="n">2</td><td></td></tr>
+<tr><td><code>SPLIT_ABORTED</code>, <code>SPLIT_STUCK</code>, <code>ERA_ABORTED</code>, <code>DUP_ABORTED</code></td><td>The same operations on an aborted or stuck value</td><td class="n">2 each</td><td></td></tr>
+</table>
+
+<h3>Guided copying is the odd one out</h3>
+<p>Every rule above is a fixed, local rewrite except <code>DUP_PLANNED</code>&rsquo;s closure branch.
+Copying a closure whose code has a published capture layout walks a whole region of the net in one
+interaction (<code>nt_region</code>), led by the plan: it copies what the plan vouches for and
+leaves a Dup at each frontier. It costs one unit of fuel however much it walks, and in the profile
+it is about 13% of a run. It is the main thing that isn&rsquo;t local, which matters for many cores.</p>
+
+<h2><span class="no">5</span>One description of the rules</h2>
+<p>The design from 2026-10-27 says every back end is &ldquo;generated from or checked against&rdquo; one
+description. Until today <code>ic.c</code> was only checked: a hand-written second copy of the
+rules, with assembly and the GPU set to be a third and a fourth. Branch <code>rt</code> makes the
+&ldquo;generated&rdquo; half real.</p>
+<ul>
+<li><code>bend/Rules.bend</code>: <code>act</code> gives each rule as data, in IC.bend&rsquo;s order. It is a total match on IC.bend&rsquo;s <code>Rule</code>, so a new rule fails to check until the table has it.</li>
+<li><code>bend/dev/genic.bend</code>: prints <code>ic.c</code> with its marked parts regenerated, the dispatch from IC.bend&rsquo;s <code>rule.of</code> and the bodies from the table. A flake check fails if the file differs.</li>
+</ul>
+<p>Here is one rule in the three places it now exists:</p>
+
+<div class="duo">
+<div><span class="tag">IC.bend, the meaning</span>
+<pre><code>def r.setenv.pair(net, +n, +i, +m, +j):
+  r.apply.go(i, j, alloc(
+    del2(spend(net), n, m),
+    apply(), 0, 0))
+
+def r.apply.go(+i, +j, a):
+  (net, +ap) = a
+  connect(connect(connect(net,
+    port(ap, 0), ni.p1(j)),
+    port(ap, 1), ni.p2(j)),
+    port(ap, 2), ni.p1(i))</code></pre></div>
+<div><span class="tag">Rules.bend, the table</span>
+<pre><code>case IC.RSetEnvPair{}:
+  Plain{Spend{} &lt;&gt; Del2{} &lt;&gt; [
+    leaf("ap", IC.apply()),
+    Wire{pn("ap", 0), PJ1{}},
+    Wire{pn("ap", 1), PJ2{}},
+    Wire{pn("ap", 2), PI1{}}]}</code></pre></div>
+</div>
+<div class="duo">
+<div style="flex-basis:100%"><span class="tag">ic.c, printed</span>
+<pre><code>case NT_SETENV_PAIR: {
+  nt_spend(x);
+  nt_del2(x, n, m);
+  u32 ap = nt_alloc(x, NT_APPLY, 0, 0);
+  nt_connect(x, ap * 4, j.p1);
+  nt_connect(x, ap * 4 + 1, j.p2);
+  nt_connect(x, ap * 4 + 2, i.p1);
+  return;
+}</code></pre></div>
+</div>
+
+<h3>What the table can&rsquo;t express</h3>
+<p>Whether a table could express the rules was an open question. They turned out to be a small language: spend, delete, new agent,
+new label, read a constant&rsquo;s part, wire, plus one branch on labels and one on plans. The
+rest of <code>ic.c</code> is not rules but the machine under them, and it stays by hand:</p>
+<ul>
+<li>the net&rsquo;s words: <code>alloc</code>, <code>delete</code>, <code>connect</code>, <code>grow</code>;</li>
+<li><code>instantiate</code>, which the table names as one step;</li>
+<li>guided copying, <code>region</code>, which the table also only names;</li>
+<li>the loop, including the <code>--fast</code> step test.</li>
+</ul>
+<p>So of <code>ic.c</code>&rsquo;s 651 lines, 281 are now printed. A new back end would still write the
+machine by hand once, and get the rules printed. That is less than a full generator, and it is the
+honest size of the win so far: it removes the rule copies, not the machine copies.</p>
+
+<h2><span class="no">6</span>How we know it&rsquo;s right</h2>
+<p>Almost all of this is testing, not proof. Foreign code can&rsquo;t pass the proof gate, so
+nothing proves the C correct, and nothing proves the table equal to IC.bend.</p>
+<table>
+<tr><th>Claim</th><th>Checked by</th><th>Kind</th></tr>
+<tr><td>The table does what IC.bend&rsquo;s rules do</td><td><code>tests/rules.bend</code>: same net, word for word, same result, same count</td><td>Test</td></tr>
+<tr><td>The C does what IC.bend does</td><td><code>tests/native.bend</code>: the same comparison, against the C</td><td>Test</td></tr>
+<tr><td>The C&rsquo;s rules are the table&rsquo;s</td><td>Printed from it; the <code>ic-generated</code> check</td><td>Generated</td></tr>
+<tr><td>The C&rsquo;s dispatch is <code>rule.of</code></td><td>Printed from it. A one-off C comparison with the old hand-written dispatch: 361 kind pairs, 0 differ</td><td>Generated</td></tr>
+<tr><td>The port prints what master prints</td><td>Goldens (63), corpus (17 meters, 16 certificates), parse errors (960), LSP (3)</td><td>Differential</td></tr>
+<tr><td>Sizing&rsquo;s erasures are sound</td><td><code>bend/PROOF.bend</code>, rechecked by BendTT&rsquo;s kernel. It says nothing about the C</td><td>Proof</td></tr>
+</table>
+
+<h3>A gap this work found</h3>
+<p>Counting firings in the C showed that <strong>6 of its 21 rules had never fired in
+the word-for-word test</strong>: <code>PASS_APP</code>, <code>SPLIT_ABORTED</code>, <code>SPLIT_STUCK</code>,
+<code>ERA_ABORTED</code>, <code>DUP_ABORTED</code> and <code>DUP_DUP</code>. The sessions just never reach them.
+Both tests now have a group where every two kinds meet alone on a net, and all 21 rules fire.</p>
+<p>To check that the new groups can fail, one wire of commuting Dups was crossed in the table and the C regenerated:</p>
+<pre><code>ok   rules-terms      ok   native-terms
+FAIL rules-pairs      FAIL native-pairs
+ok   rules-sessions   ok   native-sessions</code></pre>
+<p>The sessions alone would have passed that bug. One mutation doesn&rsquo;t prove the suite complete: the
+pairs group leaves <code>APPLY_REF</code> and <code>OPEN</code> to the sessions, since those read the store, and the
+error paths in <code>nt_region</code> have no test that reaches them.</p>
+
+<h2><span class="no">7</span>What it gains</h2>
+<p>The game is tic-tac-toe&rsquo;s <code>1 4 2 5 3</code>, run with <code>--ic</code> from a compiled
+<code>.telc</code>. Output was byte-identical in every case.</p>
+<table>
+<tr><th>Build</th><th class="n">Interactions</th><th class="n">Whole run</th><th class="n">Instructions</th></tr>
+<tr><td>Haskell master <code>1cfcb3de</code></td><td class="n">3,970,174</td><td class="n">19.9 s</td><td class="n">not measured</td></tr>
+<tr><td>Bend, pure <code>IC.run</code></td><td class="n">2,293,968</td><td class="n">0.39–0.45 s</td><td class="n">4.64 billion</td></tr>
+<tr><td>Bend + C</td><td class="n">2,293,968</td><td class="n">0.09–0.14 s</td><td class="n">0.95 billion</td></tr>
+</table>
+<p class="note">Measured today on the Ryzen 7 3700X with the gate and ana running alongside, so
+treat the times as rough; instruction counts barely move under load. The two Bend rows are branch <code>rt</code>; master&rsquo;s 19.9&nbsp;s is from earlier today, also with other jobs running.</p>
+<p>So of the roughly 200× against master, <strong>C gives about 4×</strong>. The rest comes from the flat-array net against
+master&rsquo;s <code>IntMap</code>s, and from firing about 40% fewer interactions, which the README puts down to the
+port&rsquo;s net running only the branch an <code>if</code> chooses.</p>
+
+<h3>How it got here</h3>
+<table>
+<tr><th>Date</th><th>Step</th><th>Effect on tic-tac-toe</th></tr>
+<tr><td>10&#8209;27</td><td>N1: the loop in C</td><td>1.54 s → 0.65 s</td></tr>
+<tr><td>11&#8209;05</td><td>Constant agents, ported from master</td><td>4,895,725 → 2,293,968 interactions</td></tr>
+<tr><td>11&#8209;06</td><td>N2: prepared programs in the <code>.telc</code>, small starting nets, <code>nt_apply</code> inlined</td><td>346 ms → 92 ms</td></tr>
+</table>
+
+<h3>Where the time goes now</h3>
+<table>
+<tr><th>Function</th><th class="n">Share</th><th></th></tr>
+<tr><td><code>nt_reduce_run</code>: the loop and the inlined rules</td><td class="n">28.3%</td><td><span class="bar" style="width:5.66rem"></span></td></tr>
+<tr><td><code>nt_connect</code></td><td class="n">13.5%</td><td><span class="bar" style="width:2.7rem"></span></td></tr>
+<tr><td><code>nt_dup_closure</code>: guided copying</td><td class="n">12.9%</td><td><span class="bar" style="width:2.58rem"></span></td></tr>
+<tr><td><code>term_drop</code>: Bend&rsquo;s runtime</td><td class="n">10.0%</td><td><span class="bar" style="width:2rem;background:var(--hot)"></span></td></tr>
+<tr><td><code>nt_instantiate</code></td><td class="n">7.3%</td><td><span class="bar" style="width:1.46rem"></span></td></tr>
+<tr><td><code>nt_alloc</code></td><td class="n">6.1%</td><td><span class="bar" style="width:1.22rem"></span></td></tr>
+<tr><td><code>nt_dup_pair</code></td><td class="n">3.0%</td><td><span class="bar" style="width:.6rem"></span></td></tr>
+</table>
+<p class="note"><code>perf</code>, 20 runs. The C totals about 71%; most of the rest is Bend reading the program and
+reading the result back.</p>
+
+<h3>What these gains cost</h3>
+<ul>
+<li><strong><code>.telc</code> files grew.</strong> Tic-tac-toe&rsquo;s went from 265 KB to 458 KB, and simpleplus&rsquo;s from 62 KB
+to 155 KB, because they now hold the prepared programs. Version 9 files are refused and need recompiling.</li>
+<li><strong>The generated C is about 3% slower</strong> than the hand-written one: 339M cycles against 328M,
+and 1% more instructions, measured under load. The cause isn&rsquo;t known yet. Inlining <code>nt_dup_pair</code> into the switch
+added 5% instructions, so the printer keeps it out of line.</li>
+<li><strong>Compile time is unchanged and still slow.</strong> Tic-tac-toe takes the port 110–190 s, depending on load, and master 72 s.
+This is outside the runtime, but it is the longest wait a user sees.</li>
+</ul>
+
+<h2><span class="no">8</span>What&rsquo;s still on paper</h2>
+<table>
+<tr><th>Step</th><th>What</th><th>State</th></tr>
+<tr><td>N1</td><td>The net&rsquo;s loop in C</td><td class="ok">Done</td></tr>
+<tr><td>N2</td><td>The costs around the C</td><td>First round done, local</td></tr>
+<tr><td>&mdash;</td><td>Rule table and printer</td><td>Written today, local, gate running</td></tr>
+<tr><td>N3</td><td>x86-64 assembly: dispatch and hot rules</td><td>Not started</td></tr>
+<tr><td>N4</td><td>Many cores, HVM2-style</td><td>Not started; design problems open</td></tr>
+<tr><td>N5</td><td>GPU, from the same description</td><td>Not started; path undecided</td></tr>
+</table>
+
+<h3>N3: assembly</h3>
+<p>The profile&rsquo;s hot paths are the candidates: the dispatch, split-pair, setenv-pair, instantiation and dup copying,
+printed from the same table and held to the same word-for-word test. The gain should be modest, because clang already
+compiles this loop and it has no obvious waste. That is an estimate; nothing has been measured.</p>
+
+<h3>N4: many cores</h3>
+<p>The plan: per-thread pair stacks and free lists, per-thread label ranges, atomic linking. IC.bend&rsquo;s header
+claims each rule consumes the pair it fires, so the count doesn&rsquo;t depend on firing order, which is what makes
+this possible. That claim isn&rsquo;t proved, and no test fires pairs in a different order. Two things need design first:
+guided copying walks a whole region in one rule, and the free list and label counter are global. The word-for-word test would
+also have to give way to comparing read-back and counts.</p>
+
+<h3>N5: the GPU</h3>
+<p>Bend&rsquo;s own GPU targets are CUDA and Metal only. olimpo&rsquo;s RX 580 has no CUDA, and ROCm no longer supports it.
+Vulkan compute through RADV runs on it with the 64-bit integers we need (checked 10-27, but no net has run on it), and OpenCL through
+Mesa&rsquo;s rusticl is untried. A net suits a GPU best as many independent nets at once, one session per work-group, rather than one
+turn&rsquo;s mostly sequential net. The path is your choice and can wait until N5.</p>
+
+<h3>The biggest limits, whichever comes next</h3>
+<ul>
+<li><strong>The fuel cap.</strong> A turn stops at 10M interactions by default, about 0.3 s. So faster hardware can save little
+per turn on today&rsquo;s programs unless that cap rises.</li>
+<li><strong>Long runs don&rsquo;t reach this code.</strong> They run on <code>--fast</code>, an interpreter written in Bend. It takes 8.2 s for
+<code>9!</code> where the 10-27 master build took 4.7 s. It has no C and is the one place the port is slower at run time.</li>
+<li><strong>The machine is still hand-written.</strong> See section 5.</li>
+</ul>
+
+<h2><span class="no">9</span>Where the code is</h2>
+<table>
+<tr><th>Branch</th><th>Holds</th><th>State</th></tr>
+<tr><td><code>master</code> <code>1cfcb3de</code></td><td>Haskell only. It once carried a C serializer and LLVM, HVM and Chez code; <code>a299b42c</code> deleted them as dead code on 2026-08-01</td><td>Not touched</td></tr>
+<tr><td><code>origin/bend</code> <code>e8554c92</code></td><td>The port, the C loop and constant agents</td><td class="ok">Pushed, CI passed, no PR</td></tr>
+<tr><td><code>n2</code> <code>9a44b01b</code></td><td>N2&rsquo;s speedups, on <code>bend</code></td><td>Local. Gate passed apart from 6 compile goldens, which record the file&rsquo;s hash and size; re-recorded, and the flake check then passed</td></tr>
+<tr><td><code>rt</code></td><td>The rule table, printer and new tests, on <code>n2</code>; this document</td><td class="warn">Local. Full gate running since 12:55; no result yet</td></tr>
+</table>
+
+<h3>Files</h3>
+<table>
+<tr><th>File</th><th>Lines</th><th>Role</th></tr>
+<tr><td><code>bend/IC.bend</code></td><td>3,141</td><td>The net and its rules: the meaning</td></tr>
+<tr><td><code>bend/Rules.bend</code></td><td>385</td><td>The rules as data, and that table run on IC.bend&rsquo;s net</td></tr>
+<tr><td><code>bend/dev/genic.bend</code></td><td>364</td><td>Prints <code>ic.c</code>&rsquo;s dispatch and rules</td></tr>
+<tr><td><code>bend/effs/ic.c</code></td><td>651</td><td>The C loop: 281 lines printed, the rest the machine</td></tr>
+<tr><td><code>bend/effs/ic.js</code></td><td>8</td><td>The JavaScript side: fires nothing</td></tr>
+<tr><td><code>bend/Native.bend</code></td><td>104</td><td>The command with the C loop</td></tr>
+<tr><td><code>bend/tests/native.bend</code></td><td>400</td><td>C against IC.bend, word for word</td></tr>
+<tr><td><code>bend/tests/rules.bend</code></td><td>86</td><td>Table against IC.bend, word for word</td></tr>
+</table>
+
+<h3>To try it</h3>
+<pre><code># In the rt worktree, inside `nix develop`:
+ulimit -s unlimited
+bend bend/Native.bend -o /tmp/telomare          # about 3 minutes
+/tmp/telomare tictactoe.tel --compile           # about 2 minutes, writes tictactoe.telc
+printf '1\n4\n2\n5\n3\n' | /tmp/telomare tictactoe.telc --ic --meter
+
+# Regenerate the C after changing the table or IC.bend's rule.of:
+bend bend/dev/genic.bend &gt; ic.c.new &amp;&amp; mv ic.c.new bend/effs/ic.c
+
+# The tests:
+bend bend/tests/rules.bend  -o /tmp/test-rules  &amp;&amp; /tmp/test-rules
+bend bend/tests/native.bend -o /tmp/test-native &amp;&amp; /tmp/test-native</code></pre>
+
+<p class="note">Sources: <code>HANDOFF.md</code> P8, <code>bend/IC.bend</code>&rsquo;s header and store comment,
+<code>bend/effs/ic.c</code>, and measurements taken on olimpo on 2026-11-05 and 11-06.</p>
+</article>
+</html>
