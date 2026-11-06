@@ -50,8 +50,9 @@ type Op is Data:
   Spare{+k: Wd}
   # A new label, named v.
   Fresh{+v: String}
-  # Constant m's part at word `at` of its store entry, as a new agent named v.
-  Part{+v: String, +at: U32}
+  # Constant m's two parts, its store entry's two words read first, as new
+  # agents named l and r.
+  Parts{+l: String, +r: String}
   Wire{+p: Pt, +q: Pt}
   # Template j.a instantiated between i's ports (and, when j.b is an unbounded
   # recursion's step, one more unroll: a back end may leave those to Bend).
@@ -91,7 +92,7 @@ def act(r: IC.Rule) -> Act:
     case IC.RSplitNonPair{}:
       Bendy{}
     case IC.ROpen{}:
-      Plain{[Spend{}, DelM{}, leaf("v", IC.pair()), Part{"cl", 0}, Part{"cr", 1},
+      Plain{[Spend{}, DelM{}, leaf("v", IC.pair()), Parts{"cl", "cr"},
              Wire{pn("v", 1), pn("cl", 0)}, Wire{pn("v", 2), pn("cr", 0)}, Wire{pn("v", 0), PMe{}}]}
     case IC.RSetEnvPair{}:
       Plain{Spend{} <> Del2{} <> [leaf("ap", IC.apply()),
@@ -253,9 +254,18 @@ def spare.got(+e: Env, r: IC.Net & U32) -> St:
   (net, +id) = r
   St{net, e}
 
-def part.got(+e: Env, +v: String, r: IC.Net & U32) -> St:
-  (net, +w) = r
-  bound(e, v, IC.const.node(U32.is_zero(w), net, w))
+def part(+v: String, +w: U32, s: St) -> St:
+  match s:
+    case St{net, +e}:
+      bound(e, v, IC.const.node(U32.is_zero(w), net, w))
+
+def parts.right(+e: Env, +l: String, +r: String, +wl: U32, a: IC.Net & U32) -> St:
+  (net, +wr) = a
+  part(r, wr, part(l, wl, St{net, e}))
+
+def parts.left(+e: Env, +l: String, +r: String, a: IC.Net & U32) -> St:
+  (net, +wl) = a
+  parts.right(e, l, r, wl, IC.trd(net, (IC.ni.a(e.j(e)) + 1 : U32)))
 
 def step(+e: Env, net: IC.Net, op: Op) -> St:
   match op:
@@ -273,8 +283,8 @@ def step(+e: Env, net: IC.Net, op: Op) -> St:
       spare.got(e, IC.alloc(net, wd(e, k), 0, 0))
     case Fresh{+v}:
       bound(e, v, IC.fresh.label(net))
-    case Part{+v, +at}:
-      part.got(e, v, IC.trd(net, (IC.ni.a(e.j(e)) + at : U32)))
+    case Parts{+l, +r}:
+      parts.left(e, l, r, IC.trd(net, IC.ni.a(e.j(e))))
     case Wire{+p, +q}:
       St{IC.connect(net, pt(e, p), pt(e, q)), e}
     case Inst{}:
@@ -301,16 +311,16 @@ def by.label(same: Bool, +ys: List<&2, Op>, +ns: List<&2, Op>, s: St) -> St:
     case False{}:
       ops.run(ns, s)
 
-def plan.pick(plain: Bool, +ops: List<&2, Op>, +env: Env, net: IC.Net, +p: U32) -> IC.Net:
+def plan.pick(plain: Bool, +ops: List<&2, Op>, +n: U32, +i: IC.NI, +m: U32, +j: IC.NI, net: IC.Net, +p: U32) -> IC.Net:
   match plain:
     case True{}:
-      st.net(ops.run(ops, St{net, env}))
+      st.net(ops.run(ops, St{net, Env{n, i, m, j, []}}))
     case False{}:
-      IC.r.dup.closure(net, p, e.n(env), e.i(env), e.m(env))
+      IC.r.dup.closure(net, p, n, i, m)
 
-def plan.got(+ops: List<&2, Op>, +env: Env, r: IC.Net & U32) -> IC.Net:
+def plan.got(+ops: List<&2, Op>, +n: U32, +i: IC.NI, +m: U32, +j: IC.NI, r: IC.Net & U32) -> IC.Net:
   (net, +p) = r
-  plan.pick(U32.is_zero(p), ops, env, net, p)
+  plan.pick(U32.is_zero(p), ops, n, i, m, j, net, p)
 
 def apply.act(a: Act, r: IC.Rule, net: IC.Net, +n: U32, +i: IC.NI, +m: U32, +j: IC.NI) -> IC.Net:
   match a:
@@ -321,7 +331,7 @@ def apply.act(a: Act, r: IC.Rule, net: IC.Net, +n: U32, +i: IC.NI, +m: U32, +j: 
     case ByLabel{+first, +same, +differ}:
       st.net(by.label(U32.is_eq(IC.ni.a(i), IC.ni.a(j)), same, differ, ops.run(first, St{net, Env{n, i, m, j, []}})))
     case ByPlan{+plain}:
-      plan.got(plain, Env{n, i, m, j, []}, IC.plan.of(net, IC.ni.p1(j)))
+      plan.got(plain, n, i, m, j, IC.plan.of(net, IC.ni.p1(j)))
 
 # Rule r on n and m, by the table.
 def apply(+r: IC.Rule, net: IC.Net, +n: U32, +i: IC.NI, +m: U32, +j: IC.NI) -> IC.Net:

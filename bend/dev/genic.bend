@@ -212,13 +212,6 @@ def c.port(p: Ru.Pt) -> String:
     case Ru.PJ2{}:
       "j.p2"
 
-def c.at(zero: Bool, +at: U32) -> String:
-  match zero:
-    case True{}:
-      "x->t[j.a]"
-    case False{}:
-      "x->t[j.a + " ++ U32.show(at) ++ "]"
-
 def c.op(+ind: String, op: Ru.Op) -> String:
   match op:
     case Ru.Spend{}:
@@ -235,8 +228,9 @@ def c.op(+ind: String, op: Ru.Op) -> String:
       ind ++ "nt_alloc(x, " ++ c.word(k) ++ ", 0, 0);\n"
     case Ru.Fresh{+v}:
       ind ++ "u32 " ++ v ++ " = x->label;\n" ++ ind ++ "x->label += 1;\n"
-    case Ru.Part{+v, +at}:
-      ind ++ "u32 " ++ v ++ " = nt_const_node(x, " ++ c.at(U32.is_zero(at), at) ++ ");\n"
+    case Ru.Parts{+l, +r}:
+      ind ++ "u32 " ++ l ++ " = nt_const_node(x, x->t[j.a]);\n"
+        ++ ind ++ "u32 " ++ r ++ " = nt_const_node(x, x->t[j.a + 1]);\n"
     case Ru.Wire{+p, +q}:
       ind ++ "nt_connect(x, " ++ c.port(p) ++ ", " ++ c.port(q) ++ ");\n"
     case Ru.Inst{}:

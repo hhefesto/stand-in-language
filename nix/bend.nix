@@ -199,6 +199,14 @@ let
       "rules-pairs"
       "rules-sessions"
     ];
+    netsem = [
+      "netsem-terms-on-zero"
+      "netsem-pairs-on-zero"
+      "netsem-functions"
+      "netsem-applications"
+      "netsem-ifs"
+      "netsem-terms-on-pair"
+    ];
     sem = [
       "sem-tc_ultra_minimal"
       "sem-simpleplus"
@@ -302,6 +310,10 @@ in
   # by BendTT's kernel: Bend's checker is then out of the trusted base.
   proof = bendCommand "bend-proof" bendSrc ''
     BENDTT=${bendtt}/bin/bendtt bend bend/PROOF.bend --verdict | tee result
+    grep -qx "ALL PROOFS CHECK" result
+    BENDTT=${bendtt}/bin/bendtt bend bend/NetProof.bend --verdict | tee result
+    grep -qx "ALL PROOFS CHECK" result
+    BENDTT=${bendtt}/bin/bendtt bend bend/NetModel.bend --verdict | tee result
     grep -qx "ALL PROOFS CHECK" result
     touch $out
   '';

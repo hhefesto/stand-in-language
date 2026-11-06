@@ -26,7 +26,7 @@ tests() {
   echo "== generated ic.c"
   if bend bend/dev/genic.bend | cmp -s - bend/effs/ic.c; then echo ok
   else echo "GENERATED DIFF"; fail=1; fi
-  for t in lexical front size sem eal ealm ic fast telc native rules ${EXTRA_TESTS:-}; do
+  for t in lexical front size sem eal ealm ic fast telc native rules netsem ${EXTRA_TESTS:-}; do
     echo "== test $t"
     bend bend/tests/$t.bend -o "$B/test-$t" || { echo "BUILD FAILED $t"; fail=1; continue; }
     "$B/test-$t" > "$S/logs/test-$t.out" 2>&1
@@ -133,6 +133,11 @@ proofs() {
   (cd "$S/verdict" && bend PROOF.bend --verdict) > "$S/logs/verdict.out" 2>&1
   grep -qx "ALL PROOFS CHECK" "$S/logs/verdict.out" && echo "ok: --verdict" \
     || { echo "VERDICT FAILED"; tail -20 "$S/logs/verdict.out"; fail=1; }
+  for n in NetProof NetModel; do
+    bend bend/$n.bend --verdict > "$S/logs/$n.out" 2>&1
+    grep -qx "ALL PROOFS CHECK" "$S/logs/$n.out" && echo "ok: $n --verdict" \
+      || { echo "VERDICT FAILED $n"; tail -20 "$S/logs/$n.out"; fail=1; }
+  done
 }
 
 for s in "${steps[@]}"; do

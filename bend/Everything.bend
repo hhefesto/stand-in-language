@@ -43,6 +43,8 @@ import ./Repl.bend as Repl
 import ./Json.bend as Json
 import ./Lsp.bend as Lsp
 import ./PROOF.bend as Proof
+import ./NetProof.bend as NetProof
+import ./NetModel.bend as NetModel
 
 # Every module of the port, and the proofs of LAWS.bend, so that
 # `bend bend/Everything.bend` checks them all (types, termination, laws) and

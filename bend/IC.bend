@@ -1658,11 +1658,15 @@ def r.dup.closure.go(+i: NI, r: Net & List<&2, U32>) -> Net:
     case _:
       fail(net, "dup-closure: no copies")
 
+def r.dup.closure.copy(net: Net, +l: U32, +s: U32, +m: U32) -> Net & List<&2, U32>:
+  match net:
+    case Net{mem, tpl, ctl}:
+      region(U32.to_nat(4294967295), l, RgSt{Net{mem, tpl, ctl}, [RgVisit{s, port(m, 0)}], []})
+
 # Copying a closure whose code has a published capture layout
 # (dup-closure): one interaction, then the pair copied by its plan at s.
 def r.dup.closure(net: Net, +s: U32, +n: U32, +i: NI, +m: U32) -> Net:
-  r.dup.closure.go(i, region(U32.to_nat(4294967295), ni.a(i),
-    RgSt{delete(spend(net), n), [RgVisit{s, port(m, 0)}], []}))
+  r.dup.closure.go(i, r.dup.closure.copy(delete(spend(net), n), ni.a(i), s, m))
 
 def plan.at(+tid: U32, r: Net & U32) -> Net & U32:
   (net, +t) = r

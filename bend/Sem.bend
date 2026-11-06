@@ -277,14 +277,11 @@ def aborted.of(+at: E.Site, r: R) -> R:
     case other:
       other
 
-# Abort at `at` applied to e: 0 is the identity; a pair aborts with the
-# pair, read as data, for message.
-def abort.of(+at: E.Site, e: W) -> R:
+# Abort at `at` applied to e: an aborted value, with e, read as data, for
+# message. 0 is a message like any other (Core.bend, Reference.bend, and
+# the net all have it so).
+def abort.of(+at: E.Site, +e: W) -> R:
   match e:
-    case WZero{}:
-      Val{WCode{Co.abort.ind(), E.XEnv{}}}
-    case WPair{+a, +b}:
-      marked.or(mark.in(WPair{a, b}), aborted.of(at, read(True{}, WPair{a, b})))
     case WAborted{at2, m}:
       Val{WAborted{at2, m}}
     case WHole{p}:
@@ -292,7 +289,7 @@ def abort.of(+at: E.Site, e: W) -> R:
     case WMark{at2}:
       used(at2)
     case _:
-      Val{WStuck{}}
+      marked.or(mark.in(e), aborted.of(at, read(True{}, e)))
 
 # A watched check: its value where its predicate gave a pair, else a mark.
 def checked(+site: U32, t: R, c: R) -> R:
