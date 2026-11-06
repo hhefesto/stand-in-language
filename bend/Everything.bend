@@ -35,6 +35,7 @@ import ./Meter.bend as Meter
 import ./Reference.bend as Reference
 import ./Fast.bend as Fast
 import ./Telc.bend as Telc
+import ./Wire.bend as Wire
 import ./Main.bend as Main
 import ./Partial.bend as Partial
 import ./Repl.bend as Repl

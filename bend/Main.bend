@@ -1105,51 +1105,66 @@ def stale(+entry: String, +hash: String, +path: String) -> IO(Unit):
 def stored(+expr: Co.V, ls: List<&2, Tc.Layout>) -> IC.Prog:
   IC.prepare(expr, Tc.shapes(ls, Map.new(&2, Lf.Shape)))
 
-# A compiled program run under the capture layouts it stores.
-def telc.play(~rt: Ss.Runner(), ic: Bool, t: Tc.Telc, +meter: Bool) -> IO(Unit):
-  match ic:
-    case True{}:
-      match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, p}:
-          play(~rt, Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), p), Sized{}, meter)
-    case False{}:
-      match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, +plain, +p}:
+# A compiled program on the net, as compiling prepared it: nothing to collect
+# or compile.
+def telc.ready(~rt: Ss.Runner(), r: Result<&2, &2, String, Tc.Prepared>, +path: String, +meter: Bool) -> IO(Unit):
+  match r:
+    case Fail{msg}:
+      IO.die(Unit, 1, path ++ ": " ++ msg)
+    case Done{x}:
+      match x:
+        case Tc.Prepared{m, g}:
+          play(~rt, Ss.Prog{m, g}, Sized{}, meter)
+
+def telc.plain(r: Result<&2, &2, String, Tc.Plain>, +path: String, +meter: Bool) -> IO(Unit):
+  match r:
+    case Fail{msg}:
+      IO.die(Unit, 1, path ++ ": " ++ msg)
+    case Done{x}:
+      match x:
+        case Tc.Plain{+plain, +p}:
           ref.play(plain, p, meter)
 
-def telc.cert(t: Tc.Telc) -> IO(Unit):
-  match t:
-    case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, p}:
+def telc.play(~rt: Ss.Runner(), ic: Bool, h: Tc.Head, +path: String, +meter: Bool) -> IO(Unit):
+  match ic:
+    case True{}:
+      telc.ready(~rt, Tc.ready.of(h), path, meter)
+    case False{}:
+      telc.plain(Tc.plain.of(h), path, meter)
+
+def telc.cert(h: Tc.Head) -> IO(Unit):
+  match h:
+    case Tc.Head{entry, hash, cert, counts, places, budget, body}:
       IO.write(cert)
 
-def telc.acted(~rt: Ss.Runner(), act: Act, ic: Bool, +path: String, t: Tc.Telc) -> IO(Unit):
+def telc.acted(~rt: Ss.Runner(), act: Act, ic: Bool, +path: String, h: Tc.Head) -> IO(Unit):
   match act:
     case Compile{}:
       IO.die(Unit, 1, path ++ " is already compiled")
     case Report{}:
-      telc.cert(t)
+      telc.cert(h)
     case Play{}:
-      telc.play(~rt, ic, t, False{})
+      telc.play(~rt, ic, h, path, False{})
     case Meter{}:
-      telc.play(~rt, ic, t, True{})
+      telc.play(~rt, ic, h, path, True{})
 
-def telc.decoded(~rt: Ss.Runner(), act: Act, ic: Bool, +path: String, r: Result<&2, &2, String, Tc.Telc>) -> IO(Unit):
+def telc.decoded(~rt: Ss.Runner(), act: Act, ic: Bool, +path: String, r: Result<&2, &2, String, Tc.Head>) -> IO(Unit):
   match r:
     case Fail{msg}:
       IO.die(Unit, 1, path ++ ": " ++ msg)
-    case Done{t}:
-      match t:
-        case Tc.Telc{+entry, +hash, cert, counts, places, budget, expr, layouts, plain, guard}:
+    case Done{h}:
+      match h:
+        case Tc.Head{+entry, +hash, cert, counts, places, budget, body}:
           do IO<Unit>:
             stale(entry, hash, path)
-            telc.acted(~rt, act, ic, path, Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, guard})
+            telc.acted(~rt, act, ic, path, Tc.Head{entry, hash, cert, counts, places, budget, body})
 
 def telc.read(~rt: Ss.Runner(), act: Act, ic: Bool, +path: String, r: Result<&1, &1, String, List<&2, U32>>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.die(Unit, 1, "telomare: " ++ path ++ ": " ++ e)
     case Done{bs}:
-      telc.decoded(~rt, act, ic, path, Tc.decode(bs))
+      telc.decoded(~rt, act, ic, path, Tc.load(bs))
 
 # A compiled program: nothing to parse, certify or size (runArtifact).
 def telc.run(~rt: Ss.Runner(), act: Act, ic: Bool, fast: Bool, +path: String) -> IO(Unit):

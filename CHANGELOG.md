@@ -19,6 +19,10 @@
   erased or hoisted into main's input prologue by the check analysis
   (`bend/Plan.bend`), per-check metering, and artifact version 9. The prologue
   replaces the session guard the port had.
+* A `.telc` holds the net's programs as prepared (artifact version 10), so a
+  `--ic` run from one no longer collects and compiles them: tictactoe's game runs
+  about 3.5 times faster and simpleplus's about 4.5 times. Nets start small and
+  grow, so a prologue's net per line costs almost nothing.
 * Telomare is being ported to Bend 2. The Haskell implementation was
   removed after the tag `haskell-final`: the library, the `telomare`,
   `telomare-repl` and `telomare-lsp` executables, the test suites, the

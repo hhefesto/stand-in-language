@@ -8,18 +8,25 @@ import ./Front.bend as Fr
 import ./Term.bend as T
 import ./Expr.bend as E
 import ./Certificate.bend as Ct
+import ./Wire.bend as W
+import ./IC.bend as IC
 
 # Compiled programs (master's Telomare.Artifact): a sized program with what a
 # run and `--certificate` need, so neither needs the sources again. The bytes
-# are master's layout up to its program, so the port numbers its own version,
-# 9 (master's is 8): "TELC", the version, the entry module, the sources' hash,
+# are master's layout up to its report, so the port numbers its own version,
+# 10 (master's is 8): "TELC", the version, the entry module, the sources' hash,
 # the static report as rendered, the sizing report (each site's count and
-# location, and the budget), the program the net runs, haskell-final's IC
-# certificate (the port writes none, and skips one it reads), the capture
-# layouts the program runs under, master's program, which a plain run
-# evaluates, and master's input prologue, with its layouts, if main has one.
-# Integers are int64 little-endian; a string is its UTF-8 length, then its
-# UTF-8; a Maybe is byte 0, or 1 and the value; a map is its length, then
+# location, and the budget), then four sections, each its length and its
+# bytes: the net's programs as IC.prepare left them (main and, after a Maybe
+# byte, the input prologue: each an entry, largest template, template store
+# and aborts' origins); master's input prologue, if main has one; the program
+# the net runs, haskell-final's IC certificate (the port writes none, and
+# skips one it reads) and the capture layouts it runs under; and master's
+# program, which a plain run evaluates. A run reads the head and the sections
+# it needs, in that order so the net's run reads the fewest bytes (P8 N2: most
+# of a run from a .telc went on preparing). Integers are int64 little-endian,
+# the store's words 4 bytes little-endian; a string is its UTF-8 length, then
+# its UTF-8; a Maybe is byte 0, or 1 and the value; a map is its length, then
 # its entries in ascending key order. A Haskell telomare refuses it by its
 # version.
 
@@ -44,7 +51,7 @@ type Telc is Data:
 
 # The port's version.
 def version() -> U32:
-  9
+  10
 
 # The sources' hash (sourcesHash): SHA-256 of every module's name and text
 # with their lengths, the modules sorted by name, in lowercase hex.
@@ -156,79 +163,6 @@ def shapes(ls: List<&2, Layout>, acc: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
 #
 # Each writer puts its bytes before rest.
 
-# An int64, little-endian, from a U32. One from 2^31 up is negative (a
-# reserved function index), so its high word is all ones.
-def put.int(+n: U32, rest: List<&2, U32>) -> List<&2, U32>:
-  +hi = Bool.pick(U32, U32.is_ge(n, 2147483648), 255, 0)
-  U32.and(n, 255) <> U32.and(U32.shrn(n, 8n), 255) <> U32.and(U32.shrn(n, 16n), 255) <> U32.shrn(n, 24n)
-    <> hi <> hi <> hi <> hi <> rest
-
-def put.string(s: String, rest: List<&2, U32>) -> List<&2, U32>:
-  +bs = Sha.utf8(s)
-  put.int(U32.from_nat(List.length(&2, U32, bs)), List.append(&2, U32, bs, rest))
-
-def put.file(file: String, rest: List<&2, U32>) -> List<&2, U32>:
-  match file:
-    case SNil{}:
-      0 <> rest
-    case SCon{c, t}:
-      1 <> put.string(SCon{c, t}, rest)
-
-def put.pos(p: L.Pos, rest: List<&2, U32>) -> List<&2, U32>:
-  match p:
-    case L.Pos{line, col, off}:
-      put.int(line, put.int(col, put.int(off, rest)))
-
-def put.loc(l: L.Loc, rest: List<&2, U32>) -> List<&2, U32>:
-  match l:
-    case L.Src{file, start, stop}:
-      0 <> put.file(file, put.pos(start, put.pos(stop, rest)))
-    case L.GenIn{reason, parent}:
-      1 <> put.string(reason, 1 <> put.loc(parent, rest))
-    case L.Gen{reason}:
-      1 <> put.string(reason, 0 <> rest)
-    case L.Builtin{name}:
-      2 <> put.string(name, rest)
-    case L.RuntimeLoc{}:
-      3 <> rest
-    case L.DecompiledLoc{}:
-      4 <> rest
-    case L.Unknown{}:
-      5 <> rest
-
-def put.origin(o: L.Origin, rest: List<&2, U32>) -> List<&2, U32>:
-  match o:
-    case L.Origin{k, l}:
-      L.kind.tag(k) <> put.loc(l, rest)
-
-def put.basic(d: Co.D, rest: List<&2, U32>) -> List<&2, U32>:
-  match d:
-    case Co.DZero{}:
-      0 <> rest
-    case Co.DPair{a, b}:
-      1 <> put.basic(a, put.basic(b, rest))
-
-def put.expr(v: Co.V, rest: List<&2, U32>) -> List<&2, U32>:
-  match v:
-    case Co.VZero{}:
-      0 <> rest
-    case Co.VPair{a, b}:
-      1 <> put.expr(a, put.expr(b, rest))
-    case Co.VEnv{}:
-      2 <> rest
-    case Co.VSetEnv{x}:
-      3 <> put.expr(x, rest)
-    case Co.VDefer{fi, x}:
-      4 <> put.int(fi, put.expr(x, rest))
-    case Co.VGate{}:
-      5 <> rest
-    case Co.VLeft{x}:
-      6 <> put.expr(x, rest)
-    case Co.VRight{x}:
-      7 <> put.expr(x, rest)
-    case Co.VAbort{o, m}:
-      8 <> put.origin(o, put.expr(m, rest))
-
 def put.shape(s: Lf.Shape, rest: List<&2, U32>) -> List<&2, U32>:
   match s:
     case Lf.CapData{}:
@@ -249,9 +183,9 @@ def put.counts(cs: List<&2, Count>, rest: List<&2, U32>) -> List<&2, U32>:
         case Count{tok, n}:
           match n:
             case None{}:
-              put.int(tok, 0 <> put.counts(more, rest))
+              W.put.int(tok, 0 <> put.counts(more, rest))
             case Some{k}:
-              put.int(tok, 1 <> put.int(k, put.counts(more, rest)))
+              W.put.int(tok, 1 <> W.put.int(k, put.counts(more, rest)))
 
 def put.places(ps: List<&2, Place>, rest: List<&2, U32>) -> List<&2, U32>:
   match ps:
@@ -260,7 +194,7 @@ def put.places(ps: List<&2, Place>, rest: List<&2, U32>) -> List<&2, U32>:
     case Con{p, more}:
       match p:
         case Place{tok, loc}:
-          put.int(tok, put.loc(loc, put.places(more, rest)))
+          W.put.int(tok, W.put.loc(loc, put.places(more, rest)))
 
 def put.layouts(ls: List<&2, Layout>, rest: List<&2, U32>) -> List<&2, U32>:
   match ls:
@@ -269,244 +203,127 @@ def put.layouts(ls: List<&2, Layout>, rest: List<&2, U32>) -> List<&2, U32>:
     case Con{l, more}:
       match l:
         case Layout{digest, shape}:
-          put.string(digest, put.shape(shape, put.layouts(more, rest)))
+          W.put.string(digest, put.shape(shape, put.layouts(more, rest)))
 
 def count(-A: Data, xs: List<&2, A>) -> U32:
   U32.from_nat(List.length(&2, A, xs))
 
 # The sizing report: the counts, the places and the budget.
 def put.report(+cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, rest: List<&2, U32>) -> List<&2, U32>:
-  put.int(count(Count, cs), put.counts(cs, put.int(count(Place, ps), put.places(ps, put.int(budget, rest)))))
+  W.put.int(count(Count, cs), put.counts(cs, W.put.int(count(Place, ps), put.places(ps, W.put.int(budget, rest)))))
 
 # The program, no IC certificate, and the layouts.
 def put.program(expr: Co.V, +ls: List<&2, Layout>, rest: List<&2, U32>) -> List<&2, U32>:
-  put.expr(expr, 0 <> put.int(count(Layout, ls), put.layouts(ls, rest)))
+  W.put.expr(expr, 0 <> W.put.int(count(Layout, ls), put.layouts(ls, rest)))
 
 def put.prologue(g: Maybe<&2, Co.V>) -> List<&2, U32>:
   match g:
     case None{}:
       [0]
     case Some{v}:
-      1 <> put.expr(v, [])
+      1 <> W.put.expr(v, [])
+
+# The net's programs, prepared: what IC.prepare makes of the program and its
+# prologue, so a run spends nothing on collecting and compiling them. The
+# templates' bodies stay out: IC.BodiesIn has a run collect them from the
+# program's bytes if a result holds a closure.
+def put.u32(+n: U32, rest: List<&2, U32>) -> List<&2, U32>:
+  U32.and(n, 255) <> U32.and(U32.shrn(n, 8n), 255) <> U32.and(U32.shrn(n, 16n), 255) <> U32.shrn(n, 24n) <> rest
+
+def put.words(ws: List<&2, U32>, rest: List<&2, U32>) -> List<&2, U32>:
+  match ws:
+    case Nil{}:
+      rest
+    case Con{w, more}:
+      put.u32(w, put.words(more, rest))
+
+def put.code(c: IC.Code, rest: List<&2, U32>) -> List<&2, U32>:
+  match c:
+    case IC.CdZero{}:
+      0 <> rest
+    case IC.CdPair{a, b}:
+      1 <> put.code(a, put.code(b, rest))
+    case IC.CdEnv{}:
+      2 <> rest
+    case IC.CdSetEnv{x}:
+      3 <> put.code(x, rest)
+    case IC.CdGate{}:
+      4 <> rest
+    case IC.CdLeft{x}:
+      5 <> put.code(x, rest)
+    case IC.CdRight{x}:
+      6 <> put.code(x, rest)
+    case IC.CdAbort{o, m}:
+      7 <> W.put.int(o, put.code(m, rest))
+    case IC.CdRef{tid, fi}:
+      8 <> W.put.int(tid, W.put.int(fi, rest))
+    case IC.CdIte{s, l, r, el, er, cap}:
+      9 <> put.code(s, put.code(l, put.code(r, put.code(el, put.code(er, put.code(cap, rest))))))
+    case IC.CdConst{at}:
+      10 <> W.put.int(at, rest)
+
+def put.origins(kvs: List<&2, Sigma<&2, &2, String, _ => L.Origin>>, rest: List<&2, U32>) -> List<&2, U32>:
+  match kvs:
+    case Nil{}:
+      rest
+    case Con{kv, more}:
+      match kv:
+        case (k, o):
+          W.put.string(k, W.put.origin(o, put.origins(more, rest)))
+
+def put.prog(p: IC.Prog, rest: List<&2, U32>) -> List<&2, U32>:
+  match p:
+    case IC.Prog{entry, bodies, +words, +maxk, +os}:
+      put.code(entry, W.put.int(maxk, W.put.int(count(U32, words), put.words(words,
+        W.put.int(U32.from_nat(Map.size(&2, L.Origin, os)), put.origins(Map.to_list(&2, L.Origin, os), rest))))))
+
+def put.prog.maybe(g: Maybe<&2, IC.Prog>) -> List<&2, U32>:
+  match g:
+    case None{}:
+      [0]
+    case Some{p}:
+      1 <> put.prog(p, [])
+
+def prologue.prepared(g: Maybe<&2, Co.V>, +ls: Map<&2, Lf.Shape>) -> Maybe<&2, IC.Prog>:
+  match g:
+    case None{}:
+      None{}
+    case Some{+v}:
+      Some{IC.prepare(v, ls)}
+
+def put.ready(+expr: Co.V, +prologue: Maybe<&2, Co.V>, ls: List<&2, Layout>, rest: List<&2, U32>) -> List<&2, U32>:
+  +m = shapes(ls, Map.new(&2, Lf.Shape))
+  put.prog(IC.prepare(expr, m), List.append(&2, U32, put.prog.maybe(prologue.prepared(prologue, m)), rest))
+
+# A section: its length, then its bytes.
+def section(+bs: List<&2, U32>, rest: List<&2, U32>) -> List<&2, U32>:
+  W.put.int(count(U32, bs), List.append(&2, U32, bs, rest))
 
 def encode(t: Telc) -> List<&2, U32>:
   match t:
-    case Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, prologue}:
-      84 <> 69 <> 76 <> 67 <> put.int(version(),
-        put.string(entry, put.string(hash, put.string(cert,
-          put.report(counts, places, budget, put.program(expr, layouts, put.expr(plain, put.prologue(prologue))))))))
+    case Telc{entry, hash, cert, counts, places, budget, +expr, +layouts, plain, +prologue}:
+      84 <> 69 <> 76 <> 67 <> W.put.int(version(),
+        W.put.string(entry, W.put.string(hash, W.put.string(cert,
+          put.report(counts, places, budget,
+            section(put.ready(expr, prologue, layouts, []),
+              section(put.prologue(prologue),
+                section(put.program(expr, layouts, []),
+                  section(W.put.expr(plain, []), [])))))))))
 
 # Reading
 # -------
 
-def fuel() -> Nat:
-  U32.to_nat(4294967295)
-
-# A reader's result: the value and the bytes after it, or why the bytes
-# ran short or made no sense.
-type Got<-A: Data> is Data:
-  Got{+x: A, +rest: List<&2, U32>}
-  Bad{+why: String}
-
 def G(-A: Data) -> Type:
-  List<&2, U32> -> Got<A>
+  W.G(A)
 
 def G.pure(-A: Data, x: A) -> G(A):
-  bs => Got{x, bs}
+  W.G.pure(A, x)
 
 def G.fail(-A: Data, why: String) -> G(A):
-  bs => Bad{why}
-
-def G.run(-A: Data, -B: Data, f: A -> G(B), r: Got<A>) -> Got<B>:
-  match r:
-    case Got{x, rest}:
-      f(x)(rest)
-    case Bad{why}:
-      Bad{why}
+  W.G.fail(A, why)
 
 def G.bind(-A: Data, -B: Data, m: G(A), f: A -> G(B)) -> G(B):
-  bs => G.run(A, B, f, m(bs))
-
-def byte.of(bs: List<&2, U32>) -> Got<U32>:
-  match bs:
-    case Nil{}:
-      Bad{"not enough bytes"}
-    case Con{b, rest}:
-      Got{b, rest}
-
-def byte() -> G(U32):
-  bs => byte.of(bs)
-
-def take(n: Nat) -> G(List<&2, U32>):
-  match n:
-    case 0n:
-      G.pure(List<&2, U32>, [])
-    case 1n+k:
-      do G<List<&2, U32>>:
-        b : U32 <- byte()
-        bs : List<&2, U32> <- take(k)
-        return b <> bs
-
-# An int64, little-endian; its low word.
-def int() -> G(U32):
-  do G<U32>:
-    b0 : U32 <- byte()
-    b1 : U32 <- byte()
-    b2 : U32 <- byte()
-    b3 : U32 <- byte()
-    hi : List<&2, U32> <- take(4n)
-    return (b0 + U32.shln(b1, 8n) + U32.shln(b2, 16n) + U32.shln(b3, 24n) : U32)
-
-# An int64, big-endian (Data.Binary's); its low word.
-def int.be() -> G(U32):
-  do G<U32>:
-    hi : List<&2, U32> <- take(4n)
-    b3 : U32 <- byte()
-    b2 : U32 <- byte()
-    b1 : U32 <- byte()
-    b0 : U32 <- byte()
-    return (b0 + U32.shln(b1, 8n) + U32.shln(b2, 16n) + U32.shln(b3, 24n) : U32)
-
-def string() -> G(String):
-  do G<String>:
-    n : U32 <- int()
-    bs : List<&2, U32> <- take(U32.to_nat(n))
-    return Tx.utf8(bs)
-
-def maybe.int(+m: U32) -> G(Maybe<&2, U32>):
-  match m:
-    case 0:
-      G.pure(Maybe<&2, U32>, None{})
-    case _:
-      G.bind(U32, Maybe<&2, U32>, int(), n => G.pure(Maybe<&2, U32>, Some{n}))
-
-def file.of(+m: U32) -> G(String):
-  match m:
-    case 0:
-      G.pure(String, "")
-    case _:
-      string()
-
-def pos() -> G(L.Pos):
-  do G<L.Pos>:
-    line : U32 <- int()
-    col : U32 <- int()
-    off : U32 <- int()
-    return L.Pos{line, col, off}
-
-def span() -> G(L.Loc):
-  do G<L.Loc>:
-    m : U32 <- byte()
-    file : String <- file.of(m)
-    start : L.Pos <- pos()
-    stop : L.Pos <- pos()
-    return L.Src{file, start, stop}
-
-def generated(+m: U32, +reason: String, parent: G(L.Loc)) -> G(L.Loc):
-  match m:
-    case 0:
-      G.pure(L.Loc, L.Gen{reason})
-    case _:
-      G.bind(L.Loc, L.Loc, parent, p => G.pure(L.Loc, L.GenIn{reason, p}))
-
-def loc.node(+t: U32, parent: G(L.Loc)) -> G(L.Loc):
-  match t:
-    case 0:
-      span()
-    case 1:
-      do G<L.Loc>:
-        reason : String <- string()
-        m : U32 <- byte()
-        generated(m, reason, parent)
-    case 2:
-      G.bind(String, L.Loc, string(), name => G.pure(L.Loc, L.Builtin{name}))
-    case 3:
-      G.pure(L.Loc, L.RuntimeLoc{})
-    case 4:
-      G.pure(L.Loc, L.DecompiledLoc{})
-    case 5:
-      G.pure(L.Loc, L.Unknown{})
-    case _:
-      G.fail(L.Loc, "unknown location tag " ++ U32.show(t))
-
-def loc(+fuel: Nat) -> G(L.Loc):
-  match fuel:
-    case 0n:
-      G.fail(L.Loc, "nesting too deep")
-    case 1n+f:
-      G.bind(U32, L.Loc, byte(), t => loc.node(t, loc(f)))
-
-def basic.node(+t: U32, a: G(Co.D), b: G(Co.D)) -> G(Co.D):
-  match t:
-    case 0:
-      G.pure(Co.D, Co.DZero{})
-    case 1:
-      do G<Co.D>:
-        x : Co.D <- a
-        y : Co.D <- b
-        return Co.DPair{x, y}
-    case _:
-      G.fail(Co.D, "unknown basic node tag " ++ U32.show(t))
-
-def basic(+fuel: Nat) -> G(Co.D):
-  match fuel:
-    case 0n:
-      G.fail(Co.D, "nesting too deep")
-    case 1n+f:
-      G.bind(U32, Co.D, byte(), t => basic.node(t, basic(f), basic(f)))
-
-def defer(+fi: U32, x: G(Co.V)) -> G(Co.V):
-  G.bind(Co.V, Co.V, x, b => G.pure(Co.V, Co.VDefer{fi, b}))
-
-def origin.kind(m: Maybe<&2, L.AbortKind>, +t: U32) -> G(L.AbortKind):
-  match m:
-    case Some{k}:
-      G.pure(L.AbortKind, k)
-    case None{}:
-      G.fail(L.AbortKind, "unknown abort kind " ++ U32.show(t))
-
-def origin(+fuel: Nat) -> G(L.Origin):
-  do G<L.Origin>:
-    +t : U32 <- byte()
-    k : L.AbortKind <- origin.kind(L.kind.of.tag(t), t)
-    l : L.Loc <- loc(fuel)
-    return L.Origin{k, l}
-
-def expr.node(+t: U32, a: G(Co.V), b: G(Co.V), +fuel: Nat) -> G(Co.V):
-  match t:
-    case 0:
-      G.pure(Co.V, Co.VZero{})
-    case 1:
-      do G<Co.V>:
-        x : Co.V <- a
-        y : Co.V <- b
-        return Co.VPair{x, y}
-    case 2:
-      G.pure(Co.V, Co.VEnv{})
-    case 3:
-      G.bind(Co.V, Co.V, a, x => G.pure(Co.V, Co.VSetEnv{x}))
-    case 4:
-      G.bind(U32, Co.V, int(), fi => defer(fi, a))
-    case 5:
-      G.pure(Co.V, Co.VGate{})
-    case 6:
-      G.bind(Co.V, Co.V, a, x => G.pure(Co.V, Co.VLeft{x}))
-    case 7:
-      G.bind(Co.V, Co.V, a, x => G.pure(Co.V, Co.VRight{x}))
-    case 8:
-      do G<Co.V>:
-        o : L.Origin <- origin(fuel)
-        m : Co.V <- a
-        return Co.VAbort{o, m}
-    case _:
-      G.fail(Co.V, "unknown compiled node tag " ++ U32.show(t))
-
-def expr(+fuel: Nat) -> G(Co.V):
-  match fuel:
-    case 0n:
-      G.fail(Co.V, "nesting too deep")
-    case 1n+f:
-      G.bind(U32, Co.V, byte(), t => expr.node(t, expr(f), expr(f), f))
+  W.G.bind(A, B, m, f)
 
 def shape.node(+t: U32, a: G(Lf.Shape), b: G(Lf.Shape)) -> G(Lf.Shape):
   match t:
@@ -529,7 +346,7 @@ def shape(+fuel: Nat) -> G(Lf.Shape):
     case 0n:
       G.fail(Lf.Shape, "nesting too deep")
     case 1n+f:
-      G.bind(U32, Lf.Shape, byte(), t => shape.node(t, shape(f), shape(f)))
+      G.bind(U32, Lf.Shape, W.byte(), t => shape.node(t, shape(f), shape(f)))
 
 def counts(n: Nat) -> G(List<&2, Count>):
   match n:
@@ -537,9 +354,9 @@ def counts(n: Nat) -> G(List<&2, Count>):
       G.pure(List<&2, Count>, [])
     case 1n+k:
       do G<List<&2, Count>>:
-        tok : U32 <- int()
-        m : U32 <- byte()
-        c : Maybe<&2, U32> <- maybe.int(m)
+        tok : U32 <- W.int()
+        m : U32 <- W.byte()
+        c : Maybe<&2, U32> <- W.maybe.int(m)
         rest : List<&2, Count> <- counts(k)
         return Count{tok, c} <> rest
 
@@ -549,8 +366,8 @@ def places(n: Nat) -> G(List<&2, Place>):
       G.pure(List<&2, Place>, [])
     case 1n+k:
       do G<List<&2, Place>>:
-        tok : U32 <- int()
-        l : L.Loc <- loc(fuel())
+        tok : U32 <- W.int()
+        l : L.Loc <- W.loc(W.fuel())
         rest : List<&2, Place> <- places(k)
         return Place{tok, l} <> rest
 
@@ -560,8 +377,8 @@ def layouts(n: Nat) -> G(List<&2, Layout>):
       G.pure(List<&2, Layout>, [])
     case 1n+k:
       do G<List<&2, Layout>>:
-        digest : String <- string()
-        s : Lf.Shape <- shape(fuel())
+        digest : String <- W.string()
+        s : Lf.Shape <- shape(W.fuel())
         rest : List<&2, Layout> <- layouts(k)
         return Layout{digest, s} <> rest
 
@@ -571,22 +388,22 @@ def layouts(n: Nat) -> G(List<&2, Layout>):
 def big.bytes(+t: U32, +small: Nat) -> G(Unit):
   match t:
     case 0:
-      G.bind(List<&2, U32>, Unit, take(small), bs => G.pure(Unit, Unit{}))
+      G.bind(List<&2, U32>, Unit, W.take(small), bs => G.pure(Unit, Unit{}))
     case _:
-      G.bind(U32, Unit, int.be(), n => G.bind(List<&2, U32>, Unit, take(U32.to_nat(n)), bs => G.pure(Unit, Unit{})))
+      G.bind(U32, Unit, W.int.be(), n => G.bind(List<&2, U32>, Unit, W.take(U32.to_nat(n)), bs => G.pure(Unit, Unit{})))
 
 def natural() -> G(Unit):
-  G.bind(U32, Unit, byte(), t => big.bytes(t, 8n))
+  G.bind(U32, Unit, W.byte(), t => big.bytes(t, 8n))
 
 def integer.large(+t: U32) -> G(Unit):
   match t:
     case 0:
-      G.bind(List<&2, U32>, Unit, take(4n), bs => G.pure(Unit, Unit{}))
+      G.bind(List<&2, U32>, Unit, W.take(4n), bs => G.pure(Unit, Unit{}))
     case _:
-      G.bind(U32, Unit, byte(), sign => big.bytes(1, 0n))
+      G.bind(U32, Unit, W.byte(), sign => big.bytes(1, 0n))
 
 def integer() -> G(Unit):
-  G.bind(U32, Unit, byte(), t => integer.large(t))
+  G.bind(U32, Unit, W.byte(), t => integer.large(t))
 
 def terms(n: Nat) -> G(Unit):
   match n:
@@ -604,13 +421,13 @@ def affines(n: Nat) -> G(Unit):
       G.pure(Unit, Unit{})
     case 1n+k:
       do G<Unit>:
-        m : U32 <- int()
+        m : U32 <- W.int()
         c : Unit <- terms(U32.to_nat(m))
         d : Unit <- natural()
         affines(k)
 
 def bound() -> G(Unit):
-  G.bind(U32, Unit, int(), n => affines(U32.to_nat(n)))
+  G.bind(U32, Unit, W.int(), n => affines(U32.to_nat(n)))
 
 def method(+m: U32) -> G(Unit):
   match m:
@@ -627,48 +444,145 @@ def ic.cert(+m: U32) -> G(Unit):
       G.pure(Unit, Unit{})
     case _:
       do G<Unit>:
-        k : U32 <- byte()
+        k : U32 <- W.byte()
         a : Unit <- method(k)
         b0 : Unit <- bound()
         b1 : Unit <- bound()
         bound()
+
+# The prepared programs
+# ---------------------
+
+type Prepared is Data:
+  Prepared{+main: IC.Prog, +prologue: Maybe<&2, IC.Prog>}
+
+def code.node(+t: U32, a: G(IC.Code), b: G(IC.Code), c: G(IC.Code), d: G(IC.Code), e: G(IC.Code), f: G(IC.Code)) -> G(IC.Code):
+  match t:
+    case 0:
+      G.pure(IC.Code, IC.CdZero{})
+    case 1:
+      do G<IC.Code>:
+        x : IC.Code <- a
+        y : IC.Code <- b
+        return IC.CdPair{x, y}
+    case 2:
+      G.pure(IC.Code, IC.CdEnv{})
+    case 3:
+      G.bind(IC.Code, IC.Code, a, x => G.pure(IC.Code, IC.CdSetEnv{x}))
+    case 4:
+      G.pure(IC.Code, IC.CdGate{})
+    case 5:
+      G.bind(IC.Code, IC.Code, a, x => G.pure(IC.Code, IC.CdLeft{x}))
+    case 6:
+      G.bind(IC.Code, IC.Code, a, x => G.pure(IC.Code, IC.CdRight{x}))
+    case 7:
+      do G<IC.Code>:
+        o : U32 <- W.int()
+        m : IC.Code <- a
+        return IC.CdAbort{o, m}
+    case 8:
+      do G<IC.Code>:
+        tid : U32 <- W.int()
+        fi : U32 <- W.int()
+        return IC.CdRef{tid, fi}
+    case 9:
+      do G<IC.Code>:
+        s : IC.Code <- a
+        l : IC.Code <- b
+        r : IC.Code <- c
+        el : IC.Code <- d
+        er : IC.Code <- e
+        cap : IC.Code <- f
+        return IC.CdIte{s, l, r, el, er, cap}
+    case 10:
+      G.bind(U32, IC.Code, W.int(), at => G.pure(IC.Code, IC.CdConst{at}))
+    case _:
+      G.fail(IC.Code, "unknown code tag " ++ U32.show(t))
+
+def code(+fuel: Nat) -> G(IC.Code):
+  match fuel:
+    case 0n:
+      G.fail(IC.Code, "nesting too deep")
+    case 1n+f:
+      G.bind(U32, IC.Code, W.byte(), t => code.node(t, code(f), code(f), code(f), code(f), code(f), code(f)))
+
+# A run's words, without a closure per byte: they are most of the file.
+def words.of(n: Nat, bs: List<&2, U32>, acc: List<&2, U32>) -> W.Got<List<&2, U32>>:
+  match n:
+    case 0n:
+      W.Got{List.reverse(&2, U32, acc), bs}
+    case 1n+k:
+      match bs:
+        case b0 <> b1 <> b2 <> b3 <> rest:
+          words.of(k, rest, (b0 + U32.shln(b1, 8n) + U32.shln(b2, 16n) + U32.shln(b3, 24n) : U32) <> acc)
+        case _:
+          W.Bad{"not enough bytes"}
+
+def words(n: Nat) -> G(List<&2, U32>):
+  bs => words.of(n, bs, [])
+
+def origins(n: Nat, acc: Map<&2, L.Origin>) -> G(Map<&2, L.Origin>):
+  match n:
+    case 0n:
+      G.pure(Map<&2, L.Origin>, acc)
+    case 1n+k:
+      do G<Map<&2, L.Origin>>:
+        +key : String <- W.string()
+        o : L.Origin <- W.origin(W.fuel())
+        origins(k, Map.set(&2, L.Origin, acc, key, o))
+
+def prog() -> G(IC.Prog):
+  do G<IC.Prog>:
+    e : IC.Code <- code(W.fuel())
+    maxk : U32 <- W.int()
+    n : U32 <- W.int()
+    ws : List<&2, U32> <- words(U32.to_nat(n))
+    no : U32 <- W.int()
+    os : Map<&2, L.Origin> <- origins(U32.to_nat(no), Map.new(&2, L.Origin))
+    return IC.Prog{e, IC.BodiesAt{Map.new(&2, Co.V)}, ws, maxk, os}
+
+def prog.if(none: Bool) -> G(Maybe<&2, IC.Prog>):
+  match none:
+    case True{}:
+      G.pure(Maybe<&2, IC.Prog>, None{})
+    case False{}:
+      G.bind(IC.Prog, Maybe<&2, IC.Prog>, prog(), p => G.pure(Maybe<&2, IC.Prog>, Some{p}))
 
 def prologue.if(none: Bool) -> G(Maybe<&2, Co.V>):
   match none:
     case True{}:
       G.pure(Maybe<&2, Co.V>, None{})
     case False{}:
-      G.bind(Co.V, Maybe<&2, Co.V>, expr(fuel()), v => G.pure(Maybe<&2, Co.V>, Some{v}))
+      G.bind(Co.V, Maybe<&2, Co.V>, W.expr(W.fuel()), v => G.pure(Maybe<&2, Co.V>, Some{v}))
 
-def fields(+entry: String) -> G(Telc):
-  do G<Telc>:
-    hash : String <- string()
-    cert : String <- string()
-    nc : U32 <- int()
+# What every use of a file reads: all but the sections, which are the bytes
+# after the report. A run goes on to the ones it needs.
+type Head is Data:
+  Head{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
+       +budget: U32, +body: List<&2, U32>}
+
+def fields(+entry: String) -> G(Head):
+  do G<Head>:
+    hash : String <- W.string()
+    cert : String <- W.string()
+    nc : U32 <- W.int()
     cs : List<&2, Count> <- counts(U32.to_nat(nc))
-    np : U32 <- int()
+    np : U32 <- W.int()
     ps : List<&2, Place> <- places(U32.to_nat(np))
-    budget : U32 <- int()
-    x : Co.V <- expr(fuel())
-    m : U32 <- byte()
-    c : Unit <- ic.cert(m)
-    nl : U32 <- int()
-    ls : List<&2, Layout> <- layouts(U32.to_nat(nl))
-    p : Co.V <- expr(fuel())
-    b : U32 <- byte()
-    g : Maybe<&2, Co.V> <- prologue.if(U32.is_zero(b))
-    return Telc{entry, hash, cert, cs, ps, budget, x, ls, p, g}
+    budget : U32 <- W.int()
+    body : List<&2, U32> <- W.here()
+    return Head{entry, hash, cert, cs, ps, budget, body}
 
 # What a file holds: an artifact, or why it is none (the magic or the
 # version, said as is; anything else is unreadable).
 type Read is Data:
-  Read{+t: Telc}
+  Read{+h: Head}
   Refused{+msg: String}
 
 def versioned.if(ok: Bool, +v: U32) -> G(Read):
   match ok:
     case True{}:
-      G.bind(String, Read, string(), entry => G.bind(Telc, Read, fields(entry), t => G.pure(Read, Read{t})))
+      G.bind(String, Read, W.string(), entry => G.bind(Head, Read, fields(entry), h => G.pure(Read, Read{h})))
     case False{}:
       G.pure(Read, Refused{"this artifact is version " ++ U32.show(v) ++ ", but this telomare reads version "
         ++ U32.show(version()) ++ "; recompile it from source"})
@@ -686,24 +600,133 @@ def magic(bs: List<&2, U32>) -> Bool:
 def magic.ok(ok: Bool) -> G(Read):
   match ok:
     case True{}:
-      G.bind(U32, Read, int(), v => versioned(v))
+      G.bind(U32, Read, W.int(), v => versioned(v))
     case False{}:
       G.pure(Read, Refused{"not a telomare artifact (bad magic number)"})
 
 def artifact() -> G(Read):
-  G.bind(List<&2, U32>, Read, take(4n), m => magic.ok(magic(m)))
+  G.bind(List<&2, U32>, Read, W.take(4n), m => magic.ok(magic(m)))
 
-def decoded(r: Got<Read>) -> Result<&2, &2, String, Telc>:
+def unreadable(+why: String) -> String:
+  "not a readable telomare artifact: " ++ why
+
+def loaded(r: W.Got<Read>) -> Result<&2, &2, String, Head>:
   match r:
-    case Got{x, rest}:
+    case W.Got{x, rest}:
       match x:
-        case Read{t}:
-          Done{t}
+        case Read{h}:
+          Done{h}
         case Refused{msg}:
           Fail{msg}
-    case Bad{why}:
-      Fail{"not a readable telomare artifact: " ++ why}
+    case W.Bad{why}:
+      Fail{unreadable(why)}
 
-# An artifact from its bytes, or what haskell-final says of them.
+# An artifact's head from its bytes, or what haskell-final says of them.
+def load(bs: List<&2, U32>) -> Result<&2, &2, String, Head>:
+  loaded(artifact()(bs))
+
+def read.section(-A: Data, r: W.Got<A>) -> Result<&2, &2, String, A>:
+  match r:
+    case W.Got{x, rest}:
+      Done{x}
+    case W.Bad{why}:
+      Fail{unreadable(why)}
+
+# Past a section, its length read.
+def passed() -> G(Unit):
+  G.bind(U32, Unit, W.int(), n => W.skip(U32.to_nat(n)))
+
+# What a run on the net reads: the programs as prepared, each able to find
+# its bytes if a result holds a closure.
+def prog.at(p: IC.Prog, +bs: List<&2, U32>) -> IC.Prog:
+  match p:
+    case IC.Prog{entry, bodies, words, maxk, os}:
+      IC.Prog{entry, IC.BodiesIn{bs}, words, maxk, os}
+
+def prog.maybe.at(g: Maybe<&2, IC.Prog>, +bs: List<&2, U32>) -> Maybe<&2, IC.Prog>:
+  match g:
+    case None{}:
+      None{}
+    case Some{p}:
+      Some{prog.at(p, bs)}
+
+def ready.fields() -> G(Prepared):
+  do G<Prepared>:
+    nr : U32 <- W.int()
+    m : IC.Prog <- prog()
+    b : U32 <- W.byte()
+    g : Maybe<&2, IC.Prog> <- prog.if(U32.is_zero(b))
+    ng : U32 <- W.int()
+    flag : U32 <- W.byte()
+    pro : List<&2, U32> <- W.here()
+    u : Unit <- W.skip(U32.to_nat((ng - 1 : U32)))
+    nx : U32 <- W.int()
+    src : List<&2, U32> <- W.here()
+    return Prepared{prog.at(m, src), prog.maybe.at(g, pro)}
+
+def ready.of(h: Head) -> Result<&2, &2, String, Prepared>:
+  match h:
+    case Head{entry, hash, cert, counts, places, budget, body}:
+      read.section(Prepared, ready.fields()(body))
+
+# What a plain run reads: master's program and its input prologue.
+type Plain is Data:
+  Plain{+plain: Co.V, +prologue: Maybe<&2, Co.V>}
+
+def plain.fields() -> G(Plain):
+  do G<Plain>:
+    a : Unit <- passed()
+    ng : U32 <- W.int()
+    b : U32 <- W.byte()
+    g : Maybe<&2, Co.V> <- prologue.if(U32.is_zero(b))
+    c : Unit <- passed()
+    np : U32 <- W.int()
+    p : Co.V <- W.expr(W.fuel())
+    return Plain{p, g}
+
+def plain.of(h: Head) -> Result<&2, &2, String, Plain>:
+  match h:
+    case Head{entry, hash, cert, counts, places, budget, body}:
+      read.section(Plain, plain.fields()(body))
+
+# The whole artifact, as the tests compare it.
+type Rest is Data:
+  Rest{+expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +prologue: Maybe<&2, Co.V>}
+
+def rest.fields() -> G(Rest):
+  do G<Rest>:
+    a : Unit <- passed()
+    ng : U32 <- W.int()
+    b : U32 <- W.byte()
+    g : Maybe<&2, Co.V> <- prologue.if(U32.is_zero(b))
+    nx : U32 <- W.int()
+    x : Co.V <- W.expr(W.fuel())
+    m : U32 <- W.byte()
+    c : Unit <- ic.cert(m)
+    nl : U32 <- W.int()
+    ls : List<&2, Layout> <- layouts(U32.to_nat(nl))
+    np : U32 <- W.int()
+    p : Co.V <- W.expr(W.fuel())
+    return Rest{x, ls, p, g}
+
+def whole.of(+entry: String, +hash: String, +cert: String, +cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, r: Result<&2, &2, String, Rest>) -> Result<&2, &2, String, Telc>:
+  match r:
+    case Fail{e}:
+      Fail{e}
+    case Done{x}:
+      match x:
+        case Rest{e, ls, p, g}:
+          Done{Telc{entry, hash, cert, cs, ps, budget, e, ls, p, g}}
+
+def whole(r: Result<&2, &2, String, Head>) -> Result<&2, &2, String, Telc>:
+  match r:
+    case Fail{e}:
+      Fail{e}
+    case Done{h}:
+      match h:
+        case Head{entry, hash, cert, cs, ps, budget, body}:
+          whole.of(entry, hash, cert, cs, ps, budget, read.section(Rest, rest.fields()(body)))
+
+# The whole artifact from its bytes, or what haskell-final says of them.
 def decode(bs: List<&2, U32>) -> Result<&2, &2, String, Telc>:
-  decoded(artifact()(bs))
+  whole(load(bs))

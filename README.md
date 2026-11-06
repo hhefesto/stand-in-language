@@ -153,10 +153,12 @@ in these places:
   count per rule of its own net, and haskell-final's printed "logical
   storage" counted on its map-of-ports net; the port shares neither, and
   so cannot report them honestly.
-- `--compile` writes the port's version 9 artifact: master's layout up to its
-  program, with no IC certificate (the port has none to store), then the capture
-  layouts, master's program, and master's input prologue. `--ic --compile` writes
-  the same, and a Haskell telomare refuses it by its version.
+- `--compile` writes the port's version 10 artifact: master's layout up to its
+  sizing report, then the net's programs as prepared, master's input prologue, the
+  program with no IC certificate (the port has none to store) and its capture
+  layouts, and master's program. A run reads only what it needs, so the net's
+  programs are not compiled again. `--ic --compile` writes the same, and a Haskell
+  telomare refuses it by its version.
 - The IC runs only the branch an `if` chooses (DESIGN.md §11.3). The core
   keeps one conditional, the strict gate-switch, and sizing and EAL read
   it as before. The IC compiles each branch into a template of its own,
@@ -706,7 +708,7 @@ is checked against the Haskell tests it can answer (master's EALTests are
 | Drive | `Telomare.Driver`, the `telomare` command | ported: `bend/{Session,Meter,Main,Native}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
-| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 9, written with no IC certificate) |
+| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 10, written with no IC certificate, with the net's programs prepared) |
 | REPL | `app/Repl.hs` | ported: `bend/{Repl,Partial}.bend` (line editing: `rlwrap`) |
 | LSP | `app/LSP.hs` | ported: `bend/{Json,Lsp}.bend` |
 

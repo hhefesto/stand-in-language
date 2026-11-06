@@ -15,14 +15,14 @@ import ../Text.bend as Tx
 import ../Resolve.bend as Rs
 import ../Sha256.bend as Sha
 
-# Compiled programs (.telc), haskell-final's version 4 artifacts
+# Compiled programs (.telc), the port's version 10 artifacts
 # (RunModeTests "compiled artifacts"): a round trip keeps every field, a
-# decoded program runs as its source does, a program with an input prologue
-# is written as the port's version 5 and one without as version 4, garbage
-# is refused by its magic number, the sources' hash follows their content
-# and not their order, and the node counts, the port's (sizing erased what
-# it proved dead). One `ok NAME` line per group (FAIL NAME when it breaks).
-# Run from the source root.
+# decoded program runs as its source does, the prepared programs it holds are
+# the ones prepare makes (and run the same), a program with an input prologue
+# holds it, garbage is refused by its magic number, the sources' hash follows
+# their content and not their order, and the node counts, the port's (sizing
+# erased what it proved dead). One `ok NAME` line per group (FAIL NAME when it
+# breaks). Run from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
@@ -201,10 +201,107 @@ def source.run(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Re
     case Done{+run}:
       source.sized(run, Sz.size(65536, True{}, run), lines)
 
-# What a decoded program shows, and what it spends, as its source does.
+def prepared.read(r: Result<&2, &2, String, Tc.Prepared>) -> Maybe<&2, Tc.Prepared>:
+  match r:
+    case Fail{e}:
+      None{}
+    case Done{p}:
+      Some{p}
+
+# The programs a run on the net reads from an artifact's bytes.
+def prepared.of(r: Result<&2, &2, String, Tc.Head>) -> Maybe<&2, Tc.Prepared>:
+  match r:
+    case Fail{e}:
+      None{}
+    case Done{h}:
+      prepared.read(Tc.ready.of(h))
+
+def ready.of(m: Maybe<&2, Tc.Telc>) -> Maybe<&2, Tc.Prepared>:
+  match m:
+    case None{}:
+      None{}
+    case Some{t}:
+      prepared.of(Tc.load(Tc.encode(t)))
+
+# As --compile's `telc.ready` runs it.
+def ready.run(m: Maybe<&2, Tc.Prepared>, lines: List<&2, String>) -> Ss.Replay:
+  match m:
+    case None{}:
+      Ss.Replay{["nothing prepared"], Ss.cost.none()}
+    case Some{p}:
+      match p:
+        case Tc.Prepared{m2, g}:
+          Ss.replay(Ss.Prog{m2, g}, Ss.Sized{}, lines)
+
+# What a decoded program shows, and what it spends, as its source does, from
+# its program and from the prepared programs alike.
 def runs.alike(+srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:
-  String.eq(replay.text(run.of(again(artifact(srcs, entry)), lines)),
-            replay.text(source.run(Fr.compile(srcs, entry), lines)))
+  +want = replay.text(source.run(Fr.compile(srcs, entry), lines))
+  String.eq(replay.text(run.of(again(artifact(srcs, entry)), lines)), want)
+    && String.eq(replay.text(ready.run(ready.of(artifact(srcs, entry)), lines)), want)
+
+# A prepared program written out and read back is the one prepare makes: its
+# entry, template store and origins, and, collected from its bytes, its
+# templates' bodies.
+def words.text(ws: List<&2, U32>) -> String:
+  match ws:
+    case Nil{}:
+      ""
+    case Con{w, rest}:
+      U32.show(w) ++ "," ++ words.text(rest)
+
+def bodies.text(kvs: List<&2, Sigma<&2, &2, String, _ => Co.V>>) -> String:
+  match kvs:
+    case Nil{}:
+      ""
+    case Con{kv, rest}:
+      match kv:
+        case (k, v):
+          k ++ "=" ++ Co.show(v) ++ "\n" ++ bodies.text(rest)
+
+def origins.text(kvs: List<&2, Sigma<&2, &2, String, _ => L.Origin>>) -> String:
+  match kvs:
+    case Nil{}:
+      ""
+    case Con{kv, rest}:
+      match kv:
+        case (k, o):
+          k ++ "=" ++ L.origin.show(o) ++ "\n" ++ origins.text(rest)
+
+def prog.text(p: IC.Prog) -> String:
+  match p:
+    case IC.Prog{entry, bodies, words, maxk, os}:
+      IC.key.of(entry, "") ++ "|" ++ U32.show(maxk) ++ "|" ++ words.text(words) ++ "|"
+        ++ origins.text(Map.to_list(&2, L.Origin, os)) ++ "|" ++ bodies.text(Map.to_list(&2, Co.V, IC.bodies.map(bodies)))
+
+def prog.maybe.text(g: Maybe<&2, IC.Prog>) -> String:
+  match g:
+    case None{}:
+      "none"
+    case Some{p}:
+      prog.text(p)
+
+def prepared.text(m: Maybe<&2, Tc.Prepared>) -> String:
+  match m:
+    case None{}:
+      "nothing prepared"
+    case Some{p}:
+      match p:
+        case Tc.Prepared{m2, g}:
+          prog.text(m2) ++ "||" ++ prog.maybe.text(g)
+
+def fresh.text(m: Maybe<&2, Tc.Telc>) -> String:
+  match m:
+    case None{}:
+      "no artifact"
+    case Some{t}:
+      match t:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, pro}:
+          +ls = Tc.shapes(layouts, Map.new(&2, Lf.Shape))
+          prog.text(IC.prepare(expr, ls)) ++ "||" ++ prog.maybe.text(Tc.prologue.prepared(pro, ls))
+
+def ready.alike(+m: Maybe<&2, Tc.Telc>) -> Bool:
+  String.eq(prepared.text(ready.of(m)), fresh.text(m))
 
 # Refusing garbage, hashing, counting
 # -----------------------------------
@@ -271,8 +368,11 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       runs.alike([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", []),
       runs.alike(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["3 4"]),
       runs.alike(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["9 a"])])))
+    IO.print(verdict("telc-ready", all([
+      ready.alike(sp),
+      ready.alike(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"))])))
     IO.print(verdict("telc-prologue", all([
-      U32.is_eq(version.of(sp), 9),
+      U32.is_eq(version.of(sp), 10),
       has.prologue(sp),
       Bool.not(has.prologue(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")))])))
     IO.print(verdict("telc-magic", refused(Tc.decode(Sha.utf8("not a telomare artifact at all")), "magic")))

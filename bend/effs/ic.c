@@ -410,7 +410,9 @@ static inline u32 nt_const_node(Nt* x, u32 w) {
   return w == 0 ? nt_alloc(x, NT_ZERO, 0, 0) : nt_alloc(x, NT_CONST, w, 0);
 }
 
-static void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
+// Inlined into its one caller: passed on the stack, the two infos cost a
+// store-forwarding stall each (P8 N2: 15% of a run).
+static inline __attribute__((always_inline)) void nt_apply(Nt* x, u8 r, u32 n, NtI i, u32 m, NtI j) {
   switch (r) {
     case NT_OPEN: {
       nt_spend(x);

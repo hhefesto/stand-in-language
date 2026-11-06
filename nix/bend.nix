@@ -183,6 +183,7 @@ let
     telc = [
       "telc-round-trip"
       "telc-runs"
+      "telc-ready"
       "telc-prologue"
       "telc-magic"
       "telc-hash"

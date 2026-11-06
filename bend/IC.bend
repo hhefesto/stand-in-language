@@ -3,6 +3,7 @@ import ./Loc.bend as Lc
 import ./Core.bend as Co
 import ./Show.bend as Sh
 import ./Lift.bend as Lf
+import ./Wire.bend as W
 
 # The interaction-combinator runtime (haskell-final's Telomare.IC, the part
 # a run uses). The sized program's closures are compiled once into
@@ -193,11 +194,17 @@ type Coll is Data:
 type Ser is Data:
   Ser{+nodes: List<&2, U32>, +wires: List<&2, U32>, +w: U32}
 
+# The templates' bodies, for reading closures back: at hand, or, from a .telc,
+# in the program's bytes, collected if a result ever holds a closure (it
+# costs as much as most of a run's start, and a result almost never does).
+type Bodies is Data:
+  BodiesAt{+m: Map<&2, Co.V>}
+  BodiesIn{+bs: List<&2, U32>}
+
 # The compiled program: the entry (main applied to the environment, its
-# closures templates), the templates' bodies for reading closures back,
-# and the template store.
+# closures templates), the templates' bodies and the template store.
 type Prog is Data:
-  Prog{+entry: Code, +bodies: Map<&2, Co.V>, +words: List<&2, U32>, +maxk: U32, +origins: Map<&2, Lc.Origin>}
+  Prog{+entry: Code, +bodies: Bodies, +words: List<&2, U32>, +maxk: U32, +origins: Map<&2, Lc.Origin>}
 
 type RJ is Data:
   RVisit{+p: U32, +data: Bool}
@@ -2823,7 +2830,7 @@ def scratch() -> Net:
 
 def prepared.ready(+g: Map<&2, Lf.Shape>, entry: Code, +srcs: List<&2, Src>, os: Map<&2, Lc.Origin>, ks: List<&2, U32>) -> Prog:
   +ws = tpls(srcs, (CS{scratch(), Map.new(&2, List<&2, U32>)}, []), [])
-  Prog{entry, bodies(srcs, Map.new(&2, Co.V)),
+  Prog{entry, BodiesAt{bodies(srcs, Map.new(&2, Co.V))},
        store(List.drop(&2, List<&2, U32>, ws, 1n), plans(g, srcs), List.reverse(&2, U32, ks)), max.k(ws, 0), os}
 
 # The entry and the templates' bodies after the pass.
@@ -2886,9 +2893,9 @@ def fill(ws: List<&2, U32>, +i: U32, a: Array<U32>) -> Array<U32>:
 def net.new(p: Prog) -> Net:
   match p:
     case Prog{entry, bodies, +words, +maxk, os}:
-      Net{Array.new(U32, 21n, 0),
+      Net{Array.new(U32, 15n, 0),
           fill(words, 0, Array.new(U32, depth.of((U32.from_nat(List.length(&2, U32, words)) + maxk + 2 : U32)), 0)),
-          Ctl{0, cold.none(0), 1, 0, 0, 0, 0, 262144}}
+          Ctl{0, cold.none(0), 1, 0, 0, 0, 0, 4096}}
 
 # Running
 # -------
@@ -2921,12 +2928,34 @@ def start(+entry: Code, input: Co.D) -> M(U32):
 # What reading a result back needs of the program: the templates' bodies,
 # and the aborts' origins, each by number.
 type Read is Data:
-  Read{+bodies: Map<&2, Co.V>, +os: Map<&2, Lc.Origin>}
+  Read{+bodies: Bodies, +os: Map<&2, Lc.Origin>}
+
+# The bodies of a program read from its bytes. Numbering templates takes no
+# guidance, so these are prepare's.
+def bodies.collected(r: Code & Coll) -> Map<&2, Co.V>:
+  (entry, c) = r
+  match c:
+    case Coll{next, srcs, seen, hs, org}:
+      bodies(srcs, Map.new(&2, Co.V))
+
+def bodies.read(m: Maybe<&2, Co.V>) -> Map<&2, Co.V>:
+  match m:
+    case None{}:
+      Map.new(&2, Co.V)
+    case Some{x}:
+      bodies.collected(collect(Co.app(x, Co.VEnv{}))(Coll{3, selectors(), Map.new(&2, U32), None{}, org.none()}))
+
+def bodies.map(b: Bodies) -> Map<&2, Co.V>:
+  match b:
+    case BodiesAt{m}:
+      m
+    case BodiesIn{bs}:
+      bodies.read(W.expr.of(bs))
 
 def body.of(+rd: Read, +tid: U32) -> Co.V:
   match rd:
     case Read{bodies, os}:
-      Pair.snd(Map<&2, Co.V>, Co.V, Map.get(Co.V, Co.VZero{}, bodies, U32.show(tid)))
+      Pair.snd(Map<&2, Co.V>, Co.V, Map.get(Co.V, Co.VZero{}, bodies.map(bodies), U32.show(tid)))
 
 def origin.of(+rd: Read, +n: U32) -> Lc.Origin:
   match rd:
