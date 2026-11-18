@@ -1,4 +1,4 @@
 status 0
 --- stdout
-8
+RE (missing definition "succ" at line 1, column 1)
 --- stderr

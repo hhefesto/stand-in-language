@@ -252,16 +252,17 @@ def outcome(h: How, r: IC.RB) -> Outcome:
 # EAL's capture layouts for a sized program, inferred over it
 # (ealCaptureLayouts of inferEALCompiled).
 def layouts(+expr: Co.V) -> Map<&2, Lf.Shape>:
-  EM.lr.layouts(EM.lr.of(False{}, Lf.defer.lift.expr(expr)))
+  EM.lr.layouts(EM.lr.of(False{}, EM.budget.default(), Lf.defer.lift.expr(expr)))
 
 # The input prologue's certificate: a program of its own, certified on its own,
-# its guidance added to main's and its refusal named (programWith).
-def prologue.plan(p: Maybe<&2, Co.V>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
+# its guidance added to main's and its refusal named (programWith), under
+# the compile's variable budget.
+def prologue.plan(+bud: U32, p: Maybe<&2, Co.V>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
   match p:
     case None{}:
       Done{Map.new(&2, Lf.Shape)}
     case Some{+v}:
-      EM.lr.plan(EM.lr.full(False{}, Lf.defer.lift.expr(v)))
+      EM.lr.plan(EM.lr.full(False{}, bud, Lf.defer.lift.expr(v)))
 
 def plans(m: Result<&2, &2, String, Map<&2, Lf.Shape>>, p: Result<&2, &2, String, Map<&2, Lf.Shape>>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
   match m:
@@ -282,9 +283,10 @@ def plans(m: Result<&2, &2, String, Map<&2, Lf.Shape>>, p: Result<&2, &2, String
 # its prologue does not certify, the refusal the IC runtime gives instead of a
 # session. The session runs Sized.expr, plain with what the erasure checker
 # proved erased: its bodies that plain shares (by hash) run under these
-# layouts, the erased ones under none.
-def plan.from(+run: T.C, +counts: List<&2, E.TS>, +keep: Maybe<&2, Set()>, +plain: Co.V, +prologue: Maybe<&2, Co.V>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
-  plans(EM.lr.plan(EM.certified.program(Lf.defer.lift(run), counts, keep, plain)), prologue.plan(prologue))
+# layouts, the erased ones under none. Every EAL reading runs under bud, the
+# variable budget (--eal-budget).
+def plan.from(+bud: U32, +run: T.C, +counts: List<&2, E.TS>, +keep: Maybe<&2, Set()>, +plain: Co.V, +prologue: Maybe<&2, Co.V>) -> Result<&2, &2, String, Map<&2, Lf.Shape>>:
+  plans(EM.lr.plan(EM.certified.program(bud, Lf.defer.lift(run), counts, keep, plain)), prologue.plan(bud, prologue))
 
 # A compile's layouts; a program that does not certify has none.
 def layouts.of(r: Result<&2, &2, String, Map<&2, Lf.Shape>>) -> Map<&2, Lf.Shape>:

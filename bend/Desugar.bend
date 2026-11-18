@@ -2,10 +2,10 @@ import Base
 import ./Loc.bend as L
 import ./Syntax.bend as S
 
-# Desugaring (Telomare.Desugar, desugarTerm): the builtins bound around the
-# program, the case helpers aliased, applications of builtins turned into
+# Desugaring (Telomare.Desugar, desugarTerm): the builtins and the case
+# helpers bound around the program, applications of builtins turned into
 # their direct forms where the builtin is in scope, and every `case`
-# lowered to nested ifs over the case helpers.
+# lowered to nested ifs, its literals compared by the case helpers.
 
 # An argument of an application, with the location of the application node
 # that supplies it.
@@ -56,8 +56,58 @@ def lam2(+name: String, body: S.Expanded()) -> S.Expanded():
 def builtin(+name: String, val: S.Expanded()) -> S.ExpandedBind():
   S.Bind{L.Name{L.Builtin{name}, name}, val}
 
-# let zero = 0; left = \x -> left x; ... in t (addBuiltins). `trace` is
-# the identity: master resolves its direct form to its argument.
+# The case helpers (caseHelpers): exact equality with a literal, for case
+# matching. Each takes the literal first and recurses on it alone. An
+# integer n is encoded as n - 1 paired with zero, so its helper walks the
+# left spine of both terms and requires every right of the other to be
+# zero; a string is a zero-terminated list of character codes, compared
+# code by code.
+
+# 1 when t is 0, else 0 (isZero).
+def h.zero(+loc: L.Loc, t: S.Expanded()) -> S.Expanded():
+  S.SIte{loc, t, S.SInt{loc, 0}, S.SInt{loc, 1}}
+
+def h.p(+loc: L.Loc) -> S.Expanded():
+  S.SVar{loc, "p"}
+
+# Whether the heads match, the literal and the other term paired as p.
+def h.head(int: Bool, +loc: L.Loc) -> S.Expanded():
+  match int:
+    case True{}:
+      h.zero(loc, S.SRight{loc, S.SRight{loc, h.p(loc)}})
+    case False{}:
+      S.SApp{loc, S.SApp{loc, S.SVar{loc, "__case_intEqual"}, S.SLeft{loc, S.SLeft{loc, h.p(loc)}}}, S.SLeft{loc, S.SRight{loc, h.p(loc)}}}
+
+# The next part of t: an integer's left, a string's right.
+def h.next(int: Bool, +loc: L.Loc, t: S.Expanded()) -> S.Expanded():
+  match int:
+    case True{}:
+      S.SLeft{loc, t}
+    case False{}:
+      S.SRight{loc, t}
+
+# While the literal is a pair, the other must be one whose head matches,
+# and the walk goes on with the next parts of both; once the literal is
+# zero, so must the other be (walkLiteral).
+def walk.literal(+name: String, +int: Bool) -> S.Expanded():
+  +loc = {L.Gen{"case helper " ++ name} : L.Loc}
+  +test: S.Expanded() = S.SLam{loc, L.Name{loc, "p"}, S.SLeft{loc, h.p(loc)}}
+  +step: S.Expanded() = S.SLam{loc, L.Name{loc, "recur"}, S.SLam{loc, L.Name{loc, "p"},
+    S.SIte{loc, S.SRight{loc, h.p(loc)},
+      S.SIte{loc, h.head(int, loc),
+        S.SApp{loc, S.SVar{loc, "recur"}, S.SPair{loc, h.next(int, loc, S.SLeft{loc, h.p(loc)}), h.next(int, loc, S.SRight{loc, h.p(loc)})}},
+        S.SInt{loc, 0}},
+      S.SInt{loc, 0}}}}
+  +base: S.Expanded() = S.SLam{loc, L.Name{loc, "p"}, h.zero(loc, S.SRight{loc, h.p(loc)})}
+  S.SLam{loc, L.Name{loc, "literal"}, S.SLam{loc, L.Name{loc, "term"},
+    S.SApp{loc, S.SRec{loc, test, step, base}, S.SPair{loc, S.SVar{loc, "literal"}, S.SVar{loc, "term"}}}}}
+
+def helper(+name: String, +int: Bool) -> S.ExpandedBind():
+  S.Bind{L.Name{L.Gen{"case helper"}, name}, walk.literal(name, int)}
+
+# let zero = 0; left = \x -> left x; ...; __case_intEqual = ... in t
+# (addBuiltins). `trace` is the identity: master resolves its direct form
+# to its argument.
 def add.builtins(t: S.Expanded()) -> S.Expanded():
   S.SLet{L.Gen{"addBuiltins"},
     [builtin("zero", S.SInt{L.Builtin{"zero"}, 0}),
@@ -66,42 +116,10 @@ def add.builtins(t: S.Expanded()) -> S.Expanded():
      builtin("trace", lam1("trace", S.SVar{L.Builtin{"trace"}, "x"})),
      builtin("abort", lam1("abort", S.abort.term(Empty, Unit, Empty, L.KUser{}, L.Builtin{"abort"}, S.SVar{L.Builtin{"abort"}, "x"}))),
      builtin("pair", lam2("pair", S.SPair{L.Builtin{"pair"}, S.SVar{L.Builtin{"pair"}, "x"}, S.SVar{L.Builtin{"pair"}, "y"}})),
-     builtin("app", lam2("app", S.SApp{L.Builtin{"app"}, S.SVar{L.Builtin{"app"}, "x"}, S.SVar{L.Builtin{"app"}, "y"}}))],
+     builtin("app", lam2("app", S.SApp{L.Builtin{"app"}, S.SVar{L.Builtin{"app"}, "x"}, S.SVar{L.Builtin{"app"}, "y"}})),
+     helper("__case_intEqual", True{}),
+     helper("__case_stringEqual", False{})],
     t}
-
-# Case helper aliases
-# -------------------
-
-def bound(bs: List<&2, S.ExpandedBind()>, acc: Set()) -> Set():
-  match bs:
-    case Nil{}:
-      acc
-    case Con{b, rest}:
-      match b:
-        case S.Bind{name, val}:
-          bound(rest, Set.add(acc, L.Name.text(name)))
-
-def alias.if(yes: Bool, +loc: L.Loc, +name: String, alias: String, rest: List<&2, S.ExpandedBind()>) -> List<&2, S.ExpandedBind()>:
-  match yes:
-    case True{}:
-      S.Bind{L.Name{L.GenIn{"case helper " ++ name, loc}, alias}, S.SVar{loc, name}} <> rest
-    case False{}:
-      rest
-
-def aliases(+names: Set(), +loc: L.Loc) -> List<&2, S.ExpandedBind()>:
-  alias.if(has(names, "and"), loc, "and", "__case_and",
-    alias.if(has(names, "foldl"), loc, "foldl", "__case_foldl",
-      alias.if(has(names, "dEqual"), loc, "dEqual", "__case_dEqual",
-        alias.if(has(names, "listEqual"), loc, "listEqual", "__case_listEqual", []))))
-
-# __case_and = and, ... for the helpers the program binds, ahead of its own
-# bindings (addCaseHelperAliases).
-def add.aliases(t: S.Expanded()) -> S.Expanded():
-  match t:
-    case S.SLet{+loc, +binds, body}:
-      S.SLet{loc, List.append(&2, S.ExpandedBind(), aliases(bound(binds, Set.new()), loc), binds), body}
-    case other:
-      other
 
 # Builtin applications (optimizeBuiltinFunctions)
 # -----------------------------------------------
@@ -417,42 +435,55 @@ def optimize.builtins(t: S.Expanded()) -> S.Expanded():
 # Case lowering (lowerCases)
 # --------------------------
 
-# The parts of a pattern case lowering inspects (PatternNode), each with
-# the path to it from the root, the projections first taken first ("RL"
-# is Left (Right x)).
-type Node is Data:
-  NPair{+path: String}
-  NInt{+path: String, +n: U32}
-  NStr{+path: String, +s: String}
-  NVar{+path: String, +name: L.Name}
-  NGuard{+path: String, +g: S.Desugared()}
+# A step on the way from a case's scrutinee to a part of it: a projection,
+# or a refinement check of the part reached.
+type Step is Data:
+  StL{}
+  StR{}
+  StCheck{+g: S.Desugared()}
 
-# Every pair, literal, variable and guard of a pattern, in left-to-right
-# preorder, ahead of rest (patternNodes). A guard comes after the nodes of
-# the pattern it annotates.
-def nodes.of(p: S.DesugaredPat(), +path: String, rest: List<&2, Node>) -> List<&2, Node>:
+# The parts of a pattern that bind or test beyond its structure
+# (PatternNode), each with the path to it from the root, the last step
+# first.
+type Node is Data:
+  NVar{+path: List<&2, Step>, +name: L.Name}
+  NGuard{+path: List<&2, Step>, +g: S.Desugared()}
+
+# Every variable and guard of a pattern, in left-to-right preorder, ahead
+# of rest (patternNodes). A guard comes after the nodes of the pattern it
+# annotates, and the path to a variable under a guard passes through a
+# refinement check of it: the match has tested the guard, so the check
+# cannot fail, but it lets sizing bound the variable as a let refinement
+# would. vpath leads to the variables, gpath (projections only) to the
+# guards.
+def nodes.of(p: S.DesugaredPat(), +vpath: List<&2, Step>, +gpath: List<&2, Step>, rest: List<&2, Node>) -> List<&2, Node>:
   match p:
     case S.PPair{a, b}:
-      NPair{path} <> nodes.of(a, path ++ "L", nodes.of(b, path ++ "R", rest))
-    case S.PInt{n}:
-      NInt{path, n} <> rest
-    case S.PStr{t}:
-      NStr{path, t} <> rest
+      nodes.of(a, StL{} <> vpath, StL{} <> gpath, nodes.of(b, StR{} <> vpath, StR{} <> gpath, rest))
     case S.PVar{name}:
-      NVar{path, name} <> rest
-    case S.PIgnore{}:
+      NVar{vpath, name} <> rest
+    case S.PAnn{q, +g}:
+      nodes.of(q, StCheck{g} <> vpath, gpath, NGuard{gpath, g} <> rest)
+    case _:
       rest
-    case S.PAnn{q, t}:
-      nodes.of(q, path, NGuard{path, t} <> rest)
 
-def at(path: String, +x: S.Desugared()) -> S.Desugared():
+# A step taken from y: a projection at y's location (HLeft, HRight), or a
+# check of y there (refined).
+def step.at(s: Step, +y: S.Desugared()) -> S.Desugared():
+  match s:
+    case StL{}:
+      S.SLeft{S.loc(Empty, Empty, Empty, y), y}
+    case StR{}:
+      S.SRight{S.loc(Empty, Empty, Empty, y), y}
+    case StCheck{g}:
+      S.SCheck{S.loc(Empty, Empty, Empty, y), L.KRefine{}, g, y}
+
+def at(path: List<&2, Step>, +x: S.Desugared()) -> S.Desugared():
   match path:
-    case SCon{Chr{76}, rest}:
-      at(rest, S.SLeft{S.loc(Empty, Empty, Empty, x), x})
-    case SCon{c, rest}:
-      at(rest, S.SRight{S.loc(Empty, Empty, Empty, x), x})
-    case SNil{}:
+    case Nil{}:
       x
+    case Con{s, rest}:
+      step.at(s, at(rest, x))
 
 # A pattern's literal skeleton as a term, variables and ignores as 0
 # (patternToTerm).
@@ -469,56 +500,85 @@ def pattern.term(+anno: L.Loc, p: S.DesugaredPat()) -> S.Desugared():
     case _:
       S.SInt{anno, 0}
 
-# A helper's name, as the generated code refers to it (VarP).
-def helper(+name: String) -> S.Desugared():
-  S.SVar{L.Gen{"LamBase Cofree instance"}, name}
+# 1 when t is 0, else 0 (isZero).
+def is.zero(+anno: L.Loc, t: S.Desugared()) -> S.Desugared():
+  S.SIte{anno, t, S.SInt{anno, 0}, S.SInt{anno, 1}}
 
-# AppP: at the function's location.
-def app(+f: S.Desugared(), x: S.Desugared()) -> S.Desugared():
-  S.SApp{S.loc(Empty, Empty, Empty, f), f, x}
+# Exact equality of t with a literal: its helper applied to the literal,
+# then to t. Zero and the empty string are both encoded as 0.
+def literal.check(zero: Bool, +anno: L.Loc, +helper: String, lit: S.Desugared(), t: S.Desugared()) -> S.Desugared():
+  match zero:
+    case True{}:
+      is.zero(anno, t)
+    case False{}:
+      S.SApp{anno, S.SApp{anno, S.SVar{anno, helper}, lit}, t}
 
-def equal(+name: String, a: S.Desugared(), b: S.Desugared()) -> S.Desugared():
-  app(app(helper(name), a), b)
+# The conjunction of non-empty checks, nonzero exactly when all of them
+# are: each check guards the rest (allOf).
+def all.of(+anno: L.Loc, cs: List<&2, S.Desugared()>) -> S.Desugared():
+  match cs:
+    case Nil{}:
+      S.SInt{anno, 1}
+    case Con{c, more}:
+      match more:
+        case Nil{}:
+          c
+        case Con{d, rest}:
+          S.SIte{anno, c, all.of(anno, d <> rest), S.SInt{anno, 0}}
 
-# Bool-valued checks that x has the pattern's pairs and literals, and that
-# its guards hold (matchChecks): a pair node or a guard's result, any value,
-# is made a Bool before it reaches `and`, whose arguments are refined to
-# Bool; numbers are compared with dEqual, strings whole with listEqual.
-def checks(+anno: L.Loc, +x: S.Desugared(), ns: List<&2, Node>) -> List<&2, S.Desugared()>:
+def some.cons(m: Maybe<&2, S.Desugared()>, rest: List<&2, S.Desugared()>) -> List<&2, S.Desugared()>:
+  match m:
+    case Some{x}:
+      x <> rest
+    case None{}:
+      rest
+
+# A pair whose parts have no structure to test is t itself; else t, then
+# its parts.
+def pair.check(+anno: L.Loc, +t: S.Desugared(), parts: List<&2, S.Desugared()>) -> S.Desugared():
+  match parts:
+    case Nil{}:
+      t
+    case Con{c, more}:
+      S.SIte{anno, t, all.of(anno, c <> more), S.SInt{anno, 0}}
+
+# A check, nonzero when it passes, that t has the pattern's structure, or
+# None when any term does (shapeCheck over patternShape). A pair is tested
+# before its parts, which are tested left to right. The literal goes first
+# to a helper: the helpers recurse on their first argument, and the
+# scrutinee may be unbounded input.
+def shape.check(p: S.DesugaredPat(), +anno: L.Loc, +t: S.Desugared()) -> Maybe<&2, S.Desugared()>:
+  match p:
+    case S.PPair{a, b}:
+      Some{pair.check(anno, t, some.cons(shape.check(a, anno, S.SLeft{anno, t}), some.cons(shape.check(b, anno, S.SRight{anno, t}), [])))}
+    case S.PInt{+n}:
+      Some{literal.check(U32.is_eq(n, 0), anno, "__case_intEqual", S.SInt{anno, n}, t)}
+    case S.PStr{+s}:
+      Some{literal.check(String.eq(s, ""), anno, "__case_stringEqual", S.SStr{anno, s}, t)}
+    case S.PAnn{q, g}:
+      shape.check(q, anno, t)
+    case _:
+      None{}
+
+# The guards, each applied to its part of x.
+def guards(+anno: L.Loc, +x: S.Desugared(), ns: List<&2, Node>) -> List<&2, S.Desugared()>:
   match ns:
     case Nil{}:
       []
     case Con{n, rest}:
       match n:
-        case NPair{path}:
-          S.SIte{S.loc(Empty, Empty, Empty, x), at(path, x), S.SInt{anno, 1}, S.SInt{anno, 0}} <> checks(anno, x, rest)
-        case NInt{path, k}:
-          equal("__case_dEqual", at(path, x), S.SInt{anno, k}) <> checks(anno, x, rest)
-        case NStr{path, t}:
-          equal("__case_listEqual", at(path, x), S.SStr{anno, t}) <> checks(anno, x, rest)
+        case NGuard{path, g}:
+          S.SApp{anno, g, at(path, x)} <> guards(anno, x, rest)
         case NVar{path, name}:
-          checks(anno, x, rest)
-        case NGuard{path, +g}:
-          S.SIte{S.loc(Empty, Empty, Empty, g), app(g, at(path, x)), S.SInt{anno, 1}, S.SInt{anno, 0}} <> checks(anno, x, rest)
+          guards(anno, x, rest)
 
-# The conjunction of non-empty checks (allOf).
-def all.of(+anno: L.Loc, cs: List<&2, S.Desugared()>) -> S.Desugared():
-  match cs:
-    case Nil{}:
-      S.SInt{anno, 1}
-    case Con{a, more}:
-      match more:
-        case Nil{}:
-          a
-        case Con{b, rest}:
-          match rest:
-            case Nil{}:
-              app(app(S.SVar{anno, "__case_and"}, a), b)
-            case Con{c, tail}:
-              app(app(app(S.SVar{anno, "__case_foldl"}, helper("__case_and")), S.SInt{anno, 1}),
-                  S.SList{anno, a <> b <> c <> tail})
+# Checks, each nonzero when it passes, that x has the pattern's structure
+# and then that its guards hold (matchChecks): structure first, so a guard
+# only sees a term the rest of the pattern matches.
+def checks(+anno: L.Loc, +x: S.Desugared(), p: S.DesugaredPat(), ns: List<&2, Node>) -> List<&2, S.Desugared()>:
+  some.cons(shape.check(p, anno, x), guards(anno, x, ns))
 
-def var.keep(dup: Bool, +path: String, +name: L.Name, rest: List<&2, Node>) -> List<&2, Node>:
+def var.keep(dup: Bool, +path: List<&2, Step>, +name: L.Name, rest: List<&2, Node>) -> List<&2, Node>:
   match dup:
     case True{}:
       rest
@@ -555,10 +615,6 @@ def binds(vs: List<&2, Node>, +x: S.Desugared(), r: S.Desugared()) -> S.Desugare
         case _:
           binds(rest, x, r)
 
-# ITEP: at the condition's location.
-def ite(+i: S.Desugared(), t: S.Desugared(), e: S.Desugared()) -> S.Desugared():
-  S.SIte{S.loc(Empty, Empty, Empty, i), i, t, e}
-
 # An alternative with no checks always matches, so the ones after it are
 # dropped.
 def alternative(+ra: L.Loc, cs: List<&2, S.Desugared()>, bound: S.Desugared(), next: S.Desugared()) -> S.Desugared():
@@ -566,7 +622,7 @@ def alternative(+ra: L.Loc, cs: List<&2, S.Desugared()>, bound: S.Desugared(), n
     case Nil{}:
       bound
     case Con{c, more}:
-      ite(all.of(ra, c <> more), bound, next)
+      S.SIte{ra, all.of(ra, c <> more), bound, next}
 
 # A case alternative lowered: its pattern, its guards lowered, and its
 # lowered result.
@@ -617,31 +673,31 @@ def darms(v: LV) -> List<&2, Arm>:
       []
 
 # The alternatives as nested ifs over x, tried in order, the last else
-# aborting (caseToNestedIfs); anno is the scrutinee's location.
-def ifs(+cloc: L.Loc, +anno: L.Loc, +x: S.Desugared(), alts: List<&2, Arm>) -> S.Desugared():
+# aborting (caseToNestedIfs); cloc is the case's location. Matching depends
+# on no definition from source: literals are compared by the case helpers
+# add.builtins binds.
+def ifs(+cloc: L.Loc, +x: S.Desugared(), alts: List<&2, Arm>) -> S.Desugared():
   match alts:
     case Nil{}:
-      S.SIte{anno, S.SInt{anno, 1}, S.abort.term(Empty, Empty, Empty, L.KCase{}, cloc, S.SStr{cloc, "Non-exhaustive patterns in case"}), S.SInt{anno, 0}}
+      S.SIte{cloc, S.SInt{cloc, 1}, S.abort.term(Empty, Empty, Empty, L.KCase{}, cloc, S.SStr{cloc, "Non-exhaustive patterns in case"}), S.SInt{cloc, 0}}
     case Con{alt, rest}:
       match alt:
-        case Arm{p, +r}:
-          +ns = nodes.of(p, "", [])
-          alternative(S.loc(Empty, Empty, Empty, r), checks(S.loc(Empty, Empty, Empty, r), x, ns),
-                      binds(vars(ns, Set.new()), x, r), ifs(cloc, anno, x, rest))
+        case Arm{+p, +r}:
+          +ns = nodes.of(p, [], [], [])
+          alternative(S.loc(Empty, Empty, Empty, r), checks(S.loc(Empty, Empty, Empty, r), x, p, ns),
+                      binds(vars(ns, Set.new()), x, r), ifs(cloc, x, rest))
 
 # A scrutinee that is not a variable is bound once, to a name source code
 # cannot write, so the checks and bindings refer to it instead of copying
-# it.
+# it; anno is the scrutinee's location.
 def case.bind(+cloc: L.Loc, +anno: L.Loc, scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
   +g = {L.GenIn{"case scrutinee", anno} : L.Loc}
-  +body = ifs(cloc, anno, S.SVar{g, "__case_scrutinee"}, arms)
-  S.SApp{S.loc(Empty, Empty, Empty, body), S.SLam{S.loc(Empty, Empty, Empty, body), L.Name{g, "__case_scrutinee"}, body}, scrut}
+  S.SApp{g, S.SLam{g, L.Name{g, "__case_scrutinee"}, ifs(cloc, S.SVar{g, "__case_scrutinee"}, arms)}, scrut}
 
-# cloc is the case's location, for its abort.
 def case.ifs(+cloc: L.Loc, +scrut: S.Desugared(), arms: List<&2, Arm>) -> S.Desugared():
   match scrut:
     case S.SVar{+a, +name}:
-      ifs(cloc, a, S.SVar{a, name}, arms)
+      ifs(cloc, S.SVar{a, name}, arms)
     case _:
       case.bind(cloc, S.loc(Empty, Empty, Empty, scrut), scrut, arms)
 
@@ -738,4 +794,4 @@ def lower.cases(t: S.Expanded()) -> S.Desugared():
 
 # desugarTerm: what the program is resolved to, with no case left in it.
 def desugar(t: S.Expanded()) -> S.Desugared():
-  lower.cases(optimize.builtins(add.builtins(add.aliases(t))))
+  lower.cases(optimize.builtins(add.builtins(t)))

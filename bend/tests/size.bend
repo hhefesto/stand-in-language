@@ -188,15 +188,15 @@ def kept(x: E.X) -> String:
 def filtered(+q: String, left: Bool, +n: String) -> String:
   kept(Sz.filter.at(Some{q}, left, n, E.XZero{}, E.XPair{E.XZero{}, E.XZero{}}))
 
-def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String, +cor: String, +anti: String, +ninp: String, +misl: String) -> IO(Unit):
+def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String, +cor: String, +anti: String, +ninp: String, +misl: String, +br: String, +leak: String, +unk: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("size-tc_ultra_minimal", String.eq(
       size(65536, [Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "1")))
     IO.print(verdict("size-simpleplus", String.eq(
-      size(65536, with.prelude("simpleplus", plus, prelude), "simpleplus"), "11 7 10 10")))
+      size(65536, with.prelude("simpleplus", plus, prelude), "simpleplus"), "256 7 10 10 10 11")))
     IO.print(verdict("size-tictactoe", String.eq(
       size(65536, with.prelude("tictactoe", ttt, prelude), "tictactoe"),
-      "79 32 10 127 9 10 10 9 4 4 4 78 78 3 2 2")))
+      "114 256 10 58 32 9 2 2 2 3 9 10 10 49 10 9 4 4 4 2 9 9 3 2")))
     IO.print(verdict("size-over-budget", String.eq(
       size(65536, with.prelude("over-budget-recursion", over, prelude), "over-budget-recursion"), "34")))
     IO.print(verdict("size-budget-exhausted", String.eq(
@@ -208,7 +208,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
     IO.print(verdict("size-mislabeled", String.eq(
       size(65536, with.prelude("mislabeled-size", misl, prelude), "mislabeled-size"), "9")))
     IO.print(verdict("size-where-checks-go", all([
-      String.eq(placed(with.prelude("simpleplus", plus, prelude), "simpleplus"), "/RefinementAbort"),
+      String.eq(placed(with.prelude("simpleplus", plus, prelude), "simpleplus"), "RefinementAbort/RefinementAbort"),
       String.eq(placed(with.prelude("correlated-check", cor, prelude), "correlated-check"), "/"),
       String.eq(placed(with.prelude("anticorrelated-check", anti, prelude), "anticorrelated-check"), "RefinementAbort/"),
       String.eq(placed(with.prelude("notinput", ninp, prelude), "notinput"), "/RefinementAbort")])))
@@ -220,14 +220,26 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       String.eq(filtered("L", False{}, "L"), "b"),
       String.eq(filtered("L", False{}, "LL"), "b"),
       String.eq(filtered("R", False{}, "L"), "both")])))
+    # A refinement bounds what its checked value flows into: a recursion is
+    # sized by the check in its own case alternative; one alternative's input
+    # is not bounded by another's check (the checks used to bound the whole
+    # input, as if every input passed every check main met); nor by a check
+    # whose passing branch sizing cannot follow (the unknown branch used to be
+    # read as impossible, and the program miscompiled).
+    IO.print(verdict("size-flow", all([
+      Bool.not(String.starts_with(size(65536, with.prelude("branch-refinement", br, prelude), "branch-refinement"), "could not size")),
+      String.contains(size(65536, with.prelude("branch-refinement-leak", leak, prelude), "branch-refinement-leak"), "depends on input that nothing bounds"),
+      String.contains(size(65536, with.prelude("unknown-check-branch", unk, prelude), "unknown-check-branch"), "depends on input that nothing bounds")])))
     # The net's program, where the erasure checker proves it: a case on a
     # constant that matches holds no abort, one that does not keeps it, and
-    # simpleplus's only check runs before main.
+    # simpleplus keeps one: its input check runs before main, but succByte's
+    # `Num 255` (Prelude:51:28, since master's 1cfcb3de..6e67d618) stays in
+    # main, as master's `--meter` shows (58 runs on `3 4`).
     IO.print(verdict("size-erased", all([
       String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
       String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),
       String.eq(aborts(case.of(prelude, "3"), "cased"), "Abort"),
-      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "none")])))
+      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "Abort")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -241,4 +253,7 @@ def main() -> IO(Unit):
     anti : Result<&1, &1, String, String> <- Tx.read_file("test/programs/anticorrelated-check.tel")
     ninp : Result<&1, &1, String, String> <- Tx.read_file("test/programs/notinput.tel")
     misl : Result<&1, &1, String, String> <- Tx.read_file("test/programs/mislabeled-size.tel")
-    report(text(prelude), text(ttt), text(plus), text(tc), text(over), text(unb), text(cor), text(anti), text(ninp), text(misl))
+    br : Result<&1, &1, String, String> <- Tx.read_file("test/programs/branch-refinement.tel")
+    leak : Result<&1, &1, String, String> <- Tx.read_file("test/programs/branch-refinement-leak.tel")
+    unk : Result<&1, &1, String, String> <- Tx.read_file("test/programs/unknown-check-branch.tel")
+    report(text(prelude), text(ttt), text(plus), text(tc), text(over), text(unb), text(cor), text(anti), text(ninp), text(misl), text(br), text(leak), text(unk))

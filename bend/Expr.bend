@@ -86,6 +86,7 @@ type X is Data:
   XCheck{+site: U32, +tc: X, +c: X}
   XStep{+tok: U32, +n: U32, +x: X}
   XVar{+p: String}
+  XBounded{+zs: Set(), +p: String}
   XAny{}
   XBarrier{+x: X}
   XLefts{+n: U32, +x: X}
@@ -490,6 +491,8 @@ def core(+os: Map<&2, L.Origin>, x: X) -> Result<&2, &2, String, Co.V>:
     case XStep{tok, n, a}:
       Fail{"an unrolling step"}
     case XVar{v}:
+      Fail{"an input variable"}
+    case XBounded{zs, v}:
       Fail{"an input variable"}
     case XAny{}:
       Fail{"an unknown value"}

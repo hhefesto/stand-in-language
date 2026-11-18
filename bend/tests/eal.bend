@@ -349,25 +349,30 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       String.eq(contraction(p(rgt(T.CUnsized{Lc.Gen{"first hole"}, 1}), rgt(T.CEnv{Lc.Gen{"second env"}}))),
         "[R] GeneratedLoc \"first hole\" Nothing")])))
     IO.print(verdict("eal-programs", all([
-      String.eq(program(aux(prelude, "main = succ 0")), "ok"),
-      String.eq(program(aux(prelude, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) succ) 0")), "ok"),
-      String.eq(program(aux(prelude, "main = $3 $2 succ 0")), "ok"),
+      String.eq(program(aux(prelude, "main = succByte 0")), "ok"),
+      String.eq(program(aux(prelude, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) succByte) 0")), "ok"),
+      String.eq(program(aux(prelude, "main = $3 $2 succByte 0")), "ok"),
       String.eq(program(aux(prelude, "main = let f = \\a b -> (a,b)\n           g = if 1 then f 1 else left\n       in g 1")), "ok"),
       String.eq(program(aux(prelude,
-        "main = let compose = \\f g x -> f (g x)\n           h = compose succ succ\n           g = if 1 then h else left\n       in g 1")), "ok"),
+        "main = let compose = \\f g x -> f (g x)\n           h = compose succByte succByte\n           g = if 1 then h else left\n       in g 1")), "ok"),
       String.eq(program(aux(prelude, "main = listEqual \"ab\" \"ab\"")), "ok"),
       String.eq(program(aux(prelude, "main = left (filter (\\x -> dEqual x 2) (range 0 3))")), "ok")])))
     # EALTests' two PINNED verdicts. The second gives up at the dispatch
     # depth cap; on the term that runs, the gate is in a body under the
     # Prelude's let lambdas, so main fails on that dependency.
     IO.print(verdict("eal-pinned", all([
-      String.eq(program(aux(prelude, "main = (if 0 then (\\x -> times $2 x) else $1) succ 0")), "mismatch"),
-      String.eq(program(aux(prelude, "main = (if 0 then (\\x -> x) else $1) succ 0")), "dependency")])))
+      String.eq(program(aux(prelude, "main = (if 0 then (\\x -> times $2 x) else $1) (\\x -> (x,0)) 0")), "mismatch"),
+      String.eq(program(aux(prelude, "main = (if 0 then (\\x -> x) else $1) succByte 0")), "dependency")])))
+    # haskell-final's EAL (this module; the IC runs under EALm since
+    # 075af0ef) on sized programs. Master's succByte checks `Num 255` since
+    # bd05da18, and a check in a sized chain fails this EAL's dependency
+    # (2026-11-10: "ok/dependency"), so these use a successor without one;
+    # tests/ealm.bend keeps master's succByte cases.
     IO.print(verdict("eal-sized", all([
-      String.eq(sized(aux(prelude, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) succ) 0")), "ok/ok"),
-      String.eq(sized(aux(prelude, "main = $3 $2 succ 0")), "ok/ok"),
-      String.eq(sized(aux(prelude, "main = d2c 3 succ 0")), "ok/ok"),
-      String.eq(sized(aux(prelude, "main = let g = {id, \\recur l -> succ (recur (right l)), \\l -> 0} in g [1]")), "ok/ok"),
+      String.eq(sized(aux(prelude, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) (\\x -> (x,0))) 0")), "ok/ok"),
+      String.eq(sized(aux(prelude, "main = $3 $2 (\\x -> (x,0)) 0")), "ok/ok"),
+      String.eq(sized(aux(prelude, "main = d2c 3 (\\x -> (x,0)) 0")), "ok/ok"),
+      String.eq(sized(aux(prelude, "main = let g = {id, \\recur l -> (recur (right l), 0), \\l -> 0} in g [1]")), "ok/ok"),
       String.ends_with(sized(aux(prelude,
         "main = let g = {id, \\recur l -> \\accum -> recur (right l) accum, \\l -> \\accum -> accum} in g [1] 0")), "/ok"),
       String.ends_with(sized(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]")), "/ok"),
@@ -377,14 +382,14 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
     # end as megaparsec's captureSourceSpan does.
     IO.print(verdict("eal-lift-udt", String.eq(
       main.hash(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"rat",
-        "import Prelude\nfromRational = \\n d -> if dEqual d 0 then abort \"Denominator cannot be zero\" else let g = gcd n d in (dDiv n g, dDiv d g)\nrPlus = \\a b -> fromRational (dPlus (dTimes (left a) (right b)) (dTimes (left b) (right a))) (dTimes (right a) (right b))\nmain = \\input -> (if dEqual (left (rPlus (fromRational 1 2) (fromRational 1 2))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
-      "3521248034365eeecbb7c460bb712c3166fb8b68bbe4bb64361fbbe2724b6497")))
+        "import Prelude\nfromRational = \\n d -> if dEqual d 0 then abort \"Denominator cannot be zero\" else let g = gcd n d in (dDiv n g, dDiv d g)\nrPlus = \\a b -> fromRational (plusByte (timesByte (left a) (right b)) (timesByte (left b) (right a))) (timesByte (right a) (right b))\nmain = \\input -> (if dEqual (left (rPlus (fromRational 1 2) (fromRational 1 2))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
+      "2336be040d7eef7a3806cf01eab4cea1cabb2aee8fb70e5baeea611553f2bfbd")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "d992f91d1f0ed4450acaddaf31698601d2126a3fc690232d3a2853a915617cb7")))
     IO.print(verdict("eal-layouts-simpleplus", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus")),
-      "6f10652ac9a1867c2dcef6e8a1cf478d7e9ebcc1aef83ffc8ea3055b73a97b87")))
+      "df61eecc88845c32d7d83152abc0ab3f8e335f8fdddbfb2dae5629bb671218e8")))
 
 def main() -> IO(Unit):
   do IO<Unit>:

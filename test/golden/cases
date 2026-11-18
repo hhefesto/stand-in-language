@@ -52,8 +52,8 @@ case_ simpleplus.telc-certificate test/programs/simpleplus.telc '' --certificate
 case_ tictactoe.run tictactoe.tel '1\n4\n2\n5\n3\n'
 case_ tictactoe.certificate tictactoe.tel '' --certificate
 case_ tictactoe.ic tictactoe.tel '1\n4\n2\n5\n3\n' --ic
-# A line the guard refuses, answered by master's program (every check in it).
-case_ tictactoe.ic-abort tictactoe.tel '10\n' --ic
+# A line tictactoe rejects: 10 is no square, so it asks again, and q quits.
+case_ tictactoe.ic-reject tictactoe.tel '10\nq\n' --ic
 # The game haskell-final's test suite played (test/ResolverTests.hs, "test
 # tictactoe.tel": fullRunTicTacToeString is this transcript plus the test
 # harness's closing "done"), sized and on the net.

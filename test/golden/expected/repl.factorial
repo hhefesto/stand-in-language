@@ -1,4 +1,4 @@
 status 0
 --- stdout
-24
+RE (missing definition "c2d" at line 1, column 1)
 --- stderr

@@ -7,6 +7,7 @@ import ../Loc.bend as Lc
 import ../Core.bend as Co
 import ../Lift.bend as Lf
 import ../IC.bend as IC
+import ../EALm.bend as EM
 import ../Session.bend as Ss
 import ../Text.bend as Tx
 
@@ -72,7 +73,7 @@ def sized.of(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: List<&2
     case Done{s}:
       match s:
         case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
-          Ss.replay(Ss.session(expr, Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro)), pro), Ss.Sized{}, lines)
+          Ss.replay(Ss.session(expr, Ss.layouts.of(Ss.plan.from(EM.budget.default(), run, counts, Sz.checks.keep(checks), pl, pro)), pro), Ss.Sized{}, lines)
 
 def sized.compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -195,9 +196,12 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String, +unb: Str
       agree(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["3 4"]),
       agree(with.prelude(prelude, "tictactoe", ttt), "tictactoe", ["1", "9", "2", "8", "3"])])))
     IO.print(verdict("fast-base-case", base.ran(base.case())))
+    # Since master's bd05da18, site 0 is Prelude's Num check (Prelude:28:16),
+    # run at every succByte: 14,848 unrolls, where the old site 0 had 10.
+    # There is also a fifth site (#4).
     IO.print(verdict("fast-sites", String.eq(
       sites(fast(with.prelude(prelude, "simpleplus", plus), "simpleplus", 16777216, ["3 4"])),
-      "#0 10;#1 24;#2 5;#3 4;")))
+      "#0 14848;#1 24;#2 5;#3 4;#4 10;")))
     IO.print(verdict("fast-unsized", all([
       unsized.fails(Fr.compile(with.prelude(prelude, "unbounded-input-recursion", unb), "unbounded-input-recursion")),
       String.eq(shown(fast(with.prelude(prelude, "unbounded-input-recursion", unb), "unbounded-input-recursion", 0, ["a", "a"])),

@@ -63,6 +63,7 @@ let
     "*.run-*"
     "*.ic"
     "*.ic-abort"
+    "*.ic-reject"
     "*.ic-carry"
     "*.ic-meter"
     "*.ic-certificate"
@@ -114,6 +115,8 @@ let
       "ic-constants"
       "ic-case"
       "ic-udt"
+      "ic-prelude-errors"
+      "ic-eal-budget"
       "ic-meter-case-udt"
       "ic-prologue"
       "ic-meter-tc_ultra_minimal"
@@ -222,6 +225,7 @@ let
       "size-mislabeled"
       "size-where-checks-go"
       "size-filter"
+      "size-flow"
       "size-erased"
     ];
     lexical = [

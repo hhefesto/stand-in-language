@@ -298,10 +298,10 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       "tc_ultra_minimal:6:25 (#0)")))
     IO.print(verdict("sites-simpleplus", String.eq(
       sites(Fr.compile(with.prelude("simpleplus", plus, prelude), "simpleplus")),
-      "Prelude:42:18 (#0), Prelude:60:23 (#1), simpleplus:11:42 (#2), simpleplus:11:28 (#3)")))
+      "Prelude:28:16 (#0), Prelude:92:23 (#1), simpleplus:11:45 (#2), simpleplus:11:31 (#3), simpleplus:19:37 (#4), simpleplus:20:67 (#5)")))
     IO.print(verdict("sites-tictactoe", String.eq(
       sites(Fr.compile(with.prelude("tictactoe", ttt, prelude), "tictactoe")),
-      "Prelude:42:18 (#0), Prelude:60:23 (#1), Prelude:74:24 (#2), Prelude:79:42 (#3), tictactoe:31:50 (#4), tictactoe:31:28 (#5), tictactoe:32:30 (#6), tictactoe:59:65 (#7), tictactoe:59:43 (#8), tictactoe:60:57 (#9), tictactoe:61:57 (#10), tictactoe:73:39 (#11), tictactoe:76:57 (#12), tictactoe:86:45 (#13), tictactoe:94:39 (#14), tictactoe:115:34 (#15)")))
+      "? (#0), Prelude:28:16 (#1), Prelude:37:15 (#2), Prelude:74:22 (#3), Prelude:92:23 (#4), Prelude:106:24 (#5), Prelude:111:42 (#6), tictactoe:12:10 (#7), tictactoe:23:8 (#8), tictactoe:24:8 (#9), tictactoe:49:50 (#10), tictactoe:49:28 (#11), tictactoe:50:30 (#12), tictactoe:61:25 (#13), tictactoe:62:47 (#14), tictactoe:77:65 (#15), tictactoe:77:43 (#16), tictactoe:78:57 (#17), tictactoe:79:57 (#18), tictactoe:89:34 (#19), tictactoe:97:39 (#20), tictactoe:100:61 (#21), tictactoe:110:45 (#22), tictactoe:118:39 (#23)")))
     IO.print(verdict("sites-limits", String.eq(
       sites(Fr.compile(with.prelude("over-budget-recursion", over, prelude), "over-budget-recursion")),
       "over-budget-recursion:30:34 (#0)") && String.eq(

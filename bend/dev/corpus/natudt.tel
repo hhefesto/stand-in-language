@@ -3,7 +3,7 @@ natTag = 1
 Nat = \v -> left v
 toNat = \x -> (natTag, x)
 fromNat = \(x : Nat) -> right x
-nPlus = \(a : Nat) (b : Nat) -> (natTag, d2c (right a) succ (right b))
+nPlus = \(a : Nat) (b : Nat) -> (natTag, d2c (right a) succByte (right b))
 nMinus = \(a : Nat) (b : Nat) ->
       let sLeft = \x -> case x of
                           (l, _) -> l

@@ -8,6 +8,7 @@ import ../Core.bend as Co
 import ../Lift.bend as Lf
 import ../EAL.bend as EAL
 import ../IC.bend as IC
+import ../EALm.bend as EM
 import ../Session.bend as Ss
 import ../Text.bend as Tx
 
@@ -145,7 +146,7 @@ def all(bs: List<&2, Bool>) -> Bool:
 def layouts.main(guided: Bool, +run: T.C, +counts: List<&2, E.TS>, +checks: Sz.Checks, +pl: Co.V, +pro: Maybe<&2, Co.V>) -> Map<&2, Lf.Shape>:
   match guided:
     case True{}:
-      Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro))
+      Ss.layouts.of(Ss.plan.from(EM.budget.default(), run, counts, Sz.checks.keep(checks), pl, pro))
     case False{}:
       Map.new(&2, Lf.Shape)
 
@@ -323,6 +324,16 @@ def case.reachable() -> String:
 def case.ignore() -> String:
   case.program("((3,\"s1\"),(0,0))", ["          _ -> \"True\"", "          ((3,\"s1\"),(var0,var1)) -> \"False\""])
 
+# CaseTests' near misses: a single pattern, falling through to "False".
+def case.near(+scrut: String, +pat: String) -> String:
+  case.program(scrut, ["          " ++ pat ++ " -> \"True\"", "          _ -> \"False\""])
+
+# Int, string and pair patterns in a program that imports nothing.
+def case.no.prelude() -> String:
+  unlines(["main =", "  let caseTest =", "        case (3, (\"ab\", 0)) of",
+           "          (3, (\"ac\", _)) -> \"wrong string\"", "          (2, _) -> \"wrong int\"",
+           "          (3, (\"ab\", x)) -> \"matched\"", "  in \\input -> (caseTest, 0)"])
+
 def case.nonexhaustive() -> String:
   unlines(["import Prelude", "main = \\input ->", "  let r = case 3 of", "            0 -> \"zero\"",
            "            1 -> \"one\"", "  in (r, 0)"])
@@ -338,8 +349,8 @@ def rational() -> String:
     "                        then abort \"Denominator cannot be zero\"",
     "                        else let g = gcd n d",
     "                             in (dDiv n g, dDiv d g)",
-    "rPlus = \\a b -> fromRational (dPlus (dTimes (left a) (right b)) (dTimes (left b) (right a)))",
-    "                              (dTimes (right a) (right b))",
+    "rPlus = \\a b -> fromRational (plusByte (timesByte (left a) (right b)) (timesByte (left b) (right a)))",
+    "                              (timesByte (right a) (right b))",
     "main = \\input -> (if dEqual (left (rPlus (fromRational 1 2) (fromRational 1 2))) 1 then \"ok\" else \"bad\", 0)"])
 
 def nat() -> String:
@@ -347,19 +358,28 @@ def nat() -> String:
     "natTag = 1",
     "Nat = \\v -> left v",
     "toNat = \\x -> (natTag, x)",
-    "nPlus = \\(a : Nat) (b : Nat) -> (natTag, d2c (right a) succ (right b))",
+    "nPlus = \\(a : Nat) (b : Nat) -> (natTag, d2c (right a) succByte (right b))",
     "main = \\input -> (if dEqual (right (nPlus (toNat 2) (toNat 3))) 5 then \"ok\" else \"bad\", 0)"])
 
-# UDTTests' natural arithmetic, a digit per case.
+# UDTTests' natural arithmetic, a digit per case. No minusByte 0 1: since
+# master's bd05da18 it fails numDec's NonZero check and aborts (below.zero).
 def arithmetic() -> String:
   unlines(["import Prelude",
     "b = \\x -> if x then \"1\" else \"0\"",
     "main = \\input ->",
-    "  ( concat [ b (dEqual (dPlus 1 2) 3), b (dEqual (dMinus 5 3) 2), b (dEqual (dMinus 0 1) 0)",
-    "           , b (dEqual (dTimes 3 4) 12), b (dEqual (dDiv 8 2) 4), b (dEqual (dEqual 3 3) 1)",
-    "           , b (dEqual (dEqual 3 4) 0), b (dEqual (dMod 10 3) 1)",
+    "  ( concat [ b (dEqual (plusByte 1 2) 3), b (dEqual (minusByte 5 3) 2)",
+    "           , b (dEqual (timesByte 3 4) 12), b (dEqual (dDiv 8 2) 4), b (dEqual (dEqual 3 3) 1)",
+    "           , b (dEqual (dEqual 3 4) 0), b (dEqual (modByte 10 3) 1)",
     "           ]",
     "  , 0)"])
+
+# Byte arithmetic that fails, as master's PreludeTests expect since
+# 8b9fb5ac: minusByte 0 1 fails numDec's NonZero check, dDiv 1 0 its own.
+def below.zero() -> String:
+  unlines(["import Prelude", "main = \\input -> (if dEqual (minusByte 0 1) 0 then \"zero\" else \"other\", 0)"])
+
+def by.zero() -> String:
+  unlines(["import Prelude", "main = \\input -> (if dEqual (dDiv 1 0) 0 then \"zero\" else \"other\", 0)"])
 
 def qualified() -> String:
   unlines(["import Prelude", "import qualified Other as O",
@@ -392,6 +412,29 @@ def displays(r: Ss.Replay) -> String:
 
 def shows(+prelude: String, text: String, +out: String) -> Bool:
   String.eq(last(plain(with.prelude(prelude, "M", text), "M", [])), out)
+
+# A run that fails the way frag begins to say.
+def fails.with(+prelude: String, text: String, +frag: String) -> Bool:
+  String.starts_with(last(plain(with.prelude(prelude, "M", text), "M", [])), frag)
+
+# What the gate says of a program under a variable budget (certifyMainWithin).
+def gate.said(m: Maybe<&2, EM.Err>) -> String:
+  match m:
+    case Some{e}:
+      EM.render(e)
+    case None{}:
+      "certified"
+
+def gate.under(+budget: U32, r: Result<&2, &2, String, T.C>) -> String:
+  match r:
+    case Fail{e}:
+      e
+    case Done{+run}:
+      gate.said(EM.certify.within(budget, Lf.defer.lift(run)))
+
+def gave.up(+n: String) -> String:
+  "certification gave up (the constraint solver ran out of budget):\n  the constraint system grew past " ++ n
+    ++ " variables (--eal-budget raises the limit)"
 
 def costs(+prelude: String, text: String, +n: U32) -> Bool:
   U32.is_eq(spent(session(with.prelude(prelude, "M", text), "M", [])), n)
@@ -478,31 +521,52 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
       shows(prelude, case.all(), "Hi, sam!"),
       shows(prelude, case.reachable(), "True"),
       shows(prelude, case.ignore(), "True"),
+      # literals match exactly, not by their left spine alone
+      shows(prelude, case.near("(\"ab\",3)", "(\"ab\",4)"), "False"),
+      shows(prelude, case.near("(0,1)", "1"), "False"),
+      shows(prelude, case.near("(((0,0),1),0)", "3"), "False"),
+      shows(prelude, case.near("((96,1),0)", "\"a\""), "False"),
+      shows(prelude, case.no.prelude(), "matched"),
       shows(prelude, case.nonexhaustive(), "runtime error:\nAborted, user abort: Non-exhaustive patterns in case (from pattern match at M:3:11)"),
       shows(prelude, pattern.lambda(), "pat")])))
     IO.print(verdict("ic-udt", all([
       shows(prelude, rational(), "ok"),
       shows(prelude, nat(), "ok"),
-      shows(prelude, arithmetic(), "11111111"),
+      shows(prelude, arithmetic(), "1111111"),
       String.eq(last(plain([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), "ok")])))
+    IO.print(verdict("ic-prelude-errors", all([
+      fails.with(prelude, below.zero(), "runtime error:\nAborted, check failed on 0 (from refinement check at Prelude:"),
+      fails.with(prelude, by.zero(), "runtime error:\nAborted, check failed on 0 (from refinement check at Prelude:")])))
+    # master's b1affbd1: one analysis gives up past a variable budget, and
+    # says how to raise it; the default certifies.
+    IO.print(verdict("ic-eal-budget", all([
+      String.eq(gate.under(10, Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), gave.up("10")),
+      String.eq(gate.under(1000, Fr.compile(with.prelude(prelude, "simpleplus", plus), "simpleplus")), gave.up("1000")),
+      String.eq(gate.under(EM.budget.default(), Fr.compile(with.prelude(prelude, "simpleplus", plus), "simpleplus")), "certified")])))
     IO.print(verdict("ic-meter-case-udt", all([
-      costs(prelude, case.nonexhaustive(), 1024),
-      costs(prelude, pattern.lambda(), 78),
-      costs(prelude, rational(), 36271),
-      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 552)])))
+      costs(prelude, case.nonexhaustive(), 381),
+      costs(prelude, pattern.lambda(), 65),
+      costs(prelude, rational(), 33860),
+      U32.is_eq(spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"Other", "foo = 3\n"}, Fr.Src{"M", qualified()}], "M", [])), 550)])))
     IO.print(verdict("ic-prologue", all([
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", [""])),
         "got a line|start|"),
       String.eq(displays(session(with.prelude(prelude, "M", unused.refinement()), "M", ["a"])), "got a line|start|")])))
+    # Since master's bd05da18, Prelude's byte arithmetic checks its values
+    # (succByte's Num 255, numDec's NonZero), and the net runs the checks
+    # sizing can't discharge: simpleplus's 16,042 became 1,769,485 (on
+    # 1cfcb3de's Prelude and simpleplus it is 16,019; master's own IC:
+    # 3,371,532), tictactoe's 2,293,968 became 7,534,180 (master's:
+    # 8,972,237).
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
       118)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      16042)))
+      1769485)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
-      2293968)))
+      7534180)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),

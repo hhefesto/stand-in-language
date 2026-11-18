@@ -1,15 +1,33 @@
 import Prelude
 
+Square = Num 2
+Board = Vector 9 Square
+Player = Num 1
+NumInput =
+  let zeroChar = left "0"
+      nineChar = left "9"
+      oneToNine = \x -> and (gt x zeroChar) (leq x nineChar)
+  in Vector 1 oneToNine
+QuitInput = \x -> case x of
+  "q" -> 1
+  _ -> 0
+
+{-
 drawPiece = \piece alt -> if piece
                              then if left piece
                                      then "O"
                                      else "X"
                              else alt
+-}
+drawPiece = \piece alt -> case piece of
+  1 -> "X"
+  2 -> "O"
+  0 -> alt
 
 -- drawBoard
 drawBoard
  = \pieces -> let getPiece = \n -> left (n (\x -> right x) pieces)
-                  alt = \n -> (n succ (left "1"), 0)
+                  alt = \n -> (n succByte (left "1"), 0)
                   dp = \n -> drawPiece (getPiece n) (alt n)
                   blankRow = "-+-+-\n"
               in concat [ dp $0, "|", dp $1, "|", dp $2, "\n"
@@ -40,8 +58,8 @@ validPlayer = \x -> not (toBool ($3 left x))
 validBoard = \x -> not (toBool ($9 right x))
 
 processInput
- = \string -> let num = dMinus (left string) (left "0")
-              in if and (toBool num) (toBool (dMinus 10 num))
+ = \string -> let num = d2c (left "0") left (left string)
+              in if and (toBool num) (toBool (d2c num left 10))
                  then num
                  else 0
 
@@ -65,15 +83,21 @@ whoWon
              in foldr combineRow 0 rows
 
 main = \input -> case input of
-     (s, oldState) ->
-       let oldBoard : validBoard = right oldState
-           playerIn : validPlayer = left oldState
-           placeString : validInput = s
-           place = processInput placeString
+     0 -> let nextPlayer = 1
+              output = concat [ (drawBoard emptyBoard)
+                              , "Player "
+                              , (d2c nextPlayer succByte (left "1"), 0)
+                              , "'s turn\n"
+                              , "please input number of square: "
+                              ]
+          in (output, (nextPlayer,emptyBoard))
+     ((s : QuitInput), _) -> (0,0)
+     ((placeString : NumInput), ((playerIn : Player), (oldBoard : Board))) ->
+       let place = processInput placeString
            placeOccupied = getSquare (d2c (left place)) oldBoard
            validPlace = and (toBool place) (not (toBool placeOccupied))
            newBoard = if validPlace
-                         then setPiece (succ playerIn) (d2c (left place)) oldBoard
+                         then setPiece (succByte playerIn) (d2c (left place)) oldBoard
                          else oldBoard
            winner = whoWon newBoard
            filledBoard = fullBoard newBoard
@@ -83,7 +107,7 @@ main = \input -> case input of
                                )
                        )
            doEnd = if winner then concat [ "Player "
-                                         , (d2c winner succ (left "0"), 0)
+                                         , (d2c winner succByte (left "0"), 0)
                                          , " wins!"
                                          ]
                              else "the game is a tie"
@@ -91,30 +115,15 @@ main = \input -> case input of
            output = if showBoard
                        then concat [ (drawBoard newBoard)
                                    , "Player "
-                                   , (d2c nextPlayer succ (left "1"), 0)
+                                   , (d2c nextPlayer succByte (left "1"), 0)
                                    , "'s turn\n"
                                    , "please input number of square: "
                                    ]
-                       else if dEqual placeString "q"
-                               then 0
-                               else if not (toBool place)
-                                       then "please enter a number 1-9"
-                                       else if not validPlace
-                                               then "please choose unoccupied space"
-                                               else doEnd
-           nextState = if and (toBool output)
-                             (and (not filledBoard)
-                                   (not (toBool winner))
-                             )
-                         then (nextPlayer,newBoard)
-                         else 0
+                       else if not validPlace
+                            then "please choose unoccupied space"
+                            else doEnd
+           nextState = if and (not filledBoard) (not (toBool winner))
+                       then (nextPlayer,newBoard)
+                       else 0
        in (output, nextState)
-     _ -> let nextPlayer = 1
-              output = concat [ (drawBoard emptyBoard)
-                              , "Player "
-                              , (d2c nextPlayer succ (left "1"), 0)
-                              , "'s turn\n"
-                              , "please input number of square: "
-                              ]
-          in (output, (nextPlayer,emptyBoard))
-
+     (_, oldState) -> ("please enter a number 1-9", oldState)

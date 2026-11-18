@@ -1354,6 +1354,8 @@ def sim(f, lim, checks, jw, ee, re, k):
               done_same(g, k, wpol(checks), mpol(lim, checks), Sm.Val{Sm.WStuck{}})
             case E.XVar{p}:
               done_same(g, k, wpol(checks), mpol(lim, checks), Sm.Val{Sm.WHole{p}})
+            case E.XBounded{bz, bp}:
+              done_same(g, k, wpol(checks), mpol(lim, checks), Sm.Val{Sm.WStuck{}})
             case E.XAny{}:
               done_same(g, k, wpol(checks), mpol(lim, checks), Sm.Val{Sm.WStuck{}})
             case E.XBarrier{y}:
@@ -1843,6 +1845,8 @@ def clean_step(pol, x, env):
     case E.XStep{tok, n, y}:
       Unit{}
     case E.XVar{p}:
+      Unit{}
+    case E.XBounded{bz, bp}:
       Unit{}
     case E.XAny{}:
       Unit{}
@@ -2517,6 +2521,8 @@ def incl_drop(y, a, l):
       h => h
     case E.XVar{p}:
       h => h
+    case E.XBounded{bz, bp}:
+      h => h
     case E.XAny{}:
       h => h
     case E.XBarrier{a}:
@@ -2569,6 +2575,8 @@ def covd(x, acc, l):
     case E.XStep{tok, n, a}:
       h => {==}
     case E.XVar{p}:
+      h => {==}
+    case E.XBounded{bz, bp}:
       h => {==}
     case E.XAny{}:
       h => {==}
@@ -2701,6 +2709,8 @@ def prog_witness(x, counts, left, l):
     case E.XStep{tok, n, a}:
       h => {==}
     case E.XVar{p}:
+      h => {==}
+    case E.XBounded{bz, bp}:
       h => {==}
     case E.XAny{}:
       h => {==}
@@ -3479,6 +3489,8 @@ def ifx_of(y):
                       {==}
                     case E.XVar{p}:
                       {==}
+                    case E.XBounded{bz, bp}:
+                      {==}
                     case E.XAny{}:
                       {==}
                     case E.XBarrier{p1}:
@@ -3520,6 +3532,8 @@ def ifx_of(y):
                 case E.XStep{tok, n, p1}:
                   {==}
                 case E.XVar{p}:
+                  {==}
+                case E.XBounded{bz, bp}:
                   {==}
                 case E.XAny{}:
                   {==}
@@ -3563,6 +3577,8 @@ def ifx_of(y):
               {==}
             case E.XVar{p}:
               {==}
+            case E.XBounded{bz, bp}:
+              {==}
             case E.XAny{}:
               {==}
             case E.XBarrier{p1}:
@@ -3605,6 +3621,8 @@ def ifx_of(y):
           {==}
         case E.XVar{p}:
           {==}
+        case E.XBounded{bz, bp}:
+          {==}
         case E.XAny{}:
           {==}
         case E.XBarrier{p1}:
@@ -3646,6 +3664,8 @@ def ifx_of(y):
     case E.XStep{tok, n, p1}:
       {==}
     case E.XVar{p}:
+      {==}
+    case E.XBounded{bz, bp}:
       {==}
     case E.XAny{}:
       {==}
@@ -4081,6 +4101,8 @@ def runs(f, es, jw):
               hv => runs(g, es, Sm.JDone{Sm.Val{Sm.WStuck{}}})(hv)
             case E.XVar{p}:
               hv => runs(g, es, Sm.JDone{Sm.Val{Sm.WHole{p}}})(hv)
+            case E.XBounded{bz, bp}:
+              hv => runs(g, es, Sm.JDone{Sm.Val{Sm.WStuck{}}})(hv)
             case E.XAny{}:
               hv => runs(g, es, Sm.JDone{Sm.Val{Sm.WStuck{}}})(hv)
             case E.XBarrier{y}:
@@ -6046,6 +6068,8 @@ def hs(f, pol, jp, ee, re, k):
               done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
             case E.XVar{p}:
               done_same_h(g, k, pol, pol, Sm.Val{Sm.WHole{p}})
+            case E.XBounded{bz, bp}:
+              done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
             case E.XAny{}:
               done_same_h(g, k, pol, pol, Sm.Val{Sm.WStuck{}})
             case E.XBarrier{y}:
@@ -6550,6 +6574,8 @@ def cleanf_step(pol, x, env):
       Unit{}
     case E.XVar{p}:
       Unit{}
+    case E.XBounded{bz, bp}:
+      Unit{}
     case E.XAny{}:
       Unit{}
     case E.XBarrier{y}:
@@ -6798,6 +6824,8 @@ def in_rel(i, d, f, pol, env, k):
       hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XCheck{site, tc, c}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
     case E.XStep{tok, n, y}:
       hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XStep{tok, n, y}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
+    case E.XBounded{bz, bp}:
+      hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XBounded{bz, bp}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
     case E.XAny{}:
       hr => Empty.absurd({rhf(Sm.sem(f, pol, Sm.JE{E.XAny{}, env}), Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env})) == Sm.sem(Nat.add(f, k), pol, Sm.JE{Sm.of.data(d), env}) : Sm.R}, false_true(hr))
     case E.XBarrier{y}:
@@ -7363,6 +7391,8 @@ def split_cover(i, rest, d):
       h => (%Equal.sym(Bool, refines(E.XCheck{site, tc, c}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XStep{tok, n, y}:
       h => (%Equal.sym(Bool, refines(E.XStep{tok, n, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+    case E.XBounded{bz, bp}:
+      h => (%Equal.sym(Bool, refines(E.XBounded{bz, bp}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XAny{}:
       h => (%Equal.sym(Bool, refines(E.XAny{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XBarrier{y}:

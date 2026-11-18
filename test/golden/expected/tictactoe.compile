@@ -1,6 +1,6 @@
 status 0
 --- stdout
 --- stderr
-wrote tictactoe.telc (97296 nodes, sources 67db621d6492)
+wrote tictactoe.telc (126098 nodes, sources 8db3db381e1c)
 --- files
-4e92044ba11c7ac089d188a1a3935fcd486bc3b623552a9d0a0ec5655a946930 165874 tictactoe.telc
+839fdff2d69ed80e9583e6cafbe432358c1fb582a289363d676621248f38a74e 209161 tictactoe.telc

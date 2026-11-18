@@ -1,10 +1,15 @@
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:60:23 (#0)  <= 29
-  Prelude:66:23 (#1)  <= 6
-  Prelude:74:24 (#2)  <= 28
-  Prelude:79:42 (#3)  <= 116
+  #0               <= 117
+  cases:6:25 (#1)  <= 2
+  cases:6:25 (#2)  <= 3
+  cases:7:25 (#3)  <= 2
+  cases:7:25 (#4)  <= 9
+  cases:7:25 (#5)  <= 3
+  cases:8:62 (#6)  <= 9
+  cases:8:62 (#7)  <= 9
+  cases:8:62 (#8)  <= 28
 
 sizing budget in force: 65536 unrollings
 

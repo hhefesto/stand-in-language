@@ -87,9 +87,6 @@ def has(s: Set(), +n: String) -> Bool:
 # Free variables (freeVarsDeep)
 # -----------------------------
 
-def case.refs() -> Set():
-  Set.from_list(["and", "listEqual", "foldl"])
-
 def fv(+fuel: Nat, n: FN) -> Set():
   match fuel:
     case 0n:
@@ -121,7 +118,7 @@ def fv(+fuel: Nat, n: FN) -> Set():
             case S.SList{loc, xs}:
               fv(f, FTs{xs})
             case S.SCase{loc, scrut, alts, w}:
-              union(fv(f, FT{scrut}), union(fv(f, FAs{alts}), case.refs()))
+              union(fv(f, FT{scrut}), fv(f, FAs{alts}))
             case _:
               Set.new()
         case FP{p}:

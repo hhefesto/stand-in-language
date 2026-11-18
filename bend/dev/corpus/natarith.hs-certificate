@@ -1,35 +1,40 @@
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:30:17 (#0)   <= 10
-  Prelude:34:18 (#1)   <= 5
-  Prelude:42:18 (#2)   <= 10
-  Prelude:60:23 (#3)   <= 9
-  Prelude:79:42 (#4)   <= 12
-  Prelude:144:36 (#5)  <= 4
-  natarith:5:53 (#6)   <= 4
+  Prelude:28:16 (#0)   <= 256
+  Prelude:55:18 (#1)   <= 4
+  Prelude:61:21 (#2)   <= 5
+  Prelude:71:21 (#3)   <= 10
+  Prelude:92:23 (#4)   <= 8
+  Prelude:111:42 (#5)  <= 12
+  Prelude:115:28 (#6)  <= 4
+  Prelude:180:45 (#7)  <= 4
+  natarith:5:56 (#8)   <= 4
 
 sizing budget in force: 65536 unrollings
 
 recursion nesting (structural, approximate):
-  triple         function             levels
-  Prelude:23:17  Prelude.d2c          0, 1
-  Prelude:56:32  Prelude.foldr.fixed  0, 1
-  Prelude:85:18  Prelude.dDiv         0
+  triple          function             levels
+  Prelude:4:17    Prelude.d2c          0, 1, 2
+  Prelude:88:32   Prelude.foldr.fixed  0, 1
+  Prelude:116:12  Prelude.dDiv         0
 
-maximum nesting depth: 2
+maximum nesting depth: 3
 
 bindings used below the level they were bound at:
-  Prelude.dMod.b    !!  (2 levels below its binding)
-  Prelude.dTimes.a  !!  (2 levels below its binding)
-  Prelude.d2c.b     !  (1 level below its binding)
-  Prelude.d2c.f     !  (1 level below its binding)
-  Prelude.dDiv.p    !  (1 level below its binding)
-  Prelude.dEqual.b  !  (1 level below its binding)
-  Prelude.dMinus.a  !  (1 level below its binding)
-  Prelude.dMod.a    !  (1 level below its binding)
-  Prelude.dPlus.a   !  (1 level below its binding)
-  Prelude.foldr.f   !  (1 level below its binding)
+  Prelude.Num.base     !  (1 level below its binding)
+  Prelude.Num.test     !  (1 level below its binding)
+  Prelude.d2c.b        !  (1 level below its binding)
+  Prelude.d2c.f        !  (1 level below its binding)
+  Prelude.dDiv.dSub    !  (1 level below its binding)
+  Prelude.dDiv.p       !  (1 level below its binding)
+  Prelude.dDiv.dSub.a  !  (1 level below its binding)
+  Prelude.dEqual.b     !  (1 level below its binding)
+  Prelude.foldr.f      !  (1 level below its binding)
+  Prelude.minusByte.a  !  (1 level below its binding)
+  Prelude.modByte.a    !  (1 level below its binding)
+  Prelude.modByte.b    !  (1 level below its binding)
+  Prelude.timesByte.a  !  (1 level below its binding)
 
 The two lists index differently: a count above is per instantiation (a
 recursion reached from two places is sized separately at each), while a

@@ -14,12 +14,14 @@ import ./IC.bend as IC
 # Compiled programs (master's Telomare.Artifact): a sized program with what a
 # run and `--certificate` need, so neither needs the sources again. The bytes
 # are master's layout up to its report, so the port numbers its own version,
-# 10 (master's is 8): "TELC", the version, the entry module, the sources' hash,
+# 11 (master's is 9): "TELC", the version, the entry module, the sources' hash,
 # the static report as rendered, the sizing report (each site's count and
-# location, and the budget), then four sections, each its length and its
-# bytes: the net's programs as IC.prepare left them (main and, after a Maybe
-# byte, the input prologue: each an entry, largest template, template store
-# and aborts' origins); master's input prologue, if main has one; the program
+# location, and the budget), the EAL variable budget the verdict was reached
+# under (master's artifactBudget, which master writes last), then four
+# sections, each its length and its bytes: the net's programs as IC.prepare
+# left them (main and, after a Maybe byte, the input prologue: each an entry,
+# largest template, template store and aborts' origins); master's input
+# prologue, if main has one; the program
 # the net runs, haskell-final's IC certificate (the port writes none, and
 # skips one it reads) and the capture layouts it runs under; and master's
 # program, which a plain run evaluates. A run reads the head and the sections
@@ -47,11 +49,11 @@ type Stored is Data:
 
 type Telc is Data:
   Telc{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
-       +budget: U32, +expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +prologue: Maybe<&2, Co.V>}
+       +budget: U32, +vars: U32, +expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +prologue: Maybe<&2, Co.V>}
 
 # The port's version.
 def version() -> U32:
-  10
+  11
 
 # The sources' hash (sourcesHash): SHA-256 of every module's name and text
 # with their lengths, the modules sorted by name, in lowercase hex.
@@ -143,10 +145,10 @@ def layouts.of(m: Map<&2, Lf.Shape>) -> List<&2, Layout>:
   laid(List.sort(~Sigma<&2, &2, String, _ => Lf.Shape>, ~layout.le, Map.to_list(&2, Lf.Shape, m)))
 
 # A sized program as an artifact: its entry, the sources' hash, the static
-# report as rendered, each site's count and location, the budget, the
-# program and its capture layouts.
-def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, ls: Map<&2, Lf.Shape>, plain: Co.V, prologue: Maybe<&2, Co.V>) -> Telc:
-  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, expr, layouts.of(ls), plain, prologue}
+# report as rendered, each site's count and location, the budget, the EAL
+# variable budget, the program and its capture layouts.
+def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, +vars: U32, ls: Map<&2, Lf.Shape>, plain: Co.V, prologue: Maybe<&2, Co.V>) -> Telc:
+  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, vars, expr, layouts.of(ls), plain, prologue}
 
 # The layouts as the IC looks them up.
 def shapes(ls: List<&2, Layout>, acc: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
@@ -301,14 +303,14 @@ def section(+bs: List<&2, U32>, rest: List<&2, U32>) -> List<&2, U32>:
 
 def encode(t: Telc) -> List<&2, U32>:
   match t:
-    case Telc{entry, hash, cert, counts, places, budget, +expr, +layouts, plain, +prologue}:
+    case Telc{entry, hash, cert, counts, places, budget, +vars, +expr, +layouts, plain, +prologue}:
       84 <> 69 <> 76 <> 67 <> W.put.int(version(),
         W.put.string(entry, W.put.string(hash, W.put.string(cert,
-          put.report(counts, places, budget,
+          put.report(counts, places, budget, W.put.int(vars,
             section(put.ready(expr, prologue, layouts, []),
               section(put.prologue(prologue),
                 section(put.program(expr, layouts, []),
-                  section(W.put.expr(plain, []), [])))))))))
+                  section(W.put.expr(plain, []), []))))))))))
 
 # Reading
 # -------
@@ -559,7 +561,7 @@ def prologue.if(none: Bool) -> G(Maybe<&2, Co.V>):
 # after the report. A run goes on to the ones it needs.
 type Head is Data:
   Head{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
-       +budget: U32, +body: List<&2, U32>}
+       +budget: U32, +vars: U32, +body: List<&2, U32>}
 
 def fields(+entry: String) -> G(Head):
   do G<Head>:
@@ -570,8 +572,9 @@ def fields(+entry: String) -> G(Head):
     np : U32 <- W.int()
     ps : List<&2, Place> <- places(U32.to_nat(np))
     budget : U32 <- W.int()
+    vars : U32 <- W.int()
     body : List<&2, U32> <- W.here()
-    return Head{entry, hash, cert, cs, ps, budget, body}
+    return Head{entry, hash, cert, cs, ps, budget, vars, body}
 
 # What a file holds: an artifact, or why it is none (the magic or the
 # version, said as is; anything else is unreadable).
@@ -666,7 +669,7 @@ def ready.fields() -> G(Prepared):
 
 def ready.of(h: Head) -> Result<&2, &2, String, Prepared>:
   match h:
-    case Head{entry, hash, cert, counts, places, budget, body}:
+    case Head{entry, hash, cert, counts, places, budget, vars, body}:
       read.section(Prepared, ready.fields()(body))
 
 # What a plain run reads: master's program and its input prologue.
@@ -686,7 +689,7 @@ def plain.fields() -> G(Plain):
 
 def plain.of(h: Head) -> Result<&2, &2, String, Plain>:
   match h:
-    case Head{entry, hash, cert, counts, places, budget, body}:
+    case Head{entry, hash, cert, counts, places, budget, vars, body}:
       read.section(Plain, plain.fields()(body))
 
 # The whole artifact, as the tests compare it.
@@ -709,14 +712,14 @@ def rest.fields() -> G(Rest):
     p : Co.V <- W.expr(W.fuel())
     return Rest{x, ls, p, g}
 
-def whole.of(+entry: String, +hash: String, +cert: String, +cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, r: Result<&2, &2, String, Rest>) -> Result<&2, &2, String, Telc>:
+def whole.of(+entry: String, +hash: String, +cert: String, +cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, +vars: U32, r: Result<&2, &2, String, Rest>) -> Result<&2, &2, String, Telc>:
   match r:
     case Fail{e}:
       Fail{e}
     case Done{x}:
       match x:
         case Rest{e, ls, p, g}:
-          Done{Telc{entry, hash, cert, cs, ps, budget, e, ls, p, g}}
+          Done{Telc{entry, hash, cert, cs, ps, budget, vars, e, ls, p, g}}
 
 def whole(r: Result<&2, &2, String, Head>) -> Result<&2, &2, String, Telc>:
   match r:
@@ -724,8 +727,8 @@ def whole(r: Result<&2, &2, String, Head>) -> Result<&2, &2, String, Telc>:
       Fail{e}
     case Done{h}:
       match h:
-        case Head{entry, hash, cert, cs, ps, budget, body}:
-          whole.of(entry, hash, cert, cs, ps, budget, read.section(Rest, rest.fields()(body)))
+        case Head{entry, hash, cert, cs, ps, budget, vars, body}:
+          whole.of(entry, hash, cert, cs, ps, budget, vars, read.section(Rest, rest.fields()(body)))
 
 # The whole artifact from its bytes, or what haskell-final says of them.
 def decode(bs: List<&2, U32>) -> Result<&2, &2, String, Telc>:

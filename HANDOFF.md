@@ -28,6 +28,16 @@ Haskell `telomare`, not haskell-final (section 3, "Merging master").
 prologue replaces the port's session guard; older text here that speaks of the
 guard, the boundary or `Full` is history.
 
+**Updated 2026-11-12.** telomare/master (`e86fbbfb`, Sam's eight commits after
+`1cfcb3de` and his CI fix) is merged into `bend` in one commit (section 3,
+"Merging master, 2026-11-12"). The Prelude now checks its byte arithmetic, so
+the interaction counts went up; erasing those checks where sizing proves them is
+the next step.
+
+**Updated 2026-11-17, on delfos.** telomare/master `281c00cb` (b1affbd1's EAL
+variable budget, 8b9fb5ac's Prelude error tests, the one dev shell) is merged
+and ported (section 3, "Merging master, 2026-11-17"); its gate is there.
+
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
 parity corpus, committed for the move too). Drop both commits ("Hand off
@@ -365,6 +375,142 @@ a predicate, and their `hs-*` records are new.
 dies of fuel under both haskell-final `--ic` and the port:
 `IC runtime: ICFuelExhausted 10000000`, at 10,000,000 interactions. P4 is
 expected to change that (section 4).
+
+### Merging master, 2026-11-12 (`6e67d618`, then `e86fbbfb`)
+
+One merge commit brings Sam's eight commits after `1cfcb3de`, and `e86fbbfb`
+(11-11), into `bend`. The work started on 11-09 as `ef762411` on the branch
+`bend-m6e` (worktree `~/src/telomare-m6e`, moved out of `/tmp` on 11-12); the
+user asked for as few commits as possible. What each of Sam's commits became:
+
+- `bd05da18` (Prelude improvements, a sizing fix inside refinements) and
+  `60b01d9d` (refinement tests in Prelude and tictactoe): the port reads master's
+  `Prelude.tel` and `tictactoe.tel` as they are. The byte arithmetic now checks
+  its values (`succByte`'s `Num 255`, `numDec`'s `NonZero`), so `minusByte 0 1`
+  aborts (`check failed on 0 (from refinement check at Prelude:69:11)`), and
+  tictactoe checks its own input (`NumInput`, `QuitInput`). `tests/ic.bend`'s
+  `arithmetic` dropped `minusByte 0 1` (the user's call, 11-10; the question is
+  Sam's, in PR #161), and the corpus's `arith.tel` and `natarith.tel` use the new
+  names (`plusByte`, `minusByte`, `timesByte`, `modByte`, `powByte`).
+- `b1975496` (EAL specializes small bodies first): `EALm.bend`, by reach
+  (`reachSize`), the limit doubling while nothing is small enough.
+- `223110d6` (recursions unfold inside refinement checks during limit
+  extraction) and `71e95ffb` (flow-sensitive sizing: a refinement bounds what its
+  checked value flows into): `Size.bend`'s run and a check's function are one
+  machine with a mode; a check narrows its value (`narrowChecked`, `E.XBounded`,
+  `checkRestrictions`, `boundedInput`). `PROOF.bend` gained the `XBounded` cases;
+  all laws still check.
+- `75e19f61` (non-exhaustive case memory blowup in sizing): an aborted value
+  needs no count and selects nothing worth sizing (`mergeShallow`).
+- `dc324371` (case without the Prelude, literals matched exactly): `Desugar.bend`
+  binds the case helpers itself (`__case_intEqual`, `__case_stringEqual`,
+  `walk.literal`); the old aliases are gone.
+- `6e67d618` (deep data decisions as unknown choices): `Plan.bend`'s
+  `dataDecisionDepth` and `deepDecision`.
+- `e86fbbfb`: its Prelude `quicksort` is taken; its CI change is to master's
+  workflow, which `bend` doesn't use.
+
+**The counts moved, because of the Prelude.** The checks sizing can't discharge
+run on the net, and the Prelude's `Num` check (Prelude:28:16, up to 256 steps)
+runs at every `succByte`:
+- simpleplus `3 4`: 16,042 → 1,769,485 interactions. On `1cfcb3de`'s Prelude
+  and simpleplus the merged port spends 16,019, so the port itself didn't get
+  worse. Master's own `--ic` spends 3,371,532.
+- tictactoe `1 4 2 5 3`: 2,293,968 → 7,534,180 (master's: 8,972,237). The
+  transcript is master's.
+- `--fast` simpleplus: site 0 (the Num check) unrolls 14,848 times, where the old
+  site 0 had 10, and there is a fifth site (`#4`).
+- `tests/ic.bend`'s case programs got cheaper, most likely from `dc324371`'s
+  lowering: 1,024 → 381, 78 → 65, 36,271 → 33,860, 552 → 550.
+- `telc-nodes` simpleplus 20,884 → 46,961 (`Tc.nodes(plain)`, master's program
+  with every check; not traced further).
+- simpleplus compiles much more slowly: `--ic --compile` took 187 s at 821 MB
+  (the machine was busy), where a whole run on `1cfcb3de`'s Prelude took 9.6 s.
+  The run from the `.telc` takes 0.07 s, so the time is all compile (sizing and
+  the check analysis), not the net.
+
+So erasing the Prelude's checks where sizing proves them is now the cheapest
+place to cut interactions (the user's order, 11-12: the interaction gap next,
+then EAL memory, then x86-64, many cores and the GPU).
+
+**Goldens.** `tictactoe.ic-abort` is now `tictactoe.ic-reject` (the user's call,
+11-12), with input `10` then `q`. Sam's tictactoe answers `10` with "please
+enter a number 1-9" and asks again, so with `10` alone master reached the end of
+the input and crashed (`hGetLine: end of file`, status 1); `q` ends the game.
+`expected/` is re-recorded from master `e86fbbfb` (nix's `telomare` for that
+commit, from telomare.cachix.org), and `port/` from the merged port, where its
+counts are its own.
+
+The tree that came out of this, on delfos, is the gate's under "Merging master,
+2026-11-17" below.
+
+Unchanged: Bend stays at `0ba4e5e` (2.0.40 breaks the port; wait for 2.0.41).
+
+### Merging master, 2026-11-17 (`281c00cb`)
+
+The merge of `e86fbbfb` above was never concluded: `ef762411` merged
+`6e67d618`, and two WIP commits (`6b9c9b8`, `cc54c67`, "fold into the merge
+commit") carried the rest from olimpo to delfos. This merge brings
+telomare/master `281c00cb` (PRs #162, #163, #164) in, on delfos, in
+`~/src/telomare-m6e` (branch `bend-m6e-wip`). What each commit became:
+
+- `e86fbbfb` (Sam's CI fix and Prelude `quicksort`): the Prelude was already
+  taken by hand in the WIP; the workflow is master's, which `bend` doesn't use.
+- `8b9fb5ac` (Prelude tests fail on evaluation errors they don't expect):
+  `tests/ic.bend` gained `ic-prelude-errors`: `minusByte 0 1` and `dDiv 1 0`
+  must abort with `check failed on 0 (from refinement check at Prelude:...)`,
+  as master's `assertErrorWith` cases do.
+- `b1affbd1` (Keep EAL certification of fact `--ic` within memory): the
+  variable budget. EALm.bend's state `S` holds `bud` (master's `esBudget`);
+  `fresh` and a template's instance (`tm.inst`) fail with `GaveUp` (master's
+  `EALSolverGaveUp`, same text) past it; `budget.default()` is 2^23;
+  `gu.*` is master's `gaveUpBeneath` (a main refused because a body gave up is
+  refused with the give-up); `certify.within`, `faithful.lr.within`,
+  `certified.program`, `lr.full`, `lr.of` and Session's `plan.from` take the
+  budget. Main.bend parses `--eal-budget N` (positive, else master's
+  "the budget must be positive"), shows it in the usage, compiles under it,
+  and a `.telc` run with a different `--eal-budget` prints master's note.
+  Telc.bend's artifact is version 11 (was 10) with the budget (`vars: U32`)
+  in its head, so every `*compile` golden's `.telc` grew 8 bytes. Master's
+  `sameClass` is how the port already decides a change (`constrain.k`
+  compares only the constructor and the level, never a blame); master's
+  `cycleStep` index is not ported (the port's blames are values, `Why`,
+  2026-11-03; whether its cycle blames hold equations alive is unmeasured). `tests/ic.bend` gained
+  `ic-eal-budget` (tc under 10 and simpleplus under 1000 give up, saying
+  `--eal-budget`; simpleplus under the default certifies).
+- `24d76371` (one dev shell): `nix/tools.nix`'s array loop is taken;
+  `nix/devshell.nix`, the workflow and the README stay the port's.
+- The Haskell files master changed and `bend` deleted (`app/Main.hs`,
+  `EAL.hs`, `Fast.hs`, `Driver.hs`, `Artifact.hs`, 4 test files) stay deleted.
+
+**Gate, 2026-11-17** (`bend/dev/gate.sh all`, `GATE=~/telc/gate`, inside
+`nix develop`, systemd-run MemoryMax 10G on delfos; binaries built from this
+tree): the generated `ic.c` is the same; the tests all pass (lexical 8,
+front 13, size 11, sem 3, eal 14, ealm 33, ic 20, fast 5, telc 7, native 3,
+rules 3, netsem 6 groups); lsp 3/3; perr 960 cases, 0 failures; proofs: open
+none, `--verdict`, NetProof and NetModel `--verdict` all print ALL PROOFS
+CHECK. It printed GATE FAILED only for records the merge makes stale:
+- goldens 57/63: the six `*compile` cases' `port/` records (tc, simpleplus,
+  tictactoe; `.compile` and `.ic-compile`), whose `.telc` is 8 bytes longer
+  (version 11). Re-recorded with `record-port` in a copy
+  (`~/telc/rerecord`), only the sha256 and size lines change.
+- corpus: meters 16 and certificates 16 the same; `fact` differs because its
+  oracle record `fact.hs-ic` is master's heap exhaustion from before
+  `b1affbd1`. Master `281c00cb` now refuses it ("does not certify: code vs
+  data", 138 s), and the port prints the same refusal byte for byte
+  (`~/telc/corpus-master/fact.hs-ic`, the queue's corpus record from
+  `~/telc/master-281c00c`); `fact.port-ic-meter` needs the same re-record. The
+  other 32 corpus records are what master `281c00cb` prints.
+- `expected/`'s nine `*compile` and `*draw-net` cases were re-recorded from
+  master `281c00cb` (the sources hash, master's version-9 `.telc`, and
+  `--eal-budget N` in the usage). Before: `~/telc/expected-before`, the same
+  as `HEAD`'s.
+These records wait for the user's OK; they are not in the merge commit.
+
+Memory: the port's `tictactoe --ic` peaked near 7.7 GB resident (master's
+`--compile` of it: 4.9 GB). Two such runs at once (a parallel goldens copy
+under a 5 GB cap) ran delfos out of memory and timed out, so one heavy run
+at a time on this 15 GB machine. That is the EAL memory step.
 
 ## 4. The plan: P1–P7
 

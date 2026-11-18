@@ -7,6 +7,6 @@ status 0
 7|8|9
 Player 2's turn
 please input number of square: 
-runtime error:
-Aborted, check failed on "10" (from refinement check at tictactoe:71:24)
+please enter a number 1-9
+
 --- stderr

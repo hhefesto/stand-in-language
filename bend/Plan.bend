@@ -436,6 +436,10 @@ def may.nonzero(m: A, +path: K, d: Maybe<&2, Bool>) -> Bool:
   match m:
     case VlZero{}:
       False{}
+    case VlAborted{}:
+      # an abort in the message is the one that counts: the run was stopped
+      # by an earlier abort, recorded where it fired, not this one
+      False{}
     case VlVar{h, p}:
       not.zero(d)
     case VlSuper{h, +n, +l, +r}:
@@ -510,6 +514,79 @@ def side(k: Bk, zero: Bool, st: PSt) -> PJob:
       QGate{Bool.pick(A, zero, a, b), st}
     case BFill{a, b, +e}:
       QSet{pair(Bool.pick(A, zero, a, b), e), st}
+
+# How deep a superposition's choices go on a path, when every outcome of it
+# there is plain data, so that a gate on it only selects a branch
+# (dataDecisionDepth). Choices the path decides are followed, not counted.
+# None when an outcome is something else, such as an aborted value, or the
+# walk runs past its budget.
+
+# A part of the superposition still to walk, under d undecided choices.
+type DE is Data:
+  DE{+v: A, +d: U32}
+
+def dd.fuel() -> Nat:
+  U32.to_nat(4098)
+
+# The parts a superposition leaves to walk: the side the path decides, or
+# both under one more choice.
+def dd.push(known: Maybe<&2, Bool>, +l: A, +r: A, +d: U32, rest: List<&2, DE>) -> List<&2, DE>:
+  match known:
+    case Some{pick}:
+      DE{Bool.pick(A, pick, l, r), d} <> rest
+    case None{}:
+      DE{l, (d + 1 : U32)} <> DE{r, (d + 1 : U32)} <> rest
+
+# The walk, left first, each part it visits costing one of the budget; over:
+# the budget is spent.
+def dd(+fuel: Nat, over: Bool, stack: List<&2, DE>, +path: K, +budget: U32, +depth: U32) -> Maybe<&2, U32>:
+  match fuel:
+    case 0n:
+      None{}
+    case 1n+f:
+      match over:
+        case True{}:
+          match stack:
+            case Nil{}:
+              Some{depth}
+            case Con{e, rest}:
+              None{}
+        case False{}:
+          match stack:
+            case Nil{}:
+              Some{depth}
+            case Con{e, rest}:
+              match e:
+                case DE{v, +d}:
+                  match v:
+                    case VlZero{}:
+                      dd(f, U32.is_eq(budget, 1), rest, path, (budget - 1 : U32), U32.max(depth, d))
+                    case VlPair{h, a, b}:
+                      dd(f, U32.is_eq(budget, 1), rest, path, (budget - 1 : U32), U32.max(depth, d))
+                    case VlSuper{h, +n, +l, +r}:
+                      dd(f, U32.is_eq(budget, 1), dd.push(decides.n(path, n), l, r, d, rest), path, (budget - 1 : U32), depth)
+                    case _:
+                      None{}
+
+# How many input positions deep a superposition may decide a gate before the
+# gate is taken as an unknown choice (deepDecision): an equality test with a
+# literal makes one decision of many positions, and following each of its
+# outcomes apart would run what follows once per position the test read.
+def deep.decision(m: Maybe<&2, U32>) -> Bool:
+  match m:
+    case Some{depth}:
+      U32.is_gt(depth, 8)
+    case None{}:
+      False{}
+
+# A gate on a superposition: a superposition of gates, or, where its choices
+# are deep plain data, an unknown choice of branch.
+def gate.super(deep: Bool, d: Maybe<&2, Bool>, +n: Maybe<&2, String>, +a: A, +b: A, +st: PSt) -> PJob:
+  match deep:
+    case True{}:
+      QDone{PEv{super(None{}, do.left(), do.right()), st}}
+    case False{}:
+      QDecide{d, n, BGate{a, b}, st}
 
 def gate.var(d: Maybe<&2, Bool>, +p: String) -> A:
   match d:
@@ -655,8 +732,8 @@ def ev(+fuel: Nat, +path: K, job: PJob) -> PEv:
               PEv{VlAborted{}, tick(st)}
             case VlVar{h, +p}:
               PEv{gate.var(decides(path, p), p), tick(st)}
-            case VlSuper{h, +n, a, b}:
-              ev(f, path, QDecide{decides.n(path, n), n, BGate{a, b}, tick(st)})
+            case VlSuper{+h, +n, +a, +b}:
+              ev(f, path, gate.super(deep.decision(dd(dd.fuel(), False{}, [DE{VlSuper{h, n, a, b}, 0}], path, 4096, 0)), decides.n(path, n), n, a, b, tick(st)))
             case _:
               PEv{VlAny{}, tick(st)}
         case QDecide{d, +n, +k, st}:

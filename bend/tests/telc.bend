@@ -7,6 +7,7 @@ import ../Expr.bend as E
 import ../Core.bend as Co
 import ../Lift.bend as Lf
 import ../IC.bend as IC
+import ../EALm.bend as EM
 import ../Session.bend as Ss
 import ../Certificate.bend as Ct
 import ../Levels.bend as Lv
@@ -60,8 +61,8 @@ def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, r: Result<&2, &2, 
       match s:
         case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
           +ms = mods(Fr.all(srcs))
-          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks), 65536,
-                     Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro)), pl, pro)}
+          Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks), 65536, EM.budget.default(),
+                     Ss.layouts.of(Ss.plan.from(EM.budget.default(), run, counts, Sz.checks.keep(checks), pl, pro)), pl, pro)}
 
 def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, T.C>) -> Maybe<&2, Tc.Telc>:
   match r:
@@ -154,12 +155,23 @@ def fields(m: Maybe<&2, Tc.Telc>) -> String:
       "none"
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, guard}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, guard}:
           entry ++ "\n" ++ hash ++ "\n" ++ cert ++ "\n" ++ counts.text(counts) ++ "\n" ++ places.text(places)
-            ++ "\n" ++ U32.show(budget) ++ "\n" ++ Co.show(expr) ++ "\n" ++ layouts.text(layouts) ++ "\n" ++ prologue.text(guard)
+            ++ "\n" ++ U32.show(budget) ++ "\n" ++ U32.show(vars) ++ "\n" ++ Co.show(expr) ++ "\n" ++ layouts.text(layouts) ++ "\n" ++ prologue.text(guard)
 
 def round.trip(+m: Maybe<&2, Tc.Telc>) -> Bool:
   String.eq(fields(again(m)), fields(m)) && Bool.not(String.eq(fields(m), "none"))
+
+# The artifact as compiled under another EAL variable budget (--eal-budget):
+# the verdict depends on it, so the artifact keeps it.
+def with.vars(m: Maybe<&2, Tc.Telc>, +n: U32) -> Maybe<&2, Tc.Telc>:
+  match m:
+    case None{}:
+      None{}
+    case Some{t}:
+      match t:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, pro}:
+          Some{Tc.Telc{entry, hash, cert, counts, places, budget, n, expr, layouts, plain, pro}}
 
 # Running
 # -------
@@ -173,7 +185,7 @@ def run.of(m: Maybe<&2, Tc.Telc>, lines: List<&2, String>) -> Ss.Replay:
       Ss.Replay{["no artifact"], Ss.cost.none()}
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, pro}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, +expr, layouts, plain, pro}:
           Ss.replay(Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), pro), Ss.Sized{}, lines)
 
 def replay.text(r: Ss.Replay) -> String:
@@ -192,7 +204,7 @@ def source.sized(+run: T.C, r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, lines: Lis
     case Done{s}:
       match s:
         case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
-          Ss.replay(Ss.session(expr, Ss.layouts.of(Ss.plan.from(run, counts, Sz.checks.keep(checks), pl, pro)), pro), Ss.Sized{}, lines)
+          Ss.replay(Ss.session(expr, Ss.layouts.of(Ss.plan.from(EM.budget.default(), run, counts, Sz.checks.keep(checks), pl, pro)), pro), Ss.Sized{}, lines)
 
 def source.run(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Ss.Replay:
   match r:
@@ -296,7 +308,7 @@ def fresh.text(m: Maybe<&2, Tc.Telc>) -> String:
       "no artifact"
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, +expr, layouts, plain, pro}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, +expr, layouts, plain, pro}:
           +ls = Tc.shapes(layouts, Map.new(&2, Lf.Shape))
           prog.text(IC.prepare(expr, ls)) ++ "||" ++ prog.maybe.text(Tc.prologue.prepared(pro, ls))
 
@@ -326,7 +338,7 @@ def nodes(m: Maybe<&2, Tc.Telc>) -> U32:
       0
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, guard}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, guard}:
           Tc.nodes(plain)
 
 def fifth(bs: List<&2, U32>) -> U32:
@@ -357,13 +369,15 @@ def has.prologue(m: Maybe<&2, Tc.Telc>) -> Bool:
       False{}
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, expr, layouts, plain, pro}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, pro}:
           prologue.some(pro)
 
 def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
   do IO<Unit>:
     +sp : Maybe<&2, Tc.Telc> = artifact(with.prelude(prelude, "simpleplus", plus), "simpleplus")
-    IO.print(verdict("telc-round-trip", round.trip(sp)))
+    IO.print(verdict("telc-round-trip", all([
+      round.trip(sp),
+      round.trip(with.vars(sp, 16777216))])))
     IO.print(verdict("telc-runs", all([
       runs.alike([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", []),
       runs.alike(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["3 4"]),
@@ -372,7 +386,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       ready.alike(sp),
       ready.alike(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"))])))
     IO.print(verdict("telc-prologue", all([
-      U32.is_eq(version.of(sp), 10),
+      U32.is_eq(version.of(sp), 11),
       has.prologue(sp),
       Bool.not(has.prologue(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")))])))
     IO.print(verdict("telc-magic", refused(Tc.decode(Sha.utf8("not a telomare artifact at all")), "magic")))
@@ -383,7 +397,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
                 Tc.sources.hash(with.prelude(prelude, "simpleplus", plus)))])))
     IO.print(verdict("telc-nodes", all([
       U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 798),
-      U32.is_eq(nodes(sp), 20884)])))
+      U32.is_eq(nodes(sp), 46961)])))
 
 def main() -> IO(Unit):
   do IO<Unit>:

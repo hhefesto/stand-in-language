@@ -156,7 +156,7 @@ def mr.err(r: Result<&2, &2, EM.Err, EM.MR>) -> U32:
 # ----------------------
 
 def lr.of(t: T.C) -> EM.LR:
-  EM.lr.full(False{}, Lf.defer.lift(t))
+  EM.lr.full(False{}, EM.budget.default(), Lf.defer.lift(t))
 
 def lr.guide(r: EM.LR) -> List<&2, EM.G>:
   match r:
@@ -324,7 +324,7 @@ def sized.lr(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>) -> EM.LR:
     case Done{s}:
       match s:
         case Sz.Sized{counts, expr, checks, plain, pro}:
-          EM.lr.full(False{}, Lf.defer.lift.expr(plain))
+          EM.lr.full(False{}, EM.budget.default(), Lf.defer.lift.expr(plain))
 
 def compiled(r: Result<&2, &2, String, T.C>) -> EM.LR:
   match r:
@@ -371,7 +371,11 @@ def omega() -> T.C:
   defer(1, se(p(lft(env()), env())))
 
 def church() -> String:
-  "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) succ) 0"
+  "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) succByte) 0"
+
+# Its sizing test applies a successor that is no refinement.
+def church.plain() -> String:
+  "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) (\\x -> (x,0))) 0"
 
 def gate.test() -> String:
   "main = let f = \\a b -> (a,b)\n           g = if 1 then f 1 else left\n       in g 1"
@@ -401,15 +405,15 @@ def report(+prelude: String) -> IO(Unit):
       String.eq(layout.of(lr.guide(laid), 5), "Just (CapPair CapData CapData);"),
       String.eq(layout.of(lr.guide(laid), 1), "Just (CapPair CapCode CapOther);"),
       U32.is_eq(lr.layouts(laid), 2)])))
-    +d2c : List<&2, EM.G> = lr.guide(prog.lr(aux(prelude, "main = d2c 1 succ 0")))
+    +d2c : List<&2, EM.G> = lr.guide(prog.lr(aux(prelude, "main = d2c 1 succByte 0")))
     IO.print(verdict("guidance-unsized-not-speculatable", all([
       Bool.not(U32.is_eq(len.g(d2c), 0)), Bool.not(U32.is_eq(g.specs(d2c), len.g(d2c))), Bool.not(U32.is_eq(g.specs(d2c), 0))])))
-    IO.print(verdict("simple-main", mr.done(prog(aux(prelude, "main = succ 0")))))
+    IO.print(verdict("simple-main", mr.done(prog(aux(prelude, "main = succByte 0")))))
     IO.print(verdict("lambda-church-application", mr.done(prog(aux(prelude, church())))))
-    IO.print(verdict("church-literal-composition", mr.le(prog(aux(prelude, "main = $3 $2 succ 0")), 6)))
+    IO.print(verdict("church-literal-composition", mr.le(prog(aux(prelude, "main = $3 $2 succByte 0")), 6)))
     IO.print(verdict("gate-joins-different-closures", mr.done(prog(aux(prelude, gate.test())))))
     IO.print(verdict("closure-capturing-closures-join", mr.done(prog(aux(prelude,
-      "main = let compose = \\f g x -> f (g x)\n           h = compose succ succ\n           g = if 1 then h else left\n       in g 1")))))
+      "main = let compose = \\f g x -> f (g x)\n           h = compose succByte succByte\n           g = if 1 then h else left\n       in g 1")))))
     IO.print(verdict("prelude-listEqual", mr.le(prog(aux(prelude, "main = listEqual \"ab\" \"ab\"")), 3)))
     IO.print(verdict("filter-over-range", mr.le(prog(aux(prelude, "main = left (filter (\\x -> dEqual x 2) (range 0 3))")), 3)))
     IO.print(verdict("deferLift-dedupes-siblings", U32.is_eq(bodies.n(defer(1, p(dup.apply(2), dup.apply(3)))), 2)))
@@ -418,17 +422,17 @@ def report(+prelude: String) -> IO(Unit):
     IO.print(verdict("failing-body-localized", all([
       U32.is_eq(fl.kind(lr.fails(split), 1), 1), U32.is_eq(fl.kind(lr.fails(split), 3), 1),
       U32.is_eq(len.g(lr.guide(split)), 1), U32.is_eq(mr.err(lr.main(split)), 3)])))
-    IO.print(verdict("sizing-preserves-church-application", sized(0, aux(prelude, church()))))
-    IO.print(verdict("sizing-preserves-church-literal", sized(0, aux(prelude, "main = $3 $2 succ 0"))))
-    IO.print(verdict("d2c-before-and-after-sizing", sized(1, aux(prelude, "main = d2c 3 succ 0"))))
-    IO.print(verdict("function-wrapped-recursion", sized(1, aux(prelude, "main = let g = {id, \\recur l -> succ (recur (right l)), \\l -> 0} in g [1]"))))
+    IO.print(verdict("sizing-preserves-church-application", sized(0, aux(prelude, church.plain()))))
+    IO.print(verdict("sizing-preserves-church-literal", sized(0, aux(prelude, "main = $3 $2 (\\x -> (x,0)) 0"))))
+    IO.print(verdict("d2c-before-and-after-sizing", sized(1, aux(prelude, "main = d2c 3 succByte 0"))))
+    IO.print(verdict("function-wrapped-recursion", sized(1, aux(prelude, "main = let g = {id, \\recur l -> succByte (recur (right l)), \\l -> 0} in g [1]"))))
     IO.print(verdict("curried-recursion", sized(2, aux(prelude,
       "main = let g = {id, \\recur l -> \\accum -> recur (right l) accum, \\l -> \\accum -> accum} in g [1] 0"))))
     +foldr : EM.LR = compiled(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]"))
     IO.print(verdict("sized-foldr", all([
       Bool.not(U32.is_eq((len.g(lr.guide(foldr)) + len.f(lr.fails(foldr)) : U32), 0)), U32.is_eq(len.f(lr.fails(foldr)), 0), mr.le(lr.main(foldr), 8)])))
-    IO.print(verdict("pinned-disagreeing-arity", U32.is_eq(mr.err(prog(aux(prelude, "main = (if 0 then (\\x -> times $2 x) else $1) succ 0"))), 1)))
-    IO.print(verdict("same-arity-gate-join", mr.done(prog(aux(prelude, "main = (if 0 then (\\x -> x) else $1) succ 0")))))
+    IO.print(verdict("pinned-disagreeing-arity", U32.is_eq(mr.err(prog(aux(prelude, "main = (if 0 then (\\x -> times $2 x) else $1) (\\x -> (x,0)) 0"))), 1)))
+    IO.print(verdict("same-arity-gate-join", mr.done(prog(aux(prelude, "main = (if 0 then (\\x -> x) else $1) succByte 0")))))
 
 def main() -> IO(Unit):
   do IO<Unit>:

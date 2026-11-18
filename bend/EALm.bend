@@ -170,7 +170,7 @@ type S is Type:
   S{tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>,
     pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat,
     na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>,
-    nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32}
+    nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32}
 
 type K is Data:
   KVar{}
@@ -504,9 +504,10 @@ type NI is Data:
   NI{+rk: Map<&2, U32>, +reach: List<&2, Map<&2, Bool>>, +defs: Map<&2, Bool>, +reads: Map<&2, Map<&2, Bool>>}
 
 # narrowed: substitute only what failures point at, adding to it until
-# the program certifies or nothing is left to add.
+# the program certifies or nothing is left to add, the smallest first:
+# a round adds only what reaches at most limit bodies.
 type NF is Data:
-  NfGo{+allowed: Map<&2, Bool>, +e: Err}
+  NfGo{+limit: U32, +allowed: Map<&2, Bool>, +e: Err}
   NfDone{+r: Maybe<&2, MR>}
 
 # Guidance (CodeGuidance), the faithful certificate (inferEALFaithful),
@@ -941,431 +942,437 @@ def render(e: Err) -> String:
 # Accessors (generated: /tmp/bx/eal2/acc.py)
 # ---------
 
-def s.tb.got(bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<U32> & U32) -> S & U32:
+def s.tb.got(bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<U32> & U32) -> S & U32:
   (tb, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.tb(s: S, +i: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.tb.got(bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(U32, tb, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.tb.got(bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(U32, tb, i))
 
 def s.tb.set(s: S, +i: U32, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{Array.set(U32, tb, i, x), bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{Array.set(U32, tb, i, x), bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.tb.swap(s: S, x: Array<U32>) -> S & Array<U32>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{x, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, tb)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{x, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, tb)
 
-def s.bp.got(tb: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<U32> & U32) -> S & U32:
+def s.bp.got(tb: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<U32> & U32) -> S & U32:
   (bp, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.bp(s: S, +i: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.bp.got(tb, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(U32, bp, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.bp.got(tb, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(U32, bp, i))
 
 def s.bp.set(s: S, +i: U32, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, Array.set(U32, bp, i, x), ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, Array.set(U32, bp, i, x), ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.bp.swap(s: S, x: Array<U32>) -> S & Array<U32>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, x, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, bp)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, x, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, bp)
 
-def s.ci.got(tb: Array<U32>, bp: Array<U32>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<CI> & CI) -> S & CI:
+def s.ci.got(tb: Array<U32>, bp: Array<U32>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<CI> & CI) -> S & CI:
   (ci, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.ci(s: S, +i: U32) -> S & CI:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.ci.got(tb, bp, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(CI, ci, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.ci.got(tb, bp, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(CI, ci, i))
 
 def s.ci.set(s: S, +i: U32, x: CI) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, Array.set(CI, ci, i, x), tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, Array.set(CI, ci, i, x), tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.ci.swap(s: S, x: Array<CI>) -> S & Array<CI>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, x, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, ci)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, x, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, ci)
 
-def s.tp.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<U32> & U32) -> S & U32:
+def s.tp.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<U32> & U32) -> S & U32:
   (tp, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.tp(s: S, +i: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.tp.got(tb, bp, ci, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(U32, tp, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.tp.got(tb, bp, ci, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(U32, tp, i))
 
 def s.tp.set(s: S, +i: U32, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, Array.set(U32, tp, i, x), ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, Array.set(U32, tp, i, x), ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.tp.swap(s: S, x: Array<U32>) -> S & Array<U32>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, x, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, tp)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, x, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, tp)
 
-def s.ts.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<List<&2, TE>> & List<&2, TE>) -> S & List<&2, TE>:
+def s.ts.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<List<&2, TE>> & List<&2, TE>) -> S & List<&2, TE>:
   (ts, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.ts(s: S, +i: U32) -> S & List<&2, TE>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.ts.got(tb, bp, ci, tp, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(List<&2, TE>, ts, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.ts.got(tb, bp, ci, tp, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(List<&2, TE>, ts, i))
 
 def s.ts.set(s: S, +i: U32, x: List<&2, TE>) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, Array.set(List<&2, TE>, ts, i, x), pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, Array.set(List<&2, TE>, ts, i, x), pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.ts.swap(s: S, x: Array<List<&2, TE>>) -> S & Array<List<&2, TE>>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, x, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, ts)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, x, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, ts)
 
-def s.pr.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<U32> & U32) -> S & U32:
+def s.pr.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, ap: Array<Ap>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<U32> & U32) -> S & U32:
   (pr, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.pr(s: S, +i: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.pr.got(tb, bp, ci, tp, ts, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(U32, pr, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.pr.got(tb, bp, ci, tp, ts, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(U32, pr, i))
 
 def s.pr.set(s: S, +i: U32, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, Array.set(U32, pr, i, x), ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, Array.set(U32, pr, i, x), ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.pr.swap(s: S, x: Array<U32>) -> S & Array<U32>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, x, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, pr)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, x, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, pr)
 
-def s.ap.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<Ap> & Ap) -> S & Ap:
+def s.ap.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, tm: Array<Mt>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<Ap> & Ap) -> S & Ap:
   (ap, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.ap(s: S, +i: U32) -> S & Ap:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.ap.got(tb, bp, ci, tp, ts, pr, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(Ap, ap, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.ap.got(tb, bp, ci, tp, ts, pr, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(Ap, ap, i))
 
 def s.ap.set(s: S, +i: U32, x: Ap) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, Array.set(Ap, ap, i, x), tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, Array.set(Ap, ap, i, x), tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.ap.swap(s: S, x: Array<Ap>) -> S & Array<Ap>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, x, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, ap)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, x, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, ap)
 
-def s.tm.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<Mt> & Mt) -> S & Mt:
+def s.tm.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, bd: Array<Bd>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<Mt> & Mt) -> S & Mt:
   (tm, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.tm(s: S, +i: U32) -> S & Mt:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.tm.got(tb, bp, ci, tp, ts, pr, ap, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(Mt, tm, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.tm.got(tb, bp, ci, tp, ts, pr, ap, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(Mt, tm, i))
 
 def s.tm.set(s: S, +i: U32, x: Mt) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, Array.set(Mt, tm, i, x), bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, Array.set(Mt, tm, i, x), bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.tm.swap(s: S, x: Array<Mt>) -> S & Array<Mt>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, x, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, tm)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, x, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, tm)
 
-def s.bd.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, r: Array<Bd> & Bd) -> S & Bd:
+def s.bd.got(tb: Array<U32>, bp: Array<U32>, ci: Array<CI>, tp: Array<U32>, ts: Array<List<&2, TE>>, pr: Array<U32>, ap: Array<Ap>, tm: Array<Mt>, nv: U32, vd: Nat, np: U32, pd: Nat, na: U32, ad: Nat, eqs: List<&2, SumEq>, neq: U32, dfs: List<&2, Df>, ndf: U32, lfs: List<&2, Lp>, nlf: U32, frame: U32, uni: Bool, err: Maybe<&2, Err>, cn: List<&2, CN>, ncn: U32, bud: U32, r: Array<Bd> & Bd) -> S & Bd:
   (bd, x) = r
-  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, x)
+  (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, x)
 
 def s.bd(s: S, +i: U32) -> S & Bd:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      s.bd.got(tb, bp, ci, tp, ts, pr, ap, tm, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, Array.get(Bd, bd, i))
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      s.bd.got(tb, bp, ci, tp, ts, pr, ap, tm, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud, Array.get(Bd, bd, i))
 
 def s.bd.set(s: S, +i: U32, x: Bd) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, Array.set(Bd, bd, i, x), nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, Array.set(Bd, bd, i, x), nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.bd.swap(s: S, x: Array<Bd>) -> S & Array<Bd>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, x, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, bd)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, x, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, bd)
 
 def s.nv(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, +nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, nv)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, +nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, nv)
 
 def s.nv.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, x, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, x, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.nv.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, x, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, nv)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, x, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, nv)
 
 def s.vd(s: S) -> S & Nat:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, +vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, vd)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, +vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, vd)
 
 def s.vd.set(s: S, x: Nat) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, x, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, x, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.vd.swap(s: S, x: Nat) -> S & Nat:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, x, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, vd)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, x, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, vd)
 
 def s.np(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, +np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, np)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, +np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, np)
 
 def s.np.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, x, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, x, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.np.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, x, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, np)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, x, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, np)
 
 def s.pd(s: S) -> S & Nat:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, +pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, pd)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, +pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, pd)
 
 def s.pd.set(s: S, x: Nat) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, x, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, x, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.pd.swap(s: S, x: Nat) -> S & Nat:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, x, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, pd)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, x, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, pd)
 
 def s.na(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, +na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, na)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, +na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, na)
 
 def s.na.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, x, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, x, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.na.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, x, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, na)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, x, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, na)
 
 def s.ad(s: S) -> S & Nat:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, +ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, ad)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, +ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, ad)
 
 def s.ad.set(s: S, x: Nat) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, x, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, x, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.ad.swap(s: S, x: Nat) -> S & Nat:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, x, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, ad)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, x, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, ad)
 
 def s.eqs(s: S) -> S & List<&2, SumEq>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, +eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, eqs)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, +eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, eqs)
 
 def s.eqs.set(s: S, x: List<&2, SumEq>) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, x, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, x, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.eqs.swap(s: S, x: List<&2, SumEq>) -> S & List<&2, SumEq>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, x, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, eqs)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, x, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, eqs)
 
 def s.neq(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, +neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, neq)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, +neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, neq)
 
 def s.neq.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, x, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, x, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.neq.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, x, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, neq)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, x, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, neq)
 
 def s.dfs(s: S) -> S & List<&2, Df>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, +dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, dfs)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, +dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, dfs)
 
 def s.dfs.set(s: S, x: List<&2, Df>) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, x, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, x, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.dfs.swap(s: S, x: List<&2, Df>) -> S & List<&2, Df>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, x, ndf, lfs, nlf, frame, uni, err, cn, ncn}, dfs)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, x, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, dfs)
 
 def s.ndf(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, +ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, ndf)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, +ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, ndf)
 
 def s.ndf.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, x, lfs, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, x, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.ndf.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, x, lfs, nlf, frame, uni, err, cn, ncn}, ndf)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, x, lfs, nlf, frame, uni, err, cn, ncn, bud}, ndf)
 
 def s.lfs(s: S) -> S & List<&2, Lp>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, +lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, lfs)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, +lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, lfs)
 
 def s.lfs.set(s: S, x: List<&2, Lp>) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, x, nlf, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, x, nlf, frame, uni, err, cn, ncn, bud}
 
 def s.lfs.swap(s: S, x: List<&2, Lp>) -> S & List<&2, Lp>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, x, nlf, frame, uni, err, cn, ncn}, lfs)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, x, nlf, frame, uni, err, cn, ncn, bud}, lfs)
 
 def s.nlf(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, +nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, nlf)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, +nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, nlf)
 
 def s.nlf.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, x, frame, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, x, frame, uni, err, cn, ncn, bud}
 
 def s.nlf.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, x, frame, uni, err, cn, ncn}, nlf)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, x, frame, uni, err, cn, ncn, bud}, nlf)
 
 def s.frame(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, +frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, frame)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, +frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, frame)
 
 def s.frame.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, x, uni, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, x, uni, err, cn, ncn, bud}
 
 def s.frame.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, x, uni, err, cn, ncn}, frame)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, x, uni, err, cn, ncn, bud}, frame)
 
 def s.uni(s: S) -> S & Bool:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, +uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, uni)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, +uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, uni)
 
 def s.uni.set(s: S, x: Bool) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, x, err, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, x, err, cn, ncn, bud}
 
 def s.uni.swap(s: S, x: Bool) -> S & Bool:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, x, err, cn, ncn}, uni)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, x, err, cn, ncn, bud}, uni)
 
 def s.err(s: S) -> S & Maybe<&2, Err>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, +err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, err)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, +err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, err)
 
 def s.err.set(s: S, x: Maybe<&2, Err>) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, x, cn, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, x, cn, ncn, bud}
 
 def s.err.swap(s: S, x: Maybe<&2, Err>) -> S & Maybe<&2, Err>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, x, cn, ncn}, err)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, x, cn, ncn, bud}, err)
 
 def s.cn(s: S) -> S & List<&2, CN>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, +cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, cn)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, +cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, cn)
 
 def s.cn.set(s: S, x: List<&2, CN>) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, x, ncn}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, x, ncn, bud}
 
 def s.cn.swap(s: S, x: List<&2, CN>) -> S & List<&2, CN>:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, x, ncn}, cn)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, x, ncn, bud}, cn)
 
 def s.ncn(s: S) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, +ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}, ncn)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, +ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, ncn)
 
 def s.ncn.set(s: S, x: U32) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, x}
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, x, bud}
 
 def s.ncn.swap(s: S, x: U32) -> S & U32:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
-      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, x}, ncn)
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, x, bud}, ncn)
+
+# The variable budget (esBudget), fixed when the state is made.
+def s.bud(s: S) -> S & U32:
+  match s:
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, +bud}:
+      (S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}, bud)
 
 def gr.vx.got(nd: Array<U32>, g: Array<List<&2, U32>>, gt: Array<List<&2, U32>>, vis: Array<U32>, sc: Array<U32>, n: U32, po: List<&2, U32>, cur: List<&2, U32>, trs: List<&2, List<&2, U32>>, ntr: U32, st: List<&2, DFr>, top: List<&2, U32>, pass: U32, tl: Array<List<&2, ER>>, r: Array<U32> & U32) -> GR & U32:
   (vx, x) = r
@@ -1652,15 +1659,35 @@ def failed.k1(kr: S & Maybe<&2, Err>) -> S & Bool:
 def failed(s: S) -> S & Bool:
   failed.k1(s.err(s))
 
+# The variable budget (withinBudget)
+# -------------------
+
+# The most variables one analysis makes before giving up, as master's
+# esBudget (b1affbd1). Copying definitions into their uses
+# (specializeLets) multiplies the system, deep copying most: on fact under
+# --ic, master's deep reading of the sized program made 27 million
+# variables and ran out of memory past 16 GB, where the readings before it
+# had refused. A refusal within bounds is the better answer. A verdict
+# depends on the budget, so whatever keeps a verdict keeps the budget it
+# was reached under (the compiled program, and the .telc written from it).
+#
+# 2^23 (defaultVariableBudget); `telomare --eal-budget N` raises it.
+def budget.default() -> U32:
+  8388608
+
+# EALSolverGaveUp, as withinBudget throws it.
+def gave.up(+limit: U32) -> Err:
+  GaveUp{"the constraint system grew past " ++ U32.show(limit) ++ " variables (--eal-budget raises the limit)"}
+
 # Variables
 # ---------
 
 def grow(s: S) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, +vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, +vd, np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
       S{ANode{tb, Array.new(U32, vd, 0)}, ANode{bp, Array.new(U32, vd, 0)}, ANode{ci, Array.new(CI, vd, CUnr{})},
         ANode{tp, Array.new(U32, vd, 0)}, ANode{ts, Array.new(List<&2, TE>, vd, [])}, pr, ap, tm, bd, nv,
-        (vd + 1n : Nat), np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+        (vd + 1n : Nat), np, pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def fresh.at(full: Bool, s: S, +i: U32) -> S & U32:
   match full:
@@ -1674,9 +1701,22 @@ def fresh.k2(+i: U32, kr: S & Nat) -> S & U32:
   (s, +vd) = kr
   fresh.at(U32.is_ge(i, U32.shln(1, vd)), s, i)
 
+# Past the budget (withinBudget), the failure instead of a variable: 0
+# stands in for it, and every loop stops at the failure.
+def fresh.over(over: Bool, s: S, +i: U32, +bud: U32) -> S & U32:
+  match over:
+    case True{}:
+      (fail(s, gave.up(bud)), 0)
+    case False{}:
+      fresh.k2(i, s.vd(s))
+
+def fresh.k1b(+i: U32, kr: S & U32) -> S & U32:
+  (s, +bud) = kr
+  fresh.over(U32.is_gt((i + 1 : U32), bud), s, i, bud)
+
 def fresh.k1(kr: S & U32) -> S & U32:
   (s, +i) = kr
-  fresh.k2(i, s.vd(s))
+  fresh.k1b(i, s.bud(s))
 
 def fresh(s: S) -> S & U32:
   fresh.k1(s.nv(s))
@@ -1702,9 +1742,9 @@ def fresh.sig(s: S) -> S & Sg:
 
 def pr.grow(s: S) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, +pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, +pd, na, ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
       S{tb, bp, ci, tp, ts, ANode{pr, Array.new(U32, pd, 0)}, ap, tm, bd, nv, vd, np, (pd + 1n : Nat), na, ad,
-        eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+        eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def pair.write(s: S, +p: U32, a: Sg, b: Sg) -> S & U32:
   match a:
@@ -2203,9 +2243,9 @@ def ap.none() -> Ap:
 
 def ap.grow(s: S) -> S:
   match s:
-    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, +ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}:
+    case S{tb, bp, ci, tp, ts, pr, ap, tm, bd, nv, vd, np, pd, na, +ad, eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}:
       S{tb, bp, ci, tp, ts, pr, ANode{ap, Array.new(Ap, ad, ap.none())}, tm, bd, nv, vd, np, pd, na, (ad + 1n : Nat),
-        eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn}
+        eqs, neq, dfs, ndf, lfs, nlf, frame, uni, err, cn, ncn, bud}
 
 def ap.put(full: Bool, s: S, +n: U32, +a: Ap) -> S:
   match full:
@@ -2229,11 +2269,11 @@ def ap.new(s: S, +a: Ap) -> S:
 # The state
 # ---------
 
-def st.new(bd: Array<Bd>, +nb: U32, +uni: Bool) -> S:
+def st.new(bd: Array<Bd>, +nb: U32, +uni: Bool, +bud: U32) -> S:
   +d = Ln.depth.of(nb)
   S{Array.new(U32, 10n, 0), Array.new(U32, 10n, 0), Array.new(CI, 10n, CUnr{}), Array.new(U32, 10n, 0),
     Array.new(List<&2, TE>, 10n, []), Array.new(U32, 10n, 0), Array.new(Ap, 6n, ap.none()), Array.new(Mt, d, MtNone{}),
-    bd, 0, 10n, 0, 10n, 0, 6n, [], 0, [], 0, [], 0, 0, uni, None{}, [], 0}
+    bd, 0, 10n, 0, 10n, 0, 6n, [], 0, [], 0, [], 0, 0, uni, None{}, [], 0, bud}
 
 # Showing types (deepShowTau)
 # -------------
@@ -4262,9 +4302,22 @@ def tm.inst.k2(+nb: U32, +v0: U32, +size: U32, +p0: U32, +psz: U32, bp: List<&2,
   s3 = w.aps(aps, w.pr(pr, w.ts(ts, w.tp(tp, w.tb(tb, w.ci(ci, w.bp(bp, s2, z), z), z), z), z), z), z)
   tm.inst.k3(nb, eqs, lfs, dfs, eb, et, res, doors, z, s.eqs.swap(s3, []))
 
+# Past the budget (withinBudget (base + btSize t)), the failure and no
+# instance: the walk stops at the failure.
+def tm.inst.over(over: Bool, +nb: U32, +v0: U32, +size: U32, +p0: U32, +psz: U32, bp: List<&2, KV>, ci: List<&2, KC>, tb: List<&2, KV>, tp: List<&2, KV>, ts: List<&2, KT>, pr: List<&2, KV>, +eqs: List<&2, SumEq>, +lfs: List<&2, KV>, aps: List<&2, Ap>, +dfs: List<&2, Df>, +eb: U32, +et: U32, +res: Sg, +doors: List<&2, U32>, +base: U32, +bud: U32, s: S) -> S & If:
+  match over:
+    case True{}:
+      (fail(s, gave.up(bud)), If{Sg{0, ty.data()}, Sg{0, ty.data()}, []})
+    case False{}:
+      tm.inst.k2(nb, v0, size, p0, psz, bp, ci, tb, tp, ts, pr, eqs, lfs, aps, dfs, eb, et, res, doors, base, s.np(s))
+
+def tm.inst.k1b(+nb: U32, +v0: U32, +size: U32, +p0: U32, +psz: U32, bp: List<&2, KV>, ci: List<&2, KC>, tb: List<&2, KV>, tp: List<&2, KV>, ts: List<&2, KT>, pr: List<&2, KV>, +eqs: List<&2, SumEq>, +lfs: List<&2, KV>, aps: List<&2, Ap>, +dfs: List<&2, Df>, +eb: U32, +et: U32, +res: Sg, +doors: List<&2, U32>, +base: U32, kr: S & U32) -> S & If:
+  (s, +bud) = kr
+  tm.inst.over(U32.is_gt((base + size : U32), bud), nb, v0, size, p0, psz, bp, ci, tb, tp, ts, pr, eqs, lfs, aps, dfs, eb, et, res, doors, base, bud, s)
+
 def tm.inst.k1(+nb: U32, +v0: U32, +size: U32, +p0: U32, +psz: U32, bp: List<&2, KV>, ci: List<&2, KC>, tb: List<&2, KV>, tp: List<&2, KV>, ts: List<&2, KT>, pr: List<&2, KV>, +eqs: List<&2, SumEq>, +lfs: List<&2, KV>, aps: List<&2, Ap>, +dfs: List<&2, Df>, +eb: U32, +et: U32, +res: Sg, +doors: List<&2, U32>, kr: S & U32) -> S & If:
   (s, +base) = kr
-  tm.inst.k2(nb, v0, size, p0, psz, bp, ci, tb, tp, ts, pr, eqs, lfs, aps, dfs, eb, et, res, doors, base, s.np(s))
+  tm.inst.k1b(nb, v0, size, p0, psz, bp, ci, tb, tp, ts, pr, eqs, lfs, aps, dfs, eb, et, res, doors, base, s.bud(s))
 
 def tm.inst(s: S, +nb: U32, t: Tm) -> S & If:
   match t:
@@ -6392,12 +6445,12 @@ def bd.put(kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +rk: Map<&2, U32>
               bd.put(rest, rk, (i + 1 : U32), Array.set(Bd, a, i, Bd{h, fi, U32.is_eq(fi, 4294967288), to.a(body, rk)}))
 
 # The state over a lifted program's bodies, and its main term.
-def prog.state(t: Lf.Lifted, +uni: Bool) -> S & A:
+def prog.state(t: Lf.Lifted, +uni: Bool, +bud: U32) -> S & A:
   match t:
     case Lf.Lifted{+bodies, +main}:
       +rk: Map<&2, U32> = ranks(bodies)
       +n: U32 = U32.from_nat(Map.size(&2, Lf.Body, bodies))
-      (st.new(bd.put(Map.to_list(&2, Lf.Body, bodies), rk, 0, Array.new(Bd, Ln.depth.of(n), bd.dummy())), n, uni), to.a(main, rk))
+      (st.new(bd.put(Map.to_list(&2, Lf.Body, bodies), rk, 0, Array.new(Bd, Ln.depth.of(n), bd.dummy())), n, uni, bud), to.a(main, rk))
 
 def vm.reg.k1(+w: U32, +env: Sg, kr: S & Sg) -> S:
   (s, +so) = kr
@@ -6915,8 +6968,8 @@ def rm.state(p: S & A) -> S & MR:
   go.main(s, term)
 
 # runMain over a lifted program: its result, or the first error.
-def run.main(t: Lf.Lifted, +uni: Bool) -> Result<&2, &2, Err, MR>:
-  rm.got(rm.state(prog.state(t, uni)))
+def run.main(t: Lf.Lifted, +uni: Bool, +bud: U32) -> Result<&2, &2, Err, MR>:
+  rm.got(rm.state(prog.state(t, uni, bud)))
 
 def rank.of(+rk: Map<&2, U32>, +h: String) -> U32:
   Pair.snd(Map<&2, U32>, U32, Map.get(U32, none(), rk, h))
@@ -6977,10 +7030,10 @@ def bds.arr(xs: List<&2, Bd>, +i: U32, a: Array<Bd>) -> Array<Bd>:
       bds.arr(rest, (i + 1 : U32), Array.set(Bd, a, i, b))
 
 # A fresh state over the program's bodies.
-def pg.state(p: PG, +uni: Bool) -> S:
+def pg.state(p: PG, +uni: Bool, +bud: U32) -> S:
   match p:
     case PG{+bds, +refs, +n, +main, +mrefs}:
-      st.new(bds.arr(bds, 0, Array.new(Bd, Ln.depth.of(n), bd.dummy())), n, uni)
+      st.new(bds.arr(bds, 0, Array.new(Bd, Ln.depth.of(n), bd.dummy())), n, uni, bud)
 
 def bd.got(m: Maybe<&2, Bd>) -> Bd:
   match m:
@@ -7015,9 +7068,9 @@ def sm.err(r: S & WT) -> Maybe<&2, Err>:
 
 # summarizeBody's structure: the body walked standalone (walk, dispatch,
 # presolve), in a state of its own; its first error, if any.
-def summary(+p: PG, +uni: Bool, +r: U32) -> Maybe<&2, Err>:
+def summary(+p: PG, +uni: Bool, +bud: U32, +r: U32) -> Maybe<&2, Err>:
   +b: Bd = pg.bd(p, r)
-  sm.err(walk.top(pg.state(p, uni), False{}, "env of lifted body " ++ Co.fi.show(bd.fi(b)), bd.term(b)))
+  sm.err(walk.top(pg.state(p, uni, bud), False{}, "env of lifted body " ++ Co.fi.show(bd.fi(b)), bd.term(b)))
 
 def sm.ok(m: Maybe<&2, Err>) -> Bool:
   match m:
@@ -7031,8 +7084,8 @@ def pg.n(p: PG) -> U32:
     case PG{+bds, +refs, +n, +main, +mrefs}:
       n
 
-def vq.own(+p: PG, +uni: Bool, +r: U32) -> U32:
-  Bool.pick(U32, U32.is_eq(r, pg.n(p)), 1, Bool.pick(U32, sm.ok(summary(p, uni, r)), 1, 2))
+def vq.own(+p: PG, +uni: Bool, +bud: U32, +r: U32) -> U32:
+  Bool.pick(U32, U32.is_eq(r, pg.n(p)), 1, Bool.pick(U32, sm.ok(summary(p, uni, bud, r)), 1, 2))
 
 # A failure, and the reference it failed at, plus one: main's (rank n) at
 # n + 1, body r's at n + 3 + r (n + 2 is spare), so 0 there is a body's
@@ -7055,34 +7108,34 @@ def vq.look(+p: PG, +r: U32, +d: U32, +dr: List<&2, U32>, +rest: List<&2, VF>, q
   (v, +m) = q
   vq.dep(U32.is_eq(m, 0), U32.is_eq(m, 1), v, p, r, d, dr, rest)
 
-def vq.own.if(unknown: Bool, v: Array<U32>, +p: PG, +uni: Bool, +r: U32, +rest: List<&2, VF>) -> VQ:
+def vq.own.if(unknown: Bool, v: Array<U32>, +p: PG, +uni: Bool, +bud: U32, +r: U32, +rest: List<&2, VF>) -> VQ:
   match unknown:
     case True{}:
-      VqGo{Array.set(U32, v, r, vq.own(p, uni, r)), rest}
+      VqGo{Array.set(U32, v, r, vq.own(p, uni, bud, r)), rest}
     case False{}:
       VqGo{v, rest}
 
 # A body whose references all certify: its own summary decides, unless a
 # root frame (bodyResults visits every body) finds it decided already.
-def vq.known(+p: PG, +uni: Bool, +r: U32, +rest: List<&2, VF>, q: Array<U32> & U32) -> VQ:
+def vq.known(+p: PG, +uni: Bool, +bud: U32, +r: U32, +rest: List<&2, VF>, q: Array<U32> & U32) -> VQ:
   (v, +m) = q
-  vq.own.if(U32.is_eq(m, 0), v, p, uni, r, rest)
+  vq.own.if(U32.is_eq(m, 0), v, p, uni, bud, r, rest)
 
-def vq.frame(f: VF, v: Array<U32>, +p: PG, +uni: Bool, +rest: List<&2, VF>) -> VQ:
+def vq.frame(f: VF, v: Array<U32>, +p: PG, +uni: Bool, +bud: U32, +rest: List<&2, VF>) -> VQ:
   match f:
     case VF{+r, +ds}:
       match ds:
         case Nil{}:
-          vq.known(p, uni, r, rest, Array.get(U32, v, r))
+          vq.known(p, uni, bud, r, rest, Array.get(U32, v, r))
         case Con{+d, +dr}:
           vq.look(p, r, d, dr, rest, Array.get(U32, v, d))
 
-def vq.step(st: List<&2, VF>, v: Array<U32>, +p: PG, +uni: Bool) -> VQ:
+def vq.step(st: List<&2, VF>, v: Array<U32>, +p: PG, +uni: Bool, +bud: U32) -> VQ:
   match st:
     case Nil{}:
       VqEnd{v}
     case Con{+f, +rest}:
-      vq.frame(f, v, p, uni, rest)
+      vq.frame(f, v, p, uni, bud, rest)
 
 def vq.fin(q: VQ) -> Array<U32>:
   match q:
@@ -7091,14 +7144,14 @@ def vq.fin(q: VQ) -> Array<U32>:
     case VqEnd{v}:
       v
 
-def vq.loop(fuel: Nat, q: VQ, +p: PG, +uni: Bool) -> Array<U32>:
+def vq.loop(fuel: Nat, q: VQ, +p: PG, +uni: Bool, +bud: U32) -> Array<U32>:
   match fuel:
     case 0n:
       vq.fin(q)
     case 1n+f:
       match q:
         case VqGo{v, +st}:
-          vq.loop(f, vq.step(st, v, p, uni), p, uni)
+          vq.loop(f, vq.step(st, v, p, uni, bud), p, uni, bud)
         case VqEnd{v}:
           v
 
@@ -7114,16 +7167,16 @@ def wd.after(q: Array<U32> & U32, +p: PG, +e: Err) -> Err:
   wd.pick(U32.is_eq(d, 0), p, e, d)
 
 # withDeps mainTerm (Left mainError)
-def with.deps(+p: PG, +uni: Bool, +e: Err) -> Err:
+def with.deps(+p: PG, +uni: Bool, +bud: U32, +e: Err) -> Err:
   match p:
     case PG{+bds, +refs, +n, +main, +mrefs}:
-      wd.after(Array.get(U32, vq.loop(big(), VqGo{Array.new(U32, Ln.depth.of((n + n + 3 : U32)), 0), [VF{n, mrefs}]}, p, uni), (n + 1 : U32)), p, e)
+      wd.after(Array.get(U32, vq.loop(big(), VqGo{Array.new(U32, Ln.depth.of((n + n + 3 : U32)), 0), [VF{n, mrefs}]}, p, uni, bud), (n + 1 : U32)), p, e)
 
 # runMain over the program as data.
-def pg.main(+p: PG, +uni: Bool) -> Result<&2, &2, Err, MR>:
+def pg.main(+p: PG, +uni: Bool, +bud: U32) -> Result<&2, &2, Err, MR>:
   match p:
     case PG{+bds, +refs, +n, +main, +mrefs}:
-      rm.got(go.main(pg.state(p, uni), main))
+      rm.got(go.main(pg.state(p, uni, bud), main))
 
 # allDataShape
 def cm.shape(m: MR) -> Maybe<&2, Err>:
@@ -7138,11 +7191,11 @@ def cm.at(r: Result<&2, &2, Err, MR>, +p: PG) -> Maybe<&2, Err>:
     case Done{+m}:
       cm.shape(m)
     case Fail{+e}:
-      Some{with.deps(p, False{}, e)}
+      Some{with.deps(p, False{}, budget.default(), e)}
 
 def certify.main(t: Lf.Lifted) -> Maybe<&2, Err>:
   +p: PG = pg.of(t)
-  cm.at(pg.main(p, False{}), p)
+  cm.at(pg.main(p, False{}, budget.default()), p)
 
 # Let specialization (specializeLets)
 # ------------------
@@ -8010,10 +8063,10 @@ def ni.of(+bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: PG) -> NI:
   ni.sr(specialize(None{}, True{}, bodies, main), ranks(bodies), reach.list(U32.to_nat(pg.n(p)), reach.all(p)))
 
 # A specialized program's main pass.
-def sr.main(r: SR, +uni: Bool) -> Result<&2, &2, Err, MR>:
+def sr.main(r: SR, +uni: Bool, +bud: U32) -> Result<&2, &2, Err, MR>:
   match r:
     case SR{+bodies, +origin, +main, +defs, +reads}:
-      pg.main(pg.of(Lf.Lifted{bodies, main}), uni)
+      pg.main(pg.of(Lf.Lifted{bodies, main}), uni, bud)
 
 # The failure to narrow by (located). A uniform chain types its links as
 # one, so a conflict a shared definition causes can surface first inside
@@ -8026,10 +8079,10 @@ def lc.pick(r: Result<&2, &2, Err, MR>, +e: Err) -> Err:
     case Done{+m}:
       e
 
-def located(uni: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +e: Err) -> Err:
+def located(uni: Bool, +bud: U32, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +e: Err) -> Err:
   match uni:
     case True{}:
-      lc.pick(pg.main(pg.of(Lf.Lifted{bodies, main}), False{}), e)
+      lc.pick(pg.main(pg.of(Lf.Lifted{bodies, main}), False{}, bud), e)
     case False{}:
       e
 
@@ -8085,97 +8138,212 @@ def res.some.o(r: Result<&2, &2, Err, MR>, +origin: Map<&2, String>) -> Maybe<&2
       None{}
 
 # specialized deep: substitute everything, if anything changed.
-def specialized.at(changed: Bool, +r: SR, +uni: Bool) -> Maybe<&2, MR>:
+def specialized.at(changed: Bool, +r: SR, +uni: Bool, +bud: U32) -> Maybe<&2, MR>:
   match changed:
     case True{}:
-      res.some.o(sr.main(r, uni), sr.origin(r))
+      res.some.o(sr.main(r, uni, bud), sr.origin(r))
     case False{}:
       None{}
 
-def specialized(+deep: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
+def specialized(+deep: Bool, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool, +bud: U32) -> Maybe<&2, MR>:
   +r: SR = specialize(None{}, deep, bodies, main)
-  specialized.at(sr.changed(r), r, uni)
+  specialized.at(sr.changed(r), r, uni, bud)
 
-def nf.run(r: Result<&2, &2, Err, MR>, +allowed: Map<&2, Bool>, +origin: Map<&2, String>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> NF:
+def nf.run(r: Result<&2, &2, Err, MR>, +limit: U32, +allowed: Map<&2, Bool>, +origin: Map<&2, String>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool, +bud: U32) -> NF:
   match r:
     case Done{+m}:
       NfDone{Some{mr.origin(m, origin)}}
     case Fail{+e}:
-      NfGo{allowed, located(uni, bodies, main, e)}
+      NfGo{limit, allowed, located(uni, bud, bodies, main, e)}
 
-def nf.sr(r: SR, +allowed: Map<&2, Bool>, +uni: Bool) -> NF:
+def nf.sr(r: SR, +limit: U32, +allowed: Map<&2, Bool>, +uni: Bool, +bud: U32) -> NF:
   match r:
     case SR{+bodies, +origin, +main, +defs, +reads}:
-      nf.run(pg.main(pg.of(Lf.Lifted{bodies, main}), uni), allowed, origin, bodies, main, uni)
+      nf.run(pg.main(pg.of(Lf.Lifted{bodies, main}), uni, bud), limit, allowed, origin, bodies, main, uni, bud)
 
-def nf.at(none: Bool, +allowed: Map<&2, Bool>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> NF:
+# How many bodies a pointed-at definition's code reaches (reachSize; 0
+# for main, "-").
+def rs.at(main: Bool, +ni: NI, +h: String) -> U32:
+  match main:
+    case True{}:
+      0
+    case False{}:
+      U32.from_nat(Map.size(&2, Bool, reach.of(ni, h)))
+
+def reach.size(+ni: NI, +h: String) -> U32:
+  rs.at(String.eq(h, "-"), ni, h)
+
+# The keys whose reach is at most limit.
+def set.small.go(kvs: List<&2, Sigma<&2, &2, String, _ => Bool>>, +ni: NI, +limit: U32) -> List<&2, String>:
+  match kvs:
+    case Nil{}:
+      []
+    case Con{kv, rest}:
+      match kv:
+        case (+k, +v):
+          set.keep(U32.is_le(reach.size(ni, k), limit), k, set.small.go(rest, ni, limit))
+
+def set.small(+ni: NI, +limit: U32, +a: Map<&2, Bool>) -> Map<&2, Bool>:
+  set.of(set.small.go(Map.to_list(&2, Bool, a), ni, limit), Map.new(&2, Bool))
+
+# Nothing pointed at: done, uncertified; nothing small enough: the limit
+# doubles; else substitute what is allowed and the new.
+def nf.at(none: Bool, nonew: Bool, +limit: U32, +allowed: Map<&2, Bool>, +e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool, +bud: U32) -> NF:
   match none:
     case True{}:
       NfDone{None{}}
     case False{}:
-      nf.sr(specialize(Some{allowed}, True{}, bodies, main), allowed, uni)
+      match nonew:
+        case True{}:
+          NfGo{(limit * 2 : U32), allowed, e}
+        case False{}:
+          nf.sr(specialize(Some{allowed}, True{}, bodies, main), limit, allowed, uni, bud)
 
-def nf.step(+ni: NI, +allowed: Map<&2, Bool>, +e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> NF:
-  +new: Map<&2, Bool> = set.minus(pointed.at(ni, error.bodies(e)), allowed)
-  nf.at(set.empty(new), set.union(allowed, new), bodies, main, uni)
+def nf.step(+ni: NI, +limit: U32, +allowed: Map<&2, Bool>, +e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool, +bud: U32) -> NF:
+  +pointed: Map<&2, Bool> = set.minus(pointed.at(ni, error.bodies(e)), allowed)
+  +new: Map<&2, Bool> = set.small(ni, limit, pointed)
+  nf.at(set.empty(pointed), set.empty(new), limit, set.union(allowed, new), e, bodies, main, uni, bud)
 
-def nf.loop(fuel: Nat, +n: NF, +ni: NI, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
+def nf.loop(fuel: Nat, +n: NF, +ni: NI, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool, +bud: U32) -> Maybe<&2, MR>:
   match fuel:
     case 0n:
       None{}
     case 1n+f:
       match n:
-        case NfGo{+allowed, +e}:
-          nf.loop(f, nf.step(ni, allowed, e, bodies, main, uni), ni, bodies, main, uni)
+        case NfGo{+limit, +allowed, +e}:
+          nf.loop(f, nf.step(ni, limit, allowed, e, bodies, main, uni, bud), ni, bodies, main, uni, bud)
         case NfDone{+r}:
           r
 
-def narrowed(+e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: PG, +uni: Bool) -> Maybe<&2, MR>:
-  nf.loop(big(), NfGo{Map.new(&2, Bool), located(uni, bodies, main, e)}, ni.of(bodies, main, p), bodies, main, uni)
+def narrowed(+e: Err, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +p: PG, +uni: Bool, +bud: U32) -> Maybe<&2, MR>:
+  nf.loop(big(), NfGo{1, Map.new(&2, Bool), located(uni, bud, bodies, main, e)}, ni.of(bodies, main, p), bodies, main, uni, bud)
 
 # narrowed <|> specialized False <|> specialized True
-def fb.two(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
+def fb.two(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool, +bud: U32) -> Maybe<&2, MR>:
   match m:
     case Some{+x}:
       Some{x}
     case None{}:
-      specialized(True{}, bodies, main, uni)
+      specialized(True{}, bodies, main, uni, bud)
 
-def fb.one(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool) -> Maybe<&2, MR>:
+def fb.one(m: Maybe<&2, MR>, +bodies: Map<&2, Lf.Body>, +main: Lf.L, +uni: Bool, +bud: U32) -> Maybe<&2, MR>:
   match m:
     case Some{+x}:
       Some{x}
     case None{}:
-      fb.two(specialized(False{}, bodies, main, uni), bodies, main, uni)
+      fb.two(specialized(False{}, bodies, main, uni, bud), bodies, main, uni, bud)
 
-def fallback(+e: Err, t: Lf.Lifted, +p: PG, +uni: Bool) -> Maybe<&2, MR>:
+def fallback(+e: Err, t: Lf.Lifted, +p: PG, +uni: Bool, +bud: U32) -> Maybe<&2, MR>:
   match t:
     case Lf.Lifted{+bodies, +main}:
-      fb.one(narrowed(e, bodies, main, p, uni), bodies, main, uni)
+      fb.one(narrowed(e, bodies, main, p, uni, bud), bodies, main, uni, bud)
 
 # ealLiftedMain of inferEALLiftedWith: main's pass, else a fallback's,
 # else main's failure behind its dependencies'. uni: sized recursion
 # chains typed uniformly (esUniformChains).
-def lm.fb(m: Maybe<&2, MR>, +p: PG, +e: Err, +uni: Bool) -> Result<&2, &2, Err, MR>:
+def lm.fb(m: Maybe<&2, MR>, +p: PG, +e: Err, +uni: Bool, +bud: U32) -> Result<&2, &2, Err, MR>:
   match m:
     case Some{+x}:
       Done{x}
     case None{}:
-      Fail{with.deps(p, uni, e)}
+      Fail{with.deps(p, uni, bud, e)}
 
-def lm.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG, +uni: Bool) -> Result<&2, &2, Err, MR>:
+def lm.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG, +uni: Bool, +bud: U32) -> Result<&2, &2, Err, MR>:
   match r:
     case Done{+m}:
       Done{m}
     case Fail{+e}:
-      lm.fb(fallback(e, t, p, uni), p, e, uni)
+      lm.fb(fallback(e, t, p, uni, bud), p, e, uni, bud)
 
-def lifted.with(+uni: Bool, +t: Lf.Lifted) -> Result<&2, &2, Err, MR>:
+def lifted.with(+uni: Bool, +bud: U32, +t: Lf.Lifted) -> Result<&2, &2, Err, MR>:
   +p: PG = pg.of(t)
-  lm.at(pg.main(p, uni), t, p, uni)
+  lm.at(pg.main(p, uni, bud), t, p, uni, bud)
 
+# inferEALLifted: under the default budget, as the REPL and the layouts
+# below read it.
 def lifted.main(+t: Lf.Lifted) -> Result<&2, &2, Err, MR>:
-  lifted.with(False{}, t)
+  lifted.with(False{}, budget.default(), t)
+
+# certifyMainWithin's gaveUpBeneath: a main that fails because a body it
+# depends on gave up is refused with that give-up, not with the body's
+# hash, since a larger budget may change the verdict and the give-up says
+# so, and how to raise it. The failing dependencies are followed down (vq's
+# slot n + 3 + r names the reference body r failed at, 0 for its own
+# failure) to the body that failed on its own; its own failure, if a
+# give-up, is the answer.
+type GU is Type:
+  GuGo{v: Array<U32>, +r: U32}
+  GuEnd{+e: Err}
+
+def gu.own(m: Maybe<&2, Err>, +e: Err) -> Err:
+  match m:
+    case Some{x}:
+      match x:
+        case GaveUp{+msg}:
+          GaveUp{msg}
+        case other:
+          e
+    case None{}:
+      e
+
+def gu.pick(own: Bool, v: Array<U32>, +p: PG, +uni: Bool, +bud: U32, +r: U32, +d: U32, +e: Err) -> GU:
+  match own:
+    case True{}:
+      GuEnd{gu.own(summary(p, uni, bud, r), e)}
+    case False{}:
+      GuGo{v, (d - 1 : U32)}
+
+def gu.step(q: Array<U32> & U32, +p: PG, +uni: Bool, +bud: U32, +r: U32, +e: Err) -> GU:
+  (v, +d) = q
+  gu.pick(U32.is_eq(d, 0), v, p, uni, bud, r, d, e)
+
+def gu.loop(fuel: Nat, q: GU, +p: PG, +uni: Bool, +bud: U32, +e: Err) -> Err:
+  match fuel:
+    case 0n:
+      e
+    case 1n+f:
+      match q:
+        case GuGo{v, +r}:
+          gu.loop(f, gu.step(Array.get(U32, v, (pg.n(p) + 3 + r : U32)), p, uni, bud, r, e), p, uni, bud, e)
+        case GuEnd{+x}:
+          x
+
+def wr.pick(none: Bool, v: Array<U32>, +p: PG, +uni: Bool, +bud: U32, +e: Err, +d: U32) -> Err:
+  match none:
+    case True{}:
+      e
+    case False{}:
+      gu.loop(big(), GuGo{v, (d - 1 : U32)}, p, uni, bud, DependencyFailed{bd.hash(pg.bd(p, (d - 1 : U32)))})
+
+def wr.after(q: Array<U32> & U32, +p: PG, +uni: Bool, +bud: U32, +e: Err) -> Err:
+  (v, +d) = q
+  wr.pick(U32.is_eq(d, 0), v, p, uni, bud, e, d)
+
+# withDeps mainTerm (Left mainError), then gaveUpBeneath.
+def with.root(+p: PG, +uni: Bool, +bud: U32, +e: Err) -> Err:
+  match p:
+    case PG{+bds, +refs, +n, +main, +mrefs}:
+      wr.after(Array.get(U32, vq.loop(big(), VqGo{Array.new(U32, Ln.depth.of((n + n + 3 : U32)), 0), [VF{n, mrefs}]}, p, uni, bud), (n + 1 : U32)), p, uni, bud, e)
+
+def lm.root.fb(m: Maybe<&2, MR>, +p: PG, +e: Err, +uni: Bool, +bud: U32) -> Result<&2, &2, Err, MR>:
+  match m:
+    case Some{+x}:
+      Done{x}
+    case None{}:
+      Fail{with.root(p, uni, bud, e)}
+
+def lm.root.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG, +uni: Bool, +bud: U32) -> Result<&2, &2, Err, MR>:
+  match r:
+    case Done{+m}:
+      Done{m}
+    case Fail{+e}:
+      lm.root.fb(fallback(e, t, p, uni, bud), p, e, uni, bud)
+
+# ealLiftedMain of inferEALWithLiftingWithin, its failure through
+# gaveUpBeneath.
+def lifted.root(+bud: U32, +t: Lf.Lifted) -> Result<&2, &2, Err, MR>:
+  +p: PG = pg.of(t)
+  lm.root.at(pg.main(p, False{}, bud), t, p, False{}, bud)
 
 # certifyMain
 def cmain.at(r: Result<&2, &2, Err, MR>) -> Maybe<&2, Err>:
@@ -8185,8 +8353,8 @@ def cmain.at(r: Result<&2, &2, Err, MR>) -> Maybe<&2, Err>:
     case Fail{+e}:
       Some{e}
 
-def certify.main.full(+t: Lf.Lifted) -> Maybe<&2, Err>:
-  cmain.at(lifted.main(t))
+def certify.main.full(+bud: U32, +t: Lf.Lifted) -> Maybe<&2, Err>:
+  cmain.at(lifted.root(bud, t))
 
 def ly.at(r: Map<&2, Lf.Shape> & Bool, +h: String, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
   (shapes, +known) = r
@@ -8217,9 +8385,13 @@ def ly.res(r: Result<&2, &2, Err, MR>, t: Lf.Lifted) -> Map<&2, Lf.Shape>:
 def layouts(+t: Lf.Lifted) -> Map<&2, Lf.Shape>:
   ly.res(lifted.main(t), t)
 
+# certifyMainWithin: the gate under a chosen variable budget.
+def certify.within(+bud: U32, +t: Lf.Lifted) -> Maybe<&2, Err>:
+  certify.main.full(bud, t)
+
 # certifyMain (the gate).
 def certify(+t: Lf.Lifted) -> Maybe<&2, Err>:
-  certify.main.full(t)
+  certify.within(budget.default(), t)
 
 def g.none() -> G:
   G{0, [], 0, 0, True{}, None{}}
@@ -8424,8 +8596,8 @@ def lr.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted) -> LR:
       LR{Map.new(&2, G), [], Fail{e}}
 
 # inferEALLiftedWith uni, with the guidance.
-def lr.of(+uni: Bool, +t: Lf.Lifted) -> LR:
-  lr.at(lifted.with(uni, t), t)
+def lr.of(+uni: Bool, +bud: U32, +t: Lf.Lifted) -> LR:
+  lr.at(lifted.with(uni, bud, t), t)
 
 # The sizing substitution (faithfulProgram, liftedChain, refinementCheckL)
 # -----------------------------------------------------------------
@@ -8606,8 +8778,12 @@ def faithful(t: Lf.Lifted) -> Lf.Lifted:
       Lf.Lifted{fa.extras(fa.ex.bodies(Map.to_list(&2, Lf.Body, bodies), fa.ex(main, [])), fa.bodies(Map.to_list(&2, Lf.Body, bodies), Map.new(&2, Lf.Body))), fa.rw(main)}
 
 # inferEALFaithful, over the lifted unsized program.
+def faithful.lr.within(+bud: U32, +t: Lf.Lifted) -> LR:
+  lr.of(True{}, bud, faithful(t))
+
+# Under the default budget.
 def faithful.lr(+t: Lf.Lifted) -> LR:
-  lr.of(True{}, faithful(t))
+  faithful.lr.within(budget.default(), t)
 
 # deriveSizedGuidance
 # -------------------
@@ -8887,52 +9063,52 @@ def br.own(m: Maybe<&2, Err>) -> Err:
     case None{}:
       Internal{"a failing body's summary found no error"}
 
-def br.err(own: Bool, +p: PG, +uni: Bool, +i: U32, +d: U32) -> Err:
+def br.err(own: Bool, +p: PG, +uni: Bool, +bud: U32, +i: U32, +d: U32) -> Err:
   match own:
     case True{}:
-      br.own(summary(p, uni, i))
+      br.own(summary(p, uni, bud, i))
     case False{}:
       DependencyFailed{bd.hash(pg.bd(p, (d - 1 : U32)))}
 
-def bs.v2(q: Array<U32> & U32, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +h: String) -> BS:
+def bs.v2(q: Array<U32> & U32, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +bud: U32, +h: String) -> BS:
   (v, +d) = q
-  BsGo{v, rest, bl.tail(uns), (i + 1 : U32), guide, Fl{h, br.err(U32.is_eq(d, 0), p, uni, i, d)} <> fails}
+  BsGo{v, rest, bl.tail(uns), (i + 1 : U32), guide, Fl{h, br.err(U32.is_eq(d, 0), p, uni, bud, i, d)} <> fails}
 
-def bs.one(ok: Bool, v: Array<U32>, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +h: String, +b: Lf.Body) -> BS:
+def bs.one(ok: Bool, v: Array<U32>, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +bud: U32, +h: String, +b: Lf.Body) -> BS:
   match ok:
     case True{}:
       BsGo{v, rest, bl.tail(uns), (i + 1 : U32), Map.set(&2, G, guide, h, g.syn(b, bl.head(uns))), fails}
     case False{}:
-      bs.v2(Array.get(U32, v, (pg.n(p) + 3 + i : U32)), rest, uns, i, guide, fails, p, uni, h)
+      bs.v2(Array.get(U32, v, (pg.n(p) + 3 + i : U32)), rest, uns, i, guide, fails, p, uni, bud, h)
 
-def bs.v1(q: Array<U32> & U32, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +h: String, +b: Lf.Body) -> BS:
+def bs.v1(q: Array<U32> & U32, +rest: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +bud: U32, +h: String, +b: Lf.Body) -> BS:
   (v, +m) = q
-  bs.one(U32.is_eq(m, 1), v, rest, uns, i, guide, fails, p, uni, h, b)
+  bs.one(U32.is_eq(m, 1), v, rest, uns, i, guide, fails, p, uni, bud, h, b)
 
-def bs.step(v: Array<U32>, +kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool) -> BS:
+def bs.step(v: Array<U32>, +kvs: List<&2, Sigma<&2, &2, String, _ => Lf.Body>>, +uns: List<&2, Bool>, +i: U32, +guide: Map<&2, G>, +fails: List<&2, Fl>, +p: PG, +uni: Bool, +bud: U32) -> BS:
   match kvs:
     case Nil{}:
       BsEnd{guide, fails}
     case Con{kv, rest}:
       match kv:
         case (+h, +b):
-          bs.v1(Array.get(U32, v, i), rest, uns, i, guide, fails, p, uni, h, b)
+          bs.v1(Array.get(U32, v, i), rest, uns, i, guide, fails, p, uni, bud, h, b)
 
-def bs.loop(fuel: Nat, s: BS, +p: PG, +uni: Bool) -> BS:
+def bs.loop(fuel: Nat, s: BS, +p: PG, +uni: Bool, +bud: U32) -> BS:
   match fuel:
     case 0n:
       s
     case 1n+f:
       match s:
         case BsGo{v, +kvs, +uns, +i, +guide, +fails}:
-          bs.loop(f, bs.step(v, kvs, uns, i, guide, fails, p, uni), p, uni)
+          bs.loop(f, bs.step(v, kvs, uns, i, guide, fails, p, uni, bud), p, uni, bud)
         case BsEnd{+guide, +fails}:
           BsEnd{guide, fails}
 
-def br.lr(v: Array<U32>, +t: Lf.Lifted, +p: PG, +uni: Bool, +e: Err) -> LR:
+def br.lr(v: Array<U32>, +t: Lf.Lifted, +p: PG, +uni: Bool, +bud: U32, +e: Err) -> LR:
   match t:
     case Lf.Lifted{+bodies, +main}:
-      bs.lr(bs.loop(big(), BsGo{v, Map.to_list(&2, Lf.Body, bodies), unsized.in(Lf.Lifted{bodies, main}), 0, Map.new(&2, G), []}, p, uni), e)
+      bs.lr(bs.loop(big(), BsGo{v, Map.to_list(&2, Lf.Body, bodies), unsized.in(Lf.Lifted{bodies, main}), 0, Map.new(&2, G), []}, p, uni, bud), e)
 
 # bodyResults (inferEALLiftedWith, under a main no reading certifies)
 # ------------------------------------------------------------------
@@ -8947,37 +9123,38 @@ def br.frames(rs: List<&2, List<&2, U32>>, +i: U32) -> List<&2, VF>:
     case Con{+ds, rest}:
       VF{i, ds} <> br.frames(rest, (i + 1 : U32))
 
-def br.v(+p: PG, +uni: Bool) -> Array<U32>:
+def br.v(+p: PG, +uni: Bool, +bud: U32) -> Array<U32>:
   match p:
     case PG{+bds, +refs, +n, +main, +mrefs}:
-      vq.loop(big(), VqGo{Array.new(U32, Ln.depth.of((n + n + 3 : U32)), 0), br.frames(refs, 0)}, p, uni)
+      vq.loop(big(), VqGo{Array.new(U32, Ln.depth.of((n + n + 3 : U32)), 0), br.frames(refs, 0)}, p, uni, bud)
 
-def lr.full.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG, +uni: Bool) -> LR:
+def lr.full.at(r: Result<&2, &2, Err, MR>, +t: Lf.Lifted, +p: PG, +uni: Bool, +bud: U32) -> LR:
   match r:
     case Done{+m}:
       LR{guide.ok(t, m), [], Done{m}}
     case Fail{+e}:
-      br.lr(br.v(p, uni), t, p, uni, e)
+      br.lr(br.v(p, uni, bud), t, p, uni, bud, e)
 
 # inferEALLiftedWith uni, with the guidance, and with the bodies' verdicts
 # when main fails.
-def lr.full(+uni: Bool, +t: Lf.Lifted) -> LR:
+def lr.full(+uni: Bool, +bud: U32, +t: Lf.Lifted) -> LR:
   +p: PG = pg.of(t)
-  lr.full.at(lm.at(pg.main(p, uni), t, p, uni), t, p, uni)
+  lr.full.at(lm.at(pg.main(p, uni, bud), t, p, uni, bud), t, p, uni, bud)
 
 # certifiedProgramFrom: the sized program's guidance and verdict, derived
 # from the faithful certificate of the unsized program (pre) when that
 # covers it, else inferred over the sized program (inferEALCompiled).
-def cp.pick(r: Result<&2, &2, String, LR>, +post: Lf.Lifted) -> LR:
+def cp.pick(r: Result<&2, &2, String, LR>, +bud: U32, +post: Lf.Lifted) -> LR:
   match r:
     case Done{+x}:
       x
     case Fail{+why}:
-      lr.full(False{}, post)
+      lr.full(False{}, bud, post)
 
-def certified.program(+pre: Lf.Lifted, +counts: List<&2, E.TS>, +keep: Maybe<&2, Set()>, +sized: Co.V) -> LR:
+# Every reading under the budget the compile runs with (bud).
+def certified.program(+bud: U32, +pre: Lf.Lifted, +counts: List<&2, E.TS>, +keep: Maybe<&2, Set()>, +sized: Co.V) -> LR:
   +post: Lf.Lifted = Lf.defer.lift.expr(sized)
-  cp.pick(derive(Subst{counts, keep}, pre, faithful.lr(pre), post), post)
+  cp.pick(derive(Subst{counts, keep}, pre, faithful.lr.within(bud, pre), post), bud, post)
 
 # ealCaptureLayouts of a result.
 def lr.layouts.go(kvs: List<&2, Sigma<&2, &2, String, _ => G>>, +m: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:

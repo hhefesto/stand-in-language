@@ -7,5 +7,5 @@ telomare> Error from loaded file: 1:7:
 unexpected ")<newline>"
 expecting "case", "if", "let", '"', '$', '(', '[', '\', '{', integer, or letter
 
-telomare> 2
+telomare> RE (missing definition "succ" at line 1, column 1)
 telomare> --- stderr
