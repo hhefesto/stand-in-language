@@ -5,6 +5,6 @@ Invalid option `--draw-net'
 
 Usage: telomare TELOMARE-FILE 
                 [--compile [-o|--output FILE] | --certificate | --meter] 
-                [--fast [--fuel N] | --ic]
+                [--fast [--fuel N] | --ic] [--eal-budget N]
 
   A simple but robust virtual machine

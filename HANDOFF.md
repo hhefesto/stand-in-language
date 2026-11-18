@@ -505,7 +505,8 @@ CHECK. It printed GATE FAILED only for records the merge makes stale:
   master `281c00cb` (the sources hash, master's version-9 `.telc`, and
   `--eal-budget N` in the usage). Before: `~/telc/expected-before`, the same
   as `HEAD`'s.
-These records wait for the user's OK; they are not in the merge commit.
+The user OK'd these records (2026-11-17); they are in the commit after the
+merge, "Re-record the goldens and the fact corpus record for 281c00cb".
 
 Memory: the port's `tictactoe --ic` peaked near 7.7 GB resident (master's
 `--compile` of it: 4.9 GB). Two such runs at once (a parallel goldens copy
