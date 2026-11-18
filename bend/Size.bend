@@ -82,11 +82,13 @@ type SizeFail is Data:
 
 # Whether the erasures past the check analysis's are sound (SIZING-PROOF.md
 # §4): Unproven, when the checker did not run; Checked, its verdict on main's
-# witness, and the runs it had left. Only a Proven verdict erases: the theorem
-# in PROOF.bend covers exactly that.
+# witness, and the runs it had left; first: None when that verdict is on every
+# check main makes, the ones left to run time too, else that run's verdict, and
+# seen is the run on the sites the net's program erases anyway. Only a Proven verdict erases: the
+# theorem in PROOF.bend covers exactly that.
 type Erasure is Data:
   Unproven{}
-  Checked{+seen: Ck.Seen}
+  Checked{+seen: Ck.Seen, +first: Maybe<&2, Ck.Verdict>}
 
 # What became of the refinement checks. keep: those main still makes, by origin
 # key, or None when analyzing them was over budget and all stay; hoisted: those
@@ -1495,27 +1497,61 @@ def naked.envs(x: E.X) -> E.X:
       other
 
 # The erasure checker's budget: the evaluation steps its runs may take in
-# all (Check.bend), and how deep its input tree may grow.
+# all (Check.bend), and how deep its input tree may grow. 2^30: simpleplus
+# needs 481,067,842 steps to prove every check main makes on the session's
+# inputs (2026-11-18; 2^28 before, which ran out on it).
 def check.work() -> Nat:
-  U32.to_nat(268435456)
+  U32.to_nat(1073741824)
 
 def check.depth() -> Nat:
   U32.to_nat(100000)
 
-# The erasure checker on main's witness, watching the sites the net's program
-# erases (every check main no longer makes, and every chain's bottom), on the
-# inputs the prologue passes.
-def erasure.run(check: Bool, +left: Set(), +counts: List<&2, E.TS>, +x: E.X, g: Maybe<&2, E.X>) -> Erasure:
+def erasure.watching(+left: Set(), +counts: List<&2, E.TS>, +x: E.X, +g: Maybe<&2, E.X>) -> Ck.Seen:
+  Ck.check.session(check.depth(), Sm.fuel(), Sm.Pol{Sm.Watch{}, Ck.erasable(x, left)}, Ck.witness(counts, x), g, check.work())
+
+def erasure.all(s: Ck.Seen, +left: Set(), +counts: List<&2, E.TS>, +x: E.X, +g: Maybe<&2, E.X>) -> Erasure:
+  match s:
+    case Ck.Seen{v, l}:
+      match v:
+        case Ck.Proven{}:
+          Checked{Ck.Seen{Ck.Proven{}, l}, None{}}
+        case other:
+          Checked{erasure.watching(left, counts, x, g), Some{other}}
+
+# The erasure checker on main's witness, on the inputs a session gives main
+# that the prologue passes (Ck.check.session: the user's decision of
+# 2026-11-17, that a line is a list of code points). It watches every check
+# main makes, the ones left to run time too, and every chain's bottom; where
+# that is not proven, only the sites the net's program erases anyway (every
+# check main no longer makes, and every chain's bottom).
+def erasure.run(check: Bool, +left: Set(), +counts: List<&2, E.TS>, +x: E.X, +g: Maybe<&2, E.X>) -> Erasure:
   match check:
     case True{}:
-      Checked{Ck.check(check.depth(), Sm.fuel(), Sm.Pol{Sm.Watch{}, Ck.erasable(x, left)}, Ck.witness(counts, x), g, check.work())}
+      erasure.all(erasure.watching(Set.new(), counts, x, g), left, counts, x, g)
     case False{}:
       Unproven{}
+
+# left, unless the checker proved every check (first is None).
+def left.unless(first: Maybe<&2, Ck.Verdict>, +left: Set()) -> Set():
+  match first:
+    case None{}:
+      Set.new()
+    case Some{v}:
+      left
+
+# The checks main still makes on the net: none, where the checker proved every
+# check unreachable; else those left to run time.
+def erasure.left(e: Erasure, +left: Set()) -> Set():
+  match e:
+    case Checked{s, first}:
+      left.unless(first, left)
+    case Unproven{}:
+      left
 
 # Whether the checker proved the erasures: then, and only then, they are made.
 def erased(e: Erasure) -> Bool:
   match e:
-    case Checked{s}:
+    case Checked{s, first}:
       match s:
         case Ck.Seen{v, left}:
           match v:
@@ -1617,7 +1653,7 @@ def cored(+counts: List<&2, E.TS>, cs: Checks, r: Result<&2, &2, String, Co.V>, 
       Fail{Leftover{form}}
 
 def with.erasure(+e: Erasure, +p: Pl.Plan, +plain: Co.V, +os: Map<&2, L.Origin>, +counts: List<&2, E.TS>, +left: Set(), +cm: E.X, +cap: Bool) -> Result<&2, &2, SizeFail, Sized>:
-  cored(counts, Checks{plan.keep(p), plan.hoisted(p), e}, net.expr(erased(e), os, counts, left, cm, cap, plain), plain, plan.prologue(p))
+  cored(counts, Checks{plan.keep(p), plan.hoisted(p), e}, net.expr(erased(e), os, counts, erasure.left(e, left), cm, cap, plain), plain, plan.prologue(p))
 
 def with.left(+left: Set(), +p: Pl.Plan, +plain: Co.V, +os: Map<&2, L.Origin>, +counts: List<&2, E.TS>, +cm: E.X, +x: E.X, +cap: Bool, +check: Bool) -> Result<&2, &2, SizeFail, Sized>:
   with.erasure(erasure.run(cap && check, left, counts, x, guard.sem(plan.prologue(p))), p, plain, os, counts, left, cm, cap)

@@ -508,6 +508,92 @@ CHECK. It printed GATE FAILED only for records the merge makes stale:
 The user OK'd these records (2026-11-17); they are in the commit after the
 merge, "Re-record the goldens and the fact corpus record for 281c00cb".
 
+### The session's inputs: the interaction gap, first step (2026-11-17/18)
+
+The interaction gap (the user's order, step 3) is almost all the Prelude's
+checks the net runs: simpleplus's 1,769,485 interactions are its `succByte`
+check (`Num 255`, Prelude:51:28), left to run time by the check analysis and
+run at every call. Two experiments (2026-11-17, scratch builds): the erasure
+checker's budget raised from 2^28 to 2^32 steps still ran out on simpleplus;
+and watching the checks left to run time too, it found an input that reaches
+one, a character whose number has a pair where a number has 0 (`(0 (_ _))`
+inside the digit), which no session gives. **The user's decision
+(2026-11-17): let the erasure checker assume inputs are well-formed**, then
+re-measure.
+
+What the code does now:
+- `Check.bend`: a `Form` says what data a position may hold (`FAny`;
+  `FInput`, 0 or a line and any state; `FText`, a list of characters;
+  `FNum`, a unary number, 0 or `(n, 0)`), and `form.ok` says whether data
+  has it. `split` and `explore` carry the root's form: a number's position
+  splits into 0 or `(pL, 0)`, never `(pL, pR)`. `check` is as before (`FAny`,
+  every input); `check.session` starts from `FInput`.
+- `Size.bend`: the compiler runs `check.session`, first watching every check
+  main makes (the ones left to run time too) and every chain's bottom; where
+  that is proven, the net's program makes none of main's checks
+  (`erasure.left`). Where it is not, it runs again on the sites it watched
+  before (the analysis's erasures and the bottoms), on the session's inputs.
+  `Erasure`'s `Checked` keeps the first run's verdict (`first`).
+- The checker's budget (`check.work`) is 2^30 steps (was 2^28): simpleplus
+  needs 481,067,842 to be proven.
+- `Certificate.bend`: the erasure lines say "no input a session gives it" and,
+  third, that the net's program makes none of main's checks, or why the
+  checks left to run time stay (over-budget-recursion's: the checker found
+  input `((34 _) _)` reaching its check, so it rightly stays).
+
+**What the proofs now assume** (LAWS.bend, PROOF.bend). The laws before stay
+as they were and are still proven: `certificate_opening` and
+`certificate_guarded` are about `Ck.check` on every data input. Two new laws,
+`certificate_session_opening` and `certificate_session`, are the same
+statements for `Ck.check.session`, the second with one more hypothesis,
+`Ck.form.ok(Ck.FInput{}, input) == True`: the input is 0, or a pair of a
+line and any state, the line a list (0, or a pair of a character and a
+line), each character a unary number (0, or `(n, 0)` for n + 1). That is
+what `Session.bend` gives main: `Co.DPair{Co.of.string(line), state}`,
+`Co.of.string` making each code point `Co.int` (nested `(n, 0)` pairs, no
+upper bound: code points, not bytes). The compiler's erasures now rest on
+these two laws: nothing is claimed for an input not of that form (one built
+by hand and given to main some other way). PROOF.bend proves them with the
+same tree as before (`tree`, now over a form: `goodi` holds of `fits(i, d,
+f)`, which is `refines` plus every hole's data of its form, `fits_refines`;
+`split_cover` keeps every input of the form under one of a split's sides).
+The two new laws need the user's approval (SIZING-PROOF.md's D1 rule:
+LAWS.bend is the user's).
+
+**Counts** (delfos, 2026-11-18; before: 414daa8's build, after: this change;
+`--ic --meter`):
+- tc_ultra_minimal: 118 → 118 (proven before too; it has no check left to
+  run time).
+- simpleplus `3 4`: 1,769,485 → 17,925, "3 plus 4 is 7" both. Its checker
+  proves every check (481,067,842 steps), so the net makes none of main's.
+- tictactoe `1 4 2 5 3`: 7,534,180 → 7,534,180. Both of its checker runs
+  (every check, then the bottoms alone) run out of the 2^30 budget.
+
+**Worse:** compiles where the checker runs out take longer, as it now runs
+twice with a budget four times as large: tictactoe `--ic --certificate`
+54 s → 101 s, its `--ic --meter` 233 s → 285 s (peak RSS the same, 8.8 GB).
+simpleplus's `--ic --certificate` is about the same (178 s → 186 s: the
+proof costs about what the old run-out did).
+
+Tests that pinned the old behaviour, updated in this change: `tests/ic.bend`'s
+`ic-meter-simpleplus` (1,769,485 → 17,925), `tests/size.bend`'s `size-erased`
+(simpleplus's net program now holds no abort: "Abort" → "none"), and
+`tests/eal.bend`'s `eal-layouts-simpleplus` (the layouts' digest of the sized
+program, which has no checks now: `df61eecc…` → `138b458f…`). Seven `port/`
+goldens re-recorded (`record-port`, binaries from this tree): the erasure lines
+of `tc_ultra_minimal`, `simpleplus`, `tictactoe` and `over-budget-recursion`
+`.ic-certificate`, `simpleplus.ic-meter` (17,925), and `simpleplus`'s
+`.compile`/`.ic-compile` (the `.telc` is 252,195 bytes, was 260,738).
+
+**Gate, 2026-11-18** (`bend/dev/gate.sh all`, `GATE=~/telc/gate5` on delfos,
+inside `nix develop`, this tree): the generated `ic.c` is the same; the tests
+all pass (lexical 8, front 13, size 11, sem 3, eal 14, ealm 33, ic 20, fast 5,
+telc 7, native 3, rules 3, netsem 6 groups); goldens 63 passed, 0 failed; lsp
+3/3; perr 960 cases, 0 failures; corpus meters 17 and certificates 16 the same
+(no corpus program's count moved); proofs: open none, and `bend PROOF.bend
+--verdict` (BendTT's kernel, every law in LAWS.bend, the two new ones
+included), NetProof and NetModel `--verdict` print ALL PROOFS CHECK. GATE OK.
+
 Memory: the port's `tictactoe --ic` peaked near 7.7 GB resident (master's
 `--compile` of it: 4.9 GB). Two such runs at once (a parallel goldens copy
 under a 5 GB cap) ran delfos out of memory and timed out, so one heavy run
@@ -1799,10 +1885,24 @@ and assembly and the GPU would have been two more.
   only. olimpo's GPU is an AMD RX 580 (Polaris, gfx803): no CUDA, and
   ROCm no longer supports it; Vulkan compute (RADV) runs on it, with
   64-bit integers (checked 2026-10-27), and OpenCL through Mesa's rusticl
-  should (untried). **Open, for the user:** which GPU path (CUDA as Bend does, on an
-  NVIDIA machine; Vulkan or OpenCL for this AMD card; both). The net's
-  shape suits a GPU best for many independent nets at once (one session
-  per work-group), less for one turn's mostly sequential net.
+  should (untried). **The user's decision (2026-11-18):** "Vulkan compute
+  first, tested on delfos's Intel GPU; CUDA later from the same rule
+  table". So N5's first back end is a printer beside genic.bend that prints
+  the compute shader from Rules.bend's table, as ic.c is printed, checked
+  against IC.bend by the native test; CUDA comes later from the same table,
+  and only a rented NVIDIA GPU runs it (the user's OK each time). N5 stays
+  last, after N3 and N4. The net's shape suits a GPU best for many
+  independent nets at once (one session per work-group), less for one
+  turn's mostly sequential net.
+  - delfos's GPU, probed read-only 2026-11-18 (`nix shell
+    nixpkgs#vulkan-tools -c vulkaninfo`): GPU0 is the Intel Iris Xe (TGL GT2,
+    8086:9a40), Mesa 26.2.6's Intel driver, Vulkan 1.4.354. Its queue
+    families have `QUEUE_COMPUTE_BIT` (with graphics, transfer, sparse); `shaderInt64` true,
+    `shaderBufferInt64Atomics` true (`VK_KHR_shader_atomic_int64`),
+    `shaderSharedInt64Atomics` false; `maxStorageBufferRange` 4 GiB - 1,
+    `maxMemoryAllocationSize` 0x2e073dc00 (11.5 GiB, shared with the CPU),
+    `maxComputeSharedMemorySize` 48 KiB. GPU1 is llvmpipe (CPU). Nothing ran
+    on the GPU.
 
 ### P9. Master's EAL (2026-10-30)
 

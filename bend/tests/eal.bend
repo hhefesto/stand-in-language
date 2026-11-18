@@ -387,9 +387,12 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "d992f91d1f0ed4450acaddaf31698601d2126a3fc690232d3a2853a915617cb7")))
+    # simpleplus's since 2026-11-18: the erasure checker, on the session's
+    # inputs, proves every check its main makes, so the sized program has none
+    # (was df61eecc88845c32d7d83152abc0ab3f8e335f8fdddbfb2dae5629bb671218e8).
     IO.print(verdict("eal-layouts-simpleplus", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus")),
-      "df61eecc88845c32d7d83152abc0ab3f8e335f8fdddbfb2dae5629bb671218e8")))
+      "138b458f468448cceb6b54393119ecc41d504c302366bd727af3a28df2088e67")))
 
 def main() -> IO(Unit):
   do IO<Unit>:

@@ -254,24 +254,42 @@ def kept(+why: String) -> List<&2, String>:
   ["erasures in main: none past the check analysis's; the chains keep their bases",
    "  " ++ why]
 
+# Why the checker did not prove a run.
+def unproven(v: Ck.Verdict) -> String:
+  match v:
+    case Ck.Proven{}:
+      "it proved them"
+    case Ck.Fires{+i, at}:
+      "the erasure checker found input " ++ Ck.show(i) ++ " reaching " ++ Ck.at.name(at)
+    case Ck.Unknown{why}:
+      "the erasure checker could not prove them unreachable: " ++ why
+
+# Where the checker watched every check main makes (first is None), the net's
+# program makes none; else the line saying why the checks left to run time
+# stay.
+def erasure.first(first: Maybe<&2, Ck.Verdict>) -> List<&2, String>:
+  match first:
+    case None{}:
+      ["  the net's program makes none of main's checks"]
+    case Some{v}:
+      ["  the checks left to run time stay: " ++ unproven(v)]
+
 def erasure.seen(v: Ck.Verdict, +steps: Nat) -> List<&2, String>:
   match v:
     case Ck.Proven{}:
       ["erasures in main: proven, by the erasure checker in " ++ Nat.show(steps) ++ " evaluation " ++ plural("step", Nat.is_eq(steps, 1n)),
-       "  no input it is called on reaches an erased recursion bottom or check"]
-    case Ck.Fires{+i, at}:
-      kept("the erasure checker found input " ++ Ck.show(i) ++ " reaching " ++ Ck.at.name(at))
-    case Ck.Unknown{why}:
-      kept("the erasure checker could not prove them unreachable: " ++ why)
+       "  no input a session gives it reaches an erased recursion bottom or check"]
+    case other:
+      kept(unproven(other))
 
 def erasure(e: Sz.Erasure) -> List<&2, String>:
   match e:
     case Sz.Unproven{}:
       kept("the erasure checker did not run")
-    case Sz.Checked{s}:
+    case Sz.Checked{s, first}:
       match s:
         case Ck.Seen{v, left}:
-          erasure.seen(v, Nat.sub(Sz.check.work(), left))
+          List.append(&2, String, erasure.seen(v, Nat.sub(Sz.check.work(), left)), erasure.first(first))
 
 def erasures(cs: Sz.Checks) -> List<&2, String>:
   match cs:

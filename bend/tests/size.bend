@@ -231,15 +231,17 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       String.contains(size(65536, with.prelude("branch-refinement-leak", leak, prelude), "branch-refinement-leak"), "depends on input that nothing bounds"),
       String.contains(size(65536, with.prelude("unknown-check-branch", unk, prelude), "unknown-check-branch"), "depends on input that nothing bounds")])))
     # The net's program, where the erasure checker proves it: a case on a
-    # constant that matches holds no abort, one that does not keeps it, and
-    # simpleplus keeps one: its input check runs before main, but succByte's
-    # `Num 255` (Prelude:51:28, since master's 1cfcb3de..6e67d618) stays in
-    # main, as master's `--meter` shows (58 runs on `3 4`).
+    # constant that matches holds no abort, one that does not keeps it.
+    # simpleplus kept one until 2026-11-18: succByte's `Num 255`
+    # (Prelude:51:28, since master's 1cfcb3de..6e67d618) is left to run time
+    # by the check analysis, as master's `--meter` shows (58 runs on `3 4`),
+    # but the checker, on the session's inputs (the user's decision of
+    # 2026-11-17), proves it never fails, so the net's program has none.
     IO.print(verdict("size-erased", all([
       String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
       String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),
       String.eq(aborts(case.of(prelude, "3"), "cased"), "Abort"),
-      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "Abort")])))
+      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "none")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:

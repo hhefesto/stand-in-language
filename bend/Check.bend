@@ -1,5 +1,6 @@
 import Base
 import ./Expr.bend as E
+import ./Core.bend as Co
 import ./Sem.bend as Sm
 
 # The erasure checker (SIZING-PROOF.md §4, checker v1): whether a
@@ -90,15 +91,101 @@ def unkept(xs: List<&2, U32>, +left: Set()) -> List<&2, U32>:
 def erasable(x: E.X, +left: Set()) -> List<&2, U32>:
   unkept(sites(x, []), left)
 
+# The inputs a session gives main
+# -------------------------------
+
+# What the tree may split an unknown position into. Any data, or, the user's
+# decision of 2026-11-17, only what a session gives main (Session.bend: main
+# on Co.DPair{Co.of.string(line), state}): a line, a list of characters, each
+# its code point as a unary number (n + 1 is (n, 0)), and any state. A form
+# says what data may stand at a position, and which forms its two sides have.
+type Form is Data:
+  FAny{}
+  FInput{}
+  FText{}
+  FNum{}
+
+def form.l(f: Form) -> Form:
+  match f:
+    case FAny{}:
+      FAny{}
+    case FInput{}:
+      FText{}
+    case FText{}:
+      FNum{}
+    case FNum{}:
+      FNum{}
+
+def form.r(f: Form) -> Form:
+  match f:
+    case FAny{}:
+      FAny{}
+    case FInput{}:
+      FAny{}
+    case FText{}:
+      FText{}
+    case FNum{}:
+      FAny{}
+
+def form.zero(d: Co.D) -> Bool:
+  match d:
+    case Co.DZero{}:
+      True{}
+    case Co.DPair{x, y}:
+      False{}
+
+def form.free(+d: Co.D) -> Bool:
+  True{}
+
+def form.num(d: Co.D) -> Bool:
+  match d:
+    case Co.DZero{}:
+      True{}
+    case Co.DPair{x, y}:
+      Bool.and(form.num(x), form.zero(y))
+
+def form.text(d: Co.D) -> Bool:
+  match d:
+    case Co.DZero{}:
+      True{}
+    case Co.DPair{x, y}:
+      Bool.and(form.num(x), form.text(y))
+
+def form.input(d: Co.D) -> Bool:
+  match d:
+    case Co.DZero{}:
+      True{}
+    case Co.DPair{x, y}:
+      Bool.and(form.text(x), form.free(y))
+
+# Whether d has form f: 0 has every form; a pair, its sides have f's sides'
+# forms (form.l, form.r), and a number's right side is 0.
+def form.ok(f: Form, d: Co.D) -> Bool:
+  match f:
+    case FAny{}:
+      form.free(d)
+    case FInput{}:
+      form.input(d)
+    case FText{}:
+      form.text(d)
+    case FNum{}:
+      form.num(d)
+
 # Splitting the input
 # -------------------
 
-def split.at(+p: String, zero: Bool) -> E.X:
+# The unknown position p, of form f, as 0 or as a pair: a number's pair is
+# its predecessor and 0.
+def split.at(+p: String, zero: Bool, f: Form) -> E.X:
   match zero:
     case True{}:
       E.XZero{}
     case False{}:
-      E.XPair{E.XVar{p ++ "L"}, E.XVar{p ++ "R"}}
+      match f:
+        case FNum{}:
+          E.XPair{E.XVar{p ++ "L"}, E.XZero{}}
+        case other:
+          E.XPair{E.XVar{p ++ "L"}, E.XVar{p ++ "R"}}
 
 # A position's path as directions, True for left.
 def dirs(p: String) -> List<&2, Bool>:
@@ -110,20 +197,20 @@ def dirs(p: String) -> List<&2, Bool>:
         case Chr{k}:
           U32.is_eq(k, 76) <> dirs(rest)
 
-# The input with the unknown position on the way to the position at rest (at
-# or above it) made 0 or a pair.
-def split(i: E.X, rest: List<&2, Bool>, +zero: Bool) -> E.X:
+# The input i, of form f, with the unknown position on the way to the
+# position at rest (at or above it) made 0 or a pair.
+def split(i: E.X, rest: List<&2, Bool>, +zero: Bool, +f: Form) -> E.X:
   match i:
     case E.XVar{+q}:
-      split.at(q, zero)
+      split.at(q, zero, f)
     case E.XPair{a, b}:
       match rest:
         case Con{d, more}:
           match d:
             case True{}:
-              E.XPair{split(a, more, zero), b}
+              E.XPair{split(a, more, zero, form.l(f)), b}
             case False{}:
-              E.XPair{a, split(b, more, zero)}
+              E.XPair{a, split(b, more, zero, form.r(f))}
         case Nil{}:
           E.XPair{a, b}
     case other:
@@ -270,7 +357,7 @@ def at.of(+i: E.X, w: Nat, c: Counted) -> Job:
 
 # Explore: depth bounds how deep the tree's jobs nest, work the steps its
 # runs take in all (and one a leaf).
-def explore(+depth: Nat, +fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, job: Job) -> Seen:
+def explore(+f: Form, +depth: Nat, +fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, job: Job) -> Seen:
   match depth:
     case 0n:
       Seen{Unknown{"the input split too deep"}, 0n}
@@ -281,19 +368,19 @@ def explore(+depth: Nat, +fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X
             case 0n:
               Seen{Unknown{"its budget of evaluation steps ran out"}, 0n}
             case 1n+w:
-              explore(d, fuel, pol, main, g, at.of(i, w, node.counted(fuel, pol, main, g, i)))
+              explore(f, d, fuel, pol, main, g, at.of(i, w, node.counted(fuel, pol, main, g, i)))
         case At{+i, +work, s}:
           match s:
             case Settled{v}:
               Seen{v, work}
             case Fork{+p}:
-              explore(d, fuel, pol, main, g, Then{split(i, dirs(p), False{}), explore(d, fuel, pol, main, g, Node{split(i, dirs(p), True{}), work})})
+              explore(f, d, fuel, pol, main, g, Then{split(i, dirs(p), False{}, f), explore(f, d, fuel, pol, main, g, Node{split(i, dirs(p), True{}, f), work})})
         case Then{+i, first}:
           match first:
             case Seen{v, left}:
               match v:
                 case Proven{}:
-                  explore(d, fuel, pol, main, g, Node{i, left})
+                  explore(f, d, fuel, pol, main, g, Node{i, left})
                 case other:
                   Seen{other, left}
 
@@ -314,7 +401,14 @@ def opened(v: Verdict, s: Seen) -> Seen:
 
 def check(+depth: Nat, +fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, work: Nat) -> Seen:
   opened(step.verdict(main.step(E.XZero{}, Sm.run(fuel, pol, main, E.XZero{}))),
-    explore(depth, fuel, pol, main, g, Node{E.XVar{""}, work}))
+    explore(FAny{}, depth, fuel, pol, main, g, Node{E.XVar{""}, work}))
+
+# check, on the inputs a session gives main (FInput, the user's decision of
+# 2026-11-17): what the compiler runs. LAWS.bend's certificate_session says
+# what its proof is worth.
+def check.session(+depth: Nat, +fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, work: Nat) -> Seen:
+  opened(step.verdict(main.step(E.XZero{}, Sm.run(fuel, pol, main, E.XZero{}))),
+    explore(FInput{}, depth, fuel, pol, main, g, Node{E.XVar{""}, work}))
 
 # Saying it
 # ---------

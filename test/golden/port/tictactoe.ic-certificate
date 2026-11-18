@@ -41,6 +41,7 @@ refinement checks: 0 discharged statically, 8 left to run time:
   tictactoe:85:23  at run time
 erasures in main: none past the check analysis's; the chains keep their bases
   the erasure checker could not prove them unreachable: its budget of evaluation steps ran out
+  the checks left to run time stay: the erasure checker could not prove them unreachable: its budget of evaluation steps ran out
 
 recursion nesting (structural, approximate):
   triple          function               levels

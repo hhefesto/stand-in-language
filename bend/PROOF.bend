@@ -4404,7 +4404,7 @@ law opening_at:
   {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}) != Sm.Fired{site} : Sm.R}
 
 def opening_at(depth, fuel, checks, main, g, leaves, left, proven, any, site):
-  hf => obs_never_fires(fuel, any, Sm.Pol{Sm.Watch{}, checks}, Sm.JE{E.app(main, E.XZero{}), Sm.WZero{}}, site)(opening_obs(Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))(opened_v(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven))))(hf)
+  hf => obs_never_fires(fuel, any, Sm.Pol{Sm.Watch{}, checks}, Sm.JE{E.app(main, E.XZero{}), Sm.WZero{}}, site)(opening_obs(Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))(opened_v(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(Ck.FAny{}, depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven))))(hf)
 
 def Laws.certificate_opening(depth, fuel, checks, main, g, leaves, left, proven, any, site):
   opening_at(depth, fuel, checks, main, g, leaves, left, proven, any, site)
@@ -7328,21 +7328,113 @@ def or_and_r(p, q, l):
     case False{}:
       h1 => h2 => Empty.absurd({False{} == True{} : Bool}, false_true(h2))
 
-# The checker's split: every input under i is under one of the two sides.
+# fits(i, d, f): d is one of the inputs the partial input i, of form f,
+# stands for: i refines d, and each unknown position holds data of its form
+# (Ck.form.ok).
+def fits(i: E.X, d: Co.D, +f: Ck.Form) -> Bool:
+  match i:
+    case E.XVar{p}:
+      Ck.form.ok(f, d)
+    case E.XZero{}:
+      Ck.form.zero(d)
+    case E.XPair{a, b}:
+      match d:
+        case Co.DPair{x, y}:
+          Bool.and(fits(a, x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))
+        case Co.DZero{}:
+          False{}
+    case _:
+      False{}
+
+# What fits refines.
+law fits_refines:
+  for i: E.X
+  for +d: Co.D
+  for +f: Ck.Form
+  {fits(i, d, f) == True{} : Bool} -> {refines(i, d) == True{} : Bool}
+
+def fits_refines(i, d, f):
+  match i:
+    case E.XVar{q}:
+      h => {==}
+    case E.XZero{}:
+      match d:
+        case Co.DZero{}:
+          h => {==}
+        case Co.DPair{x, y}:
+          h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XPair{+a, +b}:
+      match d:
+        case Co.DPair{+x, +y}:
+          +h => and_i(refines(a, x), refines(b, y))(fits_refines(a, x, Ck.form.l(f))(and_l(fits(a, x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))(h)))(fits_refines(b, y, Ck.form.r(f))(and_r(fits(a, x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))(h)))
+        case Co.DZero{}:
+          h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XEnv{}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XSetEnv{y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XDefer{fi, b}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XGate{}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XLeft{y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XRight{y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XAbort{at}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XAborted{at, m}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XEither{n, a, b}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XTest{tok, y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XStub{tok, y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XStage{sr, y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XCheck{site, tc, c}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XStep{tok, n, y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XBounded{bz, bp}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XAny{}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XBarrier{y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XLefts{n, y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XRights{n, y}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+    case E.XError{msg}:
+      h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
+
+# The checker's split: every input under i, of form f, is under one of the
+# two sides.
 law split_cover:
   for i: E.X
   for rest: List<&2, Bool>
   for +d: Co.D
-  {refines(i, d) == True{} : Bool} -> {Bool.or(refines(Ck.split(i, rest, True{}), d), refines(Ck.split(i, rest, False{}), d)) == True{} : Bool}
+  for +f: Ck.Form
+  {fits(i, d, f) == True{} : Bool} -> {Bool.or(fits(Ck.split(i, rest, True{}, f), d, f), fits(Ck.split(i, rest, False{}, f), d, f)) == True{} : Bool}
 
-def split_cover(i, rest, d):
+def split_cover(i, rest, d, f):
   match i:
     case E.XVar{q}:
       match d:
         case Co.DZero{}:
           h => {==}
         case Co.DPair{x, y}:
-          h => {==}
+          match f:
+            case Ck.FAny{}:
+              h => {==}
+            case Ck.FInput{}:
+              h => h
+            case Ck.FText{}:
+              h => h
+            case Ck.FNum{}:
+              h => h
     case E.XPair{+a, +b}:
       match rest:
         case Con{dd, +more}:
@@ -7350,59 +7442,59 @@ def split_cover(i, rest, d):
             case True{}:
               match d:
                 case Co.DPair{+x, +y}:
-                  +h => or_and_l(refines(Ck.split(a, more, True{}), x), refines(Ck.split(a, more, False{}), x), refines(b, y))(split_cover(a, more, x)(and_l(refines(a, x), refines(b, y))(h)))(and_r(refines(a, x), refines(b, y))(h))
+                  +h => or_and_l(fits(Ck.split(a, more, True{}, Ck.form.l(f)), x, Ck.form.l(f)), fits(Ck.split(a, more, False{}, Ck.form.l(f)), x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))(split_cover(a, more, x, Ck.form.l(f))(and_l(fits(a, x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))(h)))(and_r(fits(a, x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))(h))
                 case Co.DZero{}:
                   h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
             case False{}:
               match d:
                 case Co.DPair{+x, +y}:
-                  +h => or_and_r(refines(Ck.split(b, more, True{}), y), refines(Ck.split(b, more, False{}), y), refines(a, x))(split_cover(b, more, y)(and_r(refines(a, x), refines(b, y))(h)))(and_l(refines(a, x), refines(b, y))(h))
+                  +h => or_and_r(fits(Ck.split(b, more, True{}, Ck.form.r(f)), y, Ck.form.r(f)), fits(Ck.split(b, more, False{}, Ck.form.r(f)), y, Ck.form.r(f)), fits(a, x, Ck.form.l(f)))(split_cover(b, more, y, Ck.form.r(f))(and_r(fits(a, x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))(h)))(and_l(fits(a, x, Ck.form.l(f)), fits(b, y, Ck.form.r(f)))(h))
                 case Co.DZero{}:
                   h => Empty.absurd({False{} == True{} : Bool}, false_true(h))
         case Nil{}:
-          h => (%Equal.sym(Bool, refines(E.XPair{a, b}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+          h => (%Equal.sym(Bool, fits(E.XPair{a, b}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XZero{}:
-      h => (%Equal.sym(Bool, refines(E.XZero{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XZero{}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XEnv{}:
-      h => (%Equal.sym(Bool, refines(E.XEnv{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XEnv{}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XSetEnv{y}:
-      h => (%Equal.sym(Bool, refines(E.XSetEnv{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XSetEnv{y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XDefer{fi, b}:
-      h => (%Equal.sym(Bool, refines(E.XDefer{fi, b}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XDefer{fi, b}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XGate{}:
-      h => (%Equal.sym(Bool, refines(E.XGate{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XGate{}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XLeft{y}:
-      h => (%Equal.sym(Bool, refines(E.XLeft{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XLeft{y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XRight{y}:
-      h => (%Equal.sym(Bool, refines(E.XRight{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XRight{y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XAbort{at}:
-      h => (%Equal.sym(Bool, refines(E.XAbort{at}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XAbort{at}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XAborted{at, m}:
-      h => (%Equal.sym(Bool, refines(E.XAborted{at, m}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XAborted{at, m}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XEither{n, a, b}:
-      h => (%Equal.sym(Bool, refines(E.XEither{n, a, b}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XEither{n, a, b}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XTest{tok, y}:
-      h => (%Equal.sym(Bool, refines(E.XTest{tok, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XTest{tok, y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XStub{tok, y}:
-      h => (%Equal.sym(Bool, refines(E.XStub{tok, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XStub{tok, y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XStage{sr, y}:
-      h => (%Equal.sym(Bool, refines(E.XStage{sr, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XStage{sr, y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XCheck{site, tc, c}:
-      h => (%Equal.sym(Bool, refines(E.XCheck{site, tc, c}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XCheck{site, tc, c}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XStep{tok, n, y}:
-      h => (%Equal.sym(Bool, refines(E.XStep{tok, n, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XStep{tok, n, y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XBounded{bz, bp}:
-      h => (%Equal.sym(Bool, refines(E.XBounded{bz, bp}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XBounded{bz, bp}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XAny{}:
-      h => (%Equal.sym(Bool, refines(E.XAny{}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XAny{}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XBarrier{y}:
-      h => (%Equal.sym(Bool, refines(E.XBarrier{y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XBarrier{y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XLefts{n, y}:
-      h => (%Equal.sym(Bool, refines(E.XLefts{n, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XLefts{n, y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XRights{n, y}:
-      h => (%Equal.sym(Bool, refines(E.XRights{n, y}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XRights{n, y}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
     case E.XError{msg}:
-      h => (%Equal.sym(Bool, refines(E.XError{msg}, d), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
+      h => (%Equal.sym(Bool, fits(E.XError{msg}, d, f), True{}, h) : {Bool.or(_, _) == True{} : Bool}; {==})
 
 law or_elim:
   for p: Bool
@@ -7617,18 +7709,18 @@ def node_counted(fuel, pol, main, g, i):
 
 # goodi(…, i): on d, an input under i that the guard passes, main fires
 # no site.
-def goodi(+pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, +d: Co.D, gfuel: Nat, any: Nat, site: E.Site, i: E.X) -> Type:
-  {refines(i, d) == True{} : Bool} -> {Ck.guard.on(gfuel, g, Sm.of.data(d)) == Ck.Pass{} : Ck.Gate} -> {Sm.run(any, pol, main, Sm.of.data(d)) == Sm.Fired{site} : Sm.R} -> Empty
+def goodi(+f: Ck.Form, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, +d: Co.D, gfuel: Nat, any: Nat, site: E.Site, i: E.X) -> Type:
+  {fits(i, d, f) == True{} : Bool} -> {Ck.guard.on(gfuel, g, Sm.of.data(d)) == Ck.Pass{} : Ck.Gate} -> {Sm.run(any, pol, main, Sm.of.data(d)) == Sm.Fired{site} : Sm.R} -> Empty
 
 # What a job of the tree promises once explored to a proof.
-def good(+fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, +d: Co.D, +gfuel: Nat, +any: Nat, +site: E.Site, job: Ck.Job) -> Type:
+def good(+f: Ck.Form, +fuel: Nat, +pol: Sm.Pol, +main: E.X, +g: Maybe<&2, E.X>, +d: Co.D, +gfuel: Nat, +any: Nat, +site: E.Site, job: Ck.Job) -> Type:
   match job:
     case Ck.Node{+i, l}:
-      goodi(pol, main, g, d, gfuel, any, site, i)
+      goodi(f, pol, main, g, d, gfuel, any, site, i)
     case Ck.At{+i, l, s}:
-      {s == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> goodi(pol, main, g, d, gfuel, any, site, i)
+      {s == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> goodi(f, pol, main, g, d, gfuel, any, site, i)
     case Ck.Then{+i, first}:
-      goodi(pol, main, g, d, gfuel, any, site, i)
+      goodi(f, pol, main, g, d, gfuel, any, site, i)
 
 law step_obs:
   for i: E.X
@@ -7822,6 +7914,7 @@ def guard_ref(fuel, g, i, d, gfuel):
       hgt => hr => hp => guard_leaf(fuel, gx, i, d, gfuel)(hgt)(hr)(hp)
 
 law leaf_gt:
+  for +f: Ck.Form
   for +fuel: Nat
   for +pol: Sm.Pol
   for +main: E.X
@@ -7832,20 +7925,21 @@ law leaf_gt:
   for +site: E.Site
   for +i: E.X
   for gt: Ck.Gate
-  {gt == Ck.guard.on(fuel, g, i) : Ck.Gate} -> {Ck.Settled{Ck.Proven{}} == Ck.node.step(gt, fuel, pol, main, i) : Ck.Step} -> goodi(pol, main, g, d, gfuel, any, site, i)
+  {gt == Ck.guard.on(fuel, g, i) : Ck.Gate} -> {Ck.Settled{Ck.Proven{}} == Ck.node.step(gt, fuel, pol, main, i) : Ck.Step} -> goodi(f, pol, main, g, d, gfuel, any, site, i)
 
-def leaf_gt(fuel, pol, main, g, d, gfuel, any, site, i, gt):
+def leaf_gt(f, fuel, pol, main, g, d, gfuel, any, site, i, gt):
   match gt:
     case Ck.Pass{}:
-      hgt => eq => hr => hg => hfr => main_leaf(fuel, pol, main, i, d, any, site)(step_obs(i, Sm.run(fuel, pol, main, i))(%eq : provenv(Ck.step.verdict(_)); Unit{}))(hr)(hfr)
+      hgt => eq => hr => hg => hfr => main_leaf(fuel, pol, main, i, d, any, site)(step_obs(i, Sm.run(fuel, pol, main, i))(%eq : provenv(Ck.step.verdict(_)); Unit{}))(fits_refines(i, d, f)(hr))(hfr)
     case Ck.Refuse{}:
-      hgt => eq => hr => hg => hfr => guard_ref(fuel, g, i, d, gfuel)(hgt)(hr)(hg)
+      hgt => eq => hr => hg => hfr => guard_ref(fuel, g, i, d, gfuel)(hgt)(fits_refines(i, d, f)(hr))(hg)
     case Ck.Need{p}:
-      hgt => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), (%eq : provenv(Ck.step.verdict(_)); Unit{}))
+      hgt => eq => Empty.absurd(goodi(f, pol, main, g, d, gfuel, any, site, i), (%eq : provenv(Ck.step.verdict(_)); Unit{}))
     case Ck.Lost{why}:
-      hgt => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), (%eq : provenv(Ck.step.verdict(_)); Unit{}))
+      hgt => eq => Empty.absurd(goodi(f, pol, main, g, d, gfuel, any, site, i), (%eq : provenv(Ck.step.verdict(_)); Unit{}))
 
 law leaf:
+  for +f: Ck.Form
   for +fuel: Nat
   for +pol: Sm.Pol
   for +main: E.X
@@ -7856,18 +7950,19 @@ law leaf:
   for +site: E.Site
   for +i: E.X
   for v: Ck.Verdict
-  provenv(v) -> {Ck.Settled{v} == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> goodi(pol, main, g, d, gfuel, any, site, i)
+  provenv(v) -> {Ck.Settled{v} == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> goodi(f, pol, main, g, d, gfuel, any, site, i)
 
-def leaf(fuel, pol, main, g, d, gfuel, any, site, i, v):
+def leaf(f, fuel, pol, main, g, d, gfuel, any, site, i, v):
   match v:
     case Ck.Proven{}:
-      pv => eq => leaf_gt(fuel, pol, main, g, d, gfuel, any, site, i, Ck.guard.on(fuel, g, i))({==})(eq)
+      pv => eq => leaf_gt(f, fuel, pol, main, g, d, gfuel, any, site, i, Ck.guard.on(fuel, g, i))({==})(eq)
     case Ck.Fires{inp, at}:
-      pv => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), pv)
+      pv => eq => Empty.absurd(goodi(f, pol, main, g, d, gfuel, any, site, i), pv)
     case Ck.Unknown{why}:
-      pv => eq => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), pv)
+      pv => eq => Empty.absurd(goodi(f, pol, main, g, d, gfuel, any, site, i), pv)
 
 law then_first:
+  for +f: Ck.Form
   for dd: Nat
   for +fuel: Nat
   for +pol: Sm.Pol
@@ -7875,9 +7970,9 @@ law then_first:
   for +g: Maybe<&2, E.X>
   for +i: E.X
   for first: Ck.Seen
-  seenp(Ck.explore(dd, fuel, pol, main, g, Ck.Then{i, first})) -> seenp(first)
+  seenp(Ck.explore(f, dd, fuel, pol, main, g, Ck.Then{i, first})) -> seenp(first)
 
-def then_first(dd, fuel, pol, main, g, i, first):
+def then_first(f, dd, fuel, pol, main, g, i, first):
   match dd:
     case 0n:
       sp => Empty.absurd(seenp(first), sp)
@@ -7894,6 +7989,7 @@ def then_first(dd, fuel, pol, main, g, i, first):
 
 # A node, its counted step taken: its promise is the node's.
 law at_good:
+  for +f: Ck.Form
   for +fuel: Nat
   for +pol: Sm.Pol
   for +main: E.X
@@ -7905,15 +8001,16 @@ law at_good:
   for +i: E.X
   for w: Nat
   for c: Ck.Counted
-  {Ck.counted.s(c) == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> good(fuel, pol, main, g, d, gfuel, any, site, Ck.at.of(i, w, c)) -> goodi(pol, main, g, d, gfuel, any, site, i)
+  {Ck.counted.s(c) == Ck.node.step(Ck.guard.on(fuel, g, i), fuel, pol, main, i) : Ck.Step} -> good(f, fuel, pol, main, g, d, gfuel, any, site, Ck.at.of(i, w, c)) -> goodi(f, pol, main, g, d, gfuel, any, site, i)
 
-def at_good(fuel, pol, main, g, d, gfuel, any, site, i, w, c):
+def at_good(f, fuel, pol, main, g, d, gfuel, any, site, i, w, c):
   match c:
     case Ck.Counted{s, n}:
       eq => gd => gd(eq)
 
 # Every job the checker explores to a proof keeps its promise.
 law tree:
+  for +f: Ck.Form
   for +depth: Nat
   for +fuel: Nat
   for +pol: Sm.Pol
@@ -7924,36 +8021,36 @@ law tree:
   for +any: Nat
   for +site: E.Site
   for job: Ck.Job
-  seenp(Ck.explore(depth, fuel, pol, main, g, job)) -> good(fuel, pol, main, g, d, gfuel, any, site, job)
+  seenp(Ck.explore(f, depth, fuel, pol, main, g, job)) -> good(f, fuel, pol, main, g, d, gfuel, any, site, job)
 
-def tree(depth, fuel, pol, main, g, d, gfuel, any, site, job):
+def tree(f, depth, fuel, pol, main, g, d, gfuel, any, site, job):
   match depth:
     case 0n:
-      sp => Empty.absurd(good(fuel, pol, main, g, d, gfuel, any, site, job), sp)
+      sp => Empty.absurd(good(f, fuel, pol, main, g, d, gfuel, any, site, job), sp)
     case 1n+dd:
       match job:
         case Ck.Node{+i, l}:
           match l:
             case 0n:
-              sp => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), sp)
+              sp => Empty.absurd(goodi(f, pol, main, g, d, gfuel, any, site, i), sp)
             case 1n+l2:
-              sp => at_good(fuel, pol, main, g, d, gfuel, any, site, i, l2, Ck.node.counted(fuel, pol, main, g, i))(node_counted(fuel, pol, main, g, i))(tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.at.of(i, l2, Ck.node.counted(fuel, pol, main, g, i)))(sp))
+              sp => at_good(f, fuel, pol, main, g, d, gfuel, any, site, i, l2, Ck.node.counted(fuel, pol, main, g, i))(node_counted(fuel, pol, main, g, i))(tree(f, dd, fuel, pol, main, g, d, gfuel, any, site, Ck.at.of(i, l2, Ck.node.counted(fuel, pol, main, g, i)))(sp))
         case Ck.At{+i, +l, s}:
           match s:
             case Ck.Settled{v}:
-              sp => eq => leaf(fuel, pol, main, g, d, gfuel, any, site, i, v)(sp)(eq)
+              sp => eq => leaf(f, fuel, pol, main, g, d, gfuel, any, site, i, v)(sp)(eq)
             case Ck.Fork{+p}:
-              +sp => eq => hr => +hg => +hfr => or_elim(refines(Ck.split(i, Ck.dirs(p), True{}), d), refines(Ck.split(i, Ck.dirs(p), False{}), d))(split_cover(i, Ck.dirs(p), d)(hr))(hT => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Node{Ck.split(i, Ck.dirs(p), True{}), l})(then_first(dd, fuel, pol, main, g, Ck.split(i, Ck.dirs(p), False{}), Ck.explore(dd, fuel, pol, main, g, Ck.Node{Ck.split(i, Ck.dirs(p), True{}), l}))(sp))(hT)(hg)(hfr))(hF => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Then{Ck.split(i, Ck.dirs(p), False{}), Ck.explore(dd, fuel, pol, main, g, Ck.Node{Ck.split(i, Ck.dirs(p), True{}), l})})(sp)(hF)(hg)(hfr))
+              +sp => eq => hr => +hg => +hfr => or_elim(fits(Ck.split(i, Ck.dirs(p), True{}, f), d, f), fits(Ck.split(i, Ck.dirs(p), False{}, f), d, f))(split_cover(i, Ck.dirs(p), d, f)(hr))(hT => tree(f, dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Node{Ck.split(i, Ck.dirs(p), True{}, f), l})(then_first(f, dd, fuel, pol, main, g, Ck.split(i, Ck.dirs(p), False{}, f), Ck.explore(f, dd, fuel, pol, main, g, Ck.Node{Ck.split(i, Ck.dirs(p), True{}, f), l}))(sp))(hT)(hg)(hfr))(hF => tree(f, dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Then{Ck.split(i, Ck.dirs(p), False{}, f), Ck.explore(f, dd, fuel, pol, main, g, Ck.Node{Ck.split(i, Ck.dirs(p), True{}, f), l})})(sp)(hF)(hg)(hfr))
         case Ck.Then{+i, first}:
           match first:
             case Ck.Seen{v, left}:
               match v:
                 case Ck.Proven{}:
-                  sp => tree(dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Node{i, left})(sp)
+                  sp => tree(f, dd, fuel, pol, main, g, d, gfuel, any, site, Ck.Node{i, left})(sp)
                 case Ck.Fires{inp, at}:
-                  sp => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), sp)
+                  sp => Empty.absurd(goodi(f, pol, main, g, d, gfuel, any, site, i), sp)
                 case Ck.Unknown{why}:
-                  sp => Empty.absurd(goodi(pol, main, g, d, gfuel, any, site, i), sp)
+                  sp => Empty.absurd(goodi(f, pol, main, g, d, gfuel, any, site, i), sp)
 
 # Law 5, every later call, with each of its words shared.
 law guarded_at:
@@ -7973,7 +8070,51 @@ law guarded_at:
   {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, Sm.of.data(input)) != Sm.Fired{site} : Sm.R}
 
 def guarded_at(depth, fuel, checks, main, g, leaves, left, proven, input, gfuel, passed, any, site):
-  hf => tree(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, input, gfuel, any, site, Ck.Node{E.XVar{""}, leaves})(opened_s(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven)))({==})(passed)(hf)
+  hf => tree(Ck.FAny{}, depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, input, gfuel, any, site, Ck.Node{E.XVar{""}, leaves})(opened_s(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(Ck.FAny{}, depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven)))({==})(passed)(hf)
 
 def Laws.certificate_guarded(depth, fuel, checks, main, g, leaves, left, proven, input, gfuel, passed, any, site):
   guarded_at(depth, fuel, checks, main, g, leaves, left, proven, input, gfuel, passed, any, site)
+
+# The session's certificate (Ck.check.session, the user's decision of
+# 2026-11-17): the same tree, its root of the session's form.
+law session_opening_at:
+  for +depth: Nat
+  for +fuel: Nat
+  for +checks: List<&2, U32>
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +leaves: Nat
+  for +left: Nat
+  for +proven: {Ck.check.session(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves) == Ck.Seen{Ck.Proven{}, left} : Ck.Seen}
+  for +any: Nat
+  for +site: E.Site
+  {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}) != Sm.Fired{site} : Sm.R}
+
+def session_opening_at(depth, fuel, checks, main, g, leaves, left, proven, any, site):
+  hf => obs_never_fires(fuel, any, Sm.Pol{Sm.Watch{}, checks}, Sm.JE{E.app(main, E.XZero{}), Sm.WZero{}}, site)(opening_obs(Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))(opened_v(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(Ck.FInput{}, depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check.session(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven))))(hf)
+
+def Laws.certificate_session_opening(depth, fuel, checks, main, g, leaves, left, proven, any, site):
+  session_opening_at(depth, fuel, checks, main, g, leaves, left, proven, any, site)
+
+law session_at:
+  for +depth: Nat
+  for +fuel: Nat
+  for +checks: List<&2, U32>
+  for +main: E.X
+  for +g: Maybe<&2, E.X>
+  for +leaves: Nat
+  for +left: Nat
+  for +proven: {Ck.check.session(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves) == Ck.Seen{Ck.Proven{}, left} : Ck.Seen}
+  for +input: Co.D
+  for +formed: {Ck.form.ok(Ck.FInput{}, input) == True{} : Bool}
+  for +gfuel: Nat
+  for +passed: {Ck.guard.on(gfuel, g, Sm.of.data(input)) == Ck.Pass{} : Ck.Gate}
+  for +any: Nat
+  for +site: E.Site
+  {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, Sm.of.data(input)) != Sm.Fired{site} : Sm.R}
+
+def session_at(depth, fuel, checks, main, g, leaves, left, proven, input, formed, gfuel, passed, any, site):
+  hf => tree(Ck.FInput{}, depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, input, gfuel, any, site, Ck.Node{E.XVar{""}, leaves})(opened_s(Ck.step.verdict(Ck.main.step(E.XZero{}, Sm.run(fuel, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}))), Ck.explore(Ck.FInput{}, depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, Ck.Node{E.XVar{""}, leaves}))(seen_proven(Ck.check.session(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves), left)(proven)))(formed)(passed)(hf)
+
+def Laws.certificate_session(depth, fuel, checks, main, g, leaves, left, proven, input, formed, gfuel, passed, any, site):
+  session_at(depth, fuel, checks, main, g, leaves, left, proven, input, formed, gfuel, passed, any, site)

@@ -136,6 +136,11 @@ it.
 5. `certificate_opening` and `certificate_guarded`: if the checker proves
    main, the watched witness fires on no admitted input, at any fuel.
    **Proven.**
+6. `certificate_session_opening` and `certificate_session` (D5,
+   2026-11-17): the same for `Ck.check.session`, the checker on the
+   session's inputs, the second for admitted inputs of that form only
+   (`Ck.form.ok(Ck.FInput{}, input)`). What the compiler erases on.
+   **Proven** (awaiting the user's approval under D1).
 
 Together they say: on every input the session can give main, what the
 compiler erased could not have mattered, and the recursions had all the
@@ -261,6 +266,9 @@ on one side stands for any value on the other. It is used three times:
     guard decides.
   - simpleplus takes 14,163 runs (200,013,887 steps).
   - tictactoe (board, player and line) is in the millions of runs.
+- Since 2026-11-18 the compiler runs it on the session's inputs only
+  (`Ck.check.session`, D5): a hole is split by its form, and a number's
+  pair is `(pL, 0)`.
 
 **Checker v2, only if tictactoe-class programs must be erased:
 decision-tree values.**
@@ -418,6 +426,20 @@ verify keep their bottoms and checks, as a residual runtime abort (DESIGN
 the game `1 4 2 5 3` (6,016,132 interactions kept, 5,927,480 erased) and
 needs checker v2 (§4). Recommended to the user on 2026-10-21, and
 accepted with the plan on 2026-10-22.
+
+**D5 (decided 2026-11-17): the session's inputs are well-formed.** The
+user's call, for the interaction gap: the erasure checker may assume what
+a session gives main after its opening call, `(line, state)`, the line a
+list of code points as unary numbers, the state any data. `Ck.check`
+(every input) and laws 5 stay; `Ck.check.session` splits holes only into
+data of that form (`Ck.Form`, `Ck.form.ok`), and two more laws,
+`certificate_session_opening` and `certificate_session`, say what its
+proof is worth: no admitted input of that form fires a watched site. They
+are proven by laws 5's tree, over a form (`fits`, `fits_refines`,
+`split_cover`). With it the compiler also watches the checks left to run
+time, and erases them where the proof covers them: simpleplus's net goes
+from 1,769,485 interactions to 17,925. The new laws await the user's
+approval under D1.
 
 **D4: did not arise.** It was: if the tictactoe check fired, revert P7.6
 and go back to P7.5's confirming re-run until the checker was wired in.

@@ -9,7 +9,8 @@ sizing budget in force: 65536 unrollings
 
 refinement checks: none
 erasures in main: proven, by the erasure checker in 4141 evaluation steps
-  no input it is called on reaches an erased recursion bottom or check
+  no input a session gives it reaches an erased recursion bottom or check
+  the net's program makes none of main's checks
 
 recursion nesting (structural, approximate):
   triple                 function                      levels

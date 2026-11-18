@@ -120,3 +120,48 @@ law certificate_guarded:
   for any: Nat
   for site: E.Site
   {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, Sm.of.data(input)) != Sm.Fired{site} : Sm.R}
+
+# The session's inputs (the user's decision, 2026-11-17: let the erasure
+# checker assume inputs are well-formed). Ck.check.session(…) is the
+# checker splitting unknown positions only into what a session gives main
+# after its opening call (Session.bend: main on Co.DPair{Co.of.string(line),
+# state}): Ck.form.ok(Ck.FInput{}, input) says input is 0 or a pair of a
+# line and any state, the line a list of characters, each character its code
+# point as a unary number (0, or (n, 0) for n + 1). These two laws are the
+# compiler's: it erases on Ck.check.session's proof. They say nothing of an
+# input that is not of that form.
+
+# LAW (the session's certificate, the opening call): as
+# certificate_opening, for Ck.check.session.
+law certificate_session_opening:
+  for depth: Nat
+  for fuel: Nat
+  for checks: List<&2, U32>
+  for main: E.X
+  for g: Maybe<&2, E.X>
+  for leaves: Nat
+  for left: Nat
+  for proven: {Ck.check.session(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves) == Ck.Seen{Ck.Proven{}, left} : Ck.Seen}
+  for any: Nat
+  for site: E.Site
+  {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, E.XZero{}) != Sm.Fired{site} : Sm.R}
+
+# LAW (the session's certificate, every later call): where Ck.check.session
+# proves main, main fires no erasable site, at any fuel, on any input of the
+# session's form that its guard passes.
+law certificate_session:
+  for depth: Nat
+  for fuel: Nat
+  for checks: List<&2, U32>
+  for main: E.X
+  for g: Maybe<&2, E.X>
+  for leaves: Nat
+  for left: Nat
+  for proven: {Ck.check.session(depth, fuel, Sm.Pol{Sm.Watch{}, checks}, main, g, leaves) == Ck.Seen{Ck.Proven{}, left} : Ck.Seen}
+  for input: Co.D
+  for formed: {Ck.form.ok(Ck.FInput{}, input) == True{} : Bool}
+  for gfuel: Nat
+  for passed: {Ck.guard.on(gfuel, g, Sm.of.data(input)) == Ck.Pass{} : Ck.Gate}
+  for any: Nat
+  for site: E.Site
+  {Sm.run(any, Sm.Pol{Sm.Watch{}, checks}, main, Sm.of.data(input)) != Sm.Fired{site} : Sm.R}

@@ -557,13 +557,17 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
     # sizing can't discharge: simpleplus's 16,042 became 1,769,485 (on
     # 1cfcb3de's Prelude and simpleplus it is 16,019; master's own IC:
     # 3,371,532), tictactoe's 2,293,968 became 7,534,180 (master's:
-    # 8,972,237).
+    # 8,972,237). Since the erasure checker reads the session's inputs as
+    # well-formed (the user's decision, 2026-11-17) and watches the checks
+    # left to run time too, it proves every check simpleplus's main makes,
+    # and the net makes none: 1,769,485 became 17,925. tictactoe's checker
+    # runs out of budget, so it keeps its checks.
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
       118)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      1769485)))
+      17925)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
       7534180)))

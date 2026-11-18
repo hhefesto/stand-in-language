@@ -10,8 +10,9 @@ sizing budget in force: 65536 unrollings
 refinement checks: 0 discharged statically, 2 left to run time:
   Prelude:49:8                 before main
   over-budget-recursion:29:32  at run time
-erasures in main: proven, by the erasure checker in 240537 evaluation steps
-  no input it is called on reaches an erased recursion bottom or check
+erasures in main: proven, by the erasure checker in 239695 evaluation steps
+  no input a session gives it reaches an erased recursion bottom or check
+  the checks left to run time stay: the erasure checker found input ((34 _) _) reaching check 1
 
 recursion nesting (structural, approximate):
   triple                       function                         levels

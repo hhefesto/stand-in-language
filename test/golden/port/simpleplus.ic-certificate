@@ -18,8 +18,9 @@ refinement checks: 3 discharged statically, 2 left to run time:
   Prelude:49:8      discharged
   Prelude:51:28     at run time
   simpleplus:15:38  before main
-erasures in main: none past the check analysis's; the chains keep their bases
-  the erasure checker could not prove them unreachable: its budget of evaluation steps ran out
+erasures in main: proven, by the erasure checker in 481067842 evaluation steps
+  no input a session gives it reaches an erased recursion bottom or check
+  the net's program makes none of main's checks
 
 recursion nesting (structural, approximate):
   triple         function             levels
