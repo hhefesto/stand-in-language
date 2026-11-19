@@ -102,6 +102,15 @@ let
       "sites-limits"
       "testchar-error"
     ];
+    bind = [
+      "bind-supply"
+      "bind-definition-site"
+      "bind-unsupplied"
+      "bind-errors"
+      "bind-scopes"
+      "bind-modules"
+      "bind-recursion"
+    ];
     ic = [
       "ic-application"
       "ic-projection"
@@ -225,6 +234,7 @@ let
       "size-unbounded-input"
       "size-mislabeled"
       "size-where-checks-go"
+      "size-state-invariant"
       "size-filter"
       "size-flow"
       "size-erased"

@@ -11,7 +11,8 @@
 #   test/lsp/run.sh BIN_DIR check       [NAME...]   compare, report PASS/FAIL
 #
 # BIN_DIR holds `telomare-lsp`. A session runs in a scratch directory
-# holding Prelude.tel, test/programs/simpleplus.tel and test/lsp/files.
+# holding Prelude.tel, test/programs/simpleplus.tel and the ChurchArith.tel it
+# imports, and test/lsp/files.
 # `record` drives master's server step by step (it answers concurrently, so
 # each request waits for its answer and each notification a while); the
 # port's server answers in order, so `check` sends it the whole session at
@@ -42,7 +43,8 @@ failed=0
 for name in "${names[@]}"; do
   dir="$work/$name"
   mkdir -p "$dir"
-  cp "$root/Prelude.tel" "$root/test/programs/simpleplus.tel" "$here"/files/*.tel "$dir/"
+  cp "$root/Prelude.tel" "$root/test/programs/simpleplus.tel" "$root/test/programs/ChurchArith.tel" \
+    "$here"/files/*.tel "$dir/"
   session="$here/sessions/$name.json"
   case "$mode" in
     record)

@@ -210,13 +210,18 @@ def compiled(r: Result<&2, &2, String, T.C>, +lines: List<&2, String>) -> Bool:
 def agrees(srcs: List<&2, Fr.Src>, +entry: String, +lines: List<&2, String>) -> Bool:
   compiled(Fr.compile(srcs, entry), lines)
 
-def report(+prelude: String, +plus: String, +tc: String, +ttt: String) -> IO(Unit):
+# simpleplus, over the library modules it imports (ChurchArith since master's
+# 515e0235).
+def plus.srcs(+prelude: String, +charith: String, plus: String) -> List<&2, Fr.Src>:
+  [Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}]
+
+def report(+prelude: String, +charith: String, +plus: String, +tc: String, +ttt: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("sem-tc_ultra_minimal", agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])))
     IO.print(verdict("sem-simpleplus", all([
-      agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"]),
-      agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["9 9"]),
-      agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["9 a"])])))
+      agrees(plus.srcs(prelude, charith, plus), "simpleplus", ["3 4"]),
+      agrees(plus.srcs(prelude, charith, plus), "simpleplus", ["9 9"]),
+      agrees(plus.srcs(prelude, charith, plus), "simpleplus", ["9 a"])])))
     IO.print(verdict("sem-tictactoe", all([
       agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"]),
       agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "9", "2", "8", "3"]),
@@ -228,4 +233,5 @@ def main() -> IO(Unit):
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
-    report(text(prelude), text(plus), text(tc), text(ttt))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(text(prelude), text(charith), text(plus), text(tc), text(ttt))

@@ -5,6 +5,7 @@ import ./Parse.bend as P
 import ./Mega.bend as Mg
 import ./Expand.bend as E
 import ./Resolve.bend as Rs
+import ./Bind.bend as B
 import ./Desugar.bend as D
 import ./Lower.bend as Lw
 import ./Split.bend as Sp
@@ -13,8 +14,8 @@ import ./Text.bend as Tx
 
 # The front end as the command drives it (haskell-final's app/Main.hs
 # getModulesFor and Driver.compileModules, up to Term3): load the modules
-# the entry needs, parse and expand each, resolve main, desugar, and lower
-# it.
+# the entry needs, parse and expand each, bind the names (Bind.bend),
+# desugar, and lower it.
 
 # A module's name and text.
 
@@ -215,7 +216,7 @@ def term(m: Mods, +entry: String) -> Result<&2, &2, Err, T.C>:
       match errs:
         case Nil{}:
           do Result<&2, &2, Err, T.C>:
-            t : S.Surf<Empty, Empty, Empty> <- main.or(Rs.main(mods, entry))
+            t : S.Surf<Empty, Empty, Empty> <- main.or(B.main(mods, entry))
             re.or(Lw.process(t))
         case Con{e, rest}:
           Fail{Modules{e <> rest}}

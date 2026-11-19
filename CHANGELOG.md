@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+* Requirements (the name binder, `Telomare.Bind`): a definition may mention a
+  name nothing binds where it is written; the name is then supplied by the
+  binder (let or module top level) enclosing each place the definition is
+  mentioned, by lambda lifting. A requirement that reaches `main` unsupplied is
+  an error naming every definition it passed through. Lambda and pattern
+  variables never supply, including annotated parameters, which now bind by
+  application instead of a generated let. Imports are ordered binder layers
+  around a module's own definitions (a later import shadows an earlier one) and
+  are no longer re-exported; a module imported twice is bound once. Two
+  definitions of one name in one block are an error, as is an unbound qualified
+  name. Shadowing and unused let entries are warned about on stderr and in the
+  LSP, whose own unbound-name check is gone. See
+  `telomare-name-binder-spec.txt`.
+* The Bend `telomare` follows master to `98c963c2`: the name binder
+  (`bend/Bind.bend`, master's `Telomare.Bind`), its warnings on stderr and
+  as the language server's warnings (the server's own undefined-variable
+  check is gone), and an annotated lambda parameter bound by application; a
+  check on main's state that no call the loop can make fails is erased
+  (`bend/Plan.bend`, master's `c2976638`); the Church-numeral arithmetic is
+  `test/programs/ChurchArith.tel`'s, which simpleplus imports.
 * A `.telc` carries the IC runtime's verdict, as master's artifacts do
   (artifact version 12): `--ic` on a compiled program its source would not
   certify is refused with the same text, where it used to run.

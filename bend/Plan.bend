@@ -1306,20 +1306,6 @@ def hoisted.add(rows: List<&2, VRow>, acc: Set()) -> Set():
 def plan.rows(+rows: List<&2, VRow>) -> Plan:
   Plan{Some{kept.add(rows, Set.new())}, hoisted.add(rows, Set.new()), prologue.of(row.codes(rows))}
 
-def plan.over(over: Bool, fires: Map<&2, PRow>, +result: A) -> Plan:
-  match over:
-    case True{}:
-      plan.none()
-    case False{}:
-      plan.rows(List.sort(~VRow, ~vrow.le, verdicts(Map.values(&2, PRow, fires), result)))
-
-def plan.result(r: PEv) -> Plan:
-  match r:
-    case PEv{+v, st}:
-      match st:
-        case PSt{+n, fires}:
-          plan.over(U32.is_ge(n, budget()), fires, v)
-
 def code.of(c: PCH) -> Cd:
   match c:
     case PCH{h, x}:
@@ -1341,6 +1327,213 @@ def applied(r: PEv) -> PEv:
     case PEv{v, st}:
       ev(fuel(), KE{}, QSet{v, st})
 
+# The calls the loop can make (master's 98c963c2's reachableFailures,
+# stepProgram, seenFailures)
+# ------------------------------------------------------------------
+#
+# A check on the state that fails on no call the loop can make holds of every
+# state main makes, with no further assumption: the iteration making a state
+# ran every check of main on its own input, so the state comes only from an
+# earlier one that passed them all, and a check main's step preserves is never
+# failed. The calls are the first, input-less one, and one on any input and a
+# state that an iteration which did not abort made.
+
+# The two closures of the step program (stepProgramInd, stepNextInd). Only the
+# analysis ever runs that program, so they may share the numbers a --fast
+# step takes in a compiled one (Co.limit.ind).
+def step.program.ind() -> U32:
+  Co.neg(14)
+
+def step.next.ind() -> U32:
+  Co.neg(15)
+
+# The origin of the aborts of the first iteration in the step program
+# (hypothesisOrigin).
+def hypothesis.origin() -> L.Origin:
+  L.Origin{L.KUnknown{}, L.Gen{"earlier iteration"}}
+
+# Every abort of the program made the hypothesis's.
+def hypothesis(v: Co.V) -> Co.V:
+  match v:
+    case Co.VPair{a, b}:
+      Co.VPair{hypothesis(a), hypothesis(b)}
+    case Co.VSetEnv{x}:
+      Co.VSetEnv{hypothesis(x)}
+    case Co.VDefer{fi, x}:
+      Co.VDefer{fi, hypothesis(x)}
+    case Co.VLeft{x}:
+      Co.VLeft{hypothesis(x)}
+    case Co.VRight{x}:
+      Co.VRight{hypothesis(x)}
+    case Co.VAbort{o, m}:
+      Co.VAbort{hypothesis.origin(), hypothesis(m)}
+    case other:
+      other
+
+# lamB
+def lam(+fi: U32, x: Co.V) -> Co.V:
+  Co.VPair{Co.VDefer{fi, x}, Co.VEnv{}}
+
+# Two iterations of main as one program over (input, earlier): main's call on
+# earlier, then, where that iteration did not end the loop, its call on input
+# and the state the first made (stepProgram). The first call's aborts are the
+# hypothesis's, so that the checks seen to fail as themselves are the second
+# call's, and the first call's only stop the runs on which the second could
+# not happen.
+# Under the first closure the env is (x, _), x = (input, earlier); under the
+# second, (main's result on earlier, (x, _)), and the state is that
+# result's right (a 0 state ends the loop).
+def env.right.left() -> Co.V:
+  Co.VRight{Co.VLeft{Co.VEnv{}}}
+
+def step.program(+sized: Co.V) -> Co.V:
+  +next = Co.ite(env.right.left(), Co.app(sized, Co.VPair{Co.VLeft{Co.VLeft{Co.VRight{Co.VEnv{}}}}, env.right.left()}), Co.VZero{})
+  lam(step.program.ind(), Co.app(lam(step.next.ind(), next), Co.app(hypothesis(sized), env.right.left())))
+
+# The step program's input: any input and any earlier one, a pair of the root's
+# two halves.
+def step.input() -> A:
+  +root = var.root()
+  pair(VlVar{mix(a.h(root), 76), "L"}, VlVar{mix(a.h(root), 82), "R"})
+
+def seen.one(s: AS) -> Bool:
+  match s:
+    case AbFree{}:
+      False{}
+    case _:
+      True{}
+
+# A check is seen to fail on a run where the result is not free of aborts: a
+# check in the branch an `if` does not take runs too, and its failure is never
+# seen there.
+def seen.any(fs: List<&2, PFire>, +result: A) -> Bool:
+  match fs:
+    case Nil{}:
+      False{}
+    case Con{x, rest}:
+      match x:
+        case PFire{+path, r}:
+          seen.one(abort.status(result, path, top.d(path, result))) || seen.any(rest, result)
+
+# The checks that fail on some run where the failure is seen, by origin key
+# (seenFailures).
+def seen(rows: List<&2, PRow>, +result: A, acc: Set()) -> Set():
+  match rows:
+    case Nil{}:
+      acc
+    case Con{x, rest}:
+      match x:
+        case PRow{+o, fs}:
+          seen(rest, result, key.if(seen.any(fs, result), o, acc))
+
+def seen.if(over: Bool, fires: Map<&2, PRow>, +v: A) -> Maybe<&2, Set()>:
+  match over:
+    case True{}:
+      None{}
+    case False{}:
+      Some{seen(Map.values(&2, PRow, fires), v, Set.new())}
+
+# A run's failures, unless it was over the budget.
+def seen.of(r: PEv) -> Maybe<&2, Set()>:
+  match r:
+    case PEv{+v, st}:
+      match st:
+        case PSt{+n, fires}:
+          seen.if(U32.is_ge(n, budget()), fires, v)
+
+# main applied to an input, main's closure evaluated first.
+def run.on(+input: A, r: PEv) -> PEv:
+  match r:
+    case PEv{v, st}:
+      applied(ev(fuel(), KE{}, QSet{pair(twiddle(), pair(input, v)), tick(st)}))
+
+def run.prog(+input: A, prog: Co.V) -> PEv:
+  run.on(input, ev(fuel(), KE{}, QEval{code.of(code(prog)), VlZero{}, PSt{0, Map.new(&2, PRow)}}))
+
+def both(a: Maybe<&2, Set()>, b: Maybe<&2, Set()>) -> Maybe<&2, Set()>:
+  match a:
+    case Some{x}:
+      match b:
+        case Some{y}:
+          Some{Map.union(&2, Unit, x, y)}
+        case None{}:
+          None{}
+    case None{}:
+      None{}
+
+# The checks of a sized main that may fail on a call the loop can make: the
+# first, input-less one, or one on any input and a state that an iteration
+# which did not abort made. None when deciding that is over the budget
+# (reachableFailures).
+def reachable(+sized: Co.V) -> Maybe<&2, Set()>:
+  both(seen.of(run.prog(VlZero{}, sized)), seen.of(run.prog(step.input(), step.program(sized))))
+
+def rows.in.if(yes: Bool, x: VRow, rest: List<&2, VRow>) -> List<&2, VRow>:
+  match yes:
+    case True{}:
+      x <> rest
+    case False{}:
+      rest
+
+def rows.in(rows: List<&2, VRow>, +keys: Set()) -> List<&2, VRow>:
+  match rows:
+    case Nil{}:
+      []
+    case Con{x, rest}:
+      match x:
+        case VRow{+o, +cv}:
+          rows.in.if(Pair.snd(Set(), Bool, Set.has(keys, L.origin.key(o))), VRow{o, cv}, rows.in(rest, keys))
+
+def rows.kept(rows: List<&2, VRow>) -> Bool:
+  match rows:
+    case Nil{}:
+      False{}
+    case Con{x, rest}:
+      match x:
+        case VRow{o, cv}:
+          match cv:
+            case CV{rs, kept}:
+              kept || rows.kept(rest)
+
+# The verdicts restricted to the checks that may fail on a call the loop can
+# make, when that is decided.
+def planned(+rows: List<&2, VRow>, r: Maybe<&2, Set()>) -> List<&2, VRow>:
+  match r:
+    case Some{keys}:
+      rows.in(rows, keys)
+    case None{}:
+      rows
+
+# The loop's calls are decided only when main keeps a check.
+def planned.if(keeps: Bool, +rows: List<&2, VRow>, +sized: Co.V) -> List<&2, VRow>:
+  match keeps:
+    case True{}:
+      planned(rows, reachable(sized))
+    case False{}:
+      rows
+
+def plan.verdicts(+rows: List<&2, VRow>, +sized: Co.V) -> Plan:
+  plan.rows(planned.if(rows.kept(rows), rows, sized))
+
+# Where the checks go: those erased from main, because they can never fail,
+# fail on no call the loop can make, or every failure of them that matters is
+# decided before main, and main's input prologue. When analyzing the checks is
+# over budget, every check stays in main; when only deciding them over the
+# loop's calls is, the checks that main keeps stay.
+def plan.over(over: Bool, fires: Map<&2, PRow>, +result: A, +sized: Co.V) -> Plan:
+  match over:
+    case True{}:
+      plan.none()
+    case False{}:
+      plan.verdicts(List.sort(~VRow, ~vrow.le, verdicts(Map.values(&2, PRow, fires), result)), sized)
+
+def plan.result(r: PEv, +sized: Co.V) -> Plan:
+  match r:
+    case PEv{+v, st}:
+      match st:
+        case PSt{+n, fires}:
+          plan.over(U32.is_ge(n, budget()), fires, v, sized)
+
 # main applied to the symbolic input, main's closure evaluated first.
 def run.main(r: PEv) -> PEv:
   match r:
@@ -1348,8 +1541,8 @@ def run.main(r: PEv) -> PEv:
       applied(ev(fuel(), KE{}, QSet{pair(twiddle(), pair(var.root(), v)), tick(st)}))
 
 # Where a sized main's refinement checks go.
-def plan(prog: Co.V) -> Plan:
-  plan.result(run.main(ev(fuel(), KE{}, QEval{code.of(code(prog)), VlZero{}, PSt{0, Map.new(&2, PRow)}})))
+def plan(+prog: Co.V) -> Plan:
+  plan.result(run.main(ev(fuel(), KE{}, QEval{code.of(code(prog)), VlZero{}, PSt{0, Map.new(&2, PRow)}})), prog)
 
 # Whether main still makes a check from this origin.
 def kept(k: Maybe<&2, Set()>, +o: L.Origin) -> Bool:

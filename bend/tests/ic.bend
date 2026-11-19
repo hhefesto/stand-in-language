@@ -388,6 +388,11 @@ def qualified() -> String:
 def with.prelude(+prelude: String, +name: String, text: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, text}]
 
+# simpleplus, over the library modules it imports (ChurchArith since master's
+# 515e0235).
+def plus.srcs(+prelude: String, +charith: String, plus: String) -> List<&2, Fr.Src>:
+  [Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}]
+
 # A refinement of main's input whose value main never uses: the session
 # runs it on every line, before main, and an empty line fails it; master's
 # program answers that line, and never looks at the value, so the session
@@ -439,7 +444,7 @@ def gave.up(+n: String) -> String:
 def costs(+prelude: String, text: String, +n: U32) -> Bool:
   U32.is_eq(spent(session(with.prelude(prelude, "M", text), "M", [])), n)
 
-def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
+def report(+prelude: String, +charith: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("ic-application", all([
       gives(se(p(d(100, env()), z())), z()),
@@ -541,8 +546,8 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
     # says how to raise it; the default certifies.
     IO.print(verdict("ic-eal-budget", all([
       String.eq(gate.under(10, Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), gave.up("10")),
-      String.eq(gate.under(1000, Fr.compile(with.prelude(prelude, "simpleplus", plus), "simpleplus")), gave.up("1000")),
-      String.eq(gate.under(EM.budget.default(), Fr.compile(with.prelude(prelude, "simpleplus", plus), "simpleplus")), "certified")])))
+      String.eq(gate.under(1000, Fr.compile(plus.srcs(prelude, charith, plus), "simpleplus")), gave.up("1000")),
+      String.eq(gate.under(EM.budget.default(), Fr.compile(plus.srcs(prelude, charith, plus), "simpleplus")), "certified")])))
     IO.print(verdict("ic-meter-case-udt", all([
       costs(prelude, case.nonexhaustive(), 381),
       costs(prelude, pattern.lambda(), 65),
@@ -561,19 +566,23 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
     # well-formed (the user's decision, 2026-11-17) and watches the checks
     # left to run time too, it proves every check simpleplus's main makes,
     # and the net makes none: 1,769,485 became 17,925. tictactoe's checker
-    # runs out of budget, so it keeps its checks.
+    # runs out of budget, so it keeps its checks. Master's 515e0235 moved the
+    # Church arithmetic out of the Prelude into test/programs/ChurchArith.tel,
+    # which simpleplus imports: on those sources 17,925 became 17,919, as
+    # master's own count went from 3,371,532 to 3,371,526 (the merged port
+    # still spends 17,925 on the sources before, 2026-11-19).
     IO.print(verdict("ic-meter-tc_ultra_minimal", U32.is_eq(
       spent(session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])),
       118)))
     IO.print(verdict("ic-meter-simpleplus", U32.is_eq(
-      spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])),
-      17925)))
+      spent(session(plus.srcs(prelude, charith, plus), "simpleplus", ["3 4"])),
+      17919)))
     IO.print(verdict("ic-meter-tictactoe", U32.is_eq(
       spent(session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])),
       7534180)))
     IO.print(verdict("ic-usage-agrees", all([
       usage.agrees([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"),
-      usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus"),
+      usage.agrees(plus.srcs(prelude, charith, plus), "simpleplus"),
       usage.agrees([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe")])))
 
 def main() -> IO(Unit):
@@ -582,4 +591,5 @@ def main() -> IO(Unit):
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
-    report(text(prelude), text(tc), text(plus), text(ttt))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(text(prelude), text(charith), text(tc), text(plus), text(ttt))

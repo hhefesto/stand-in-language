@@ -196,8 +196,10 @@ def contraction(t: T.C) -> String:
 # --------
 
 # A program over the Prelude, as EALTests' AuxModule.
-def aux(+prelude: String, +s: String) -> Result<&2, &2, String, T.C>:
-  Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"AuxModule", "import Prelude\n" ++ s}], "AuxModule")
+# A program over the library modules, both imported on one line (master's
+# auxImports, since 515e0235), so its locations are one line down.
+def aux(+prelude: String, +charith: String, +s: String) -> Result<&2, &2, String, T.C>:
+  Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"AuxModule", "import Prelude import ChurchArith\n" ++ s}], "AuxModule")
 
 # Its verdict.
 def program(r: Result<&2, &2, String, T.C>) -> String:
@@ -293,7 +295,7 @@ def dup.apply(+i: U32) -> T.C:
 def omega() -> T.C:
   defer(1, se(p(lft(env()), env())))
 
-def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
+def report(+prelude: String, +charith: String, +tc: String, +plus: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("sha256-vectors", all([
       String.eq(Sha.string(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
@@ -349,54 +351,61 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       String.eq(contraction(p(rgt(T.CUnsized{Lc.Gen{"first hole"}, 1}), rgt(T.CEnv{Lc.Gen{"second env"}}))),
         "[R] GeneratedLoc \"first hole\" Nothing")])))
     IO.print(verdict("eal-programs", all([
-      String.eq(program(aux(prelude, "main = succByte 0")), "ok"),
-      String.eq(program(aux(prelude, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) succByte) 0")), "ok"),
-      String.eq(program(aux(prelude, "main = $3 $2 succByte 0")), "ok"),
-      String.eq(program(aux(prelude, "main = let f = \\a b -> (a,b)\n           g = if 1 then f 1 else left\n       in g 1")), "ok"),
-      String.eq(program(aux(prelude,
+      String.eq(program(aux(prelude, charith, "main = succByte 0")), "ok"),
+      String.eq(program(aux(prelude, charith, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) succByte) 0")), "ok"),
+      String.eq(program(aux(prelude, charith, "main = $3 $2 succByte 0")), "ok"),
+      String.eq(program(aux(prelude, charith, "main = let f = \\a b -> (a,b)\n           g = if 1 then f 1 else left\n       in g 1")), "ok"),
+      String.eq(program(aux(prelude, charith,
         "main = let compose = \\f g x -> f (g x)\n           h = compose succByte succByte\n           g = if 1 then h else left\n       in g 1")), "ok"),
-      String.eq(program(aux(prelude, "main = listEqual \"ab\" \"ab\"")), "ok"),
-      String.eq(program(aux(prelude, "main = left (filter (\\x -> dEqual x 2) (range 0 3))")), "ok")])))
+      String.eq(program(aux(prelude, charith, "main = listEqual \"ab\" \"ab\"")), "ok"),
+      String.eq(program(aux(prelude, charith, "main = left (filter (\\x -> dEqual x 2) (range 0 3))")), "ok")])))
     # EALTests' two PINNED verdicts. The second gives up at the dispatch
     # depth cap; on the term that runs, the gate is in a body under the
     # Prelude's let lambdas, so main fails on that dependency.
     IO.print(verdict("eal-pinned", all([
-      String.eq(program(aux(prelude, "main = (if 0 then (\\x -> times $2 x) else $1) (\\x -> (x,0)) 0")), "mismatch"),
-      String.eq(program(aux(prelude, "main = (if 0 then (\\x -> x) else $1) succByte 0")), "dependency")])))
+      String.eq(program(aux(prelude, charith, "main = (if 0 then (\\x -> times $2 x) else $1) (\\x -> (x,0)) 0")), "mismatch"),
+      String.eq(program(aux(prelude, charith, "main = (if 0 then (\\x -> x) else $1) succByte 0")), "dependency")])))
     # haskell-final's EAL (this module; the IC runs under EALm since
     # 075af0ef) on sized programs. Master's succByte checks `Num 255` since
     # bd05da18, and a check in a sized chain fails this EAL's dependency
     # (2026-11-10: "ok/dependency"), so these use a successor without one;
     # tests/ealm.bend keeps master's succByte cases.
     IO.print(verdict("eal-sized", all([
-      String.eq(sized(aux(prelude, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) (\\x -> (x,0))) 0")), "ok/ok"),
-      String.eq(sized(aux(prelude, "main = $3 $2 (\\x -> (x,0)) 0")), "ok/ok"),
-      String.eq(sized(aux(prelude, "main = d2c 3 (\\x -> (x,0)) 0")), "ok/ok"),
-      String.eq(sized(aux(prelude, "main = let g = {id, \\recur l -> (recur (right l), 0), \\l -> 0} in g [1]")), "ok/ok"),
-      String.ends_with(sized(aux(prelude,
+      String.eq(sized(aux(prelude, charith, "main = (\\f x -> f (f (f x))) ((\\f x -> f (f x)) (\\x -> (x,0))) 0")), "ok/ok"),
+      String.eq(sized(aux(prelude, charith, "main = $3 $2 (\\x -> (x,0)) 0")), "ok/ok"),
+      String.eq(sized(aux(prelude, charith, "main = d2c 3 (\\x -> (x,0)) 0")), "ok/ok"),
+      String.eq(sized(aux(prelude, charith, "main = let g = {id, \\recur l -> (recur (right l), 0), \\l -> 0} in g [1]")), "ok/ok"),
+      String.ends_with(sized(aux(prelude, charith,
         "main = let g = {id, \\recur l -> \\accum -> recur (right l) accum, \\l -> \\accum -> accum} in g [1] 0")), "/ok"),
-      String.ends_with(sized(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]")), "/ok"),
-      sized.all(aux(prelude, "main = foldr (\\x l -> (x,l)) 0 [1,2]"))])))
+      String.ends_with(sized(aux(prelude, charith, "main = foldr (\\x l -> (x,l)) 0 [1,2]")), "/ok"),
+      sized.all(aux(prelude, charith, "main = foldr (\\x l -> (x,l)) 0 [1,2]"))])))
     # The digest of the term that runs (liftedBodyHash of deferLift's main):
     # master's up to 98de497c, the port's own record since 1cfcb3de, since an application's span reaches its
-    # end as megaparsec's captureSourceSpan does.
+    # end as megaparsec's captureSourceSpan does. Master's 515e0235 and
+    # 6ad57ff7 moved lines out of the Prelude, so its checks' locations moved:
+    # 2336be04… became be35796e…; the merged port gives 2336be04… on
+    # 1624a3c's Prelude (2026-11-19).
     IO.print(verdict("eal-lift-udt", String.eq(
       main.hash(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"rat",
         "import Prelude\nfromRational = \\n d -> if dEqual d 0 then abort \"Denominator cannot be zero\" else let g = gcd n d in (dDiv n g, dDiv d g)\nrPlus = \\a b -> fromRational (plusByte (timesByte (left a) (right b)) (timesByte (left b) (right a))) (timesByte (right a) (right b))\nmain = \\input -> (if dEqual (left (rPlus (fromRational 1 2) (fromRational 1 2))) 1 then \"ok\" else \"bad\", 0)\n"}], "rat")),
-      "2336be040d7eef7a3806cf01eab4cea1cabb2aee8fb70e5baeea611553f2bfbd")))
+      "be35796e7464466f0b669944e5aea6af0ded7b66c4deaaa60ca04be47521aa48")))
     IO.print(verdict("eal-layouts-tc_ultra_minimal", String.eq(
       layouts.digest(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "d992f91d1f0ed4450acaddaf31698601d2126a3fc690232d3a2853a915617cb7")))
     # simpleplus's since 2026-11-18: the erasure checker, on the session's
     # inputs, proves every check its main makes, so the sized program has none
     # (was df61eecc88845c32d7d83152abc0ab3f8e335f8fdddbfb2dae5629bb671218e8).
+    # Since master's 515e0235 (the Church arithmetic in ChurchArith.tel, which
+    # simpleplus imports) 138b458f… became bca5b4e5…; the merged port gives
+    # 138b458f… on 1624a3c's Prelude and simpleplus (2026-11-19).
     IO.print(verdict("eal-layouts-simpleplus", String.eq(
-      layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus")),
-      "138b458f468448cceb6b54393119ecc41d504c302366bd727af3a28df2088e67")))
+      layouts.digest(Fr.compile([Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}], "simpleplus")),
+      "bca5b4e5879c31f187a072886f5c00c4d36afff5c3fc150e9574534301df04ba")))
 
 def main() -> IO(Unit):
   do IO<Unit>:
     prelude : Result<&1, &1, String, String> <- Tx.read_file("Prelude.tel")
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
-    report(text(prelude), text(tc), text(plus))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(text(prelude), text(charith), text(tc), text(plus))

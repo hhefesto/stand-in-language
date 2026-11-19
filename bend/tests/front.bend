@@ -170,6 +170,24 @@ def expands(r: Result<&2, &2, E.ExpErr, List<&2, S.EItem>>) -> Bool:
 # Programs
 # --------
 
+# An annotated parameter binds by application, not let, so that it cannot
+# supply a requirement (master's ParserTests, 98c963c2): `\(v : Bool) -> v`
+# is `\b -> (\v -> v) (Bool checks b)`.
+def annotated.e(r: Result<&2, &2, E.ExpErr, S.Expanded()>) -> Bool:
+  match r:
+    case Done{S.SLam{l1, b, S.SApp{l2, S.SLam{l3, L.Name{l4, "v"}, S.SVar{l5, "v"}},
+                                  S.SCheck{l6, L.KRefine{}, S.SVar{l7, "Bool"}, S.SVar{l8, bound}}}}}:
+      String.eq(bound, L.Name.text(b))
+    case _:
+      False{}
+
+def annotated(r: Result<&2, &2, P.PErr, S.Parsed()>) -> Bool:
+  match r:
+    case Done{p}:
+      annotated.e(E.term(p))
+    case Fail{e}:
+      False{}
+
 def text(r: Result<&1, &1, String, String>) -> String:
   match r:
     case Fail{e}:
@@ -269,7 +287,12 @@ def error(r: Result<&2, &2, String, T.C>) -> String:
 def with.prelude(+name: String, t: String, +prelude: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, t}]
 
-def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: String,
+# simpleplus, over the library modules it imports (ChurchArith since master's
+# 515e0235).
+def plus.srcs(+prelude: String, +charith: String, plus: String) -> List<&2, Fr.Src>:
+  [Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}]
+
+def report(+prelude: String, +charith: String, +ttt: String, +plus: String, +tc: String, +tchar: String,
         +over: String, +unb: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("parse-accept", all(accepted())))
@@ -285,23 +308,24 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       && duplicate(expand("x = case 0 of\n  (x, x) -> x\n"), "x")
       && own.binder(expand("x = case 0 of\n  (x, (y : \\v -> x)) -> y\n"), "x")
       && expands(expand("x = case 0 of\n  (y : \\y -> let x = y in x) -> y\n"))
-      && expands(expand("[T, mk] = [0, 1]\n"))))
+      && expands(expand("[T, mk] = [0, 1]\n"))
+      && annotated(P.expression("", "\\(v : Bool) -> v"))))
     IO.print(verdict("programs-parse", all([
       module.parses("Prelude", prelude), module.parses("tictactoe", ttt),
-      module.parses("simpleplus", plus), module.parses("tc_ultra_minimal", tc),
-      module.parses("testchar", tchar), module.parses("over-budget-recursion", over),
-      module.parses("unbounded-input-recursion", unb),
+      module.parses("simpleplus", plus), module.parses("ChurchArith", charith),
+      module.parses("tc_ultra_minimal", tc), module.parses("testchar", tchar),
+      module.parses("over-budget-recursion", over), module.parses("unbounded-input-recursion", unb),
       Result.is_done(&2, &2, E.ExpErr, List<&2, S.EItem>, expand(lines(["foo = \\a -> case a of",
         "              0 -> a", "              x -> succ a", "", "main = \\i -> (\"Success\", 0)"])))])))
     IO.print(verdict("sites-tc_ultra_minimal", String.eq(
       sites(Fr.compile([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")),
       "tc_ultra_minimal:6:25 (#0)")))
     IO.print(verdict("sites-simpleplus", String.eq(
-      sites(Fr.compile(with.prelude("simpleplus", plus, prelude), "simpleplus")),
-      "Prelude:28:16 (#0), Prelude:92:23 (#1), simpleplus:11:45 (#2), simpleplus:11:31 (#3), simpleplus:19:37 (#4), simpleplus:20:67 (#5)")))
+      sites(Fr.compile(plus.srcs(prelude, charith, plus), "simpleplus")),
+      "Prelude:28:16 (#0), Prelude:84:23 (#1), simpleplus:12:45 (#2), simpleplus:12:31 (#3), simpleplus:20:37 (#4), simpleplus:21:67 (#5)")))
     IO.print(verdict("sites-tictactoe", String.eq(
       sites(Fr.compile(with.prelude("tictactoe", ttt, prelude), "tictactoe")),
-      "? (#0), Prelude:28:16 (#1), Prelude:37:15 (#2), Prelude:74:22 (#3), Prelude:92:23 (#4), Prelude:106:24 (#5), Prelude:111:42 (#6), tictactoe:12:10 (#7), tictactoe:23:8 (#8), tictactoe:24:8 (#9), tictactoe:49:50 (#10), tictactoe:49:28 (#11), tictactoe:50:30 (#12), tictactoe:61:25 (#13), tictactoe:62:47 (#14), tictactoe:77:65 (#15), tictactoe:77:43 (#16), tictactoe:78:57 (#17), tictactoe:79:57 (#18), tictactoe:89:34 (#19), tictactoe:97:39 (#20), tictactoe:100:61 (#21), tictactoe:110:45 (#22), tictactoe:118:39 (#23)")))
+      "? (#0), Prelude:28:16 (#1), Prelude:37:15 (#2), Prelude:66:22 (#3), Prelude:84:23 (#4), Prelude:98:24 (#5), Prelude:103:42 (#6), tictactoe:12:10 (#7), tictactoe:23:8 (#8), tictactoe:24:8 (#9), tictactoe:49:50 (#10), tictactoe:49:28 (#11), tictactoe:50:30 (#12), tictactoe:61:25 (#13), tictactoe:62:47 (#14), tictactoe:77:65 (#15), tictactoe:77:43 (#16), tictactoe:78:57 (#17), tictactoe:79:57 (#18), tictactoe:89:34 (#19), tictactoe:97:39 (#20), tictactoe:100:61 (#21), tictactoe:110:45 (#22), tictactoe:118:39 (#23)")))
     IO.print(verdict("sites-limits", String.eq(
       sites(Fr.compile(with.prelude("over-budget-recursion", over, prelude), "over-budget-recursion")),
       "over-budget-recursion:30:34 (#0)") && String.eq(
@@ -309,7 +333,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +tchar: S
       "unbounded-input-recursion:27:34 (#0)")))
     IO.print(verdict("testchar-error", String.eq(
       error(Fr.compile([Fr.Src{"testchar", tchar}], "testchar")),
-      "RE (missing definition \"concat\" at line 14, column 31)")))
+      "RE (\"concat\" (at line 14, column 31)\n  is required by \"output\" (line 14, column 22)\n  is required by \"main\" (line 8, column 1)\n  and is not defined)")))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -320,4 +344,5 @@ def main() -> IO(Unit):
     tchar : Result<&1, &1, String, String> <- Tx.read_file("test/programs/testchar.tel")
     over : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/over-budget-recursion.tel")
     unb : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/unbounded-input-recursion.tel")
-    report(text(prelude), text(ttt), text(plus), text(tc), text(tchar), text(over), text(unb))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(text(prelude), text(charith), text(ttt), text(plus), text(tc), text(tchar), text(over), text(unb))

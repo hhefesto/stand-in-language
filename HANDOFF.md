@@ -42,6 +42,11 @@ and ported (section 3, "Merging master, 2026-11-17"); its gate is there.
 A `.telc` now carries the IC's verdict (section 3, "A `.telc` carries the
 IC's verdict"); next, in the user's order, are N3, N4 and N5 (P8).
 
+**Updated 2026-11-19, on delfos.** The user moved the work to delfos again
+("do all work on delfos"). telomare/master `98c963c2` (the name binder, state
+invariants, the Church arithmetic out of the Prelude) is merged and ported
+(section 3, "Merging master, 2026-11-19"); its gate is there.
+
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
 parity corpus, committed for the move too). Drop both commits ("Hand off
@@ -650,6 +655,120 @@ sem 3, eal 14, ealm 33, ic 20, fast 5, telc 8, native 3, rules 3, netsem 6
 groups); goldens 68 passed, 0 failed; lsp 3/3; perr 960 cases, 0 failures;
 corpus meters 17 and certificates 16 the same; proofs: open none, `--verdict`,
 NetProof and NetModel `--verdict` all print ALL PROOFS CHECK. GATE OK, both.
+
+### Merging master, 2026-11-19 (`98c963c2`)
+
+The user (2026-11-19): "There are new commits in master, bring them into the
+bend branch", all on delfos. The worktree is `~/src/telomare-bend` (branch
+`bend`, from olimpo's `bend` at `1624a3c7`); `~/src/telomare` stays on
+`sizing-proof`. Master `98c963c2`'s binaries are `~/telc/master-98c963c`
+(`/nix/store/a1qpvjbb…-telomare-0.1.0.0`, from telomare.cachix.org). Four
+commits came in; what each became:
+
+- `515e0235`, `6ad57ff7` (the Church-numeral arithmetic, `plus`, `times`,
+  `pow`, `minus`, `factorial` and `dFactorial`, out of the Prelude into
+  `test/programs/ChurchArith.tel`, which simpleplus imports): the Prelude and
+  the test programs are master's. Every test that compiles simpleplus loads
+  ChurchArith too (`plus.srcs` in
+  `tests/{fast,front,ic,native,rules,sem,size,telc}.bend`), and the inline
+  programs of `tests/eal.bend` and `tests/ealm.bend` import both on one line,
+  as master's `auxImports` does. `test/golden/run.sh` copies the modules
+  beside a program into its scratch directory, `test/lsp/run.sh` copies
+  ChurchArith.tel, and the corpus's `fact.tel` imports it (through a symlink
+  beside it, as `Prelude.tel` is).
+- `c2976638` (check state invariants for main functions): `Plan.bend`'s
+  `reachable` is master's `reachableFailures` (`step.program`, `hypothesis`,
+  `seen`): where main keeps a check, two more runs of the check analysis
+  (main on 0, and two iterations over any input and an earlier state) keep in
+  the plan only the checks that may fail on a call the loop can make.
+  `tests/size.bend`'s `size-state-invariant` holds master's four programs to
+  master's SizingTests answers. The step program's two closures are -14 and
+  -15, numbers a compiled program gives `--fast` steps; only the analysis
+  runs that program. Not ported: master's ConformanceTests entry for
+  `state-invariant-halt` (the port has no conformance suite).
+- `98c963c2` (the name binder): `bend/Bind.bend` is `Telomare.Bind`, one
+  function (`go`) over a task, since Bend has no mutual recursion. It replaces
+  `Resolve.bend`'s import flattening and qualifying (Resolve keeps the errors,
+  three of them new, and `prune`). `Front.bend` binds with it; `Expand.bend`
+  binds an annotated parameter by application (`bind.as`); `Main.bend` prints
+  the binder's warnings on stderr before compiling (`warnings`, master's
+  `reportWarnings`; none for a `.telc`). An import's location is master's
+  span now (`Parse.bend`'s `import.parse`), since a warning can sit on it.
+  The language server shows the warnings as warnings (severity 2, source
+  "binder", over the name, or the import's span: `warn.range`), places the
+  new errors at their locations, drops its own undefined-variable check
+  (`refs` lost its `look` flag), and binds `telomare.partialEval`'s
+  expression in a module `<repl>` that imports nothing (definitions still
+  import the Prelude qualified). The REPL keeps its own bindings, as master's
+  `app/Repl.hs` does. `tests/bind.bend` (7 groups) is master's
+  NameBinderTests T2-T22, with master's answers (displays, errors, warnings).
+  `~/telc/nbcmp.sh` runs 31 programs (`~/telc/nbcases.sh`: T2-T22 and five
+  more) through master and the port and compares stdout, stderr and status:
+  31 the same. `tests/front.bend`'s `expand-errors` checks the annotated
+  parameter's application; its `testchar-error` is now the requirement's
+  chain.
+
+**Records from master `98c963c2`**, as the merges before took them:
+- `test/golden/expected/`: 18 cases (`record`, `GOLDEN_TIMEOUT=2400`): the
+  Prelude's line numbers, simpleplus's one line down (its second import),
+  testchar's error (an unsupplied requirement, with its chain), the sources'
+  hash and size in every `*compile` (simpleplus 46,961 -> 46,924 nodes), and
+  master's simpleplus `--ic --meter`, 3,371,532 -> 3,371,526.
+- `test/lsp/`: simpleplus.tel gained a line, so the sessions' requests on it
+  before it is changed point one line down (`~/telc/shiftlines.pl`); `basics`
+  gained four document changes (a shadowing and unused `let` entry, an
+  unsupplied requirement, a later import shadowing an earlier one, and the
+  same through one qualifier; `test/lsp/files/Shadow{A,B}.tel`). `expected/`
+  re-recorded. Master no longer sends the bare "missing definition"
+  diagnostic beside the resolver's.
+- corpus (`~/telc/corpus98.sh`, into `~/telc/corpus-master98`): `fact.hs-ic`
+  (master's refusal names `Code#211348`, was 211380) and eight
+  `hs-certificate`s: the Prelude's line numbers, `fact` through ChurchArith,
+  natudt's `__lambda_pattern_1` row gone (an annotated parameter is no let
+  binding now), and arith's, rat's and ratarith's sites numbered without gaps
+  (Ratio imports the Prelude, which is now bound once, not twice).
+
+**The port's own records**, re-recorded only where the merge moved them,
+each change one of master's (`record-port`; the corpus with `CORPUS_RECORD=1`,
+whose diff is these ten files and no other):
+- `port/` goldens: `simpleplus.ic-meter` (17,925 -> 17,919),
+  `simpleplus.ic-certificate` and `tictactoe.ic-certificate` (the line
+  numbers master's moved, and simpleplus's erasure checker in 481,060,671
+  steps, was 481,067,842), and the four `*compile` (the sources' hash and
+  nodes master's report, the `.telc` 251,966 and 566,183 bytes). Their report
+  parts are master's new ones line for line, as before.
+- corpus: the eight `port-certificate`s master's changed, `fact.port-ic-meter`
+  (the port's refusal is master's, `Code#211348` too) and `rat.port-ic-meter`
+  (34,904 -> 33,973 interactions).
+
+**Counts, and where they moved** (`~/telc/exp98.sh`, `~/telc/ratexp.sh`,
+`--ic --meter`, the port before the merge being `~/telc/gate5`'s):
+- simpleplus `3 4`: 17,925 -> 17,919. The merged port spends 17,925 on
+  1624a3c's Prelude and simpleplus, and gives the old `port/` record of
+  `--ic --certificate` byte for byte there (481,067,842 steps), so both moves
+  come from master's sources, as master's six interactions do. (The port
+  before the merge spends 18,618 on the new sources, likely binding the
+  Prelude twice through ChurchArith; not traced.)
+- rat: 34,904 -> 33,973. The port before the merge spends 34,904 on both
+  Preludes, the merged port 33,973 on both, so the change is the binder's, not
+  the sources'. Most likely the diamond: rat and Ratio both import the
+  Prelude, which the flattening bound twice and the binder binds once (master's
+  rat certificate lost the same gaps in its site numbers); not traced further.
+  rat's display is master's.
+- `tests/eal.bend`'s pinned digests: `eal-lift-udt` 2336be04… -> be35796e…,
+  `eal-layouts-simpleplus` 138b458f… -> bca5b4e5…; the merged port gives the
+  old digests on 1624a3c's sources (`~/telc/digest/eal-dbg`).
+- tc_ultra_minimal 118 and tictactoe `1 4 2 5 3` 7,534,180: unchanged.
+
+**Worse: compile time.** simpleplus's `--ic --meter` took 767-781 s with the
+merged port against 268-274 s before (`~/telc/exp98.log`, delfos busy with the
+gate both times): its main keeps a check, so the plan runs the check analysis
+three more times (`reachable`, two runs, one over two iterations of main).
+Master pays less for the same step: 56 s (281c00c) -> 89 s (98c963c2) on its
+own sources (`~/telc/mtime98.log`). The gate's tests that compile simpleplus
+(telc, ic, sem, the goldens) take about three times as long. tictactoe's
+analysis runs out of budget, so it never gets there. Making `reachable`
+cheaper (or the analysis itself) is open.
 
 ## 4. The plan: P1–P7
 

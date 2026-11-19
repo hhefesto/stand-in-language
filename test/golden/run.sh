@@ -15,8 +15,9 @@
 # with none every case runs. Run from anywhere; paths are taken relative to
 # the repository root.
 #
-# A case runs in a scratch directory holding its program and Prelude.tel,
-# because telomare loads `<Module>.tel` from the current directory. Cases of
+# A case runs in a scratch directory holding its program, the modules beside
+# it and Prelude.tel, because telomare loads `<Module>.tel` from the current
+# directory. Cases of
 # the same program share that directory, in file order, so a `--compile` case
 # leaves its .telc for the cases after it. A case's record is its exit status,
 # its stdout, its stderr and, for every file it wrote, the file's sha256 and
@@ -66,7 +67,14 @@ program_dir() {
     mkdir -p "$dir"
     cp "$root/Prelude.tel" "$dir/"
     case "$program" in
-      *.tel) cp "$root/$program" "$dir/" ;;
+      *.tel)
+        cp "$root/$program" "$dir/"
+        # the modules beside it, which it may import (simpleplus imports
+        # test/programs/ChurchArith.tel since master's 515e0235)
+        if [ "$(dirname "$program")" != . ]; then
+          cp "$root/$(dirname "$program")"/*.tel "$dir/"
+        fi
+        ;;
     esac
   fi
   printf '%s\n' "$dir"

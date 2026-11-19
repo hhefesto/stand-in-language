@@ -8,6 +8,7 @@ import ./Parse.bend as P
 import ./Mega.bend as Mg
 import ./Expand.bend as E
 import ./Resolve.bend as Rs
+import ./Bind.bend as B
 import ./Desugar.bend as D
 import ./Front.bend as Fr
 import ./Size.bend as Sz
@@ -25,8 +26,9 @@ import ./Session.bend as Ss
 #
 # - textDocument/didOpen, didChange (whole text), didClose: the document
 #   is kept, parsed and expanded, and its diagnostics published: the
-#   parser's or expansion's error, or imports not found, variables
-#   defined nowhere, and the resolver's error (master's storeParsedDoc);
+#   parser's or expansion's error, or imports not found, the name
+#   binder's warnings (Bind.bend) and the resolver's error (master's
+#   storeParsedDoc);
 # - textDocument/semanticTokens/full and /range: master's line lexer, its
 #   token types as master numbers them (0 comment, 1 keyword, 2 string,
 #   3 number, 5 operator, 19 variable, against the lsp library's default
@@ -943,17 +945,11 @@ def let.wks(+env: List<&2, L.Name>, +binds: List<&2, S.Bind<Empty, Unit, Empty>>
   +env2 = List.append(&2, L.Name, ns, env)
   push.binds(ns, env2, binds, Wk{ns, env2, body} <> rest)
 
-def rec.wks(look: Bool, +env: List<&2, L.Name>, a: S.Surf<Empty, Unit, Empty>, r: S.Surf<Empty, Unit, Empty>, b: S.Surf<Empty, Unit, Empty>, rest: List<&2, Wk>) -> List<&2, Wk>:
-  match look:
-    case True{}:
-      wk(env, a) <> wk(env, r) <> wk(env, b) <> rest
-    case False{}:
-      rest
-
 # A term's subterms, in source order, ahead of rest. A recursion's are
-# visited only when look says so: master's reference and definition walks
-# never descend into one, its undefined-variable check does.
-def kids(look: Bool, +env: List<&2, L.Name>, t: S.Surf<Empty, Unit, Empty>, rest: List<&2, Wk>) -> List<&2, Wk>:
+# never visited: master's reference and definition walks never descend into
+# one (its undefined-variable check did, until the name binder replaced it,
+# 98c963c2).
+def kids(+env: List<&2, L.Name>, t: S.Surf<Empty, Unit, Empty>, rest: List<&2, Wk>) -> List<&2, Wk>:
   match t:
     case S.SApp{loc, f, x}:
       wk(env, f) <> wk(env, x) <> rest
@@ -970,7 +966,7 @@ def kids(look: Bool, +env: List<&2, L.Name>, t: S.Surf<Empty, Unit, Empty>, rest
     case S.SRight{loc, x}:
       wk(env, x) <> rest
     case S.SRec{loc, a, r, b}:
-      rec.wks(look, env, a, r, b, rest)
+      rest
     case S.SLet{loc, binds, body}:
       let.wks(env, binds, body, rest)
     case S.SList{loc, xs}:
@@ -1016,16 +1012,16 @@ def ref.hit(yes: Bool, +name: String, +loc: L.Loc, acc: List<&2, Ref>) -> List<&
 type RSt is Data:
   RSt{+stack: List<&2, Wk>, +acc: List<&2, Ref>}
 
-def refs.step(look: Bool, w: Wk, rest: List<&2, Wk>, acc: List<&2, Ref>) -> RSt:
+def refs.step(w: Wk, rest: List<&2, Wk>, acc: List<&2, Ref>) -> RSt:
   match w:
     case Wk{new, +env, t}:
       match t:
         case S.SVar{+loc, +name}:
           RSt{rest, ref.hit(bound(env, name), name, loc, acc)}
         case other:
-          RSt{kids(look, env, other, rest), acc}
+          RSt{kids(env, other, rest), acc}
 
-def refs.go(fuel: Nat, +look: Bool, st: RSt) -> List<&2, Ref>:
+def refs.go(fuel: Nat, st: RSt) -> List<&2, Ref>:
   match fuel:
     case 0n:
       match st:
@@ -1038,13 +1034,12 @@ def refs.go(fuel: Nat, +look: Bool, st: RSt) -> List<&2, Ref>:
             case []:
               acc
             case w <> rest:
-              refs.go(k, look, refs.step(look, w, rest, acc))
+              refs.go(k, refs.step(w, rest, acc))
 
-# master's termReferences (look False) and unresolvedTerm (look True), over
-# every binding: newest first, so a name's references come out last to
+# master's termReferences, over every binding: newest first, so a name's references come out last to
 # first, as Map.fromListWith (<>) leaves them.
-def refs(+look: Bool, +items: List<&2, S.EItem>) -> List<&2, Ref>:
-  refs.go(U32.to_nat(4294967295), look, RSt{item.wks(items, []), []})
+def refs(+items: List<&2, S.EItem>) -> List<&2, Ref>:
+  refs.go(U32.to_nat(4294967295), RSt{item.wks(items, []), []})
 
 # Definitions
 # -----------
@@ -1169,7 +1164,7 @@ def def.term(+ss: List<&2, U32>, +p: Pos, +env: List<&2, L.Name>, t: S.Surf<Empt
     case S.SVar{loc, +name}:
       def.var.at(in.range(p, range.loc(ss, loc)), ss, env, name, rest)
     case other:
-      DGo{kids(False{}, env, other, rest)}
+      DGo{kids(env, other, rest)}
 
 def def.binder(m: Maybe<&2, Range>, +ss: List<&2, U32>, +p: Pos, +env: List<&2, L.Name>, t: S.Surf<Empty, Unit, Empty>, rest: List<&2, Wk>) -> DSt:
   match m:
@@ -1382,13 +1377,26 @@ def load.env(+env: Env, +uri: String, +items: List<&2, S.EItem>) -> IO(List<&2, 
 # Diagnostics (storeParsedDoc)
 # ----------------------------
 
+# How bad a diagnostic is: the binder's warnings are the only warnings
+# (master's 98c963c2).
+type Sev is Data:
+  SevError{}
+  SevWarning{}
+
+def sev.code(s: Sev) -> U32:
+  match s:
+    case SevError{}:
+      1
+    case SevWarning{}:
+      2
+
 type Diag is Data:
-  Diag{+range: Range, +source: String, +message: String}
+  Diag{+sev: Sev, +range: Range, +source: String, +message: String}
 
 def diag.json(d: Diag) -> J.Json:
   match d:
-    case Diag{r, src, msg}:
-      J.JObj{[J.JKv{"range", range.json(r)}, J.JKv{"severity", J.js.u32(1)},
+    case Diag{sev, r, src, msg}:
+      J.JObj{[J.JKv{"range", range.json(r)}, J.JKv{"severity", J.js.u32(sev.code(sev))},
         J.JKv{"source", J.JStr{src}}, J.JKv{"message", J.JStr{msg}}]}
 
 def diags.json(ds: List<&2, Diag>) -> List<&2, J.Json>:
@@ -1409,14 +1417,14 @@ def cmp.then(c: Cmp, rest: Cmp) -> Cmp:
 
 def diag.le.b(+al: U32, +ac: U32, +ael: U32, +aec: U32, +sa: String, +ma: String, b: Diag) -> Bool:
   match b:
-    case Diag{Range{Pos{+bl, +bc}, Pos{+bel, +bec}}, +sb, +mb}:
+    case Diag{bs, Range{Pos{+bl, +bc}, Pos{+bel, +bec}}, +sb, +mb}:
       Cmp.is_le(cmp.then(U32.cmp(al, bl), cmp.then(U32.cmp(ac, bc), cmp.then(U32.cmp(ael, bel),
         cmp.then(U32.cmp(aec, bec), cmp.then(String.order(sa, sb), String.order(ma, mb)))))))
 
 # The order of master's Map by (range, source, message).
 def diag.le(a: Diag, b: Diag) -> Bool:
   match a:
-    case Diag{Range{Pos{+al, +ac}, Pos{+ael, +aec}}, +sa, +ma}:
+    case Diag{as, Range{Pos{+al, +ac}, Pos{+ael, +aec}}, +sa, +ma}:
       diag.le.b(al, ac, ael, aec, sa, ma, b)
 
 def diag.keep(+d: Diag, after: List<&2, Diag>) -> List<&2, Diag>:
@@ -1449,7 +1457,7 @@ def perr.off(e: P.PErr) -> U32:
           off
 
 def diag.at(+text: String, +off: U32, msg: String) -> Diag:
-  Diag{range.after(pos.at(starts(text), off)), "parser", msg}
+  Diag{SevError{}, range.after(pos.at(starts(text), off)), "parser", msg}
 
 # Master's error where Mega.bend finds it, else the port's own.
 def diag.shown(+text: String, +e: P.PErr, m: Maybe<&2, Mg.Shown>) -> Diag:
@@ -1476,39 +1484,7 @@ def exp.range(+ss: List<&2, U32>, e: E.ExpErr) -> Range:
       range.point(0, 0)
 
 def diag.expand(+text: String, +e: E.ExpErr) -> Diag:
-  Diag{exp.range(starts(text), e), "expand", E.render(e)}
-
-def builtins() -> List<&2, String>:
-  ["zero", "left", "right", "trace", "pair", "app"]
-
-def name.pre(+q: String, it: S.EItem, rest: List<&2, String>) -> List<&2, String>:
-  match it:
-    case S.EBind{n, v}:
-      (q ++ L.Name.text(n)) <> rest
-    case S.EImport{i}:
-      rest
-
-def names.pre(+q: String, items: List<&2, S.EItem>) -> List<&2, String>:
-  match items:
-    case []:
-      []
-    case it <> more:
-      name.pre(q, it, names.pre(q, more))
-
-def qual.names(+q: String, m: Maybe<&2, List<&2, S.EItem>>) -> List<&2, String>:
-  match m:
-    case Some{items}:
-      names.pre(q, items)
-    case None{}:
-      []
-
-# importedDefinitionNames
-def imported.names(imps: List<&2, S.Import>, +mods: List<&2, Rs.Mod>) -> List<&2, String>:
-  match imps:
-    case []:
-      []
-    case S.Import{l, mn, q} <> rest:
-      List.append(&2, String, qual.names(qual.prefix(q), Rs.find.mod(mods, L.Name.text(mn))), imported.names(rest, mods))
+  Diag{SevError{}, exp.range(starts(text), e), "expand", E.render(e)}
 
 def mod.names(ms: List<&2, Rs.Mod>) -> List<&2, String>:
   match ms:
@@ -1524,7 +1500,7 @@ def import.diag(found: Bool, +ss: List<&2, U32>, mn: L.Name, rest: List<&2, Diag
     case False{}:
       match mn:
         case L.Name{l, +n}:
-          Diag{name.loc.range(ss, l, n), "resolver", "module not found " ++ Sh.string(n)} <> rest
+          Diag{SevError{}, name.loc.range(ss, l, n), "resolver", "module not found " ++ Sh.string(n)} <> rest
 
 # importDiagnostics
 def import.diags(+ss: List<&2, U32>, imps: List<&2, S.Import>, +names: List<&2, String>) -> List<&2, Diag>:
@@ -1534,36 +1510,24 @@ def import.diags(+ss: List<&2, U32>, imps: List<&2, S.Import>, +names: List<&2, 
     case S.Import{l, +mn, q} <> rest:
       import.diag(has.str(names, L.Name.text(mn)), ss, mn, import.diags(ss, rest, names))
 
-def undef.diag(known: Bool, +ss: List<&2, U32>, r: Ref, rest: List<&2, Diag>) -> List<&2, Diag>:
-  match known:
-    case True{}:
-      rest
-    case False{}:
-      match r:
-        case Ref{n, l}:
-          Diag{range.loc(ss, l), "resolver", "missing definition " ++ Sh.string(n)} <> rest
-
-def ref.name(r: Ref) -> String:
-  match r:
-    case Ref{n, l}:
-      n
-
-# undefinedVariableDiagnostics
-def undef.diags(+ss: List<&2, U32>, +globals: List<&2, String>, rs: List<&2, Ref>) -> List<&2, Diag>:
-  match rs:
-    case []:
-      []
-    case +r <> rest:
-      undef.diag(has.str(globals, ref.name(r)), ss, r, undef.diags(ss, globals, rest))
-
+# resolverErrorDiagnostics: at the error's location where it has one. Every
+# module is parsed under its own name, but master's server parses them all
+# under the empty one, so a location in an imported module cannot be told
+# apart from one in this document there either.
 def res.err(+ss: List<&2, U32>, +e: Rs.ResErr) -> List<&2, Diag>:
   match e:
     case Rs.NoMainFunction{m}:
       []
     case Rs.MissingDefinitionAt{l, n}:
-      [Diag{range.loc(ss, l), "resolver", Rs.render(e)}]
+      [Diag{SevError{}, range.loc(ss, l), "resolver", Rs.render(e)}]
+    case Rs.UnsuppliedRequirement{n, l, via}:
+      [Diag{SevError{}, range.loc(ss, l), "resolver", Rs.render(e)}]
+    case Rs.UnboundQualifiedName{l, n}:
+      [Diag{SevError{}, range.loc(ss, l), "resolver", Rs.render(e)}]
+    case Rs.DuplicateDefinition{l, n}:
+      [Diag{SevError{}, range.loc(ss, l), "resolver", Rs.render(e)}]
     case _:
-      [Diag{range.point(0, 0), "resolver", Rs.render(e)}]
+      [Diag{SevError{}, range.point(0, 0), "resolver", Rs.render(e)}]
 
 def res.of(+ss: List<&2, U32>, r: Result<&2, &2, Fr.Err, T.C>) -> List<&2, Diag>:
   match r:
@@ -1576,11 +1540,49 @@ def res.of(+ss: List<&2, U32>, r: Result<&2, &2, Fr.Err, T.C>) -> List<&2, Diag>
     case Done{t}:
       []
 
-# resolverDiagnostics, only when every import was found.
+# Where a binder warning is (locTagToRangeIn of its location): a name, whose
+# location here is where it starts, so its length on (as master's span is the
+# name's); or an import, whose location is master's span.
+def warn.range(+ss: List<&2, U32>, l: L.Loc, +x: String) -> Range:
+  match l:
+    case L.Src{+file, L.Pos{+l1, +c1, +o1}, L.Pos{+l2, +c2, +o2}}:
+      Bool.pick(Range, U32.is_eq(o1, o2), name.loc.range(ss, L.Src{file, L.Pos{l1, c1, o1}, L.Pos{l2, c2, o2}}, x),
+        Range{pos.at(ss, o1), pos.at(ss, o2)})
+    case other:
+      range.start(L.start(other))
+
+def bind.diag(here: Bool, +ss: List<&2, U32>, +w: B.W, rest: List<&2, Diag>) -> List<&2, Diag>:
+  match here:
+    case True{}:
+      Diag{SevWarning{}, warn.range(ss, B.loc(w), B.name(w)), "binder", B.render(w)} <> rest
+    case False{}:
+      rest
+
+# The binder's warnings about this document, as warnings.
+def bind.diags(+ss: List<&2, U32>, ws: List<&2, B.MW>) -> List<&2, Diag>:
+  match ws:
+    case []:
+      []
+    case B.MW{m, +w} <> rest:
+      bind.diag(String.eq(m, "Current"), ss, w, bind.diags(ss, rest))
+
+def bound.diags(+ss: List<&2, U32>, r: Result<&2, &2, Rs.ResErr, B.Bound>) -> List<&2, Diag>:
+  match r:
+    case Fail{e}:
+      res.err(ss, e)
+    case Done{b}:
+      match b:
+        case B.Bound{t, ws}:
+          List.append(&2, Diag, bind.diags(ss, ws), res.of(ss, Fr.term.of(D.desugar(t))))
+
+# resolverDiagnostics, only when every import was found: the binder's
+# warnings, and its error or lowering's. Without a main nothing is a root, so
+# an unbound name is a requirement for whoever imports this module, not an
+# error (NoMainFunction gives none).
 def res.diags(go: Bool, +ss: List<&2, U32>, +items: List<&2, S.EItem>, +mods: List<&2, Rs.Mod>) -> List<&2, Diag>:
   match go:
     case True{}:
-      res.of(ss, Fr.term(Fr.Mods{Rs.Mod{"Current", items} <> mods, []}, "Current"))
+      bound.diags(ss, B.resolve(Rs.Mod{"Current", items} <> mods, "Current"))
     case False{}:
       []
 
@@ -1593,11 +1595,8 @@ def is.nil(ds: List<&2, Diag>) -> Bool:
 
 def diags.ok(+ss: List<&2, U32>, +items: List<&2, S.EItem>, +lms: List<&2, Lm>, +pre: List<&2, Rs.Mod>) -> List<&2, Diag>:
   +mods = List.append(&2, Rs.Mod, lm.mods(lms), pre)
-  +imps = imports(items)
-  +idiags = import.diags(ss, imps, mod.names(mods))
-  +globals = List.append(&2, String, builtins(), List.append(&2, String, imported.names(imps, mods), top.names(items)))
-  +udiags = undef.diags(ss, globals, refs(True{}, items))
-  diags.sorted(List.append(&2, Diag, idiags, List.append(&2, Diag, udiags, res.diags(is.nil(idiags), ss, items, mods))))
+  +idiags = import.diags(ss, imports(items), mod.names(mods))
+  diags.sorted(List.append(&2, Diag, idiags, res.diags(is.nil(idiags), ss, items, mods)))
 
 def diagnose(+env: Env, +uri: String, +text: String, p: Pd) -> IO(List<&2, Diag>):
   match p:
@@ -1653,7 +1652,7 @@ def def.local(m: Maybe<&2, Range>, +uri: String, +ss: List<&2, U32>, +p: Pos, +i
       loc.json(uri, r)
     case None{}:
       +cur = tops.lc(ss, uri, "", items, [])
-      def.symbol(or.else(lc.at(p, cur), ref.at(ss, p, refs(False{}, items))), List.append(&2, Lc, cur, lm.lcs(lms)))
+      def.symbol(or.else(lc.at(p, cur), ref.at(ss, p, refs(items))), List.append(&2, Lc, cur, lm.lcs(lms)))
 
 # definitionAt: a local binder first, then the symbol under the position
 # among this document's definitions and its imports'.
@@ -1722,7 +1721,7 @@ def references(+uri: String, +p: Pos, incl: Bool, m: Maybe<&2, Doc>) -> J.Json:
         case PdOk{+items}:
           +ss = starts(text)
           +cur = tops.lc(ss, uri, "", items, [])
-          +rs = refs(False{}, items)
+          +rs = refs(items)
           refs.result(or.else(lc.at(p, cur), ref.at(ss, p, rs)), ss, uri, incl, cur, rs)
         case _:
           J.JNull{}
@@ -1792,12 +1791,25 @@ def pe.program(r: Result<&2, &2, Fr.Err, T.C>) -> String:
     case Done{+run}:
       pe.sized(Sz.size(65536, False{}, run))
 
+# The module eval2IExpr binds its input as (master's 98c963c2).
+def pe.repl() -> String:
+  "<repl>"
+
+def pe.bound(r: Result<&2, &2, Rs.ResErr, S.Expanded()>) -> String:
+  match r:
+    case Fail{e}:
+      "Evaluation Error: " ++ Rs.render(e)
+    case Done{x}:
+      pe.program(Fr.term.of(D.desugar(x)))
+
+# An expression is the main of a module of its own, which imports nothing
+# (master's 98c963c2: a bare expression sees no library module).
 def pe.expanded(r: Result<&2, &2, E.ExpErr, S.Surf<Empty, Unit, Empty>>) -> String:
   match r:
     case Fail{e}:
       "Evaluation Error: " ++ E.render(e)
     case Done{x}:
-      pe.program(Fr.term.of(D.desugar(x)))
+      pe.bound(B.main([Rs.Mod{pe.repl(), [S.EBind{L.Name{L.Gen{"eval2IExpr"}, "main"}, x}]}], pe.repl()))
 
 def pe.gen() -> L.Loc:
   L.Gen{"eval2IExpr.import"}
@@ -1805,12 +1817,13 @@ def pe.gen() -> L.Loc:
 def pe.import() -> S.EItem:
   S.EImport{S.Import{pe.gen(), L.Name{pe.gen(), "Prelude"}, Some{L.Name{pe.gen(), "Prelude"}}}}
 
-# Definitions: main among them, under the Prelude qualified as Prelude
-# (wrapMain over resolveAllImports).
+# Definitions: main among them, in a module that imports the Prelude
+# qualified as Prelude (eval2IExpr: every library module, qualified by its
+# name, which the server's is).
 def pe.main(yes: Bool, +items: List<&2, S.EItem>, +pre: List<&2, Rs.Mod>) -> String:
   match yes:
     case True{}:
-      pe.program(Fr.term(Fr.Mods{Rs.Mod{"Current", pe.import() <> items} <> pre, []}, "Current"))
+      pe.program(Fr.term(Fr.Mods{Rs.Mod{pe.repl(), pe.import() <> items} <> pre, []}, pe.repl()))
     case False{}:
       "Evaluation Error: missing 'main' definition"
 

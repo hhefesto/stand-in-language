@@ -68,13 +68,13 @@ def compiled(r: Result<&2, &2, String, T.C>, lines: List<&2, String>) -> Bool:
 def session(srcs: List<&2, Fr.Src>, +entry: String, lines: List<&2, String>) -> Bool:
   compiled(Fr.compile(srcs, entry), lines)
 
-def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
+def report(+prelude: String, +charith: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(N.verdict("rules-terms", cases(N.closed())))
     IO.print(N.verdict("rules-pairs", meets(N.meet.prog(), N.meets())))
     IO.print(N.verdict("rules-sessions",
       session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", [])
-      && session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])
+      && session([Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"])
       && session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])))
 
 def main() -> IO(Unit):
@@ -83,4 +83,5 @@ def main() -> IO(Unit):
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
-    report(N.text(prelude), N.text(tc), N.text(plus), N.text(ttt))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(N.text(prelude), N.text(charith), N.text(tc), N.text(plus), N.text(ttt))

@@ -11,6 +11,7 @@ import ./EALm.bend as EM
 import ./IC.bend as IC
 import ./Session.bend as Ss
 import ./Resolve.bend as Rs
+import ./Bind.bend as B
 import ./Levels.bend as Lv
 import ./Certificate.bend as Ct
 import ./Meter.bend as Mt
@@ -1314,12 +1315,32 @@ def parsed(~rt: Ss.Runner(), +act: Act, +ic: Bool, h: Ss.How, +entry: String, +p
     case Ss.Fast{fuel}:
       fast.parsed(~rt, act, fuel, entry, bud, m)
 
+def warned(ls: List<&2, String>) -> IO(Unit):
+  match ls:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case Con{l, rest}:
+      do IO<Unit>:
+        IO.print_err(l)
+        warned(rest)
+
+# The name binder's warnings (Bind.bend), on stderr so they never mix with
+# output; none when a module does not parse or the program does not bind
+# (reportWarnings).
+def warnings(m: Fr.Mods, +entry: String) -> List<&2, String>:
+  match m:
+    case Fr.Mods{+mods, errs}:
+      B.warnings(mods, modules.ok(errs), entry)
+
 def loaded(~rt: Ss.Runner(), act: Act, ic: Bool, h: Ss.How, +entry: String, +path: String, +bud: U32, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.die(Unit, 1, failed(Unread{e}))
     case Done{+srcs}:
-      parsed(~rt, act, ic, h, entry, path, bud, srcs, Fr.all(srcs))
+      +m = Fr.all(srcs)
+      do IO<Unit>:
+        warned(warnings(m, entry))
+        parsed(~rt, act, ic, h, entry, path, bud, srcs, m)
 
 # The EAL variable budget a compile runs under: --eal-budget's, or the
 # default.

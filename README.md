@@ -512,8 +512,9 @@ sessions in `test/lsp` (`test/lsp/run.sh`), parse errors' text included.
 The language server provides:
 
 - **Diagnostics** — on every document open and edit it reports parse
-  errors, missing imported modules, undefined variable references, and
-  resolver errors. Diagnostics are cleared when the document is closed.
+  errors, missing imported modules, the name binder's warnings (shadowing,
+  unused `let` entries), and resolver errors. Diagnostics are cleared when
+  the document is closed.
 - **Go to definition** — jumps to local `let`, lambda, and case-pattern
   binders, to top-level definitions, and to definitions in qualified
   imported modules.
@@ -705,7 +706,7 @@ is checked against the Haskell tests it can answer (master's EALTests are
 | --- | --- | --- |
 | Lexical facts | `Telomare.Lexical` | ported: `bend/Lexical.bend` |
 | Parse | `Telomare.IR.*` (surface), `Telomare.Parse`, `Telomare.Expand`, `Telomare.Desugar` | ported: `bend/{Loc,Syntax,Lex,Parse,Expand,Desugar}.bend` |
-| Resolve | `Telomare.Resolve` | ported: `bend/{Resolve,Term,Lower,Split,Front}.bend` |
+| Resolve | `Telomare.Bind`, `Telomare.Resolve` | ported: `bend/{Bind,Resolve,Term,Lower,Split,Front}.bend` |
 | Size (totality) | `Telomare.Size`, `Telomare.Size.IR`, the parts of `Telomare.Machine` sizing uses | ported: `bend/{Expr,Size,Plan}.bend`, handing on `bend/Core.bend`'s CompiledExpr |
 | Certify | `Telomare.EAL` (master's, PR #157), the lifting and hashing in `Telomare.Resolve` | ported: `bend/{Sha256,Lift,Rat,Linear,EALm}.bend` (the verdict, the fallbacks, the certificate after sizing and the capture layouts it gives, the REPL's `:t`; `bend/EAL.bend` is haskell-final's, kept for its tests) |
 | IC runtime | `Telomare.IC` | ported: `bend/IC.bend`, closure copying guided by the EAL capture layouts |

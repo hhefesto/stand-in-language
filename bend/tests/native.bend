@@ -379,7 +379,7 @@ def text(r: Result<&1, &1, String, String>) -> String:
     case Done{s}:
       s
 
-def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
+def report(+prelude: String, +charith: String, +tc: String, +plus: String, +ttt: String) -> IO(Unit):
   do IO<Unit>:
     terms : Bool <- all.io(cases.io(closed()))
     IO.print(verdict("native-terms", terms))
@@ -387,7 +387,7 @@ def report(+prelude: String, +tc: String, +plus: String, +ttt: String) -> IO(Uni
     IO.print(verdict("native-pairs", pairs))
     sessions : Bool <- all.io([
       session([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", []),
-      session([Fr.Src{"Prelude", prelude}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"]),
+      session([Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}], "simpleplus", ["3 4"]),
       session([Fr.Src{"Prelude", prelude}, Fr.Src{"tictactoe", ttt}], "tictactoe", ["1", "4", "2", "5", "3"])])
     IO.print(verdict("native-sessions", sessions))
 
@@ -397,4 +397,5 @@ def main() -> IO(Unit):
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
-    report(text(prelude), text(tc), text(plus), text(ttt))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(text(prelude), text(charith), text(tc), text(plus), text(ttt))

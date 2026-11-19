@@ -46,6 +46,11 @@ def text(r: Result<&1, &1, String, String>) -> String:
 def with.prelude(+prelude: String, +name: String, text: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, text}]
 
+# simpleplus, over the library modules it imports (ChurchArith since master's
+# 515e0235).
+def plus.srcs(+prelude: String, +charith: String, plus: String) -> List<&2, Fr.Src>:
+  [Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}]
+
 # Artifacts, as --compile makes them
 # ----------------------------------
 
@@ -410,16 +415,16 @@ def loaded.refusal(m: Maybe<&2, Tc.Telc>) -> String:
     case Some{t}:
       head.refusal(Tc.load(Tc.encode(t)))
 
-def report(+prelude: String, +tc: String, +plus: String, +er: String) -> IO(Unit):
+def report(+prelude: String, +charith: String, +tc: String, +plus: String, +er: String) -> IO(Unit):
   do IO<Unit>:
-    +sp : Maybe<&2, Tc.Telc> = artifact(with.prelude(prelude, "simpleplus", plus), "simpleplus")
+    +sp : Maybe<&2, Tc.Telc> = artifact(plus.srcs(prelude, charith, plus), "simpleplus")
     IO.print(verdict("telc-round-trip", all([
       round.trip(sp),
       round.trip(with.vars(sp, 16777216))])))
     IO.print(verdict("telc-runs", all([
       runs.alike([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", []),
-      runs.alike(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["3 4"]),
-      runs.alike(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["9 a"])])))
+      runs.alike(plus.srcs(prelude, charith, plus), "simpleplus", ["3 4"]),
+      runs.alike(plus.srcs(prelude, charith, plus), "simpleplus", ["9 a"])])))
     IO.print(verdict("telc-ready", all([
       ready.alike(sp),
       ready.alike(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"))])))
@@ -429,13 +434,15 @@ def report(+prelude: String, +tc: String, +plus: String, +er: String) -> IO(Unit
       Bool.not(has.prologue(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")))])))
     IO.print(verdict("telc-magic", refused(Tc.decode(Sha.utf8("not a telomare artifact at all")), "magic")))
     IO.print(verdict("telc-hash", all([
-      Bool.not(String.eq(Tc.sources.hash(with.prelude(prelude, "simpleplus", plus)),
-                         Tc.sources.hash(with.prelude(prelude, "simpleplus", "main = \\input -> (\"different\", 0)")))),
-      String.eq(Tc.sources.hash([Fr.Src{"simpleplus", plus}, Fr.Src{"Prelude", prelude}]),
-                Tc.sources.hash(with.prelude(prelude, "simpleplus", plus)))])))
+      Bool.not(String.eq(Tc.sources.hash(plus.srcs(prelude, charith, plus)),
+                         Tc.sources.hash(plus.srcs(prelude, charith, "main = \\input -> (\"different\", 0)")))),
+      String.eq(Tc.sources.hash([Fr.Src{"simpleplus", plus}, Fr.Src{"ChurchArith", charith}, Fr.Src{"Prelude", prelude}]),
+                Tc.sources.hash(plus.srcs(prelude, charith, plus)))])))
+    # The plain program's nodes, as --compile reports them: master's counts
+    # (simpleplus 46,961 before 98c963c2; its master now says 46,924).
     IO.print(verdict("telc-nodes", all([
       U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 798),
-      U32.is_eq(nodes(sp), 46961)])))
+      U32.is_eq(nodes(sp), 46924)])))
     +refd : Maybe<&2, Tc.Telc> = artifact([Fr.Src{"eal-refused", er}], "eal-refused")
     IO.print(verdict("telc-refusal", all([
       String.starts_with(refusal.in(refd), "refused: the IC runtime requires an EAL certificate; this program does not certify"),
@@ -450,4 +457,5 @@ def main() -> IO(Unit):
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     er : Result<&1, &1, String, String> <- Tx.read_file("test/programs/eal-refused.tel")
-    report(text(prelude), text(tc), text(plus), text(er))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(text(prelude), text(charith), text(tc), text(plus), text(er))

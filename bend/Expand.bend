@@ -192,13 +192,21 @@ def lam.names(ps: List<&2, S.ExpandedLPat()>, +i: Nat) -> List<&2, L.Name>:
     case Con{p, rest}:
       lam.name(i, p) <> lam.names(rest, 1n+i)
 
+# The scope bound by application to the checked value: `(\name -> scope)
+# checked`, located at the scope, as lowering locates the application it
+# makes of a let.
+def bind.as(name: L.Name, +scope: S.Expanded(), checked: S.Expanded()) -> S.Expanded():
+  S.SApp{S.loc(Empty, Unit, Empty, scope), S.SLam{S.loc(Empty, Unit, Empty, scope), name, scope}, checked}
+
 # One parameter's destructuring around the body (applyDestructure), at the
 # lambda's location lt; the parameter starts at loc. A refinement `(p : T)`
-# binds the checked value: `\(x : T) -> body` is `\v -> let x = T checks v
-# in body`, as `let x : T = v` would be, and an annotated pattern that is no
-# variable is destructured from that binding. Annotations further in are
-# guards of the parameter's destructuring case, whose fallback aborts, so a
-# parameter's guard that fails aborts as a refinement does.
+# binds the checked value: `\(x : T) -> body` is `\v -> (\x -> body) (T
+# checks v)`, checked as `let x : T = v` would be but bound as a variable,
+# so that it cannot supply a requirement (bend/Bind.bend, master's 98c963c2),
+# and an annotated pattern that is no variable is destructured from that
+# binding. Annotations further in are guards of the parameter's
+# destructuring case, whose fallback aborts, so a parameter's guard that
+# fails aborts as a refinement does.
 def destructure(+lt: L.Loc, +loc: L.Loc, p: S.ExpandedPat(), +v: String, inner: S.Expanded()) -> S.Expanded():
   match p:
     case S.PVar{name}:
@@ -206,11 +214,11 @@ def destructure(+lt: L.Loc, +loc: L.Loc, p: S.ExpandedPat(), +v: String, inner: 
     case S.PAnn{q, t}:
       match q:
         case S.PVar{name}:
-          S.SLet{lt, [S.Bind{name, S.SCheck{loc, L.KRefine{}, t, S.SVar{lt, v}}}], inner}
+          bind.as(name, inner, S.SCheck{loc, L.KRefine{}, t, S.SVar{lt, v}})
         case other:
-          S.SLet{lt, [S.Bind{L.Name{L.GenIn{"annotated lambda pattern", loc}, v ++ "_checked"},
-                             S.SCheck{loc, L.KRefine{}, t, S.SVar{lt, v}}}],
-            destructure(lt, loc, other, v ++ "_checked", inner)}
+          bind.as(L.Name{L.GenIn{"annotated lambda pattern", loc}, v ++ "_checked"},
+            destructure(lt, loc, other, v ++ "_checked", inner),
+            S.SCheck{loc, L.KRefine{}, t, S.SVar{lt, v}})
     case other:
       S.SCase{lt, S.SVar{lt, v},
         [S.Alt{other, inner},

@@ -26,7 +26,7 @@ tests() {
   echo "== generated ic.c"
   if bend bend/dev/genic.bend | cmp -s - bend/effs/ic.c; then echo ok
   else echo "GENERATED DIFF"; fail=1; fi
-  for t in lexical front size sem eal ealm ic fast telc native rules netsem ${EXTRA_TESTS:-}; do
+  for t in lexical front bind size sem eal ealm ic fast telc native rules netsem ${EXTRA_TESTS:-}; do
     echo "== test $t"
     bend bend/tests/$t.bend -o "$B/test-$t" || { echo "BUILD FAILED $t"; fail=1; continue; }
     "$B/test-$t" > "$S/logs/test-$t.out" 2>&1

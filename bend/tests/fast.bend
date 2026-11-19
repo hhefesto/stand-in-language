@@ -38,6 +38,11 @@ def text(r: Result<&1, &1, String, String>) -> String:
 def with.prelude(+prelude: String, +name: String, text: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, text}]
 
+# simpleplus, over the library modules it imports (ChurchArith since master's
+# 515e0235).
+def plus.srcs(+prelude: String, +charith: String, plus: String) -> List<&2, Fr.Src>:
+  [Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}]
+
 # Sessions
 # --------
 
@@ -189,27 +194,27 @@ def unsized.fails(r: Result<&2, &2, String, T.C>) -> Bool:
     case Done{run}:
       size.fails(Sz.size(65536, True{}, run))
 
-def report(+prelude: String, +tc: String, +plus: String, +ttt: String, +unb: String) -> IO(Unit):
+def report(+prelude: String, +charith: String, +tc: String, +plus: String, +ttt: String, +unb: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("fast-agrees", all([
       agree([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal", []),
-      agree(with.prelude(prelude, "simpleplus", plus), "simpleplus", ["3 4"]),
+      agree(plus.srcs(prelude, charith, plus), "simpleplus", ["3 4"]),
       agree(with.prelude(prelude, "tictactoe", ttt), "tictactoe", ["1", "9", "2", "8", "3"])])))
     IO.print(verdict("fast-base-case", base.ran(base.case())))
     # Since master's bd05da18, site 0 is Prelude's Num check (Prelude:28:16),
     # run at every succByte: 14,848 unrolls, where the old site 0 had 10.
     # There is also a fifth site (#4).
     IO.print(verdict("fast-sites", String.eq(
-      sites(fast(with.prelude(prelude, "simpleplus", plus), "simpleplus", 16777216, ["3 4"])),
+      sites(fast(plus.srcs(prelude, charith, plus), "simpleplus", 16777216, ["3 4"])),
       "#0 14848;#1 24;#2 5;#3 4;#4 10;")))
     IO.print(verdict("fast-unsized", all([
       unsized.fails(Fr.compile(with.prelude(prelude, "unbounded-input-recursion", unb), "unbounded-input-recursion")),
       String.eq(shown(fast(with.prelude(prelude, "unbounded-input-recursion", unb), "unbounded-input-recursion", 0, ["a", "a"])),
                 "#\n--\n \n--\n")])))
     IO.print(verdict("fast-fuel", all([
-      String.starts_with(last(fast(with.prelude(prelude, "simpleplus", plus), "simpleplus", 20, ["3 4"])),
+      String.starts_with(last(fast(plus.srcs(prelude, charith, plus), "simpleplus", 20, ["3 4"])),
                          "runtime error: out of fuel after 20 interactions.\n"),
-      String.eq(last(fast(with.prelude(prelude, "simpleplus", plus), "simpleplus", 0, ["3 4"])), "3 plus 4 is 7")])))
+      String.eq(last(fast(plus.srcs(prelude, charith, plus), "simpleplus", 0, ["3 4"])), "3 plus 4 is 7")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -218,4 +223,5 @@ def main() -> IO(Unit):
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
     ttt : Result<&1, &1, String, String> <- Tx.read_file("tictactoe.tel")
     unb : Result<&1, &1, String, String> <- Tx.read_file("test/programs/limits/unbounded-input-recursion.tel")
-    report(text(prelude), text(tc), text(plus), text(ttt), text(unb))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    report(text(prelude), text(charith), text(tc), text(plus), text(ttt), text(unb))

@@ -807,20 +807,25 @@ def item.def(r: Result<&2, &1, PErr, Val & List<&2, Lx.Tok>>) -> Step:
       (v, toks) = vt
       SItem{S.IDef{as.def(v)}, toks}
 
-def import.qual(+file: String, loc: L.Loc, name: L.Name, toks: List<&2, Lx.Tok>) -> Step:
+def import.qual(+file: String, +loc: L.Loc, name: L.Name, toks: List<&2, Lx.Tok>) -> Step:
   match toks:
-    case Con{Lx.Tok{Lx.KKw{"as"}, at, ws, nl}, Con{Lx.Tok{Lx.KId{q}, +qat, qws, qnl}, rest}}:
-      SItem{S.IImport{S.Import{loc, name, Some{L.Name{L.at(file, qat), q}}}}, rest}
+    case Con{Lx.Tok{Lx.KKw{"as"}, at, ws, nl}, Con{Lx.Tok{Lx.KId{q}, +qat, qws, qnl}, +rest}}:
+      SItem{S.IImport{S.Import{span.end(loc, tok.ws(peek(rest))), name, Some{L.Name{L.at(file, qat), q}}}}, rest}
     case _:
       SErr{unexpected(peek(toks), "\"as\" and a qualifier")}
 
-# `import M` or `import qualified M as Q`.
-def import.parse(+file: String, loc: L.Loc, toks: List<&2, Lx.Tok>) -> Step:
+# `import M` or `import qualified M as Q`. The import's span is master's
+# (captureSourceSpan): to the next item after `import M` (its module name is
+# followed by every space, newline and comment), to where the same-line space
+# after the qualifier stops after `import qualified M as Q`. The name binder
+# warns at it (a later import shadowing an earlier one), and the language
+# server gives that warning this range.
+def import.parse(+file: String, +loc: L.Loc, toks: List<&2, Lx.Tok>) -> Step:
   match toks:
     case Con{Lx.Tok{Lx.KKw{"qualified"}, at, ws, nl}, Con{Lx.Tok{Lx.KId{m}, +mat, mws, mnl}, rest}}:
       import.qual(file, loc, L.Name{L.at(file, mat), m}, rest)
-    case Con{Lx.Tok{Lx.KId{m}, +mat, mws, mnl}, rest}:
-      SItem{S.IImport{S.Import{loc, L.Name{L.at(file, mat), m}, None{}}}, rest}
+    case Con{Lx.Tok{Lx.KId{m}, +mat, mws, mnl}, +rest}:
+      SItem{S.IImport{S.Import{span.end(loc, tok.pos(peek(rest))), L.Name{L.at(file, mat), m}, None{}}}, rest}
     case _:
       SErr{unexpected(peek(toks), "module name")}
 

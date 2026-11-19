@@ -66,6 +66,11 @@ def size(+max: U32, srcs: List<&2, Fr.Src>, +entry: String) -> String:
 def with.prelude(+name: String, t: String, +prelude: String) -> List<&2, Fr.Src>:
   [Fr.Src{"Prelude", prelude}, Fr.Src{name, t}]
 
+# simpleplus, over the library modules it imports (ChurchArith since master's
+# 515e0235).
+def plus.srcs(+prelude: String, +charith: String, plus: String) -> List<&2, Fr.Src>:
+  [Fr.Src{"Prelude", prelude}, Fr.Src{"ChurchArith", charith}, Fr.Src{"simpleplus", plus}]
+
 # Checks
 # ------
 
@@ -188,12 +193,13 @@ def kept(x: E.X) -> String:
 def filtered(+q: String, left: Bool, +n: String) -> String:
   kept(Sz.filter.at(Some{q}, left, n, E.XZero{}, E.XPair{E.XZero{}, E.XZero{}}))
 
-def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String, +cor: String, +anti: String, +ninp: String, +misl: String, +br: String, +leak: String, +unk: String) -> IO(Unit):
+def report(+prelude: String, +charith: String, +ttt: String, +plus: String, +tc: String, +over: String, +unb: String, +cor: String, +anti: String, +ninp: String, +misl: String, +br: String, +leak: String, +unk: String,
+           +si: String, +sib: String, +sif: String, +sih: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("size-tc_ultra_minimal", String.eq(
       size(65536, [Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "1")))
     IO.print(verdict("size-simpleplus", String.eq(
-      size(65536, with.prelude("simpleplus", plus, prelude), "simpleplus"), "256 7 10 10 10 11")))
+      size(65536, plus.srcs(prelude, charith, plus), "simpleplus"), "256 7 10 10 10 11")))
     IO.print(verdict("size-tictactoe", String.eq(
       size(65536, with.prelude("tictactoe", ttt, prelude), "tictactoe"),
       "114 256 10 58 32 9 2 2 2 3 9 10 10 49 10 9 4 4 4 2 9 9 3 2")))
@@ -208,10 +214,19 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
     IO.print(verdict("size-mislabeled", String.eq(
       size(65536, with.prelude("mislabeled-size", misl, prelude), "mislabeled-size"), "9")))
     IO.print(verdict("size-where-checks-go", all([
-      String.eq(placed(with.prelude("simpleplus", plus, prelude), "simpleplus"), "RefinementAbort/RefinementAbort"),
+      String.eq(placed(plus.srcs(prelude, charith, plus), "simpleplus"), "RefinementAbort/RefinementAbort"),
       String.eq(placed(with.prelude("correlated-check", cor, prelude), "correlated-check"), "/"),
       String.eq(placed(with.prelude("anticorrelated-check", anti, prelude), "anticorrelated-check"), "RefinementAbort/"),
       String.eq(placed(with.prelude("notinput", ninp, prelude), "notinput"), "/RefinementAbort")])))
+    # master's c2976638: a check on the state that every state main makes
+    # passes is erased, as is one every state the loop goes on with passes (a
+    # 0 state ends it); one a state main makes fails stays, as does one the
+    # input-less first call fails.
+    IO.print(verdict("size-state-invariant", all([
+      String.eq(placed(with.prelude("state-invariant", si, prelude), "state-invariant"), "/"),
+      String.eq(placed(with.prelude("state-invariant-broken", sib, prelude), "state-invariant-broken"), "RefinementAbort/"),
+      String.eq(placed(with.prelude("state-invariant-first-call", sif, prelude), "state-invariant-first-call"), "RefinementAbort/"),
+      String.eq(placed(with.prelude("state-invariant-halt", sih, prelude), "state-invariant-halt"), "/")])))
     IO.print(verdict("size-filter", all([
       String.eq(filtered("R", True{}, "L"), "both"),
       String.eq(filtered("L", True{}, "L"), "a"),
@@ -241,7 +256,7 @@ def report(+prelude: String, +ttt: String, +plus: String, +tc: String, +over: St
       String.eq(aborts(case.of(prelude, "0"), "cased"), "none"),
       String.eq(aborts([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"), "none"),
       String.eq(aborts(case.of(prelude, "3"), "cased"), "Abort"),
-      String.eq(aborts(with.prelude("simpleplus", plus, prelude), "simpleplus"), "none")])))
+      String.eq(aborts(plus.srcs(prelude, charith, plus), "simpleplus"), "none")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -258,4 +273,10 @@ def main() -> IO(Unit):
     br : Result<&1, &1, String, String> <- Tx.read_file("test/programs/branch-refinement.tel")
     leak : Result<&1, &1, String, String> <- Tx.read_file("test/programs/branch-refinement-leak.tel")
     unk : Result<&1, &1, String, String> <- Tx.read_file("test/programs/unknown-check-branch.tel")
-    report(text(prelude), text(ttt), text(plus), text(tc), text(over), text(unb), text(cor), text(anti), text(ninp), text(misl), text(br), text(leak), text(unk))
+    charith : Result<&1, &1, String, String> <- Tx.read_file("test/programs/ChurchArith.tel")
+    si : Result<&1, &1, String, String> <- Tx.read_file("test/programs/state-invariant.tel")
+    sib : Result<&1, &1, String, String> <- Tx.read_file("test/programs/state-invariant-broken.tel")
+    sif : Result<&1, &1, String, String> <- Tx.read_file("test/programs/state-invariant-first-call.tel")
+    sih : Result<&1, &1, String, String> <- Tx.read_file("test/programs/state-invariant-halt.tel")
+    report(text(prelude), text(charith), text(ttt), text(plus), text(tc), text(over), text(unb), text(cor), text(anti), text(ninp), text(misl), text(br), text(leak), text(unk),
+           text(si), text(sib), text(sif), text(sih))

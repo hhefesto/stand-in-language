@@ -10,6 +10,7 @@ import ./Parse.bend as Parse
 import ./Mega.bend as Mega
 import ./Expand.bend as Expand
 import ./Resolve.bend as Resolve
+import ./Bind.bend as Bind
 import ./Desugar.bend as Desugar
 import ./Term.bend as Term
 import ./Lower.bend as Lower
