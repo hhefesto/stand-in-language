@@ -154,8 +154,10 @@ in these places:
   count per rule of its own net, and haskell-final's printed "logical
   storage" counted on its map-of-ports net; the port shares neither, and
   so cannot report them honestly.
-- `--compile` writes the port's version 10 artifact: master's layout up to its
-  sizing report, then the net's programs as prepared, master's input prologue, the
+- `--compile` writes the port's version 12 artifact: master's layout up to its
+  sizing report, the EAL variable budget and the IC runtime's verdict (master's
+  refusal, or the port's bare admission where master stores its EAL result),
+  then the net's programs as prepared, master's input prologue, the
   program with no IC certificate (the port has none to store) and its capture
   layouts, and master's program. A run reads only what it needs, so the net's
   programs are not compiled again. `--ic --compile` writes the same, and a Haskell
@@ -422,7 +424,9 @@ $ telomare tictactoe.telc               # starts at once
 A `.telc` file holds the sized program together with its counts, its
 certificate and the capture layouts it runs under, so running it skips
 parsing, certifying, resolving and sizing,
-and `--certificate` on it prints instantly. If the sources are still around and
+and `--certificate` on it prints instantly. It also holds the IC runtime's
+verdict, reached when it was compiled: a program `--ic` refuses from source
+is refused from its `.telc` too, with the same words. If the sources are still around and
 have changed since it was built, running it says so and carries on — an
 artifact is expected to outlive the checkout it came from.
 
@@ -709,7 +713,7 @@ is checked against the Haskell tests it can answer (master's EALTests are
 | Drive | `Telomare.Driver`, the `telomare` command | ported: `bend/{Session,Meter,Main,Native}.bend` |
 | Static report | `Telomare.Levels`, `Telomare.Certificate` | ported: `bend/{Levels,Certificate}.bend` |
 | IC storage bounds | `Telomare.IC.*`, `Telomare.SpaceBound` | not ported |
-| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 10, written with no IC certificate, with the net's programs prepared) |
+| Artifacts | `Telomare.Artifact` | ported: `bend/Telc.bend` (version 12, written with no IC certificate, with the net's programs prepared and the IC's verdict) |
 | REPL | `app/Repl.hs` | ported: `bend/{Repl,Partial}.bend` (line editing: `rlwrap`) |
 | LSP | `app/LSP.hs` | ported: `bend/{Json,Lsp}.bend` |
 

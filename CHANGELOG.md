@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* A `.telc` carries the IC runtime's verdict, as master's artifacts do
+  (artifact version 12): `--ic` on a compiled program its source would not
+  certify is refused with the same text, where it used to run.
 * Refinements and case guards share one meaning: `(p : P)` holds where `P`
   gives anything but Zero. A failing guard in a `case` falls through to the next
   alternative; a failing definition or lambda parameter refinement aborts with

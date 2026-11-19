@@ -87,6 +87,15 @@ case_ over-budget-recursion.ic-certificate test/programs/limits/over-budget-recu
 # Unsized, the program sizing rejects runs.
 case_ unbounded-input-recursion.fast test/programs/limits/unbounded-input-recursion.tel 'a\n' --fast
 
+# Sized and run, but not on the net: the two calls of one step get no EAL
+# boxes, so --ic refuses the program, from its source and from its .telc
+# alike (the artifact carries the verdict compiling reached, as master's does).
+case_ eal-refused.run test/programs/eal-refused.tel ''
+case_ eal-refused.ic test/programs/eal-refused.tel '' --ic
+case_ eal-refused.compile test/programs/eal-refused.tel '' --compile
+case_ eal-refused.telc-ic test/programs/eal-refused.telc '' --ic
+case_ eal-refused.telc-run test/programs/eal-refused.telc ''
+
 # The REPL over the Prelude (CI's smoke test is the first).
 repl_ repl.succ 'succ 7'
 repl_ repl.factorial 'c2d (factorial 4)'

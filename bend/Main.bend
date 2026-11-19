@@ -44,7 +44,8 @@ import ./Fast.bend as Fs
 # unbounded: nothing proves it terminates, so fuel caps each iteration, and
 # its meter counts applications, gates and each recursion site's unrolls.
 # `--compile` writes haskell-final's version 4 artifact (Telc.bend), less
-# its IC certificate; `--ic --compile` is the same. The command line is
+# its IC certificate, with master's verdict: `--ic` on a `.telc` is refused
+# as on its source; `--ic --compile` is the same. The command line is
 # read as master's optparse parser reads it, errors included (`--draw-net`
 # is an invalid option there too). The goldens in test/golden check the command
 # (`test/golden/run.sh BIN_DIR check`).
@@ -891,9 +892,10 @@ def out.path(o: Out, +file: String) -> String:
       Bool.pick(String, String.ends_with(file, ".tel"), file ++ "c", file ++ ".telc")
 
 # The sized program as an artifact: master's `--compile`, less the IC
-# certificate.
-def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, +checks: Sz.Checks, +plain: Co.V, +p: Maybe<&2, Co.V>, +bud: U32, ls: Map<&2, Lf.Shape>) -> Tc.Telc:
-  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks), budget(), bud, ls, plain, p)
+# certificate. plan is the IC's admission (Ss.plan.from): the artifact keeps
+# its refusal, or its layouts.
+def telc.of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, +run: T.C, +expr: Co.V, info: Result<&2, &2, String, Lv.Info>, +checks: Sz.Checks, +plain: Co.V, +p: Maybe<&2, Co.V>, +bud: U32, +plan: Result<&2, &2, String, Map<&2, Lf.Shape>>) -> Tc.Telc:
+  Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, budget(), info, checks), budget(), bud, Ss.refusal.of(plan), Ss.layouts.of(plan), plain, p)
 
 def prefix(n: Nat, s: String) -> String:
   match n:
@@ -915,9 +917,9 @@ def wrote(+path: String, +n: U32, +hash: String, r: Result<&1, &1, String, Unit>
 
 def written(+path: String, t: Tc.Telc) -> IO(Unit):
   match t:
-    case Tc.Telc{entry, +hash, cert, counts, places, budget, vars, expr, layouts, +plain, prologue}:
+    case Tc.Telc{entry, +hash, cert, counts, places, budget, vars, refusal, expr, layouts, +plain, prologue}:
       do IO<Unit>:
-        r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, prologue}))
+        r : Result<&1, &1, String, Unit> <- Tx.Bytes.write(path, Tc.encode(Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, expr, layouts, plain, prologue}))
         wrote(path, Tc.nodes(plain), hash, r)
 
 # withICPlan: a session on the net only under the layouts compiling gave
@@ -960,7 +962,7 @@ def acted(~rt: Ss.Runner(), ic: Bool, r: Result<&2, &2, Failure, Compiled>, act:
                 case Report{}:
                   IO.write(Ct.report.of(ic, counts, run, budget(), Lv.info(mods, entry), checks))
                 case Compile{}:
-                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks, pl, p, bud, Ss.layouts.of(Ss.plan.from(bud, run, counts, Sz.checks.keep(checks), pl, p))))
+                  written(path, telc.of(entry, srcs, counts, run, expr, Lv.info(mods, entry), checks, pl, p, bud, Ss.plan.from(bud, run, counts, Sz.checks.keep(checks), pl, p)))
 
 # Unsized (--fast)
 # ----------------
@@ -1216,16 +1218,31 @@ def telc.plain(r: Result<&2, &2, String, Tc.Plain>, +path: String, +meter: Bool)
         case Tc.Plain{+plain, +p}:
           ref.play(plain, p, meter)
 
+# withICPlan on the verdict the artifact carries: a program the IC runtime
+# refused when it was compiled is refused now, with the same words, and
+# nothing runs on the net.
+def telc.admitted(~rt: Ss.Runner(), refusal: Maybe<&2, String>, h: Tc.Head, +path: String, +meter: Bool) -> IO(Unit):
+  match refusal:
+    case Some{why}:
+      IO.die(Unit, 1, why)
+    case None{}:
+      telc.ready(~rt, Tc.ready.of(h), path, meter)
+
+def telc.net(~rt: Ss.Runner(), h: Tc.Head, +path: String, +meter: Bool) -> IO(Unit):
+  match h:
+    case Tc.Head{entry, hash, cert, counts, places, budget, vars, +refusal, body}:
+      telc.admitted(~rt, refusal, Tc.Head{entry, hash, cert, counts, places, budget, vars, refusal, body}, path, meter)
+
 def telc.play(~rt: Ss.Runner(), ic: Bool, h: Tc.Head, +path: String, +meter: Bool) -> IO(Unit):
   match ic:
     case True{}:
-      telc.ready(~rt, Tc.ready.of(h), path, meter)
+      telc.net(~rt, h, path, meter)
     case False{}:
       telc.plain(Tc.plain.of(h), path, meter)
 
 def telc.cert(h: Tc.Head) -> IO(Unit):
   match h:
-    case Tc.Head{entry, hash, cert, counts, places, budget, vars, body}:
+    case Tc.Head{entry, hash, cert, counts, places, budget, vars, refusal, body}:
       IO.write(cert)
 
 def telc.acted(~rt: Ss.Runner(), act: Act, ic: Bool, +path: String, h: Tc.Head) -> IO(Unit):
@@ -1262,11 +1279,11 @@ def telc.decoded(~rt: Ss.Runner(), act: Act, ic: Bool, bu: Maybe<&2, U32>, +path
       IO.die(Unit, 1, path ++ ": " ++ msg)
     case Done{h}:
       match h:
-        case Tc.Head{+entry, +hash, cert, counts, places, budget, +vars, body}:
+        case Tc.Head{+entry, +hash, cert, counts, places, budget, +vars, refusal, body}:
           do IO<Unit>:
             stale(entry, hash, path)
             budget.noted(bu, vars)
-            telc.acted(~rt, act, ic, path, Tc.Head{entry, hash, cert, counts, places, budget, vars, body})
+            telc.acted(~rt, act, ic, path, Tc.Head{entry, hash, cert, counts, places, budget, vars, refusal, body})
 
 def telc.read(~rt: Ss.Runner(), act: Act, ic: Bool, bu: Maybe<&2, U32>, +path: String, r: Result<&1, &1, String, List<&2, U32>>) -> IO(Unit):
   match r:

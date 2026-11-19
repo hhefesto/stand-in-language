@@ -1,0 +1,34 @@
+status 1
+--- stdout
+--- stderr
+the IC runtime requires an EAL certificate; this program does not certify: certification failed: no box decoration satisfies these constraints together:
+  [eq [668,2060] = 670]: box depth = the parent's depth + this edge's boxes
+  [eq [652,679] = 670]: env occurrence depth = the bangs this body opens
+  [eq [697,679] = 699]: box depth = the parent's depth + this edge's boxes
+  [eq [513,716,481,481] = 699]: env occurrence depth = the bangs this body opens
+  [eq [652,681,685] = 678]: env occurrence depth = the bangs this body opens
+  [eq [668,2062] = 678]: box depth = the parent's depth + this edge's boxes
+  [eq [652,681,683] = 656]: env occurrence depth = the bangs this body opens
+  [eq [692,666] = 656]: box depth = the parent's depth + this edge's boxes
+  [eq [747,666] = 748]: boxes entered = boxes on the applied pair + on the function
+  [eq [560,2060] = 562]: box depth = the parent's depth + this edge's boxes
+  [eq [544,571] = 562]: env occurrence depth = the bangs this body opens
+  [eq [589,571] = 591]: box depth = the parent's depth + this edge's boxes
+  [eq [513,716,481] = 591]: env occurrence depth = the bangs this body opens
+  [eq [668,2060] = 670]: box depth = the parent's depth + this edge's boxes
+  [eq [652,679] = 670]: env occurrence depth = the bangs this body opens
+  [eq [697,679] = 699]: box depth = the parent's depth + this edge's boxes
+  [eq [513,716,481,481] = 699]: env occurrence depth = the bangs this body opens
+  [eq [544,573,685] = 570]: env occurrence depth = the bangs this body opens
+  [eq [560,2062] = 570]: box depth = the parent's depth + this edge's boxes
+  [eq [513,718,532] = 603]: env occurrence depth = the bangs this body opens
+  [eq [589,573] = 603]: box depth = the parent's depth + this edge's boxes
+  [eq [513,718,532] = 715]: env occurrence depth = the bangs this body opens
+  [eq [697,681] = 715]: box depth = the parent's depth + this edge's boxes
+  [eq [652,681,685] = 678]: env occurrence depth = the bangs this body opens
+  [eq [668,2062] = 678]: box depth = the parent's depth + this edge's boxes
+  [eq [652,681,683] = 656]: env occurrence depth = the bangs this body opens
+  [eq [692,666] = 656]: box depth = the parent's depth + this edge's boxes
+  [eq [747,666] = 748]: boxes entered = boxes on the applied pair + on the function
+
+

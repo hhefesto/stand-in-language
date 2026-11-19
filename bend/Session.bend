@@ -296,6 +296,15 @@ def layouts.of(r: Result<&2, &2, String, Map<&2, Lf.Shape>>) -> Map<&2, Lf.Shape
     case Fail{why}:
       Map.new(&2, Lf.Shape)
 
+# A compile's refusal: what the IC runtime says instead of a session, if the
+# program does not certify (programPlan's Left, as a .telc carries it).
+def refusal.of(r: Result<&2, &2, String, Map<&2, Lf.Shape>>) -> Maybe<&2, String>:
+  match r:
+    case Done{ls}:
+      None{}
+    case Fail{why}:
+      Some{why}
+
 # prepareEntry: the sized program prepared for runs under EAL's capture
 # layouts for it, so closures are copied as EAL planned.
 def prepared(+expr: Co.V) -> IC.Prog:

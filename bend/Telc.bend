@@ -14,11 +14,14 @@ import ./IC.bend as IC
 # Compiled programs (master's Telomare.Artifact): a sized program with what a
 # run and `--certificate` need, so neither needs the sources again. The bytes
 # are master's layout up to its report, so the port numbers its own version,
-# 11 (master's is 9): "TELC", the version, the entry module, the sources' hash,
+# 12 (master's is 9): "TELC", the version, the entry module, the sources' hash,
 # the static report as rendered, the sizing report (each site's count and
 # location, and the budget), the EAL variable budget the verdict was reached
-# under (master's artifactBudget, which master writes last), then four
-# sections, each its length and its bytes: the net's programs as IC.prepare
+# under (master's artifactBudget, which master writes last), the verdict
+# (master's artifactVerdict, the IC runtime's admission decided at compile
+# time: byte 0 and the refusal as the IC runtime words it, or byte 1, where
+# master goes on with its EAL result and the port has nothing to add), then
+# four sections, each its length and its bytes: the net's programs as IC.prepare
 # left them (main and, after a Maybe byte, the input prologue: each an entry,
 # largest template, template store and aborts' origins); master's input
 # prologue, if main has one; the program
@@ -47,13 +50,15 @@ type Layout is Data:
 type Stored is Data:
   Stored{+expr: Co.V, +layouts: List<&2, Layout>}
 
+# refusal: None when the IC runtime admits the program, else what it says
+# instead of a session.
 type Telc is Data:
   Telc{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
-       +budget: U32, +vars: U32, +expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +prologue: Maybe<&2, Co.V>}
+       +budget: U32, +vars: U32, +refusal: Maybe<&2, String>, +expr: Co.V, +layouts: List<&2, Layout>, +plain: Co.V, +prologue: Maybe<&2, Co.V>}
 
 # The port's version.
 def version() -> U32:
-  11
+  12
 
 # The sources' hash (sourcesHash): SHA-256 of every module's name and text
 # with their lengths, the modules sorted by name, in lowercase hex.
@@ -146,9 +151,10 @@ def layouts.of(m: Map<&2, Lf.Shape>) -> List<&2, Layout>:
 
 # A sized program as an artifact: its entry, the sources' hash, the static
 # report as rendered, each site's count and location, the budget, the EAL
-# variable budget, the program and its capture layouts.
-def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, +vars: U32, ls: Map<&2, Lf.Shape>, plain: Co.V, prologue: Maybe<&2, Co.V>) -> Telc:
-  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, vars, expr, layouts.of(ls), plain, prologue}
+# variable budget, the IC runtime's refusal if it refuses the program, the
+# program and its capture layouts.
+def of(+entry: String, srcs: List<&2, Fr.Src>, +counts: List<&2, E.TS>, run: T.C, expr: Co.V, cert: String, +budget: U32, +vars: U32, refusal: Maybe<&2, String>, ls: Map<&2, Lf.Shape>, plain: Co.V, prologue: Maybe<&2, Co.V>) -> Telc:
+  Telc{entry, sources.hash(srcs), cert, counted(counts), placed(counts, Ct.locs(run, Map.new(&2, L.Loc))), budget, vars, refusal, expr, layouts.of(ls), plain, prologue}
 
 # The layouts as the IC looks them up.
 def shapes(ls: List<&2, Layout>, acc: Map<&2, Lf.Shape>) -> Map<&2, Lf.Shape>:
@@ -213,6 +219,14 @@ def count(-A: Data, xs: List<&2, A>) -> U32:
 # The sizing report: the counts, the places and the budget.
 def put.report(+cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, rest: List<&2, U32>) -> List<&2, U32>:
   W.put.int(count(Count, cs), put.counts(cs, W.put.int(count(Place, ps), put.places(ps, W.put.int(budget, rest)))))
+
+# The verdict, with master's tags (putVerdict): 0 and the refusal, or 1.
+def put.refusal(r: Maybe<&2, String>, rest: List<&2, U32>) -> List<&2, U32>:
+  match r:
+    case Some{why}:
+      0 <> W.put.string(why, rest)
+    case None{}:
+      1 <> rest
 
 # The program, no IC certificate, and the layouts.
 def put.program(expr: Co.V, +ls: List<&2, Layout>, rest: List<&2, U32>) -> List<&2, U32>:
@@ -303,14 +317,14 @@ def section(+bs: List<&2, U32>, rest: List<&2, U32>) -> List<&2, U32>:
 
 def encode(t: Telc) -> List<&2, U32>:
   match t:
-    case Telc{entry, hash, cert, counts, places, budget, +vars, +expr, +layouts, plain, +prologue}:
+    case Telc{entry, hash, cert, counts, places, budget, +vars, refusal, +expr, +layouts, plain, +prologue}:
       84 <> 69 <> 76 <> 67 <> W.put.int(version(),
         W.put.string(entry, W.put.string(hash, W.put.string(cert,
-          put.report(counts, places, budget, W.put.int(vars,
+          put.report(counts, places, budget, W.put.int(vars, put.refusal(refusal,
             section(put.ready(expr, prologue, layouts, []),
               section(put.prologue(prologue),
                 section(put.program(expr, layouts, []),
-                  section(W.put.expr(plain, []), []))))))))))
+                  section(W.put.expr(plain, []), [])))))))))))
 
 # Reading
 # -------
@@ -557,11 +571,24 @@ def prologue.if(none: Bool) -> G(Maybe<&2, Co.V>):
     case False{}:
       G.bind(Co.V, Maybe<&2, Co.V>, W.expr(W.fuel()), v => G.pure(Maybe<&2, Co.V>, Some{v}))
 
+# The verdict (getVerdict).
+def refusal.tagged(+t: U32) -> G(Maybe<&2, String>):
+  match t:
+    case 0:
+      G.bind(String, Maybe<&2, String>, W.string(), why => G.pure(Maybe<&2, String>, Some{why}))
+    case 1:
+      G.pure(Maybe<&2, String>, None{})
+    case _:
+      G.fail(Maybe<&2, String>, "unknown verdict tag " ++ U32.show(t))
+
+def refusal() -> G(Maybe<&2, String>):
+  G.bind(U32, Maybe<&2, String>, W.byte(), t => refusal.tagged(t))
+
 # What every use of a file reads: all but the sections, which are the bytes
-# after the report. A run goes on to the ones it needs.
+# after the verdict. A run goes on to the ones it needs.
 type Head is Data:
   Head{+entry: String, +hash: String, +cert: String, +counts: List<&2, Count>, +places: List<&2, Place>,
-       +budget: U32, +vars: U32, +body: List<&2, U32>}
+       +budget: U32, +vars: U32, +refusal: Maybe<&2, String>, +body: List<&2, U32>}
 
 def fields(+entry: String) -> G(Head):
   do G<Head>:
@@ -573,8 +600,9 @@ def fields(+entry: String) -> G(Head):
     ps : List<&2, Place> <- places(U32.to_nat(np))
     budget : U32 <- W.int()
     vars : U32 <- W.int()
+    r : Maybe<&2, String> <- refusal()
     body : List<&2, U32> <- W.here()
-    return Head{entry, hash, cert, cs, ps, budget, vars, body}
+    return Head{entry, hash, cert, cs, ps, budget, vars, r, body}
 
 # What a file holds: an artifact, or why it is none (the magic or the
 # version, said as is; anything else is unreadable).
@@ -669,7 +697,7 @@ def ready.fields() -> G(Prepared):
 
 def ready.of(h: Head) -> Result<&2, &2, String, Prepared>:
   match h:
-    case Head{entry, hash, cert, counts, places, budget, vars, body}:
+    case Head{entry, hash, cert, counts, places, budget, vars, refusal, body}:
       read.section(Prepared, ready.fields()(body))
 
 # What a plain run reads: master's program and its input prologue.
@@ -689,7 +717,7 @@ def plain.fields() -> G(Plain):
 
 def plain.of(h: Head) -> Result<&2, &2, String, Plain>:
   match h:
-    case Head{entry, hash, cert, counts, places, budget, vars, body}:
+    case Head{entry, hash, cert, counts, places, budget, vars, refusal, body}:
       read.section(Plain, plain.fields()(body))
 
 # The whole artifact, as the tests compare it.
@@ -712,14 +740,14 @@ def rest.fields() -> G(Rest):
     p : Co.V <- W.expr(W.fuel())
     return Rest{x, ls, p, g}
 
-def whole.of(+entry: String, +hash: String, +cert: String, +cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, +vars: U32, r: Result<&2, &2, String, Rest>) -> Result<&2, &2, String, Telc>:
+def whole.of(+entry: String, +hash: String, +cert: String, +cs: List<&2, Count>, +ps: List<&2, Place>, +budget: U32, +vars: U32, +refusal: Maybe<&2, String>, r: Result<&2, &2, String, Rest>) -> Result<&2, &2, String, Telc>:
   match r:
     case Fail{e}:
       Fail{e}
     case Done{x}:
       match x:
         case Rest{e, ls, p, g}:
-          Done{Telc{entry, hash, cert, cs, ps, budget, vars, e, ls, p, g}}
+          Done{Telc{entry, hash, cert, cs, ps, budget, vars, refusal, e, ls, p, g}}
 
 def whole(r: Result<&2, &2, String, Head>) -> Result<&2, &2, String, Telc>:
   match r:
@@ -727,8 +755,8 @@ def whole(r: Result<&2, &2, String, Head>) -> Result<&2, &2, String, Telc>:
       Fail{e}
     case Done{h}:
       match h:
-        case Head{entry, hash, cert, cs, ps, budget, vars, body}:
-          whole.of(entry, hash, cert, cs, ps, budget, vars, read.section(Rest, rest.fields()(body)))
+        case Head{entry, hash, cert, cs, ps, budget, vars, refusal, body}:
+          whole.of(entry, hash, cert, cs, ps, budget, vars, refusal, read.section(Rest, rest.fields()(body)))
 
 # The whole artifact from its bytes, or what haskell-final says of them.
 def decode(bs: List<&2, U32>) -> Result<&2, &2, String, Telc>:

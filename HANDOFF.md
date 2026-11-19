@@ -38,6 +38,10 @@ the next step.
 variable budget, 8b9fb5ac's Prelude error tests, the one dev shell) is merged
 and ported (section 3, "Merging master, 2026-11-17"); its gate is there.
 
+**Updated 2026-11-18, on olimpo.** The user moved the work back to olimpo.
+A `.telc` now carries the IC's verdict (section 3, "A `.telc` carries the
+IC's verdict"); next, in the user's order, are N3, N4 and N5 (P8).
+
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
 parity corpus, committed for the move too). Drop both commits ("Hand off
@@ -598,6 +602,54 @@ Memory: the port's `tictactoe --ic` peaked near 7.7 GB resident (master's
 `--compile` of it: 4.9 GB). Two such runs at once (a parallel goldens copy
 under a 5 GB cap) ran delfos out of memory and timed out, so one heavy run
 at a time on this 15 GB machine. That is the EAL memory step.
+
+### A `.telc` carries the IC's verdict (2026-11-18, on olimpo)
+
+The user's order after the gap step (2026-11-18): fix the `.telc` bug, then
+N3, N4 and N5 (P8), worked on olimpo again ("work here in olimpo"); delfos's
+`~/telc` (scripts, logs, the HVM4 comparison in `~/telc/cmp`) was copied to
+olimpo's `~/telc`, and `7eb0a53` fetched from delfos.
+
+**The bug.** A program the IC runtime refuses (no EAL certificate after
+sizing) was refused by `--ic` from its source, but `--compile` wrote its
+`.telc` with no layouts and no word of the refusal, and `X.telc --ic` ran it.
+Master stores the verdict (`artifactVerdict`, `Either String EALResult`) and
+`runArtifact` dies with the refusal (`withICPlan`). Found by the HVM4
+comparison on natfib10 (`~/telc/cmp/RESULTS.md`).
+
+**The fix.** Telc.bend's artifact is version 12: after the EAL variable
+budget, the verdict, with master's tags (0 and the refusal as the IC runtime
+words it, or 1; master then writes its EAL result, the port nothing).
+`Telc.refusal` and `Head.refusal` are `Maybe<String>`; `Tc.of` takes it, and
+Main's `telc.of` takes the compile's plan (`Ss.plan.from`) and keeps both its
+layouts (`Ss.layouts.of`) and its refusal (`Ss.refusal.of`, new). A `.telc`
+run with `--ic` reads the head and, refused, dies with the stored text,
+status 1, before reading the net's programs (`telc.net`, `telc.admitted`); a
+plain run and `--certificate` are as before. Every `*compile` golden's
+`.telc` grows one byte.
+
+Tests: `tests/telc.bend` gained `telc-refusal` (the refused program's
+artifact holds a refusal starting "the IC runtime requires an EAL
+certificate", the head a run loads holds the same, it round-trips; simpleplus
+holds none); `telc-prologue` checks version 12. The program is
+`test/programs/eal-refused.tel`: one recursion whose step calls itself twice
+(`(recur (left n), recur (left (left n)))`, no Prelude), which sizes and runs
+in milliseconds and which master 281c00c refuses on the net too. Its goldens
+`eal-refused.{run,ic,compile,telc-ic,telc-run}`: `expected/` recorded from
+master 281c00c (`/nix/store/14am8lp2…-telomare-0.1.0.0`, from
+telomare.cachix.org), `port/eal-refused.compile` the port's (its `.telc`
+is version 12, master's 9). The six `*compile` `port/` records were
+re-recorded (`record-port`): only their `.telc`'s sha256 and size change, one
+byte longer each.
+
+**Gate, 2026-11-18** (`bend/dev/gate.sh`, on olimpo inside `nix develop`, this
+tree, in two runs side by side: `build tests` with `GATE=~/telc/olimpo/gateA`,
+`build goldens lsp perr corpus proofs` with `GATE=~/telc/olimpo/gateB`): the
+generated `ic.c` is the same; the tests all pass (lexical 8, front 13, size 11,
+sem 3, eal 14, ealm 33, ic 20, fast 5, telc 8, native 3, rules 3, netsem 6
+groups); goldens 68 passed, 0 failed; lsp 3/3; perr 960 cases, 0 failures;
+corpus meters 17 and certificates 16 the same; proofs: open none, `--verdict`,
+NetProof and NetModel `--verdict` all print ALL PROOFS CHECK. GATE OK, both.
 
 ## 4. The plan: P1–P7
 

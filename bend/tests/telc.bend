@@ -16,14 +16,15 @@ import ../Text.bend as Tx
 import ../Resolve.bend as Rs
 import ../Sha256.bend as Sha
 
-# Compiled programs (.telc), the port's version 10 artifacts
+# Compiled programs (.telc), the port's version 12 artifacts
 # (RunModeTests "compiled artifacts"): a round trip keeps every field, a
 # decoded program runs as its source does, the prepared programs it holds are
 # the ones prepare makes (and run the same), a program with an input prologue
 # holds it, garbage is refused by its magic number, the sources' hash follows
-# their content and not their order, and the node counts, the port's (sizing
-# erased what it proved dead). One `ok NAME` line per group (FAIL NAME when it
-# breaks). Run from the source root.
+# their content and not their order, the node counts, the port's (sizing
+# erased what it proved dead), and a program the IC runtime refuses carries
+# the refusal, so its .telc is refused as its source is. One `ok NAME` line
+# per group (FAIL NAME when it breaks). Run from the source root.
 
 def verdict(+name: String, pass: Bool) -> String:
   Bool.pick(String, pass, "ok ", "FAIL ") ++ name
@@ -61,8 +62,9 @@ def sized(+entry: String, +srcs: List<&2, Fr.Src>, +run: T.C, r: Result<&2, &2, 
       match s:
         case Sz.Sized{+counts, +expr, +checks, +pl, +pro}:
           +ms = mods(Fr.all(srcs))
+          +plan = Ss.plan.from(EM.budget.default(), run, counts, Sz.checks.keep(checks), pl, pro)
           Some{Tc.of(entry, srcs, counts, run, expr, Ct.report(counts, run, 65536, Lv.info(ms, entry), checks), 65536, EM.budget.default(),
-                     Ss.layouts.of(Ss.plan.from(EM.budget.default(), run, counts, Sz.checks.keep(checks), pl, pro)), pl, pro)}
+                     Ss.refusal.of(plan), Ss.layouts.of(plan), pl, pro)}
 
 def compiled(+entry: String, +srcs: List<&2, Fr.Src>, r: Result<&2, &2, String, T.C>) -> Maybe<&2, Tc.Telc>:
   match r:
@@ -149,15 +151,24 @@ def prologue.text(g: Maybe<&2, Co.V>) -> String:
     case Some{x}:
       Co.show(x)
 
+# The IC runtime's verdict, as an artifact keeps it.
+def refusal.text(r: Maybe<&2, String>) -> String:
+  match r:
+    case None{}:
+      "admitted"
+    case Some{why}:
+      "refused: " ++ why
+
 def fields(m: Maybe<&2, Tc.Telc>) -> String:
   match m:
     case None{}:
       "none"
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, guard}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, expr, layouts, plain, guard}:
           entry ++ "\n" ++ hash ++ "\n" ++ cert ++ "\n" ++ counts.text(counts) ++ "\n" ++ places.text(places)
-            ++ "\n" ++ U32.show(budget) ++ "\n" ++ U32.show(vars) ++ "\n" ++ Co.show(expr) ++ "\n" ++ layouts.text(layouts) ++ "\n" ++ prologue.text(guard)
+            ++ "\n" ++ U32.show(budget) ++ "\n" ++ U32.show(vars) ++ "\n" ++ refusal.text(refusal) ++ "\n" ++ Co.show(expr)
+            ++ "\n" ++ layouts.text(layouts) ++ "\n" ++ prologue.text(guard)
 
 def round.trip(+m: Maybe<&2, Tc.Telc>) -> Bool:
   String.eq(fields(again(m)), fields(m)) && Bool.not(String.eq(fields(m), "none"))
@@ -170,8 +181,8 @@ def with.vars(m: Maybe<&2, Tc.Telc>, +n: U32) -> Maybe<&2, Tc.Telc>:
       None{}
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, pro}:
-          Some{Tc.Telc{entry, hash, cert, counts, places, budget, n, expr, layouts, plain, pro}}
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, expr, layouts, plain, pro}:
+          Some{Tc.Telc{entry, hash, cert, counts, places, budget, n, refusal, expr, layouts, plain, pro}}
 
 # Running
 # -------
@@ -185,7 +196,7 @@ def run.of(m: Maybe<&2, Tc.Telc>, lines: List<&2, String>) -> Ss.Replay:
       Ss.Replay{["no artifact"], Ss.cost.none()}
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, +expr, layouts, plain, pro}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, +expr, layouts, plain, pro}:
           Ss.replay(Ss.session(expr, Tc.shapes(layouts, Map.new(&2, Lf.Shape)), pro), Ss.Sized{}, lines)
 
 def replay.text(r: Ss.Replay) -> String:
@@ -308,7 +319,7 @@ def fresh.text(m: Maybe<&2, Tc.Telc>) -> String:
       "no artifact"
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, +expr, layouts, plain, pro}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, +expr, layouts, plain, pro}:
           +ls = Tc.shapes(layouts, Map.new(&2, Lf.Shape))
           prog.text(IC.prepare(expr, ls)) ++ "||" ++ prog.maybe.text(Tc.prologue.prepared(pro, ls))
 
@@ -338,7 +349,7 @@ def nodes(m: Maybe<&2, Tc.Telc>) -> U32:
       0
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, guard}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, expr, layouts, plain, guard}:
           Tc.nodes(plain)
 
 def fifth(bs: List<&2, U32>) -> U32:
@@ -369,10 +380,37 @@ def has.prologue(m: Maybe<&2, Tc.Telc>) -> Bool:
       False{}
     case Some{t}:
       match t:
-        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, expr, layouts, plain, pro}:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, expr, layouts, plain, pro}:
           prologue.some(pro)
 
-def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
+# The verdict an artifact holds, and the one a run reads from its bytes
+# (Tc.load's head, all a .telc run reads before it is refused).
+def refusal.in(m: Maybe<&2, Tc.Telc>) -> String:
+  match m:
+    case None{}:
+      "no artifact"
+    case Some{t}:
+      match t:
+        case Tc.Telc{entry, hash, cert, counts, places, budget, vars, refusal, expr, layouts, plain, pro}:
+          refusal.text(refusal)
+
+def head.refusal(r: Result<&2, &2, String, Tc.Head>) -> String:
+  match r:
+    case Fail{e}:
+      "unreadable: " ++ e
+    case Done{h}:
+      match h:
+        case Tc.Head{entry, hash, cert, counts, places, budget, vars, refusal, body}:
+          refusal.text(refusal)
+
+def loaded.refusal(m: Maybe<&2, Tc.Telc>) -> String:
+  match m:
+    case None{}:
+      "no artifact"
+    case Some{t}:
+      head.refusal(Tc.load(Tc.encode(t)))
+
+def report(+prelude: String, +tc: String, +plus: String, +er: String) -> IO(Unit):
   do IO<Unit>:
     +sp : Maybe<&2, Tc.Telc> = artifact(with.prelude(prelude, "simpleplus", plus), "simpleplus")
     IO.print(verdict("telc-round-trip", all([
@@ -386,7 +424,7 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
       ready.alike(sp),
       ready.alike(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal"))])))
     IO.print(verdict("telc-prologue", all([
-      U32.is_eq(version.of(sp), 11),
+      U32.is_eq(version.of(sp), 12),
       has.prologue(sp),
       Bool.not(has.prologue(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")))])))
     IO.print(verdict("telc-magic", refused(Tc.decode(Sha.utf8("not a telomare artifact at all")), "magic")))
@@ -398,10 +436,18 @@ def report(+prelude: String, +tc: String, +plus: String) -> IO(Unit):
     IO.print(verdict("telc-nodes", all([
       U32.is_eq(nodes(artifact([Fr.Src{"tc_ultra_minimal", tc}], "tc_ultra_minimal")), 798),
       U32.is_eq(nodes(sp), 46961)])))
+    +refd : Maybe<&2, Tc.Telc> = artifact([Fr.Src{"eal-refused", er}], "eal-refused")
+    IO.print(verdict("telc-refusal", all([
+      String.starts_with(refusal.in(refd), "refused: the IC runtime requires an EAL certificate; this program does not certify"),
+      String.eq(loaded.refusal(refd), refusal.in(refd)),
+      round.trip(refd),
+      String.eq(refusal.in(sp), "admitted"),
+      String.eq(loaded.refusal(sp), "admitted")])))
 
 def main() -> IO(Unit):
   do IO<Unit>:
     prelude : Result<&1, &1, String, String> <- Tx.read_file("Prelude.tel")
     tc : Result<&1, &1, String, String> <- Tx.read_file("tc_ultra_minimal.tel")
     plus : Result<&1, &1, String, String> <- Tx.read_file("test/programs/simpleplus.tel")
-    report(text(prelude), text(tc), text(plus))
+    er : Result<&1, &1, String, String> <- Tx.read_file("test/programs/eal-refused.tel")
+    report(text(prelude), text(tc), text(plus), text(er))

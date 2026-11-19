@@ -3,4 +3,4 @@ status 0
 --- stderr
 wrote tictactoe.telc (126098 nodes, sources 7242aaed507a)
 --- files
-77211e28539f2808475eb30a52388ddca54857c21c10a69e74082100541fd414 566187 tictactoe.telc
+cf97da42cc250dd4323dd21bbbcff9d0a7b9d9f725cd61b4c43be24f61353ae4 566188 tictactoe.telc

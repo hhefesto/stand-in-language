@@ -1,0 +1,6 @@
+status 0
+--- stdout
+--- stderr
+wrote eal-refused.telc (644 nodes, sources d922788f8a07)
+--- files
+309205243269c4343e8a0a68cf55cd7dd55b6d8f6f30e55349648d39add794a4 5803 eal-refused.telc

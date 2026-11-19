@@ -1,0 +1,13 @@
+-- LIMIT: both calls of a recursion on one step. Sizing counts it and the
+--   reference evaluator runs it, but EAL finds no boxes for the two calls
+--   together, so the program has no EAL certificate.
+-- EXPECTED: a plain run prints 1; --ic refuses the program, and so does --ic
+--   on the .telc --compile writes: the refusal is decided at compile time and
+--   the artifact carries it.
+
+fib = { \n -> left n
+      , \recur n -> (recur (left n), recur (left (left n)))
+      , \n -> n
+      }
+
+main = \input -> (if fib 2 then "1" else "0", 0)
