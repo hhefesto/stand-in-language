@@ -204,8 +204,9 @@ lambdaVarNames = zipWith nameFor [0 :: Int ..]
 -- parameters' bindings are in scope in later parameters' annotations.
 --
 -- A refinement annotation @(p : T)@ binds the checked value, so
--- @\\(x : T) -> body@ becomes @\\v -> let x = CheckF T v in body@, the same
--- as writing @let x : T = v in body@. Annotations further in are guards of
+-- @\\(x : T) -> body@ becomes @\\v -> (\\x -> body) (CheckF T v)@: checked
+-- like @let x : T = v in body@, but bound as a variable, so it cannot
+-- supply a requirement ('Telomare.Bind'). Annotations further in are guards of
 -- the parameter's destructuring case, whose fallback aborts, so a lambda
 -- parameter's guard that fails aborts as a refinement does.
 --
@@ -226,12 +227,17 @@ buildMultiLambda lt patterns body =
            PatternVarF _ -> inner
            PatternAnnotatedF innerPat (AnnotatedEST typeExpr) ->
              let checked = loc :< embedH (CheckF RefinementAbort typeExpr bound)
+                 -- bound by application, not let: a let binder would
+                 -- supply requirements ('Telomare.Bind'), a parameter
+                 -- must not. Located at the scope, as letsToApps locates
+                 -- the application it makes of a let.
+                 bindAs name scope@(a :< _) = a :< embedL (AppF (a :< embedL (LamF name scope)) checked)
              in case project innerPat of
-                  PatternVarF name -> lt :< LetUPF [(name, checked)] inner
+                  PatternVarF name -> bindAs name inner
                   _ ->
                     let checkedName = varName <> "_checked"
                         checkedBinder = locatedName (GeneratedLoc "annotated lambda pattern" (Just loc)) checkedName
-                    in lt :< LetUPF [(checkedBinder, checked)]
+                    in bindAs checkedBinder
                          (applyDestructure ((loc, innerPat), checkedName) inner)
            _ ->
              lt :< CaseUPF bound

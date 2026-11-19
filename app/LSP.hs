@@ -20,7 +20,6 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import Data.Monoid (First (..))
-import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Time (defaultTimeLocale, formatTime, parseTimeM, zonedTimeToUTC)
 import Data.Time.LocalTime (ZonedTime)
@@ -41,6 +40,8 @@ import Language.LSP.Protocol.Types (NormalizedUri, Position (..), Range (..),
 import qualified Language.LSP.Protocol.Types as LSPTypes
 import Language.LSP.Server
 
+import Telomare.Bind (bindWarningLoc, renderBindWarning)
+import Telomare.Desugar (desugarTerm)
 import Telomare.Driver (eval2IExpr)
 import Telomare.Error
 import Telomare.Expand (ExpansionError, expandModule, expansionErrorLoc,
@@ -51,7 +52,7 @@ import Telomare.IR.Surface
 import Telomare.Lexical (blockCommentDelims, identifierContinueChar,
                          identifierStart, lineCommentStart, reservedWords)
 import Telomare.Parse (runParseModule, runParseModuleDetailed)
-import Telomare.Resolve (main2Term3)
+import Telomare.Resolve (process, resolveMainWithWarnings)
 import Text.Megaparsec.Error (ParseErrorBundle (..), errorBundlePretty,
                               errorOffset)
 
@@ -274,9 +275,7 @@ storeParsedDoc gState uri version text = do
       importedModules <- liftIO $ concat <$> mapM (loadImportedModuleBinding gState uri) (moduleImports parsed)
       let modules' = importedModules <> modules
           importDiagnostics' = importDiagnostics text modules' parsed
-          semanticDiagnostics = undefinedVariableDiagnostics text modules' parsed
       pure . dedupeDiagnostics $ importDiagnostics'
-          <> semanticDiagnostics
           <> if null importDiagnostics'
              then resolverDiagnostics text modules' parsed
              else []
@@ -360,47 +359,6 @@ importDiagnostics text modules parsed =
 moduleImportRange :: T.Text -> ImportDecl -> Range
 moduleImportRange text = locTagToRangeIn text . locatedNameLoc . parsedImportModule
 
-undefinedVariableDiagnostics :: T.Text -> ExpandedModules -> ExpandedModule -> [LSPTypes.Diagnostic]
-undefinedVariableDiagnostics text modules parsed =
-  dedupeDiagnostics
-    [ mkDiagnostic range "resolver" $ T.pack ("missing definition " <> show name)
-    | (name, range) <- unresolvedReferences text globals parsed
-    ]
-  where
-    globals = Set.fromList $ builtinNames <> importedDefinitionNames modules parsed <> currentDefinitionNames parsed
-
-builtinNames :: [String]
-builtinNames = ["zero", "left", "right", "trace", "pair", "app"]
-
-importedDefinitionNames :: ExpandedModules -> ExpandedModule -> [String]
-importedDefinitionNames modules parsed =
-  [ maybe name (<> ('.' : name)) (importQualifier moduleImport)
-  | moduleImport <- moduleImports parsed
-  , Just moduleParsed <- [lookup (importModuleName moduleImport) modules]
-  , ExpandedModuleBinding locatedName' _ <- moduleParsed
-  , let name = locatedNameText locatedName'
-  ]
-
-currentDefinitionNames :: ExpandedModule -> [String]
-currentDefinitionNames parsed =
-  [ locatedNameText name | ExpandedModuleBinding name _ <- parsed ]
-
-unresolvedReferences :: T.Text -> Set.Set String -> ExpandedModule -> [(String, Range)]
-unresolvedReferences text globals parsed =
-  concatMap (unresolvedTerm text globals)
-    [term | ExpandedModuleBinding _ term <- parsed]
-
-unresolvedTerm :: T.Text -> Set.Set String -> ExpandedSurfaceTerm -> [(String, Range)]
-unresolvedTerm text globals = go Set.empty
-  where
-    go bound (loc :< term) = case term of
-      UnprocessedParsedTermL (VarF name)
-        | name `Set.member` bound || name `Set.member` globals -> []
-        | otherwise -> [(name, locTagToRangeIn text loc)]
-      _ -> foldMapScoped
-             (\binders -> go (Set.fromList (locatedNameText <$> binders) <> bound))
-             term
-
 dedupeDiagnostics :: [LSPTypes.Diagnostic] -> [LSPTypes.Diagnostic]
 dedupeDiagnostics = Map.elems . Map.fromList . fmap (\diagnostic -> (diagnosticKey diagnostic, diagnostic))
 
@@ -410,24 +368,38 @@ diagnosticKey diagnostic =
 
 resolverDiagnostics :: T.Text -> ExpandedModules -> ExpandedModule -> [LSPTypes.Diagnostic]
 resolverDiagnostics text modules parsed =
-  case main2Term3 (("Current", parsed) : modules) "Current" of
+  -- without a main nothing is a root, so an unbound name is a requirement
+  -- for whoever imports this module, not an error
+  case resolveMainWithWarnings (("Current", parsed) : modules) "Current" of
     Left NoMainFunction{} -> []
     Left err              -> resolverErrorDiagnostics text err
-    Right _               -> []
+    Right (term, warnings) ->
+      [ mkDiagnosticWith LSPTypes.DiagnosticSeverity_Warning (locTagToRangeIn text (bindWarningLoc w))
+          "binder" (T.pack $ renderBindWarning w)
+      | ("Current", w) <- warnings ]
+      <> either (resolverErrorDiagnostics text) (const []) (process (desugarTerm term))
 
 resolverErrorDiagnostics :: T.Text -> ResolverError -> [LSPTypes.Diagnostic]
 resolverErrorDiagnostics text err =
-  case err of
-    MissingDefinitionAt loc _ ->
-      [mkDiagnostic (locTagToRangeIn text loc) "resolver" (T.pack $ renderResolverError err)]
-    _ ->
-      [mkDiagnostic fallbackRange "resolver" (T.pack $ renderResolverError err)]
+  [mkDiagnostic range "resolver" (T.pack $ renderResolverError err)]
+  where
+    -- every module is parsed under the empty source name, so a location in
+    -- an imported module cannot be told apart from one in this document
+    range = case err of
+      MissingDefinitionAt loc _     -> locTagToRangeIn text loc
+      UnsuppliedRequirement _ loc _ -> locTagToRangeIn text loc
+      UnboundQualifiedName loc _    -> locTagToRangeIn text loc
+      DuplicateDefinition loc _     -> locTagToRangeIn text loc
+      _                             -> fallbackRange
 
 mkDiagnostic :: Range -> T.Text -> T.Text -> LSPTypes.Diagnostic
-mkDiagnostic range source message =
+mkDiagnostic = mkDiagnosticWith LSPTypes.DiagnosticSeverity_Error
+
+mkDiagnosticWith :: LSPTypes.DiagnosticSeverity -> Range -> T.Text -> T.Text -> LSPTypes.Diagnostic
+mkDiagnosticWith severity range source message =
   LSPTypes.Diagnostic
     range
-    (Just LSPTypes.DiagnosticSeverity_Error)
+    (Just severity)
     Nothing
     Nothing
     (Just source)

@@ -18,6 +18,7 @@ import qualified Control.Comonad.Trans.Cofree as CofreeT
 import Control.Lens (Identity (runIdentity))
 import Data.Functor.Foldable (cata, embed)
 import Debug.Trace
+import Telomare.Bind (BindWarning)
 import Telomare.Desugar (desugarTerm)
 import Telomare.EAL (CodeGuidance (..), EALLiftedResult, EALResult,
                      VariableBudget, certifyMainWithin, defaultVariableBudget,
@@ -28,8 +29,8 @@ import Telomare.Error
 import Telomare.Eval.IC (ICMeter, ICPlan (..), evalIC, renderRefusal)
 import Telomare.Eval.Meter (Meter, evalMeter)
 import Telomare.Eval.Reference ()
-import Telomare.Expand (expandDefs, expandModule, expandTerm,
-                        renderExpansionError, wrapMain)
+import Telomare.Expand (ExpansionError (MissingMain), expandDefs, expandModule,
+                        expandTerm, renderExpansionError)
 import Telomare.IR.Base
 import Telomare.IR.Builder
 import Telomare.IR.Core
@@ -40,7 +41,8 @@ import Telomare.Machine (appB, chainLinks, deferB, eraseChecks,
                          refinementCheckB)
 import Telomare.Parse (parseOneExprOrDefinitions, runParseModule)
 import Telomare.PrettyPrint
-import Telomare.Resolve (main2Term3, process, resolveAllImports)
+import Telomare.Resolve (main2Term3, process, resolveMain,
+                         resolveMainWithWarnings)
 import Telomare.Size (SizingReport (..), SizingSettings (..),
                       buildUnsizedLocMap, checkPlan, evalStaticCheck,
                       locateSizingFailure, sizeTermM, term3ToUnsizedExpr)
@@ -328,12 +330,22 @@ compileModulesWithin budget so modulesStrings s =
             compileMainReportingWithin budget so [ (n, m) | (n, Right m) <- parsed ] s
     errs -> Left $ unlines errs
   where
-    parsed :: [(String, Either String ExpandedModule)]
-    parsed = fmap parseAndExpand modulesStrings
-    parseAndExpand (moduleName, content) =
-      ( moduleName
-      , runParseModule moduleName content
-          >>= first renderExpansionError . expandModule )
+    parsed = parseAndExpandModules modulesStrings
+
+parseAndExpandModules :: [(String, String)] -> [(String, Either String ExpandedModule)]
+parseAndExpandModules = fmap $ \(moduleName, content) ->
+  ( moduleName
+  , runParseModule moduleName content >>= first renderExpansionError . expandModule )
+
+-- |The name binder's warnings about a program, empty when it does not
+-- parse or bind (compiling it reports why).
+programWarnings :: [(String, String)] -- ^All modules as (Module_Name, Module_Content)
+                -> String -- ^Module's name with `main` function
+                -> [BindWarning]
+programWarnings modulesStrings s =
+  case traverse sequence (parseAndExpandModules modulesStrings) of
+    Right modules | Right (_, warnings) <- resolveMainWithWarnings modules s -> snd <$> warnings
+    _ -> []
 
 runMainCore :: [(String, String)] -- ^All modules as (Module_Name, Module_Content)
             -> String -- ^Module's name with `main` function
@@ -440,17 +452,28 @@ evalLoop_ :: Iteration -> IO String
 evalLoop_ iexpr = snd <$> evalLoopCore plainEval iexpr keepAccum "" []
 
 eval2IExpr :: ExpandedModules -> String -> Either String CompiledExpr
-eval2IExpr extraModuleBindings str = do
-  resolved <- first show $ resolveAllImports extraModuleBindings aux
+eval2IExpr extraModuleBindings str =
   first errorBundlePretty (runParser parseOneExprOrDefinitions "" str)
-    >>= first renderExpansionError
-        . either (expandDefs >=> wrapMain resolved) expandTerm
+    >>= first renderExpansionError . replItems
+    >>= first show . (\items -> resolveMain ((replModule, items) : extraModuleBindings) replModule)
     >>= first show . process . desugarTerm
     >>= tt . first show . compileUnitTest
     where
       tt = \case
         Left e -> Left $ show e
         Right x -> pure x
+      -- definitions see every library module, qualified by its name; a
+      -- bare expression sees none
+      replModule = "<repl>"
+      replItems = \case
+        Left defs -> do
+          bindings <- expandDefs defs
+          if any ((== "main") . locatedNameText . fst) bindings
+            then pure $ aux <> (uncurry ExpandedModuleBinding <$> bindings)
+            else Left MissingMain
+        Right expr ->
+          pure . ExpandedModuleBinding (locatedName (GeneratedLoc "eval2IExpr" Nothing) "main")
+            <$> expandTerm expr
       aux = makeImport . fst <$> extraModuleBindings
       makeImport name =
         let loc = GeneratedLoc "eval2IExpr.import" Nothing

@@ -6,7 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- |Name resolution and core lowering: imports are resolved
--- ('resolveMain'), let bindings become lambda applications with
+-- ('resolveMain', via 'Telomare.Bind'), let bindings become lambda applications with
 -- @TUnsizedRepeaterF@ threaded to recursive references and names are
 -- scope-checked ('letsToApps'), lambdas get de Bruijn indices
 -- ('debruijinize'), and the result is lowered to core
@@ -43,6 +43,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Debug.Trace (trace)
 import GHC.Generics (Generic1, Generically1 (..))
+import Telomare.Bind (BindWarning, bindProgram)
 import Telomare.Desugar (desugarTerm)
 import Telomare.Error
 import Telomare.IR.Base
@@ -345,77 +346,25 @@ process2Term2 :: DesugaredSurfaceTerm -> Either ResolverError Term2
 process2Term2 = debruijinize <=< fmap tf . letsToApps
                   where tf x = debugTrace ("wLet Term1:\n" <> prettyPrint x) x
 
-resolveAllImports :: ExpandedModules -- ^All modules
-                  -> ExpandedModule -- ^Module whose imports should be resolved
-                  -> Either ResolverError [(String, ExpandedSurfaceTerm)]
-resolveAllImports modules = resolveItems modules []
-
-resolveImports :: ExpandedModules
-               -> String
-               -> Either ResolverError [(String, ExpandedSurfaceTerm)]
-resolveImports modules = resolveModule modules []
-
-resolveModule :: ExpandedModules
-              -> [String]
-              -> String
-              -> Either ResolverError [(String, ExpandedSurfaceTerm)]
-resolveModule modules stack moduleName
-  | moduleName `elem` stack =
-      Left . ImportCycle $ dropWhile (/= moduleName) stack <> [moduleName]
-  | otherwise = case lookup moduleName modules of
-      Nothing    -> Left $ ModuleNotFound moduleName
-      Just items -> resolveItems modules (stack <> [moduleName]) items
-
-resolveItems :: ExpandedModules
-             -> [String]
-             -> ExpandedModule
-             -> Either ResolverError [(String, ExpandedSurfaceTerm)]
-resolveItems modules stack = fmap concat . traverse resolveItem
+-- |Bind names across the whole program ('Telomare.Bind.bindProgram') and
+-- keep only the top-level definitions main reaches.
+resolveMainWithWarnings :: ExpandedModules -- ^Modules and their typed expanded items
+                        -> String -- ^Module name with main
+                        -> Either ResolverError (ExpandedSurfaceTerm, [(String, BindWarning)])
+resolveMainWithWarnings allModules mainModule = do
+  (term, warnings) <- bindProgram allModules mainModule
+  pure (pruneTopLevel term, warnings)
   where
-    resolveItem = \case
-      ExpandedModuleBinding name value -> Right [(locatedNameText name, value)]
-      ExpandedModuleImport importDecl -> do
-        bindings <- resolveModule modules stack
-          (locatedNameText $ parsedImportModule importDecl)
-        pure $ case parsedImportQualifier importDecl of
-          Nothing        -> bindings
-          Just qualifier -> qualifyBindings (locatedNameText qualifier) bindings
-
-qualifyBindings :: String
-                -> [(String, ExpandedSurfaceTerm)]
-                -> [(String, ExpandedSurfaceTerm)]
-qualifyBindings qualifier bindings =
-  [ (qualify name, qualifyTerm names qualifier value)
-  | (name, value) <- bindings
-  ]
-  where
-    names = Set.fromList $ fst <$> bindings
-    qualify name = qualifier <> "." <> name
-
-qualifyTerm :: Set String -> String -> ExpandedSurfaceTerm -> ExpandedSurfaceTerm
-qualifyTerm names qualifier = go Set.empty
-  where
-    go bound (loc :< term) = loc :< case term of
-      UnprocessedParsedTermL (VarF name)
-        | name `Set.member` names && name `Set.notMember` bound ->
-            UnprocessedParsedTermL $ VarF (qualifier <> "." <> name)
-      other -> mapScoped (\binders -> go (bound <> binderNames binders)) other
-
-    binderNames = Set.fromList . fmap locatedNameText
+    pruneTopLevel = \case
+      loc :< LetUPF bindings root ->
+        let kept = Set.fromList . fmap fst $ pruneBindings root (first locatedNameText <$> bindings)
+        in loc :< LetUPF (filter ((`Set.member` kept) . locatedNameText . fst) bindings) root
+      other -> other
 
 resolveMain :: ExpandedModules -- ^Modules and their typed expanded items
             -> String -- ^Module name with main
             -> Either ResolverError ExpandedSurfaceTerm
-resolveMain allModules mainModule = case lookup mainModule allModules of
-  Nothing -> Left $ ModuleNotFound mainModule
-  Just _ -> do
-    resolved <- resolveImports allModules mainModule
-    case lookup "main" resolved of
-      Nothing -> Left $ NoMainFunction mainModule
-      Just x ->
-        let loc = case x of loc' :< _ -> loc'
-            locatedBindings = first (locatedName (GeneratedLoc "resolveMain.binding" (Just loc))) <$> pruneBindings x resolved
-        in Right $ GeneratedLoc "resolveMain" (Just loc) :< LetUPF locatedBindings x
+resolveMain allModules = fmap fst . resolveMainWithWarnings allModules
 
 main2Term3 :: ExpandedModules
            -> String -- ^Module name with main

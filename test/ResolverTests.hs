@@ -14,6 +14,7 @@ import Data.Algorithm.Diff (getGroupedDiff)
 import Data.Algorithm.DiffOutput (ppDiff)
 import Data.Bifunctor (first)
 import Data.List (isInfixOf, isPrefixOf, sortOn)
+import NameBinderTests (nameBinderTests)
 import qualified System.IO.Strict as Strict
 import System.IO.Unsafe (unsafePerformIO)
 import Telomare.Desugar
@@ -40,7 +41,7 @@ main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [unitTests, qcProps, unitTestsCase, qcPropsCase]
+tests = testGroup "Tests" [unitTests, qcProps, unitTestsCase, qcPropsCase, nameBinderTests]
 -- tests = testGroup "Tests" [unitTestsCase]
 
 ---------------------
@@ -96,12 +97,16 @@ qcProps = testGroup "Property tests (QuickCheck)"
         pure . QC.counterexample dummymodule $ case result of
           Left err  -> expectedError `isInfixOf` show err
           Right res -> expectedError `isInfixOf` show res
-  , QC.testProperty "Check recursive imports work"
+  -- imports are not re-exported (Telomare.Bind), so a name defined only
+  -- at the end of an import chain is not in scope in Main
+  , QC.testProperty "Check transitive imports are not re-exported"
       . withMaxSuccess 16
       . QC.forAll genRecursiveImports $ \modules -> QC.idempotentIOProperty $ do
-        let expectedValue = recursiveImportsResult modules <> "\ndone"
-        result <- runMain_ modules "Main"
-        pure . QC.counterexample (ppShow modules) $ result === expectedValue
+        let expectedError = "missing definition"
+        result <- try (runMain_ modules "Main") :: IO (Either SomeException String)
+        pure . QC.counterexample (ppShow modules) $ case result of
+          Left err  -> expectedError `isInfixOf` show err
+          Right res -> expectedError `isInfixOf` res
   ]
 
 recursiveResult :: String -> String
@@ -121,9 +126,6 @@ genRecursiveLet = do
       lastVar = last varNames
       lastLine = lastVar <> " = " <> show lastValue
   pure (assignments <> [lastLine])
-
-recursiveImportsResult :: [(String, String)] -> String
-recursiveImportsResult = init . tail . drop 2 . dropWhile (/= '=') . snd . last
 
 linewrap :: String -> String -> String -> String
 linewrap firstAssignment letBlock firstVar =
@@ -323,10 +325,10 @@ unitTests = testGroup "Unit tests"
             [ ("A", [binding a "x" (a :< IntUPF 1), binding a "y" (var "x")])
             , ("Main", [qualifiedImport a "Q" "A", binding a "main" (var "Q.y")])
             ]
-      case resolveImports modules "Main" of
-        Right bindings -> do
-          fst <$> bindings @?= ["Q.x", "Q.y", "main"]
-          lookup "Q.y" bindings @?= Just (var "Q.x")
+      case resolveMain modules "Main" of
+        Right (_ :< LetUPF bindings root) -> do
+          root @?= var "A::y"
+          lookup "A::y" (first locatedNameText <$> bindings) @?= Just (var "A::x")
         other -> assertFailure $ "qualified import failed: " <> show other
   , testCase "qualified imports rewrite transitive references" $ do
       let a = UnknownLoc
@@ -336,10 +338,10 @@ unitTests = testGroup "Unit tests"
             , ("A", [qualifiedImport a "B" "B", binding a "y" (var "B.x")])
             , ("Main", [qualifiedImport a "Q" "A", binding a "main" (var "Q.y")])
             ]
-      case resolveImports modules "Main" of
-        Right bindings -> do
-          fst <$> bindings @?= ["Q.B.x", "Q.y", "main"]
-          lookup "Q.y" bindings @?= Just (var "Q.B.x")
+      case resolveMain modules "Main" of
+        Right (_ :< LetUPF bindings root) -> do
+          root @?= var "A::y"
+          lookup "A::y" (first locatedNameText <$> bindings) @?= Just (var "B::x")
         other -> assertFailure $ "transitive qualified import failed: " <> show other
   , testCase "test backward cycle let" $ do
       let backwardCycleLet = wrapRecursiveBackwardLet cycleLet
@@ -368,8 +370,13 @@ unitTests = testGroup "Unit tests"
   , testCase "test tictactoe.tel without sizing" $ do
       res <- tictactoeUnsized
       res @?= fullRunTicTacToeString
-  , testCase "test recursive imports" $ do
-      res <- runMain_ aux222 "Main"
+  , testCase "test recursive imports are not re-exported" $ do
+      res <- try (runMain_ aux222 "Main") :: IO (Either SomeException String)
+      case res of
+        Left err -> assertBool (show err) ("missing definition \"xyz\"" `isInfixOf` show err)
+        Right out -> assertFailure $ "expected xyz to be undefined, got " <> out
+  , testCase "test recursive imports, imported directly" $ do
+      res <- runMain_ (("Main", "import Abc\nimport Ghi\nmain = \\input -> (xyz, 0)") : drop 1 aux222) "Main"
       res @?= "whattt\ndone"
   ]
 

@@ -39,15 +39,18 @@ expansionTests = testGroup "Expansion pass"
             Right (pats', body', expanded) ->
               stripParserLocs expanded @?= stripParserLocs (buildMultiLambda loc pats' body')
         _ -> assertFailure $ "expected raw LamPatF, got: " <> show raw
+  -- bound by application, not let, so the parameter cannot supply a
+  -- requirement (Telomare.Bind)
   , testCase "annotated pattern lambda binds a CheckF of the argument" $ do
       raw <- runTelomareParser parseLongExpr "\\(v : Bool) -> v"
       case expandTerm raw of
         Right (_ :< UnprocessedParsedTermL (LamF binder
-                (_ :< LetUPF
-                  [(name, _ :< UnprocessedParsedTermH (CheckF RefinementAbort
+                (_ :< UnprocessedParsedTermL (AppF
+                  (_ :< UnprocessedParsedTermL (LamF name
+                    (_ :< UnprocessedParsedTermL (VarF "v"))))
+                  (_ :< UnprocessedParsedTermH (CheckF RefinementAbort
                     (_ :< UnprocessedParsedTermL (VarF "Bool"))
-                    (_ :< UnprocessedParsedTermL (VarF bound))))]
-                  (_ :< UnprocessedParsedTermL (VarF "v")))))
+                    (_ :< UnprocessedParsedTermL (VarF bound))))))))
           | locatedNameText name == "v" ->
           bound @?= locatedNameText binder
         other -> assertFailure $ "unexpected expansion: " <> show other

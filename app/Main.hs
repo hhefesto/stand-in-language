@@ -14,10 +14,12 @@ import System.IO (hFlush, hPutStr, hPutStrLn, stderr, stdout)
 import Telomare.Artifact (Artifact (..), isArtifactPath, nodeCount,
                           readArtifact, sourcesHash, telcExtension,
                           writeArtifact)
+import Telomare.Bind (renderBindWarning)
 import Telomare.Certificate (renderStaticReport)
 import Telomare.Driver (CompiledProgram (..), SizingOption (MainSizing),
                         compileModulesWithin, evalLoop, evalLoopIC,
-                        evalLoopMetered, programIteration, programPlan)
+                        evalLoopMetered, programIteration, programPlan,
+                        programWarnings)
 import Telomare.EAL (VariableBudget (..), defaultVariableBudget)
 import Telomare.Eval.IC (ICPlan, renderICMeter)
 import Telomare.Eval.Meter (renderMeter)
@@ -244,12 +246,18 @@ runCompiled runtime action cp = case (action, runtime) of
     reportMeter $ renderICMeter measured
   _notARun -> die "runCompiled: only Run and Meter reach here"
 
+-- |The name binder's warnings, on stderr so they never mix with output.
+reportWarnings :: [(String, String)] -> String -> IO ()
+reportWarnings allModules entryModule =
+  mapM_ (hPutStrLn stderr . renderBindWarning) (programWarnings allModules entryModule)
+
 -- |The usual route. Sizing costs minutes on Prelude-heavy programs, so every
 -- action here works from one compile.
 runSized :: VariableBudget -> Runtime -> FilePath -> Action -> IO ()
 runSized budget runtime file action = do
   let entryModule = takeBaseName file
   allModules <- getModulesFor file
+  reportWarnings allModules entryModule
   case compileModulesWithin budget MainSizing allModules entryModule of
     Left err -> die err
     Right cp -> case action of
@@ -283,6 +291,7 @@ runFast :: VariableBudget -> FilePath -> Action -> Maybe Int -> IO ()
 runFast budget file action fuel = do
   let entryModule = takeBaseName file
   allModules <- getModulesFor file
+  reportWarnings allModules entryModule
   case action of
     Compile _ -> die "--compile sizes the program, so it cannot be combined with --fast"
     Certificate -> putStr $ staticReport Nothing Nothing allModules entryModule

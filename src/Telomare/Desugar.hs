@@ -11,6 +11,7 @@ module Telomare.Desugar
   ( desugarTerm
   , patternToTerm
   , optimizeBuiltinFunctions
+  , builtinNames
   ) where
 
 import Control.Comonad.Cofree (Cofree (..))
@@ -328,6 +329,10 @@ optimizeBuiltinFunctions = go (Set.fromList (fst <$> builtins))
       in if locatedNameLoc name == BuiltinLoc text
            then Set.insert text
            else Set.delete text
+
+-- |The names 'addBuiltins' binds that source code can mention.
+builtinNames :: [String]
+builtinNames = "zero" : (fst <$> builtins)
 
 -- |Bind @zero@, the 'builtins' and the 'caseHelpers' around the term.
 addBuiltins :: ExpandedSurfaceTerm -> ExpandedSurfaceTerm

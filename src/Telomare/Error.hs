@@ -86,6 +86,13 @@ data ResolverError
   | DefinitionCycle [String]
   | MissingDefinitions [String]
   | MissingDefinitionAt LocTag String
+  | UnsuppliedRequirement String LocTag [(String, LocTag)]
+    -- ^ A requirement that reaches @main@ unsupplied: its name, where it
+    -- occurs, and each definition it was inherited through, innermost
+    -- first and ending with @main@.
+  | UnboundQualifiedName LocTag String
+  | DuplicateDefinition LocTag String
+    -- ^ Two entries with one key in one let block or module.
   | ParseError String
   deriving (Eq, Ord)
 
@@ -104,6 +111,14 @@ renderResolverError = \case
   MissingDefinitions names -> "MissingDefinitions " <> show names
   MissingDefinitionAt loc name ->
     "missing definition " <> show name <> " at " <> renderLocTagVerbose loc
+  UnsuppliedRequirement name loc via ->
+    show name <> " (at " <> renderLocTagVerbose loc <> ")"
+    <> concatMap (\(n, l) -> "\n  is required by " <> show n <> " (" <> renderLocTagVerbose l <> ")") via
+    <> "\n  and is not defined"
+  UnboundQualifiedName loc name ->
+    "qualified name " <> show name <> " is not defined, at " <> renderLocTagVerbose loc
+  DuplicateDefinition loc name ->
+    show name <> " is defined more than once in one block, at " <> renderLocTagVerbose loc
   ParseError err -> "ParseError " <> show err
 
 -- |Why the sizing pass could not pin a finite iteration count on a recursion

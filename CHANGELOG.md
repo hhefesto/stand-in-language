@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+* Requirements (the name binder, `Telomare.Bind`): a definition may mention a
+  name nothing binds where it is written; the name is then supplied by the
+  binder (let or module top level) enclosing each place the definition is
+  mentioned, by lambda lifting. A requirement that reaches `main` unsupplied is
+  an error naming every definition it passed through. Lambda and pattern
+  variables never supply, including annotated parameters, which now bind by
+  application instead of a generated let. Imports are ordered binder layers
+  around a module's own definitions (a later import shadows an earlier one) and
+  are no longer re-exported; a module imported twice is bound once. Two
+  definitions of one name in one block are an error, as is an unbound qualified
+  name. Shadowing and unused let entries are warned about on stderr and in the
+  LSP, whose own unbound-name check is gone. See
+  `telomare-name-binder-spec.txt`.
 * Refinements and case guards share one meaning: `(p : P)` holds where `P`
   gives anything but Zero. A failing guard in a `case` falls through to the next
   alternative; a failing definition or lambda parameter refinement aborts with

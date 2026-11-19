@@ -1,0 +1,558 @@
+TELOMARE NAME BINDER: SPEC (v1)
+Date: 2026-11-18
+Status: implemented in Telomare.Bind (v1)
+
+
+0. SUMMARY
+
+Definitions may mention names that are not defined where the definition
+is written. Such a name is a requirement of the definition. A
+requirement is supplied by whichever binder (let, or a module's top
+level) encloses the place where the definition is mentioned. If a
+requirement reaches the program root without being supplied, that is a
+compile error.
+
+Everything is resolved statically in one whole-program pass that runs
+after Telomare.Expand and before imports are flattened. The pass outputs
+an ordinary closed program with no requirements, so no later compiler
+stage changes.
+
+v1 adds no surface syntax. `let` and top-level definitions are the
+binder; imports become ordered binder layers around a module's own
+definitions (D12).
+
+User-visible change: an unbound name inside a definition that is
+actually used is no longer an immediate error. (Unbound names inside
+unused definitions are already accepted today: pruneBindings and the
+reachability filter in letsToApps drop unreachable bindings before the
+missing-definition check.)
+
+Example:
+
+    -- module Sort
+    sort = \xs -> ... le a b ...          -- le is not defined here
+
+    -- module Main
+    import Prelude
+    import Sort
+    main = let le = leq in sort [3,1,2]   -- supplied here
+
+elaborates to (internal names per 6.5):
+
+    Sort.sort = \__req_le -> \xs -> ... __req_le a b ...
+    Main.main = let le = Prelude.leq in Sort.sort le [3,1,2]
+
+
+1. DECISIONS THIS SPEC ENCODES
+
+D1. Requirements propagate through definitions (a definition that
+    mentions an open definition inherits its unsupplied requirements).
+D2. Keys are names only. No type-directed selection.
+D3. Requirements are implicit: any identifier with no lexical binding.
+D4. Resolution is purely lexical and static.
+D5. Lambda variables and binder names are separate namespaces and do
+    not interact. Because every later stage uses a single namespace,
+    the elaborator must preserve this by renaming (D14).
+D6. `let` is the binder. Store values are arbitrary expressions.
+D7. Entries of one store see each other; cycles are an error (the
+    existing let rule).
+D8. All shadowing produces at least a warning, except shadowing of
+    builtins (D11).
+D9. Elaboration is by lambda lifting.
+D10. Stores are literal (the entries written in the let / module).
+     No computed stores, no store algebra in v1.
+D11. Builtins (zero, left, right, trace, abort, pair, app; the
+     `builtins` list in Telomare.Desugar plus `zero`) form an implicit
+     outermost binder. They count as defined everywhere, so they are
+     never requirements and (by 5.6) no user binder can supply them.
+     Shadowing a builtin does not trigger W1.
+D12. Modules. A module's scope chain, innermost first, is:
+       its own top-level definitions (one store, entries see each
+         other, D7),
+       then its imports, last-written innermost (a later import is
+         nested inside an earlier one),
+       then builtins.
+     Each import layer holds only the imported module's own top-level
+     definitions; imports are not re-exported (a change from the
+     current resolveItems, which re-exports transitively).
+     Prelude is not implicit: a module that wants it imports it.
+     A module reached through more than one import in the same chain
+     appears once, at its first-written position.
+     (Initial implementation. More sophisticated module binding is
+     planned later; see Q5.)
+D13. The pass runs after Telomare.Expand, on ExpandedModules, before
+     import flattening (resolveMain) and before Telomare.Desugar.
+D14. Capture is avoided by renaming lambda / pattern variables in the
+     output, never by adding entries to binders.
+D15. A qualified name (one written through an import qualifier) is
+     never a requirement. Unbound, it is error E3.
+D16. Two entries with the same key in one store (one let block, or one
+     module's top level) are an error, E4.
+
+
+2. TERMS
+
+Binder      A let block, a module's top level, an import layer, or the
+            builtin binder. Holds a store.
+Store       Ordered list of entries (key, expr).
+Entry       One definition in a store.
+Variable    Identifier bound by a lambda parameter or a case pattern.
+Name        Any other identifier.
+Mention     An occurrence of a name in an expression.
+Requirement A name mentioned in an entry (directly or through other
+            entries) that no binder enclosing the entry's definition
+            site defines.
+Open entry  Entry with a non-empty requirement set.
+Root        The body of `main` in the main module. For the REPL
+            (eval2IExpr) the root is the entered expression, or `main`
+            after wrapMain.
+
+
+3. ABSTRACT SYNTAX FOR THE PASS
+
+Input: ExpandedModules (Telomare.IR.Surface), i.e. per module a list of
+ExpandedModuleItem: ImportDecl or (LocatedName, ExpandedSurfaceTerm).
+Because Expand has run:
+- a refinement `k : T = e` is already `CheckF RefinementAbort T e` at
+  the root of the entry body, so it is lifted with the body for free;
+- a list assignment is already one entry per name (plus a generated
+  `__list_assignment_L_C` intermediate entry where needed);
+- multi-pattern lambdas are already nested lambdas plus case.
+
+Classification (section 4) is done during resolution, against a scope
+chain whose frames are either variable frames (lambda / pattern bound)
+or binder frames, rather than by building a separate Var/Name term
+type first. Every node keeps its LocTag (needed for diagnostics, 8).
+
+Output: a single ExpandedSurfaceTerm, the same shape resolveMain
+produces today (one LetUPF of top-level bindings around main's body),
+with every top-level key renamed to a unique internal name (6.5) and
+every identifier lexically bound. No requirements remain. resolveMain's
+import flattening and qualifyBindings are replaced by this pass;
+pruneBindings, desugarTerm and everything after are unchanged.
+
+Required change in Telomare.Expand: buildMultiLambda currently lowers
+an annotated variable parameter `\(x : T) -> body` to
+
+    \__lambda_pattern_i -> let x = CheckF T __lambda_pattern_i in body
+
+which would make the generated let a binder that supplies requirements
+(so `\(x : T) -> f 0` and `\x -> f 0` would bind differently). Emit a
+lambda application instead, the form Telomare.Desugar.bindPatternVars
+already uses for case pattern variables:
+
+    \__lambda_pattern_i -> (\x -> body) (CheckF T __lambda_pattern_i)
+
+The same applies to the `*_checked` binders for annotated non-variable
+patterns. letsToApps lowers a let without unsized recursion to the same
+application anyway (LetBinding 0 becomes Open in debruijinize), so the
+compiled term should be unchanged; T1 confirms this.
+
+
+4. CLASSIFICATION
+
+For each identifier occurrence, find the nearest enclosing construct
+that binds that identifier:
+
+    lambda parameter or case pattern  -> Var
+    binder key (incl. import layers,
+      builtins)                       -> Name
+    nothing                           -> Name (a requirement), or E3
+                                         if qualified (D15)
+
+Notes:
+- "Nearest" is over both kinds of construct together, so
+  `\x -> let x = 1 in x` gives Name, and `let x = 1 in \x -> x`
+  gives Var.
+- A binder's keys are in scope in the binder body and in all of that
+  binder's entries (D7).
+- Names generated by Expand (`__lambda_pattern_i`, `*_checked`,
+  `__list_assignment_*`) start with `_` and so cannot collide with
+  user identifiers (identifiers start with a letter, Telomare.Lexical).
+- Qualified names: `import qualified M as Q` gives a layer whose keys
+  are `Q.k`. Identifiers may contain `.` (identifierContinueChar), so
+  "qualified" means: the part before the last `.` is a qualifier of an
+  import in the module's chain.
+
+
+5. RESOLUTION
+
+5.1 Scope chain
+
+The scope chain at a point in the program is the list of enclosing
+binders, innermost first, ending with the module's import layers and
+the builtin binder (D12). Lambdas are not part of the chain (D5).
+
+5.2 Resolving a mention
+
+To resolve `Name x` with scope chain S:
+
+    1. Find the innermost binder B in S that has key x.
+    2. If there is none, x is a requirement at this point (5.3).
+    3. Otherwise let d be B's entry for x, with requirement set
+       Req(d) = {r1 .. rn} (sorted by name).
+       The mention elaborates to:  x a1 .. an
+       where each ai is the result of resolving `Name ri` with the
+       SAME chain S (the mention's chain, not d's).
+
+Step 3 is where a requirement gets supplied: ri was unbound at d's
+definition site, but may be bound by a binder between d and the
+mention. This works across modules: an entry of an imported module
+can have its requirements supplied by the importing module.
+
+5.3 Requirement at a point
+
+If `Name x` is unbound at a point:
+- Inside an entry: x is added to Req(e) for the INNERMOST enclosing
+  entry e, and the occurrence elaborates to e's lifted parameter for x.
+  Outer entries inherit it through step 3 when they mention e.
+- In the root: compile error E1.
+
+5.4 Requirement sets
+
+Req(e) is the set of names added by 5.3 while resolving e's body
+(including any refinement CheckF, which is part of the body after
+Expand). Because of step 3, this includes requirements inherited from
+open entries that e mentions and that are not supplied at the mention.
+
+Req(e) depends only on e's definition site (5.6), so it is well
+defined per entry. Compute it on demand with memoisation, depth-first,
+with an "in progress" mark per entry.
+
+5.5 Cycles
+
+Reaching an "in progress" entry is a cycle: error E2.
+
+This check must be made during resolution, not syntactically, because
+a cycle can pass through a requirement:
+
+    let f = \n -> plusByte n x
+    in  let x = f 0        -- x = f x after resolution: cycle
+        in  x
+
+(After elaboration this becomes `x = f x` in one let, which
+topologicalSort in letsToApps would also reject as DefinitionCycle;
+E2 exists to give a message that names the requirement.)
+
+Recursion continues to go through the existing unsized recursion
+construct `{t, r, b}` only.
+
+5.6 Definition site wins
+
+A name bound at an entry's definition site is never a requirement, so
+a later binder cannot override it:
+
+    let x = 1 in
+      let f = \n -> plusByte n x in
+        let x = 2 in f 0        -- result uses x = 1
+                                -- W1 (x shadowed) and W2 (x = 2 unused)
+
+
+6. ELABORATION
+
+6.1 Entries
+
+    Entry k body, Req = {r1 .. rn}
+      ->  k = \__req_r1 -> ... \__req_rn -> body'
+
+`__req_r` is a lifted parameter. Like every other generated name it
+starts with `_`, which the lexer cannot produce for user identifiers,
+so it cannot collide with or be captured by a user lambda. (Not `$`,
+which already means Church numerals, and not `:`, which marks unsized
+recursion placeholders and is filtered by letsToApps' missing-name
+check.) Parameter order is sorted by requirement name. If n = 0 the
+entry is unchanged.
+
+A refinement is a CheckF at the root of the body, so it stays under
+the lifted lambdas and is checked per instantiation.
+
+Interaction with unsized recursion: annotateUnsizedCount later wraps
+each binding in its `:n` placeholder lambdas, outside the lifted ones
+(`k = \:0 -> \__req_r -> body`), and debruijinize applies fresh
+TUnsizedRepeaterF tokens to each mention before the user's arguments
+(`(k REP) a1`). The two orders agree, and sizing stays per mention.
+
+6.2 Mentions
+
+Per 5.2 step 3: `x` becomes `x a1 .. an`.
+
+6.3 Capture avoidance (D14)
+
+The output has one namespace. A supplied argument ai is a reference to
+a binder key, and a lambda or pattern variable of the same name
+between that binder and the mention would capture it:
+
+    let x = 1 in \x -> f 0      -- f requires x
+    -- naive output: let x = 1 in \x -> f x 0   (x captured)
+
+Whenever a lambda or case-pattern variable v has the same identifier
+as a key referenced by a supplied argument within v's scope, rename v
+and its Var occurrences to a fresh `__var_v_N` name, keeping v's
+LocTag so diagnostics still point at user source. Renaming lambdas is
+always safe because lambdas never supply.
+
+6.4 Binders and variables
+
+`let` stays the existing let form with elaborated entries and body.
+`Var v` is unchanged unless renamed by 6.3.
+
+6.5 Top-level keys
+
+Each module's top-level key k is renamed to a unique internal name
+(`M::k`: `::` cannot occur in a source identifier), and every Name resolving to it is
+rewritten to match. This makes it safe to put all modules' entries in
+one flat let, as resolveMain does today, even when two modules define
+the same key or a module was imported more than once. This subsumes
+qualifyBindings.
+
+6.6 Identity on closed programs
+
+A program with no requirements elaborates to itself up to the
+renaming of 6.5 (and 6.3, which cannot fire without requirements).
+The compiled Term3 must be identical. This is the main regression
+property (10). Note that sizing depends on the shape letsToApps
+produces (see the Telomare.Resolve header), so programs that DO use
+requirements will change shape and may move sizing regression
+constants.
+
+
+7. KNOWN CONSEQUENCES (accepted)
+
+C1. `let x = v in e` and `(\x -> e) v` are not equivalent: the let can
+    supply a requirement x of something mentioned in e, the lambda
+    cannot. Any pass relying on that equivalence must run after this
+    one. Existing ones (letsToApps, Desugar.bindPatternVars) already
+    do (D13).
+
+C2. An open entry is a function after lifting, so its value is not
+    shared between mentions:
+
+        let y = expensive x in ... y ... y ...   -- x unbound here
+
+    y is computed at each mention. A later optimisation can share
+    mentions that resolve identically. Not in v1.
+
+C3. Accidental supply. Any binder between definition and mention
+    supplies a matching requirement, intended or not:
+
+        let f = \n -> plusByte n x in
+          let x = 5              -- an unrelated local named x
+              r = f 0
+          in r
+
+    No shadowing occurs, so no warning fires. See open question Q3.
+    Across modules: an importing module's top-level definitions supply
+    the requirements of imported definitions it mentions.
+
+C4. Adding a definition named foo to a scope turns every requirement
+    foo defined beneath it into a reference to that definition.
+    Callers that supplied foo then get W2. This includes adding foo to
+    a module that others import.
+
+C5. With name-only keys there is one implementation per name per
+    region. Using two "instances" in one expression needs nested
+    binders.
+
+C6. Imports are no longer re-exported (D12). A module that used names
+    from a transitive import must import that module itself.
+
+
+8. DIAGNOSTICS
+
+Warnings (Telomare.Bind.BindWarning) come back from
+resolveMainWithWarnings, each tagged with its module. The CLI prints
+them on stderr (Telomare.Driver.programWarnings); the LSP shows the
+current document's as warning diagnostics and no longer runs its own
+syntactic unbound-name check. The REPL does not show them yet.
+
+Errors:
+
+E1. Unsupplied requirement at the root (UnsuppliedRequirement; a name
+    unbound directly in main keeps the existing MissingDefinitionAt).
+    Report the chain, with locations:
+        `le` is required by `sort` (file:line)
+        which is required by `main` (file:line)
+        and is not defined.
+E2. Cyclic definition, including cycles through requirements (5.5).
+    Reported as the existing DefinitionCycle, with the path starting
+    from its earliest-written member.
+E3. Unbound qualified name (D15): UnboundQualifiedName.
+E4. Duplicate key in one store (D16): DuplicateDefinition. (Today these are silently
+    accepted; diamond imports also produce them, which D12's
+    dedupe removes.)
+
+Warnings:
+
+W1. Shadowing. Any of:
+    - a binder key that is also a key of an enclosing binder
+      (including a later import layer shadowing an earlier one, or a
+      module definition shadowing an import);
+    - a lambda/pattern variable with the same identifier as a key of
+      an enclosing binder;
+    - a binder key with the same identifier as an enclosing
+      lambda/pattern variable;
+    - a lambda/pattern variable with the same identifier as a
+      requirement that propagates outward past it
+      (`\x -> f 0` where f requires x; not captured, per D5).
+    Not when the shadowed key is a builtin (D11).
+    Expect noise wherever lambda parameters reuse Prelude names
+    (map, id, min, max, take, filter, ...). See Q1.
+W2. Unused key: a let entry that no mention resolves to. A use as a
+    supplied argument (5.2 step 3) counts as a mention.
+    Exempt: module top-level definitions and import layers (unused
+    Prelude definitions are normal), and every compiler-generated
+    entry (`__list_assignment_*` and the like).
+
+
+9. PIPELINE PLACEMENT
+
+    parse all modules
+      -> Telomare.Expand (expandModule), with the change in section 3
+      -> [this pass] classify, resolve, elaborate, diagnose
+           input:  ExpandedModules + main module name
+           output: one ExpandedSurfaceTerm (replaces resolveMain's
+                   import flattening and qualifyBindings)
+      -> pruneBindings
+      -> Telomare.Desugar.desugarTerm (addBuiltins, case lowering)
+      -> Telomare.Resolve.process (letsToApps, debruijinize, splitExpr)
+
+Constraints:
+- Needs the whole program, since requirements cross module
+  boundaries.
+- Runs before anything that treats let as application (C1).
+- The existing unbound-name checks (MissingDefinitionAt in letsToApps,
+  "undefined identifier" in debruijinize) already run after this pass
+  and become internal sanity checks: nothing should be unbound.
+- Give the pass its own input and output types so the boundary is
+  explicit: Name/Var distinguished on the way in, no requirements on
+  the way out.
+- Every entry point must go through it: main2Term3 / compileModules,
+  eval2IExpr (REPL; it builds qualified imports of every library
+  module), the LSP, and the test helpers. Put it in one shared
+  function rather than at each call site.
+- ResolverTests that expect undefined-identifier errors for used
+  definitions will change to E1.
+
+
+10. TEST CASES
+
+Telomare has no infix operators; tests use Prelude functions such as
+plusByte and leq.
+
+T1. Closed program: compiled Term3 equals today's (all existing
+    tests), including programs using annotated lambda parameters
+    (checks the Expand change in section 3).
+
+T2. Basic supply.
+        let f = \n -> plusByte n x in let x = 1 in f 0
+    -> f lifted over x; mention becomes `f x`.
+
+T3. Definition site wins (5.6). Expect W1 and W2.
+
+T4. Propagation.
+        let f = \n -> plusByte n x
+            g = \n -> f n
+        in  let x = 1 in g 0
+    -> Req(f) = Req(g) = {x}; g's body is `f __req_x n`; mention
+       `g x`.
+
+T5. Sibling supply.
+        let f = \n -> plusByte n x
+            x = 1
+        in  f 0
+    -> x is a sibling key, so f is closed. Output equals input.
+
+T6. No lambda capture (unsupplied).
+        let f = \n -> plusByte n x in \x -> f 0
+    -> at the root: E1 for x, plus W1 for the lambda's x.
+
+T7. Unsupplied requirement: E1 with full chain through two entries.
+
+T8. Cycle through requirement (5.5 example): E2.
+
+T9. Open supplier.
+        let f = \n -> plusByte n x in
+          let x = y in
+            let y = 2 in f 0
+    -> Req(x) = {y}; mention f becomes `f (x y)`.
+
+T10. Requirement inside a refinement is lifted with the body; check
+     that the static refinement checker accepts a CheckF whose check
+     depends on a lifted parameter.
+
+T11. Dictionary style across modules (the section 0 example).
+
+T12. Same open entry under two binders gives two different
+     instantiations in one program.
+
+T13. Classification: `\x -> let x = 1 in x` and
+     `let x = 1 in \x -> x` (both with W1).
+
+T14. Capture avoidance (6.3).
+        let f = \n -> plusByte n x in
+          let x = 1 in \x -> f x
+    -> the lambda's x is renamed; f receives the let's x (1), while
+       the explicit argument is the lambda's x.
+
+T15. Annotated parameter does not supply.
+        let f = \n -> plusByte n x in \(x : Bool) -> f 0
+    -> same result as T6 (E1 + W1), not a supply.
+
+T16. Import order: two imported modules both define k; the later
+     import wins, with W1. A module definition named k wins over both,
+     with W1.
+
+T17. Diamond: Main imports Prelude and ChurchArith, ChurchArith
+     imports Prelude (the existing test setup). Prelude's definitions
+     appear once; no E4.
+
+T18. No re-export: Main imports only ChurchArith and mentions a
+     Prelude name -> that name is a requirement at the root (E1).
+
+T19. Qualified: `import qualified M as Q`, mention `Q.missing` -> E3.
+
+T20. Builtin cannot be supplied: an entry mentions `left`; a `let left
+     = ...` at the mention site does not change it, and no W1.
+
+T21. Duplicate key in one let -> E4.
+
+T22. Unsized recursion in an open entry: two mentions get independent
+     sizing tokens and correct lifted arguments.
+
+T23. Cross-module supply with EAL certification: an open entry with
+     unsized recursion whose requirement is a function (sort le).
+     Check that the EAL gate still certifies it.
+
+
+11. OUT OF SCOPE FOR V1
+
+- Store algebra (merge, override, rename, restrict, hide).
+- Named or first-class stores.
+- Imports as rebindable binders (parameterised modules).
+- Contracts on requirements.
+- Type-directed keys.
+- Sharing of identical instantiations (C2).
+- Re-exports.
+
+
+12. OPEN QUESTIONS
+
+Q1. Binder-over-binder shadowing is the normal way to switch an
+    implementation locally, and lambda parameters often reuse Prelude
+    names. W1 will be noisy. Options: accept the noise, exempt some
+    cases, or add an explicit override marker.
+
+Q2. Contracts on requirements. After lifting, a requirement is a
+    parameter. Can a refinement be attached to it, and what syntax
+    names a requirement in order to do so? Planned approach: use
+    refinements and requirements together in real code first.
+
+Q3. Accidental supply (C3). Possible mitigation: an informational
+    listing of which binder supplied which requirement, per
+    definition. Decide after using the feature.
+
+Q4. (Resolved: W2 does not apply to top-level definitions.)
+
+Q5. Module binding beyond v1. D12 is the initial design; more
+    sophisticated module binding (e.g. imports as explicit binders
+    whose entries can be overridden, re-exports) is planned.

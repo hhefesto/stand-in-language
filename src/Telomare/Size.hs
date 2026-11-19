@@ -460,7 +460,7 @@ mayFailChecks budget input zeros prog = Map.keysSet . checkFires <$> analyzeChec
 -- decides it.
 reachableFailures :: Int -> CompiledExpr -> Maybe (Set AbortOrigin)
 reachableFailures budget sized =
-  (<>) <$> (seenFailures <$> analyzeChecks budget ZeroB Set.empty sized)
+  (<>) . seenFailures <$> analyzeChecks budget ZeroB Set.empty sized
        <*> (seenFailures <$> analyzeChecks budget stepInput Set.empty (stepProgram sized))
   where
     stepInput = PairB (indexedEE $ IVarF 1) (indexedEE $ IVarF 2)
