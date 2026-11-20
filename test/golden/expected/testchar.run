@@ -1,4 +1,7 @@
 status 1
 --- stdout
 --- stderr
-RE (missing definition "concat" at line 14, column 31)
+RE ("concat" (at line 14, column 31)
+  is required by "output" (line 14, column 22)
+  is required by "main" (line 8, column 1)
+  and is not defined)

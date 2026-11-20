@@ -1,31 +1,31 @@
 static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
-  Prelude:28:16 (#1)    <= 256
-  Prelude:55:18 (#3)    <= 19
-  Prelude:61:21 (#5)    <= 16
-  Prelude:65:19 (#7)    <= 4
-  Prelude:71:21 (#9)    <= 37
-  Prelude:92:23 (#11)   <= 17
-  Prelude:111:42 (#13)  <= 60
-  Prelude:115:28 (#15)  <= 19
-  Prelude:180:45 (#17)  <= 4
-  Prelude:188:37 (#20)  <= 4
-  Prelude:188:15 (#21)  <= 60
-  Ratio:6:37 (#22)      <= 3
-  Ratio:7:33 (#23)      <= 1
-  Ratio:7:43 (#24)      <= 4
-  arith:7:56 (#25)      <= 4
-  arith:8:81 (#26)      <= 4
+  Prelude:28:16 (#0)    <= 256
+  Prelude:55:18 (#1)    <= 19
+  Prelude:57:21 (#2)    <= 16
+  Prelude:59:19 (#3)    <= 4
+  Prelude:63:21 (#4)    <= 37
+  Prelude:84:23 (#5)    <= 17
+  Prelude:103:42 (#6)   <= 60
+  Prelude:107:28 (#7)   <= 19
+  Prelude:168:45 (#8)   <= 4
+  Prelude:176:37 (#9)   <= 4
+  Prelude:176:15 (#10)  <= 60
+  Ratio:6:37 (#11)      <= 3
+  Ratio:7:33 (#12)      <= 1
+  Ratio:7:43 (#13)      <= 4
+  arith:7:56 (#14)      <= 4
+  arith:8:81 (#15)      <= 4
 
 sizing budget in force: 65536 unrollings
 
 recursion nesting (structural, approximate):
   triple          function             levels
   Prelude:4:17    Prelude.d2c          0, 1, 2, 3, 4, 5
-  Prelude:88:32   Prelude.foldr.fixed  0, 1
-  Prelude:116:12  Prelude.dDiv         0, 1, 2, 3
-  Prelude:183:3   Prelude.gcd          0, 1, 2
+  Prelude:80:32   Prelude.foldr.fixed  0, 1
+  Prelude:108:12  Prelude.dDiv         0, 1, 2, 3
+  Prelude:171:3   Prelude.gcd          0, 1, 2
 
 maximum nesting depth: 6
 

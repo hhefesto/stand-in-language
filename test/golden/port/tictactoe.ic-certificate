@@ -6,10 +6,10 @@ recursion sites (iterations, over every input):
   #0                      <= 114
   Prelude:28:16 (#1)      <= 256
   Prelude:37:15 (#2)      <= 10
-  Prelude:74:22 (#3)      <= 58
-  Prelude:92:23 (#4)      <= 32
-  Prelude:106:24 (#5)     <= 9
-  Prelude:111:42 (#6)     <= 2
+  Prelude:66:22 (#3)      <= 58
+  Prelude:84:23 (#4)      <= 32
+  Prelude:98:24 (#5)      <= 9
+  Prelude:103:42 (#6)     <= 2
   tictactoe:12:10 (#7)    <= 2
   tictactoe:23:8 (#8)     <= 2
   tictactoe:24:8 (#9)     <= 3
@@ -44,11 +44,11 @@ erasures in main: none past the check analysis's; the chains keep their bases
   the checks left to run time stay: the erasure checker could not prove them unreachable: its budget of evaluation steps ran out
 
 recursion nesting (structural, approximate):
-  triple          function               levels
-  Prelude:4:17    Prelude.d2c            0, 1, 2
-  Prelude:83:13   Prelude.map            0, 1
-  Prelude:88:32   Prelude.foldr.fixed    0, 1, 2
-  Prelude:100:33  Prelude.zipWith.fixed  0, 1
+  triple         function               levels
+  Prelude:4:17   Prelude.d2c            0, 1, 2
+  Prelude:75:13  Prelude.map            0, 1
+  Prelude:80:32  Prelude.foldr.fixed    0, 1, 2
+  Prelude:92:33  Prelude.zipWith.fixed  0, 1
 
 maximum nesting depth: 3
 

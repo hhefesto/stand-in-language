@@ -3,8 +3,8 @@ status 0
 enter two digits separated by a space
 3 plus 4 is 7
 --- stderr
-interactions (measured): 3371532
-  split-pair: 1150983
+interactions (measured): 3371526
+  split-pair: 1150977
   setenv-pair: 620338
   apply-ref: 558428
   dup-plan-copy: 463565

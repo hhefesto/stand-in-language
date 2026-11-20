@@ -4,11 +4,11 @@ static report: what the compiler knows without running the program
 
 recursion sites (iterations, over every input):
   Prelude:28:16 (#0)     <= 256
-  Prelude:92:23 (#1)     <= 7
-  simpleplus:11:45 (#2)  <= 10
-  simpleplus:11:31 (#3)  <= 10
-  simpleplus:19:37 (#4)  <= 10
-  simpleplus:20:67 (#5)  <= 11
+  Prelude:84:23 (#1)     <= 7
+  simpleplus:12:45 (#2)  <= 10
+  simpleplus:12:31 (#3)  <= 10
+  simpleplus:20:37 (#4)  <= 10
+  simpleplus:21:67 (#5)  <= 11
 
 sizing budget in force: 65536 unrollings
 
@@ -17,15 +17,15 @@ refinement checks: 3 discharged statically, 2 left to run time:
   Prelude:45:19     discharged
   Prelude:49:8      discharged
   Prelude:51:28     at run time
-  simpleplus:15:38  before main
-erasures in main: proven, by the erasure checker in 481067842 evaluation steps
+  simpleplus:16:38  before main
+erasures in main: proven, by the erasure checker in 481060671 evaluation steps
   no input a session gives it reaches an erased recursion bottom or check
   the net's program makes none of main's checks
 
 recursion nesting (structural, approximate):
   triple         function             levels
   Prelude:4:17   Prelude.d2c          0, 1
-  Prelude:88:32  Prelude.foldr.fixed  0, 1
+  Prelude:80:32  Prelude.foldr.fixed  0, 1
 
 maximum nesting depth: 2
 

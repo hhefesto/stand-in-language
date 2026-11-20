@@ -2,5 +2,5 @@ status 0
 --- stdout
 enter two digits separated by a space
 runtime error:
-Aborted, check failed on "9 a" (from refinement check at simpleplus:15:38)
+Aborted, check failed on "9 a" (from refinement check at simpleplus:16:38)
 --- stderr

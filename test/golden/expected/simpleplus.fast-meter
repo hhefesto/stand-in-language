@@ -9,10 +9,10 @@ recursion unrolls (measured):     29,782 across 5 sites
 
   site   source            function          unrolls
   #0     Prelude:28:16     Prelude.Num       29,696
-  #1     Prelude:92:23     Prelude.foldr     48
-  #4     simpleplus:19:37  simpleplus.main   20
-  #2     simpleplus:11:45  simpleplus.doAdd  10
-  #3     simpleplus:11:31  simpleplus.doAdd  8
+  #1     Prelude:84:23     Prelude.foldr     48
+  #4     simpleplus:20:37  simpleplus.main   20
+  #2     simpleplus:12:45  simpleplus.doAdd  10
+  #3     simpleplus:12:31  simpleplus.doAdd  8
 
 Unrolls are totals over the run, not depths, so they are not the same
 measurement as --certificate's per-instantiation iteration counts.

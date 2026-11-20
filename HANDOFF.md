@@ -770,6 +770,21 @@ own sources (`~/telc/mtime98.log`). The gate's tests that compile simpleplus
 analysis runs out of budget, so it never gets there. Making `reachable`
 cheaper (or the analysis itself) is open.
 
+**The `.telc` fix, checked again** (`~/telc/telcfix.sh`, `~/telc/telcfix.log`):
+natfib10, the HVM4 comparison's program, which `--ic` refuses from its
+source: the merged port's `--compile` writes its `.telc`, the `.telc` run with
+`--ic` refuses it with master `98c963c2`'s text and status, byte for byte, and
+the plain `.telc` run prints master's `1`.
+
+**Gate, 2026-11-19/20** (`bend/dev/gate.sh all` at `113832c`, `GATE=~/telc/gate98c`
+on delfos, inside `nix develop`, under systemd's `MemoryMax=11G`; 6 h 31 min):
+the generated `ic.c` is the same; the tests all pass (lexical 8, front 13,
+bind 7, size 12, sem 3, eal 14, ealm 33, ic 20, fast 5, telc 8, native 3,
+rules 3, netsem 6 groups); goldens 68 passed, 0 failed; lsp 3/3; perr 960
+cases, 0 failures; corpus meters 17 and certificates 16 the same; proofs: open
+none, and `bend PROOF.bend --verdict`, NetProof and NetModel `--verdict` print
+ALL PROOFS CHECK. GATE OK. `nix flake check` was not run.
+
 ## 4. The plan: P1–P7
 
 **Asked on 2026-10-01:**
