@@ -45,7 +45,9 @@ IC's verdict"); next, in the user's order, are N3, N4 and N5 (P8).
 **Updated 2026-11-19, on delfos.** The user moved the work to delfos again
 ("do all work on delfos"). telomare/master `98c963c2` (the name binder, state
 invariants, the Church arithmetic out of the Prelude) is merged and ported
-(section 3, "Merging master, 2026-11-19"); its gate is there.
+(section 3, "Merging master, 2026-11-19"); its gate is there. N3's first
+round, worked on olimpo, is in and gated here (P8, "N3 on delfos"): the net's
+loop in x86-64 assembly. Next, in the user's order, are N4 and N5.
 
 **This file is committed only so it travels.** Master keeps HANDOFF.md out
 of the tree (`27bec343`), and so does `bend/dev/` (the dev tools and the
@@ -2040,7 +2042,9 @@ and assembly and the GPU would have been two more.
   kinds and the dispatch (a literal table, from IC.bend's own `rule.of`) and
   the rules' bodies (from the table). The flake's `ic-generated` check and
   gate.sh's tests step fail when the file differs. To change them:
-  `bend bend/dev/genic.bend > ic.c.new && mv ic.c.new bend/effs/ic.c`.
+  `bend bend/dev/genic.bend -o /tmp/genic && /tmp/genic > ic.c.new && mv
+  ic.c.new bend/effs/ic.c` (built since N3: interpreted, it runs out of
+  stack).
 - `bend/tests/rules.bend` holds the table to IC.bend's rules: the runs of
   `tests/native.bend` (its closed terms and its sessions), made both ways, must
   leave the same net word for word. So the chain is table = IC.bend (rules
@@ -2057,11 +2061,90 @@ and assembly and the GPU would have been two more.
   instructions.
 - `low-level-runtime.html` documents all this for a reader.
 
+**N3, the first round (2026-11-18, on olimpo).** `nt_reduce` in x86-64
+assembly: `genic.bend`'s part `x64` prints it from the same table, a
+top-level `__asm__` block in `ic.c` (AT&T syntax), and `nt_reduce_run` calls it
+on x86-64 (`nt_loop`; `TELOMARE_IC_LOOP=c` runs C's loop instead, and the
+gate and the flake's tests run tests/native.bend both ways).
+- The net's state lives in registers for the whole loop (Nt* %rbx, the
+  agents' words %r12, sp %r13d, free %r14d, bump %r15d), which C can't keep:
+  every store into the net's u32 words may alias Nt's u32 fields, and a call
+  to `nt_grow` sits on every alloc's path. Nt's hot fields come first now, at
+  offsets `ic.c` asserts.
+- Each rule loads only what its steps read of the two agents (the printer
+  reads it off the table), wires with the port arithmetic inline (a port p's
+  word is p + (p & ~3) + 1), and allocs, deletes, spends and pushes inline.
+  Instantiation (`nt_instantiate`, the machine's, 25% of a run) and guided
+  copying (`nt_dup_closure` and `nt_region`, 14%) are printed by hand into
+  the apply-ref and planned-dup rules, in registers too. Growing the net
+  (`nt_c_grow`) and guided copying's two stacks (`nt_c_jobs`, `nt_c_vals`,
+  realloc as before) stay C's, called through stubs that keep every scratch
+  register, with the state written back to Nt and read again after.
+- The rule table is the asm's own copy (`.Lnt_table`, from IC.bend's
+  rule.of), each cell the rule or 128 plus the rule the other way round.
+- tests/native.bend passes on both loops (the nets word for word, about
+  370 s each); tictactoe's `1 4 2 5 3` gives the same output and 7,534,180
+  interactions.
+- Measured on olimpo (Ryzen 7 3700X, under the gate's load), tictactoe.telc
+  `--ic` (`1 4 2 5 3`), user cycles of the whole run (perf stat, medians of
+  7): C's loop 874 M (845 M before Nt's fields moved), C with
+  `nt_alloc`/`nt_connect`/`nt_push` forced inline 759 M, the assembly 565 M
+  (2.74 G -> 2.00 G instructions); wall 243 -> 167 ms. On the way: the loop
+  and rules alone 619 M, with instantiation 583 M. fib21.telc 864 -> 790 ms
+  (its run is mostly loading the 12.8 MB file and `term_drop`). The
+  assembly is now 80% of tictactoe's run, `term_drop` 7%.
+- Tried and dropped: a copy of the dispatch at every rule's end (threaded
+  code, each indirect jump predicted from the rule before) ran 3% slower;
+  widening Nt's u32 fields to u64 (so C could keep them) saved 1.4% of the
+  instructions and no cycles; one table lookup for both orders of a pair
+  (the cell's 128) changed nothing measurable, and stays.
+- `genic.bend` must now be built to run: interpreted, it runs out of stack
+  reading an `ic.c` this size (`bend bend/dev/genic.bend -o /tmp/genic &&
+  /tmp/genic > ic.c.new`; the flake check and gate.sh build it).
+
+**N3 on delfos (2026-11-19/20).** The first round was worked on olimpo and
+left uncommitted (`~/src/telomare-n3`, and staged in `~/src/telomare` on
+`1624a3c7`); it came to delfos as a patch (`~/telo-carry-n3`, with
+`bend/dev/loadtime.bend`, an untracked dev tool that no longer checks: it
+predates `.telc` version 12, and is not committed) and applied cleanly on the
+`98c963c2` merge (branch `bend-n3`, worktree `~/src/telomare-n3try`). Checked
+there:
+- `genic` prints `ic.c` byte for byte (the x86-64 part included);
+- the gate on that tree for what the assembly reaches (`~/telc/n3gate.sh`,
+  `GATE=~/telc/gaten3`, inside `nix develop`, under `MemoryMax=11G`; 3 h 23
+  min): the build; tests/native.bend 3 groups on the assembly's loop (808 s)
+  and on C's (805 s), tests/rules.bend 3 on both (820 s, 825 s); goldens 68
+  passed, 0 failed; lsp 3/3; perr 960 cases, 0 failures; corpus meters 17 and
+  certificates 16 the same; proofs: open none, `--verdict`, NetProof and
+  NetModel `--verdict` all ALL PROOFS CHECK. The other test files don't
+  import Native.bend and passed on the tree without N3 (the merge's gate);
+  `nix flake check` was not run;
+- tictactoe.telc `--ic --meter` (`1 4 2 5 3`): the assembly, C's loop
+  (`TELOMARE_IC_LOOP=c`) and the binary before N3 print the same, 7,534,180
+  interactions.
+
+Measured on delfos (i7-1160G7), tictactoe.telc `--ic` (`1 4 2 5 3`), on core
+3, the three interleaved 5 s apart, medians of 7 (`~/telc/n3perf.sh`; user
+cycles and instructions from perf stat, wall ms):
+
+| | cycles | instructions | wall |
+|---|---|---|---|
+| the assembly | 577 M | 2.00 G | 152 ms |
+| N3's C loop | 737 M | 2.74 G | 188 ms |
+| C, before N3 | 760 M | 2.71 G | 191 ms |
+
+with delfos otherwise idle (`~/telc/n3perf-idle.tsv`); under the gate's load
+(`~/telc/n3perf-load.tsv`): 588 M, 743 M and 756 M cycles, 170, 246 and 246
+ms.
+
+So on this laptop the assembly saves about a quarter of the cycles and of the
+instructions (olimpo's Ryzen: about a third of the cycles), and a fifth of the
+wall time; N3's C loop is about where the C was before (3% fewer cycles, 1%
+more instructions).
+
 **Next, in order:**
-- N3: x86-64 assembly where the profile says the C loop is the cost: the
-  dispatch and the hot rules (split-pair, setenv-pair, apply-ref
-  instantiation, dup copying), printed from Rules.bend's table by a printer
-  beside genic.bend's, checked by tests/native.bend. A turn is capped at 10M
+- N3 is a first round: the dispatch's one indirect jump and the net's
+  scattered words are most of what is left. A turn is capped at 10M
   interactions (about 0.3 s), so today's programs gain little per turn.
 - N4: many cores, HVM2-style: per-thread pair stacks, atomic linking,
   per-thread free lists and label ranges; counts stay exact, the net's

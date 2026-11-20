@@ -334,9 +334,11 @@ in
   '';
 
   # bend/effs/ic.c's generated parts are what bend/dev/genic.bend prints, from
-  # IC.bend's dispatch and bend/Rules.bend's table.
+  # IC.bend's dispatch and bend/Rules.bend's table (built: interpreted, it runs
+  # out of stack reading ic.c).
   icGenerated = bendCommand "ic-generated" bendSrc ''
-    bend bend/dev/genic.bend > ic.c.generated
+    bend bend/dev/genic.bend -o genic
+    ./genic > ic.c.generated
     diff bend/effs/ic.c ic.c.generated
     touch $out
   '';
@@ -361,6 +363,10 @@ in
         printf 'ok %s\n' ${lib.escapeShellArgs lines} | diff - "$TMPDIR/${name}.out"
       '') tests
     )}
+    # The native test once more on C's loop: the run above was the assembly's
+    # on x86-64.
+    TELOMARE_IC_LOOP=c "$TMPDIR/native" > "$TMPDIR/native-c.out"
+    diff "$TMPDIR/native.out" "$TMPDIR/native-c.out"
     touch $out
   '';
 }

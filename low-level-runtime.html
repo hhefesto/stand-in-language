@@ -474,15 +474,19 @@ This is outside the runtime, but it is the longest wait a user sees.</li>
 <tr><td>N1</td><td>The net&rsquo;s loop in C</td><td class="ok">Done</td></tr>
 <tr><td>N2</td><td>The costs around the C</td><td>First round done, local</td></tr>
 <tr><td>&mdash;</td><td>Rule table and printer</td><td>Written today, local, gate running</td></tr>
-<tr><td>N3</td><td>x86-64 assembly: dispatch and hot rules</td><td>Not started</td></tr>
+<tr><td>N3</td><td>x86-64 assembly: dispatch and hot rules</td><td>First round done (2026-11-18), gated on delfos (2026-11-20), local</td></tr>
 <tr><td>N4</td><td>Many cores, HVM2-style</td><td>Not started; design problems open</td></tr>
 <tr><td>N5</td><td>GPU, from the same description</td><td>Not started; path undecided</td></tr>
 </table>
 
 <h3>N3: assembly</h3>
-<p>The profile&rsquo;s hot paths are the candidates: the dispatch, split-pair, setenv-pair, instantiation and dup copying,
-printed from the same table and held to the same word-for-word test. The gain should be modest, because clang already
-compiles this loop and it has no obvious waste. That is an estimate; nothing has been measured.</p>
+<p><strong>Updated 2026-11-18.</strong> The loop, the dispatch and every rule the table describes are now x86-64 assembly,
+printed by <code>genic.bend</code> from the same table into a top-level <code>__asm__</code> block in <code>ic.c</code>, with
+instantiation and guided copying written by hand into their rules. The net&rsquo;s state stays in registers for the whole
+loop, which C can&rsquo;t do: every store into the net&rsquo;s words may alias the state&rsquo;s fields. Growing the net is still C,
+called with the state written back. The word-for-word test passes on both loops, and <code>TELOMARE_IC_LOOP=c</code> runs
+the C one. On the tic-tac-toe game from a <code>.telc</code>: 874 M user cycles in C, 759 M in C with its helpers forced
+inline, 565 M in assembly; 243 &rarr; 167 ms wall.</p>
 
 <h3>N4: many cores</h3>
 <p>The plan: per-thread pair stacks and free lists, per-thread label ranges, atomic linking. IC.bend&rsquo;s header
@@ -535,8 +539,9 @@ bend bend/Native.bend -o /tmp/telomare          # about 3 minutes
 /tmp/telomare tictactoe.tel --compile           # about 2 minutes, writes tictactoe.telc
 printf '1\n4\n2\n5\n3\n' | /tmp/telomare tictactoe.telc --ic --meter
 
-# Regenerate the C after changing the table or IC.bend's rule.of:
-bend bend/dev/genic.bend &gt; ic.c.new &amp;&amp; mv ic.c.new bend/effs/ic.c
+# Regenerate the C after changing the table or IC.bend's rule.of (built:
+# interpreted, genic runs out of stack reading ic.c):
+bend bend/dev/genic.bend -o /tmp/genic &amp;&amp; /tmp/genic &gt; ic.c.new &amp;&amp; mv ic.c.new bend/effs/ic.c
 
 # The tests:
 bend bend/tests/rules.bend  -o /tmp/test-rules  &amp;&amp; /tmp/test-rules

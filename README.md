@@ -113,9 +113,14 @@ layouts are byte for byte the same. The interaction net runs only the branch
 an `if` chooses (see [Design](#design)), so it runs the tic-tac-toe test game
 in 2.3 million interactions where master takes 4.0 million.
 
-The net's loop is C. `bend/effs/ic.c`, a Bend foreign effect called from
-`bend/Native.bend`, fires the pairs on the same net, by the same rules, in
-the same order as `bend/IC.bend`. IC.bend stays the definition: it fires
+The net's loop is C, and on x86-64 assembly. `bend/effs/ic.c`, a Bend
+foreign effect called from `bend/Native.bend`, fires the pairs on the same
+net, by the same rules, in the same order as `bend/IC.bend`; on x86-64 it
+runs its loop in assembly (`TELOMARE_IC_LOOP=c` runs the C one), printed
+from the same table, with the net's state in registers and instantiation and
+guided copying in assembly too: the tic-tac-toe game below takes about a
+quarter fewer cycles on an i7-1160G7, a third fewer on a Ryzen 7 3700X.
+IC.bend stays the definition: it fires
 the few pairs the C hands back (those that make a stuck value or count a
 `--fast` unroll), it is what the tests and the proofs read, and
 `bend/Main.bend`'s own `main` still runs it. A test

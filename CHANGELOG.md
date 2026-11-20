@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* On x86-64 the interaction net's loop runs in assembly, printed from the
+  same rule table as its C, with the net's state in registers: the tic-tac-toe
+  game from a `.telc` takes about a quarter fewer cycles (an i7-1160G7; a
+  third on a Ryzen 7 3700X). `TELOMARE_IC_LOOP=c` runs the C loop.
 * Requirements (the name binder, `Telomare.Bind`): a definition may mention a
   name nothing binds where it is written; the name is then supplied by the
   binder (let or module top level) enclosing each place the definition is

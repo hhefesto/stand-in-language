@@ -24,7 +24,8 @@ build() {
 
 tests() {
   echo "== generated ic.c"
-  if bend bend/dev/genic.bend | cmp -s - bend/effs/ic.c; then echo ok
+  bend bend/dev/genic.bend -o "$B/genic" || { echo "BUILD FAILED genic"; fail=1; }
+  if "$B/genic" | cmp -s - bend/effs/ic.c; then echo ok
   else echo "GENERATED DIFF"; fail=1; fi
   for t in lexical front bind size sem eal ealm ic fast telc native rules netsem ${EXTRA_TESTS:-}; do
     echo "== test $t"
@@ -38,6 +39,14 @@ tests() {
       echo "MISMATCH $t"; diff "$S/logs/test-$t.exp" "$S/logs/test-$t.out"; fail=1
     fi
   done
+  # The native test once more on C's loop (the assembly's ran above).
+  echo "== test native, C's loop"
+  TELOMARE_IC_LOOP=c "$B/test-native" > "$S/logs/test-native-c.out" 2>&1
+  if diff "$S/logs/test-native.exp" "$S/logs/test-native-c.out" > /dev/null; then
+    echo "ok: $(wc -l < "$S/logs/test-native-c.out") groups"
+  else
+    echo "MISMATCH native, C's loop"; fail=1
+  fi
 }
 
 goldens() {
