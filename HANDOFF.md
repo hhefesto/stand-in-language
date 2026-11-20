@@ -772,6 +772,17 @@ own sources (`~/telc/mtime98.log`). The gate's tests that compile simpleplus
 analysis runs out of budget, so it never gets there. Making `reachable`
 cheaper (or the analysis itself) is open.
 
+`bend/dev/plantime simpleplus` (it takes the module now, and times the
+loop's two runs too; delfos, 2026-11-19, beside the gate): main's analysis
+1,806,286 steps in 227 s, main on 0 122,074 in 0.4 s, the step program
+3,612,571 in 478 s. That is about 130 µs a step, where the budget is 100 M
+steps. perf (`cycles:u`, `~/telc/planprof.top`) puts 45% of the run in the
+runtime's `span_fade`, 40% in `term_drop` and 12% in `spin_33`, and under 1%
+in Plan.bend's own code: the analysis spends its time freeing values it
+copied, not stepping. Where (which copies) is not traced yet; that is the
+lead for making the plan, and so every compile whose main keeps a check,
+cheaper.
+
 **The `.telc` fix, checked again** (`~/telc/telcfix.sh`, `~/telc/telcfix.log`):
 natfib10, the HVM4 comparison's program, which `--ic` refuses from its
 source: the merged port's `--compile` writes its `.telc`, the `.telc` run with
@@ -3151,8 +3162,9 @@ that never uses one runs on master).
 - `fastdiff.sh BIN [SESSIONS [SEED]]`: sized vs `--fast` sessions, a
   differential test (bend/SIZING-PROOF.md §3).
 - `gate.sh`: the gate (section 9).
-- `plantime`: sizing with the check plan, and the analysis's run alone, timed,
-  with the steps it took (run it where `tictactoe.tel` is).
+- `plantime [MODULE]`: sizing with the check plan, then the check analysis's
+  runs alone (main's, and the two that decide the loop's calls), timed, with
+  the steps each took (tictactoe by default; run it where `MODULE.tel` is).
 
 Build a tool with `bend bend/dev/X.bend -o /tmp/X` (inside `nix develop`),
 and run it from the repo root: modules load as `M.tel` from the cwd.

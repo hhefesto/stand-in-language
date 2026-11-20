@@ -6,22 +6,32 @@ import ../Plan.bend as Pl
 import ../Expr.bend as E
 import ../Core.bend as Co
 
-# `plantime MODULE`: sizing with the check plan, and the check analysis's run
-# alone, timed, with the steps it took.
+# `plantime [MODULE]`: sizing with the check plan, then the check analysis's
+# runs alone, timed, with the steps each took: main on its symbolic input
+# (the plan's), and the two that decide the loop's calls (master's
+# reachableFailures, since 98c963c2's merge): main on 0, and the step
+# program. MODULE is tictactoe by default; run it where MODULE.tel is.
 
 def ms(+t0: Nat, +t1: Nat) -> String:
   U32.show(U32.from_nat((t1 - t0 : Nat))) ++ " ms"
+
+def timed(+name: String, +s: String, +t0: Nat) -> IO(Nat):
+  do IO<Nat>:
+    IO.print(name ++ ": " ++ s)
+    +t1 : Nat <- IO.now()
+    IO.print("  " ++ ms(t0, t1))
+    return t1
 
 def analysed(r: Result<&2, &2, String, Co.V>, +t0: Nat) -> IO(Unit):
   match r:
     case Fail{e}:
       IO.print("no core: " ++ e)
-    case Done{v}:
+    case Done{+v}:
       do IO<Unit>:
-        +s : String = Pl.stats(v)
-        IO.print(s)
-        +t1 : Nat <- IO.now()
-        IO.print("the analysis's run " ++ ms(t0, t1))
+        +t1 : Nat <- timed("main", Pl.stats(v), t0)
+        +t2 : Nat <- timed("main on 0", Pl.stats.of(Pl.run.prog(Pl.VlZero{}, v)), t1)
+        +t3 : Nat <- timed("the step program", Pl.stats.of(Pl.run.prog(Pl.step.input(), Pl.step.program(v))), t2)
+        IO.print("done")
 
 def sized(r: Result<&2, &2, Sz.SizeFail, Sz.Sized>, +run: T.C, +t0: Nat) -> IO(Unit):
   match r:
@@ -52,7 +62,19 @@ def loaded(+entry: String, r: Result<&1, &1, String, List<&2, Fr.Src>>) -> IO(Un
     case Done{srcs}:
       termed(Fr.compile(srcs, entry))
 
+def entry.of(xs: List<String>) -> String:
+  match xs:
+    case self <> m <> rest:
+      m
+    case _:
+      "tictactoe"
+
+def go(+m: String) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules(m)
+    loaded(m, r)
+
 def main() -> IO(Unit):
   do IO<Unit>:
-    r : Result<&1, &1, String, List<&2, Fr.Src>> <- Fr.modules("tictactoe")
-    loaded("tictactoe", r)
+    xs : List<String> <- IO.args()
+    go(entry.of(xs))
